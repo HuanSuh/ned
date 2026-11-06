@@ -55,17 +55,37 @@ export function setBusyButtons() {
   if (!S.busy) { b1.textContent = "지금 점검"; b2.textContent = "아침 브리핑"; return; }
   const secs = Math.round((Date.now() - S.busy.t0) / 1000);
   const target = S.busy.daily ? b2 : b1;
-  target.innerHTML = `<span class="spin"></span>${S.busy.daily ? "정리 중" : "스캔 중"} ${secs}초`;
+  // Two steps (GET /api/check): agenda phase 1 → claude judging. Unknown (old daemon) → the old single label.
+  const label = S.busy.phase === "agenda" ? "데이터 갱신 중…" : S.busy.phase === "judge" ? "판단 중…" : S.busy.daily ? "정리 중" : "스캔 중";
+  target.innerHTML = `<span class="spin"></span>${label} ${secs}초`;
+}
+
+/** Follow the daemon-side step of the running check; entering "agenda" also starts the per-card agenda spinners. */
+async function pollCheck() {
+  try {
+    const st = await api("/api/check");
+    if (!S.busy || !st?.running || !st.phase || st.phase === S.busy.phase) return;
+    S.busy.phase = st.phase; setBusyButtons();
+    if (st.phase === "agenda") loadAgenda().then(followAgenda);
+  } catch { /* old daemon: keep the generic label */ }
 }
 
 export let busyTick = 0;
+/** '지금 점검' = POST /api/check (agenda refresh → judge); '아침 브리핑' = POST /api/heartbeat?daily=1. */
 export async function runHeartbeat(daily) {
   if (S.busy) return;
-  S.busy = { daily, t0: Date.now() };
+  S.busy = { daily, t0: Date.now(), phase: daily ? null : "agenda" };
   setBusyButtons(); renderHeader();
-  busyTick = setInterval(setBusyButtons, 1000);
+  let n = 0;
+  busyTick = setInterval(() => { setBusyButtons(); if (++n % 2 === 1) pollCheck(); }, 1000);
   try {
-    const b = await api(`/api/heartbeat${daily ? "?daily=1" : ""}`, { method: "POST" });
+    let b;
+    if (daily) b = await api("/api/heartbeat?daily=1", { method: "POST" });
+    else {
+      try { b = await api("/api/check", { method: "POST" }); }
+      catch (e) { if (e.status !== 404) throw e; S.busy.phase = null; b = await api("/api/heartbeat", { method: "POST" }); }
+      loadAgenda().then(followAgenda); loadCosts();
+    }
     S.hbErr = null;
     if (b && b.status === "skipped") toast("볼 게 없어서 건너뛰었어.");
     else if (b && b.status === "NED_OK") toast(`이상 무. ${quip(Date.now())}`);
@@ -189,6 +209,7 @@ function boot() {
     else if (ev.key === "Escape") closeDetail();
   });
 
+  $("btn-hb").title = "지금 점검 (r) — 메일·Slack·Jira·GitHub·캘린더를 새로 가져온 뒤 판단 · 1~2분";
   $("btn-hb").addEventListener("click", () => runHeartbeat(false));
   $("btn-daily").addEventListener("click", () => runHeartbeat(true));
   for (const b of document.querySelectorAll("[data-refresh]")) b.addEventListener("click", () => (b.dataset.refresh === "events" ? Promise.all([loadEvents(), loadBriefings()]) : loadConfig()));

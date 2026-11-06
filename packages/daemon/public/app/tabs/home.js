@@ -248,6 +248,8 @@ export const homeCard = $("todo-card");
 
 /** Listeners + one-time setup; main.js calls every module's init() once, in the old file's order. */
 export function init() {
+  // Merged into the header '지금 점검' (POST /api/check = agenda refresh → judge). refreshAgenda() stays for ⚠ retries.
+  $("ag-refresh").style.display = "none";
   $("ag-refresh").addEventListener("click", refreshAgenda);
   $("tadd").addEventListener("submit", (e) => {
     e.preventDefault();

@@ -26,6 +26,22 @@ node dist/cli.js prompt agenda       # dry-run: heartbeat | briefing | agenda �
 새 세션 이벤트도 없고 `signal_check_minutes` 가 지나지 않았으면 LLM 을 부르지 않고 침묵한다.
 `briefing_time` 이 지난 첫 tick 은 `prompts/briefing.md` 로 아침 브리핑을 만든다 (하루 1회).
 
+**heartbeat = agenda 재사용** (`src/heartbeat.ts`, `prompts/heartbeat.md` · `briefing.md`): heartbeat 는 Gmail·Slack·Jira·GitHub·캘린더를
+직접 읽지 않는다. 흐름 — (a) `agenda.json` 이 `signal_check_minutes` 보다 오래됐으면 agenda 1단계(`refreshAgenda`)를 돌리고 기다린다
+(이미 돌고 있으면 그 실행에 합류; 실패하면 이전 목록으로 진행) → (b) 프롬프트 `{{AGENDA}}` 에 agenda 목록을 압축한 텍스트를 넣는다:
+캘린더(heartbeat: 앞으로 2시간 + 응답 안 한 초대 / 아침: 오늘 일정 전체), Slack `items` + 답 안 한 `all` + 팔로업 채널 요약·하이라이트(`[나 필요]`),
+메일 `items` + 안 읽은 수, Jira, GitHub. heartbeat 는 `sent.log` 에 이미 있는 url 의 항목을 미리 뺀다(아침 브리핑은 그대로) →
+(c) `claude -p` 를 커넥터 없이 부른다: `sources.sentry` 가 켜져 있으면 `--tools ToolSearch` + `mcp__Sentry__search_issues`/`get_issue_details` 만,
+`--max-turns 6` (Sentry 는 agenda 가 안 다루는 유일한 소스); 꺼져 있으면 도구 없이 isolated(설정·MCP 생략, 1턴). 모델은 `claude_model`.
+`claude_max_turns` 는 더 이상 heartbeat 에 쓰지 않는다. NED_OK·`sent.log` 중복 억제·알림·attention 은 전과 같다. `{{SESSIONS}}`/`{{EVENTS}}` 는
+`is_worker === true` 인 세션(Orca 워커)을 뺀다(필드가 있을 때). 측정(2026-11-06, Sentry 꺼짐, `claude-fable-5-1`, 신선한 agenda):
+$0.36 · 1턴 · 46초 — 이전(커넥터 직접 조회) $2.09–2.34 · 12–15턴 · 107초–7분.
+로그 한 줄에 `agenda reused (Nm old)` / `refreshed in Ns, $x` / `joined running refresh`, `judge Ns`, `total Ns` 가 찍힌다.
+
+**지금 점검** (`POST /api/check`): agenda 1단계를 **항상** 새로 돌린 뒤 heartbeat(강제). 동시에 여러 번 불러도 한 번만 돈다.
+`GET /api/check` → `{running, phase: "agenda"|"judge"|null, daily, started_at, phase_started_at}` — 스케줄된 heartbeat·아침 브리핑도 같은 상태를 낸다.
+`POST /api/heartbeat` 는 호환용으로 남는다(agenda 는 오래됐을 때만 갱신).
+
 **확인 완료** (`reviewed_at`): attention 항목은 그대로 두고 `~/.ned/reviewed.json`(id → ms, 7일 보관)에 표시만 한다.
 `writeState` 가 매번 `reviewed_at` 을 덧입히므로 refreshSessions / heartbeat 가 attention 을 새로 만들어도 유지되고, 표시 뒤에
 항목이 바뀌면(`ts` 가 더 늦음 — 예: 세션의 새 알림) 다시 열린 상태가 된다. `POST /api/attention/:id/review {reviewed: boolean}`
@@ -128,7 +144,9 @@ heartbeat / briefing 의 `{{FILTERS}}` 에도 팔로업 목록이 붙어 needs_m
 | GET | `/api/events?days=2` | 최근 N일의 훅 이벤트 (오래된 것부터) |
 | GET | `/api/briefings?limit=30` | 브리핑 히스토리 (최신 먼저) |
 | GET / PUT | `/api/config` | `config.yaml` 조회 / 부분 갱신 |
-| POST | `/api/heartbeat?daily=1` | heartbeat 강제 실행 |
+| POST | `/api/heartbeat?daily=1` | heartbeat 강제 실행 (agenda 는 오래됐을 때만 갱신 — 호환용) |
+| POST | `/api/check?daily=1` | 대시보드 '지금 점검': agenda 1단계 새로 고침 → heartbeat. 결과 브리핑(또는 `{status:"skipped"}`) 반환, 동시 호출은 한 실행을 공유 |
+| GET | `/api/check` | 진행 중인 점검 단계 `{running, phase: "agenda"\|"judge"\|null, daily, started_at, phase_started_at}` |
 | POST | `/api/attention/:id/dismiss` | attention 항목 제거. 세션 항목은 `dismissed.json` 에 기억돼 같은 알림으로는 다시 안 뜬다 |
 | GET | `/api/agenda` | `agenda.json` (+ `busy`, `sources_status`, `context_status`). 없으면 빈 배열과 `updated_at: 0`. 실행 중이 아닌데 `running` 으로 남은 소스(데몬이 도중에 죽음)는 `error: "interrupted"` 로 보여 준다 |
 | POST | `/api/agenda/refresh` | 1단계(목록)가 끝나면 반환 (실행 중이면 그 결과를 기다림). 2단계는 백그라운드로 계속 — 응답의 `context_status.running` |
@@ -234,7 +252,7 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
 | `NED_NO_LLM` | (unset) | `1` 이면 heartbeat 가 `claude -p` 를 호출하지 않고 `NED_OK` 를 기록하며, agenda 1단계는 `NED_NO_LLM_AGENDA` 파일(없으면 빈 목록), 2단계는 스텁 맥락을 쓴다 (비용 0, 테스트용) |
 | `NED_NO_LLM_RESULT` | (unset) | `NED_NO_LLM=1` 일 때 heartbeat 가 받을 브리핑 JSON (예: `{"status":"UPDATE","headline":"…","action_items":[…]}`). UPDATE 경로 테스트용 |
 | `NED_NO_LLM_AGENDA` | (unset) | `NED_NO_LLM=1` 일 때 agenda 1단계가 쓸 모델 출력 모양 JSON 파일 경로 (`{"slack":{…},"mail":{…},"calendar":[…],…}`). 소스별 호출은 자기 키만 가져간다 |
-| `NED_NO_LLM_DELAY_MS` | (unset) | `NED_NO_LLM=1` 일 때 agenda 소스별 스텁 호출 지연 (우선순위 n번째 = n×값) 과 2단계 배치 지연 — 순서·진행 상태 테스트용 |
+| `NED_NO_LLM_DELAY_MS` | (unset) | `NED_NO_LLM=1` 일 때 agenda 소스별 스텁 호출 지연 (우선순위 n번째 = n×값) 과 2단계 배치 지연, heartbeat 스텁 판단 단계 지연(1×값) — 순서·진행 상태 테스트용 |
 | `NED_NO_LLM_COST` | (unset) | `NED_NO_LLM=1` 일 때 2단계 스텁 배치 하나의 비용(USD) — `costs.json` 에 기록되어 일일 예산 중단 경로를 테스트할 수 있다 |
 | `NED_SEND_DRY_RUN` | (unset) | `1` 이면 `POST /api/send` 의 Slack/Gmail 액션이 `claude` argv·프롬프트만 로그에 남기고 실행하지 않는다 |
 | `NED_NOTIFY` | (unset) | Ned.app 이 데몬을 띄울 때 `app` 으로 설정한다. `config.notify: auto` 이면 이때 osascript 배너를 띄우지 않는다 (알림은 Ned.app 이 `state.json` 을 보고 직접 보낸다) |
