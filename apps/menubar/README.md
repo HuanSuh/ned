@@ -84,7 +84,58 @@ kill <pid>                                            # quits cleanly (stops the
 
 Launch args: `--dashboard` opens the window at launch (`NED_OPEN_DASHBOARD=1` does the same).
 `--login-item-selftest` registers then unregisters the Login Item and logs both results.
+`--login-item-status` prints `SMAppService.mainApp.status` to stdout and exits (read-only, no UI; see Login Item below).
 `--persona-selftest` logs persona resolution and exercises the persona PUT (see Persona below).
+`--wake-selftest` fakes a wedged-after-sleep daemon (SIGSTOP on the child) and runs the wake check (see Sleep / wake below).
+`--notify-selftest` runs synthetic state.json through the notification planner and the badge / open-item /
+`is_worker` decoding, prints the results and exits non-zero on failure (headless).
+
+## Menu bar badge and attention
+
+- **Badge** = `state.attention_open_count` (attention not marked 확인 완료). An older daemon without that field:
+  the count of `attention` items without `reviewed_at`.
+- **지금 봐야 할 것** lists open items only (max 5). Reviewed items stay in `state.json` but are hidden here.
+- **Worker sessions**: the daemon marks sessions whose cwd (or Orca worktree path) is under `~/orca/workspaces/`
+  as `is_worker` (Orca child worktrees = the user's own agent workers). They never become attention items
+  (`입력 대기` / `오류`) and are not counted, but stay in `state.sessions`. The menu lists them after your own
+  sessions, dimmed, with a `워커` tag.
+
+## Login Item
+
+The toggle next to **Login Items 에 등록** shows **자동 시작: 켜짐 / 꺼짐**. 켜짐 only when
+`SMAppService.mainApp.status == .enabled`; `requiresApproval` shows `꺼짐 (승인 필요)`.
+
+```sh
+.build/Ned.app/Contents/MacOS/Ned --login-item-status
+# login-item-status: notFound (rawValue 3) — 자동 시작: 꺼짐
+# bundle: …/apps/menubar/.build/Ned.app id=com.ned.menubar
+```
+
+| status | Meaning |
+| --- | --- |
+| `enabled` | Registered and allowed — Ned opens at login |
+| `requiresApproval` | Registered, but macOS wants the user's OK (common for ad-hoc-signed bundles) |
+| `notRegistered` | Not registered (toggle off) |
+| `notFound` | macOS has no record for this bundle path — normal for a dev bundle that was never registered |
+
+Status is per bundle path: check the installed app with `/Applications/Ned.app/Contents/MacOS/Ned --login-item-status`
+(only with a build that has this flag — an older binary ignores it and launches normally).
+
+**Approval** (when status is `requiresApproval`; the toggle also opens this pane):
+System Settings > General > **Login Items & Extensions** (macOS 14: **Login Items**) → find Ned under
+**Open at Login** (add it with + if missing), and if Ned is listed under **Allow in the Background**, turn it on.
+
+## Sleep / wake
+
+On `NSWorkspace.didWakeNotification` the app probes `GET /api/state` (first probe 3 s after wake, up to 3 probes
+within ~10–15 s). If none answers it restarts the daemon: its own child gets SIGTERM, then SIGKILL after 3 s
+(a stopped/wedged process may ignore SIGTERM), then the usual adopt-or-spawn. An adopted external daemon that
+does not answer is replaced by a spawned child. Every step is logged to `app-daemon.log` as `wake: …`.
+
+```sh
+NED_HOME=/tmp/ned-wake NED_PORT=7793 NED_NO_LLM=1 .build/Ned.app/Contents/MacOS/Ned --wake-selftest
+grep wake /tmp/ned-wake/logs/app-daemon.log    # … wake selftest: PASS — restarted, new pid N healthy (old M)
+```
 
 Logs go to the unified log:
 
