@@ -32,6 +32,7 @@ export function ensureDirs(): void {
 
 export function writeJsonAtomic(file: string, data: unknown): void {
   const tmp = `${file}.tmp-${process.pid}`;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
   fs.renameSync(tmp, file);
 }

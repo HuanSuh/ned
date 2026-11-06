@@ -59,6 +59,72 @@ final class DaemonManager: ObservableObject {
         healthTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.tick() }
         }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in await self?.checkAfterWake() }
+        }
+    }
+
+    private var wakeObserver: NSObjectProtocol?
+    private var wakeCheck: Task<Void, Never>?
+
+    /// After sleep the child may be alive but wedged (timers/sockets stalled) or dead. Probe for
+    /// up to ~10 s (network can lag right after wake); if still unhealthy, restart and log it.
+    func checkAfterWake(attempts: Int = 3, interval: TimeInterval = 3) async {
+        wakeCheck?.cancel()
+        let t = Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.note("wake: checking daemon health (status: \(self.statusLine))")
+            for i in 1...attempts {
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                if Task.isCancelled || self.stopping { return }
+                if await Self.probe(timeout: 2) != nil {
+                    self.note("wake: daemon healthy (probe \(i)/\(attempts))")
+                    if case .starting(let pid) = self.status { self.status = .running(pid: pid) }
+                    return
+                }
+            }
+            if Task.isCancelled || self.stopping { return }
+            if AppConfig.env["NED_NO_DAEMON"] == "1" { self.note("wake: daemon unhealthy, NED_NO_DAEMON=1 — not restarting"); return }
+            self.note("wake: daemon unhealthy after \(attempts) probes (~\(Int(Double(attempts) * (interval + 2)))s) — restarting")
+            self.pendingRestart?.cancel()
+            // A wedged child may not act on SIGTERM; don't let `restart()` block on it.
+            // `stopping` + clearing `process` keeps childExited from scheduling a second (backoff) spawn.
+            if let p = self.process, p.isRunning {
+                let pid = p.processIdentifier
+                self.stopping = true
+                kill(pid, SIGTERM)
+                let deadline = Date().addingTimeInterval(3)
+                while p.isRunning && Date() < deadline { try? await Task.sleep(nanoseconds: 100_000_000) }
+                if p.isRunning { self.note("wake: daemon pid \(pid) ignored SIGTERM — SIGKILL"); kill(pid, SIGKILL); p.waitUntilExit() }
+                self.process = nil
+                self.stopping = false
+            }
+            self.restart()
+        }
+        wakeCheck = t
+        await t.value
+    }
+
+    /// `--wake-selftest` (use with a throwaway NED_HOME / NED_PORT): wait for the spawned child,
+    /// SIGSTOP it to fake a wedged-after-sleep daemon, run the same wake check, and log whether a
+    /// new healthy pid came up. Then quit.
+    func wakeSelfTest() async {
+        func waitRunning(_ secs: Int, not old: Int32? = nil) async -> Int32? {
+            for _ in 0..<(secs * 2) {
+                if case .running(let pid) = status, pid != old { return pid }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+            return nil
+        }
+        guard let pid = await waitRunning(40) else { note("wake selftest: FAIL — daemon never became healthy (\(statusLine))"); NSApp.terminate(nil); return }
+        note("wake selftest: daemon pid \(pid) healthy — SIGSTOP to simulate a wedged daemon")
+        kill(pid, SIGSTOP)
+        await checkAfterWake(attempts: 2, interval: 2)
+        let fresh = await waitRunning(40, not: pid)
+        note("wake selftest: \(fresh.map { "PASS — restarted, new pid \($0) healthy (old \(pid))" } ?? "FAIL — no new healthy daemon (\(statusLine))")")
+        NSApp.terminate(nil)
     }
 
     /// Called from applicationWillTerminate: SIGTERM, wait up to 3 s, then SIGKILL.

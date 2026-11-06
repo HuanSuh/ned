@@ -312,6 +312,26 @@ enum NotifySelfTest {
             }
             for s in plan.skipped { print("  SKIP \(s.id): \(s.reason)") }
         }
+        // Menu bar badge / dropdown: open (not 확인 완료) items; `attention_open_count` wins when present.
+        let reviewed = """
+        [{"id":"a","title":"open"},{"id":"b","title":"reviewed","reviewed_at":1700000000000},{"id":"c","title":"open 2"}]
+        """
+        let badgeCases: [(String, String, Int, [String])] = [
+            ("badge = attention_open_count", #"{"attention":\#(reviewed),"attention_open_count":2}"#, 2, ["a", "c"]),
+            ("badge fallback (no attention_open_count) = items without reviewed_at", #"{"attention":\#(reviewed)}"#, 2, ["a", "c"]),
+            ("badge: daemon count trusted over the list", #"{"attention":\#(reviewed),"attention_open_count":5}"#, 5, ["a", "c"]),
+            ("all reviewed → 0", #"{"attention":[{"id":"b","title":"r","reviewed_at":1}]}"#, 0, []),
+        ]
+        for (name, json, count, open) in badgeCases {
+            let st = decode(json)
+            let ok = st.openCount == count && st.openAttention.map(\.id) == open
+            if !ok { failures += 1 }
+            print("== \(name) [\(ok ? "OK" : "FAIL: got \(st.openCount) \(st.openAttention.map(\.id))")]")
+        }
+        let ws = decode(#"{"sessions":[{"id":"w","cwd":"/x","is_worker":true},{"id":"u","cwd":"/y"}]}"#)
+        let wok = ws.sessions.map(\.is_worker) == [true, false]
+        if !wok { failures += 1 }
+        print("== sessions decode is_worker (missing → false) [\(wok ? "OK" : "FAIL")]")
         print(failures == 0 ? "notify selftest: all passed" : "notify selftest: \(failures) FAILED")
         return failures == 0 ? 0 : 1
     }
