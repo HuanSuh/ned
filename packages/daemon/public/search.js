@@ -423,7 +423,9 @@
       return;
     }
     if (st.open) {
-      if (e.key === "Escape" && !palEl.contains(e.target)) { e.preventDefault(); close(); }
+      // stopImmediatePropagation: comms.js also listens on document (capture); stopPropagation alone would not stop a
+      // listener on the same node, and once the palette is closed comms' "#nsp.open" guard no longer holds.
+      if (e.key === "Escape" && !palEl.contains(e.target)) { e.preventDefault(); e.stopImmediatePropagation(); close(); }
       return;
     }
     if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey && !editable(e.target)) { e.preventDefault(); e.stopPropagation(); open(); }
