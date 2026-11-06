@@ -27,8 +27,8 @@ else
 fi
 
 echo "▶ Ned.app"
-if [ -z "${NED_SIGN_IDENTITY:-}" ] && ! security find-identity -p codesigning 2>/dev/null | grep -q '"Ned Local Signing"'; then
-  echo "  ! 서명 인증서 없음 → ad-hoc 서명: 매 설치마다 macOS 가 권한(문서 폴더 등)을 다시 묻게 됨."
+if [ -z "${NED_SIGN_IDENTITY:-}" ] && ! { security find-identity -v -p codesigning 2>/dev/null || true; } | grep '"Ned Local Signing"' >/dev/null; then
+  echo "  ! 유효한 서명 인증서 없음(없거나 신뢰 안 됨) → ad-hoc 서명: 매 설치마다 macOS 가 권한(문서 폴더 등)을 다시 묻게 됨."
   echo "    한 번만: bash $REPO/scripts/make-signing-cert.sh  (README 'macOS 가 권한을 매번 다시 물으면' 참고)"
 fi
 bash "$REPO/apps/menubar/scripts/package.sh"
