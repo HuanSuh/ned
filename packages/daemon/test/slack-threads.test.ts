@@ -1,0 +1,258 @@
+import fs from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import YAML from "yaml";
+import { patchAgenda, readAgenda, refreshAgenda, type SlackAllItem, type SlackBlock, type SlackItem } from "../src/agenda.js";
+import { buildContextPrompt, buildThreadPrompt, processThreads } from "../src/agenda-context.js";
+import { DEFAULT_CONFIG, loadConfig, type NedConfig } from "../src/config.js";
+import { agendaContext } from "../src/drafts.js";
+import { threadAttention } from "../src/heartbeat.js";
+import { CONFIG_PATH, NED_HOME } from "../src/paths.js";
+import {
+  THREAD_RECHECK_MINUTES,
+  applyThreadState,
+  hasNewSinceMe,
+  markThreadSeen,
+  mergeThreadReads,
+  syncThreadsFromList,
+  threadCandidates,
+  threadKeyOf,
+  type SlackThread,
+} from "../src/slack-threads.js";
+
+const NOW = Date.parse("2026-11-07T03:00:00.000Z");
+const sec = Math.floor(NOW / 1000);
+/** Slack ts `m` minutes before NOW. */
+const ts = (minAgo: number) => `${sec - minAgo * 60}.000100`;
+const link = (ch: string, t: string, thread?: string) => `https://x.slack.com/archives/${ch}/p${t.replace(".", "")}${thread ? `?thread_ts=${thread}&cid=${ch}` : ""}`;
+const iso = (t: string) => new Date(Number(t) * 1000).toISOString();
+
+const ROOT = ts(120); // thread root, 2h ago
+const MINE = ts(60); // my reply
+const item = (over: Partial<SlackItem> = {}): SlackItem => ({ channel: "#dev", from: "Kim", text: "배포 언제 해요?", url: link("C1", ROOT), ts: iso(ROOT), reason: "mention", ...over });
+const block = (over: Partial<SlackBlock> = {}): SlackBlock => ({ summary: "", items: [], all: [], watch: [], ...over });
+
+describe("thread keys", () => {
+  it("permalink → channel:thread_ts (thread_ts param wins, else the message itself)", () => {
+    expect(threadKeyOf(link("C1", ROOT))).toBe(`C1:${ROOT}`);
+    expect(threadKeyOf(link("C1", MINE, ROOT))).toBe(`C1:${ROOT}`);
+    expect(threadKeyOf("https://example.com")).toBe("");
+  });
+});
+
+describe("syncThreadsFromList", () => {
+  it("one record per thread from items + all + watch, with the newest seen ts and best priority", () => {
+    const s = block({
+      items: [item()],
+      all: [{ ...item({ url: link("C1", MINE, ROOT), text: "답글 멘션", ts: iso(MINE) }), answered: true }],
+      watch: [{ channel: "#ops", summary: "", highlights: [{ from: "Lee", text: "장애", ts: iso(ts(30)), url: link("C9", ts(30)), needs_me: false, reason: "" }] }],
+    });
+    const th = syncThreadsFromList([], s, NOW);
+    expect(th.map((t) => t.key).sort()).toEqual([`C1:${ROOT}`, `C9:${ts(30)}`].sort());
+    const t = th.find((x) => x.key === `C1:${ROOT}`)!;
+    expect(t.search_latest_ts).toBe(MINE);
+    expect(t.prio).toBe(0);
+    expect(t.root_text).toBe("배포 언제 해요?");
+    expect(th.find((x) => x.key.startsWith("C9"))!.prio).toBe(2);
+  });
+  it("keeps what earlier reads learned; drops unlisted threads quiet for over a week", () => {
+    const old = (sec - 8 * 86400).toFixed(6);
+    const prev: SlackThread[] = [
+      { ...syncThreadsFromList([], block({ items: [item()] }), NOW)[0], last_reply_ts: ts(10), thread_summary: "요약", new_since_me: 1 },
+      { key: `C2:${old}`, channel_id: "C2", thread_ts: old, channel: "#old", url: link("C2", old), prio: 1, first_seen_at: "", reply_count: 0, new_since_me: 0, participants: [], recent: [] },
+    ];
+    const th = syncThreadsFromList(prev, block({ items: [item()] }), NOW);
+    expect(th).toHaveLength(1);
+    expect(th[0]).toMatchObject({ last_reply_ts: ts(10), thread_summary: "요약", new_since_me: 1 });
+  });
+});
+
+describe("threadCandidates (cost control)", () => {
+  const base = (over: Partial<SlackThread>): SlackThread => ({ key: "C1:" + ROOT, channel_id: "C1", thread_ts: ROOT, channel: "#dev", url: link("C1", ROOT), prio: 1, first_seen_at: "", reply_count: 0, new_since_me: 0, participants: [], recent: [], ...over });
+  const recently = new Date(NOW - 60_000).toISOString();
+  it("skips a thread whose known last reply equals phase 1's newest ts and was read recently", () => {
+    expect(threadCandidates([base({ last_reply_ts: MINE, search_latest_ts: MINE, checked_at: recently })], 8, NOW)).toEqual([]);
+  });
+  it("re-reads when phase 1 saw something newer, when never read, or after the recheck interval", () => {
+    const newer = base({ key: "a", last_reply_ts: ROOT, search_latest_ts: MINE, checked_at: recently });
+    const never = base({ key: "b" });
+    const stale = base({ key: "c", last_reply_ts: MINE, search_latest_ts: MINE, checked_at: new Date(NOW - (THREAD_RECHECK_MINUTES + 1) * 60_000).toISOString() });
+    expect(threadCandidates([stale, never, newer], 8, NOW).map((t) => t.key)).toEqual(["a", "b", "c"]);
+  });
+  it("only threads active in the last 48h, at most N", () => {
+    const old = (sec - 49 * 3600).toFixed(6);
+    expect(threadCandidates([base({ key: "x", thread_ts: old, search_latest_ts: old })], 8, NOW)).toEqual([]);
+    const many = Array.from({ length: 12 }, (_, i) => base({ key: `k${i}` }));
+    expect(threadCandidates(many, 8, NOW)).toHaveLength(8);
+    expect(threadCandidates(many, 0, NOW)).toEqual([]);
+  });
+});
+
+describe("mergeThreadReads", () => {
+  const fresh = () => syncThreadsFromList([], block({ items: [item()] }), NOW);
+  const read = (msgs: [string, string, string][], extra: Record<string, unknown> = {}) => ({ key: `C1:${ROOT}`, messages: msgs.map(([from, t, text]) => ({ from, ts: t, text })), ...extra });
+
+  it("latest reply, reply count, my last reply and replies by others after it", () => {
+    const th = fresh();
+    const done = mergeThreadReads(th, [read([["Kim", ROOT, "배포 언제 해요?"], ["나", MINE, "오늘 오후요"], ["Kim", ts(20), "몇 시쯤?"], ["Park", ts(10), "저도 궁금"]], { reply_count: 3, thread_summary: "배포 시각 재질문 — 시간 답해줘" })], NOW);
+    expect(done).toEqual([`C1:${ROOT}`]);
+    expect(th[0]).toMatchObject({ last_reply_ts: ts(10), last_reply_from: "Park", last_reply_text: "저도 궁금", reply_count: 3, my_last_reply_ts: MINE, my_last_reply_at: iso(MINE), new_since_me: 2, thread_summary: "배포 시각 재질문 — 시간 답해줘", summary_ts: ts(10) });
+    expect(th[0].participants).toEqual(["Kim", "나", "Park"]);
+    expect(th[0].checked_at).toBe(new Date(NOW).toISOString());
+  });
+  it("no reply of mine → new_since_me 0; my reply cut off by the excerpt → the model's count", () => {
+    const a = fresh();
+    mergeThreadReads(a, [read([["Kim", ROOT, "q"], ["Park", ts(10), "a"]])], NOW);
+    expect(a[0].new_since_me).toBe(0);
+    const b = fresh();
+    mergeThreadReads(b, [read([["Kim", ts(20), "x"], ["Park", ts(10), "y"]], { my_last_reply_ts: MINE, new_since_me: 5 })], NOW);
+    expect(b[0].new_since_me).toBe(5);
+  });
+  it("summary is cached while last_reply_ts stays, dropped when the thread moved without a new one", () => {
+    const th = fresh();
+    mergeThreadReads(th, [read([["Kim", ROOT, "q"], ["Park", ts(10), "a"]], { thread_summary: "첫 요약" })], NOW);
+    mergeThreadReads(th, [read([["Kim", ROOT, "q"], ["Park", ts(10), "a"]], { thread_summary: "" })], NOW);
+    expect(th[0].thread_summary).toBe("첫 요약");
+    mergeThreadReads(th, [read([["Park", ts(10), "a"], ["Kim", ts(5), "b"]])], NOW);
+    expect(th[0].thread_summary).toBeUndefined();
+    mergeThreadReads(th, [read([["Park", ts(10), "a"], ["Kim", ts(5), "b"]], { thread_summary: "새 요약" })], NOW);
+    expect(th[0]).toMatchObject({ thread_summary: "새 요약", summary_ts: ts(5) });
+  });
+});
+
+describe("applyThreadState (reopen)", () => {
+  const answered = (): SlackAllItem => ({ ...item(), answered: true });
+  const withThread = (msgs: [string, string][]) => {
+    const s = block({ all: [answered()] });
+    s.threads = syncThreadsFromList([], s, NOW);
+    mergeThreadReads(s.threads, [{ key: `C1:${ROOT}`, messages: msgs.map(([from, t]) => ({ from, ts: t, text: `${from} 메시지` })) }], NOW);
+    applyThreadState(s);
+    return s;
+  };
+  it("an answered row with a reply after mine goes back to 확인 필요 (once), with thread view + draft context", () => {
+    const s = withThread([["Kim", ROOT], ["나", MINE], ["Kim", ts(5)]]);
+    expect(s.all[0]).toMatchObject({ answered: false, reopened: true });
+    expect(s.items).toHaveLength(1);
+    expect(s.items[0]).toMatchObject({ reopened: true, reason: "thread", url: item().url });
+    expect(s.items[0].thread).toMatchObject({ last_reply_from: "Kim", new_since_me: 1 });
+    expect(s.items[0].context?.messages.at(-1)?.text).toBe("Kim 메시지");
+    applyThreadState(s);
+    expect(s.items).toHaveLength(1);
+  });
+  it("stays answered while nobody wrote after me; undone after I reply again", () => {
+    expect(withThread([["Kim", ROOT], ["나", MINE]]).items).toHaveLength(0);
+    const s = withThread([["Kim", ROOT], ["나", MINE], ["Kim", ts(5)]]);
+    mergeThreadReads(s.threads!, [{ key: `C1:${ROOT}`, messages: [{ from: "Kim", ts: ts(5), text: "?" }, { from: "나", ts: ts(2), text: "!" }] }], NOW);
+    applyThreadState(s);
+    expect(s.items).toHaveLength(0);
+    expect(s.all[0]).toMatchObject({ answered: true });
+    expect(s.all[0].reopened).toBeUndefined();
+  });
+  it("a followed-channel highlight that got a reply after mine needs me again", () => {
+    const h = { from: "Lee", text: "장애", ts: iso(ROOT), url: link("C1", ROOT), needs_me: false, reason: "" };
+    const s = block({ watch: [{ channel: "#ops", summary: "", highlights: [h] }] });
+    s.threads = syncThreadsFromList([], s, NOW);
+    mergeThreadReads(s.threads, [{ key: `C1:${ROOT}`, messages: [{ from: "나", ts: MINE, text: "봤어요" }, { from: "Lee", ts: ts(5), text: "재발" }] }], NOW);
+    applyThreadState(s);
+    expect(s.watch[0].highlights[0]).toMatchObject({ needs_me: true, reopened: true, reason: "내 답 이후 새 답글" });
+  });
+});
+
+describe("확인 완료 keyed by the latest reply", () => {
+  it("markThreadSeen stores the reply ts from the key; a newer reply makes it new again", () => {
+    const s = block({ all: [{ ...item(), answered: true }] });
+    s.threads = syncThreadsFromList([], s, NOW);
+    mergeThreadReads(s.threads, [{ key: `C1:${ROOT}`, messages: [{ from: "나", ts: MINE, text: "a" }, { from: "Kim", ts: ts(5), text: "b" }] }], NOW);
+    applyThreadState(s);
+    expect(hasNewSinceMe(s.threads[0])).toBe(true);
+    expect(markThreadSeen(s, `slack:C1:${ROOT}@${ts(5)}`, true)).toBe(true);
+    expect(s.threads[0].seen_reply_ts).toBe(ts(5));
+    expect(hasNewSinceMe(s.threads[0])).toBe(false);
+    expect(s.all[0].thread?.seen_reply_ts).toBe(ts(5));
+    // Seen at that reply → no longer reopened (back to answered) until the next reply.
+    expect(s.items).toHaveLength(0);
+    expect(s.all[0].answered).toBe(true);
+    mergeThreadReads(s.threads, [{ key: `C1:${ROOT}`, messages: [{ from: "나", ts: MINE, text: "a" }, { from: "Kim", ts: ts(5), text: "b" }, { from: "Kim", ts: ts(1), text: "c" }] }], NOW);
+    expect(hasNewSinceMe(s.threads[0])).toBe(true);
+    applyThreadState(s);
+    expect(s.items).toHaveLength(1);
+    // A key whose ts is a reply no longer listed still finds the thread through its known messages.
+    expect(markThreadSeen(s, `slack:C1:${ts(1)}@${ts(1)}`, true)).toBe(true);
+    expect(s.threads[0].seen_reply_ts).toBe(ts(1));
+    expect(markThreadSeen(s, `slack:C1:${ROOT}`, false)).toBe(true);
+    expect(s.threads[0].seen_reply_ts).toBeUndefined();
+    expect(markThreadSeen(s, "jira:APP-1", true)).toBe(false);
+  });
+});
+
+describe("heartbeat thread attention", () => {
+  it("one action item per (thread, last_reply_ts); a new reply raises it again; seen threads are skipped", () => {
+    const s = block({ all: [{ ...item(), answered: true }] });
+    s.threads = syncThreadsFromList([], s, NOW);
+    mergeThreadReads(s.threads, [{ key: `C1:${ROOT}`, thread_summary: "시간 답 기다림", messages: [{ from: "나", ts: MINE, text: "a" }, { from: "Kim", ts: ts(5), text: "몇 시?" }] }], NOW);
+    const a = { ...readAgenda(), slack: s };
+    const first = threadAttention(a, new Set(), NOW);
+    expect(first.items).toHaveLength(1);
+    expect(first.items[0]).toMatchObject({ kind: "slack", url: item().url, detail: "시간 답 기다림" });
+    expect(first.items[0].title).toContain("Kim: 몇 시?");
+    expect(threadAttention(a, new Set(first.keys), NOW).items).toEqual([]);
+    mergeThreadReads(s.threads, [{ key: `C1:${ROOT}`, messages: [{ from: "나", ts: MINE, text: "a" }, { from: "Kim", ts: ts(5), text: "몇 시?" }, { from: "Kim", ts: ts(1), text: "??" }] }], NOW);
+    expect(threadAttention(a, new Set(first.keys), NOW).items).toHaveLength(1);
+    s.threads[0].seen_reply_ts = ts(1);
+    expect(threadAttention(a, new Set(), NOW).items).toEqual([]);
+  });
+});
+
+describe("prompts", () => {
+  const cfg: NedConfig = { ...DEFAULT_CONFIG };
+  it("the thread prompt asks for the follow-up keys and summary; the context prompt doesn't", () => {
+    const t = syncThreadsFromList([], block({ items: [item()] }), NOW);
+    const p = buildThreadPrompt(t, cfg);
+    for (const k of ["slack_read_thread", "my_last_reply_ts", "new_since_me", "thread_summary", "known_last_reply_ts", `"key":"C1:${ROOT}"`]) expect(p).toContain(k);
+    expect(p).not.toContain("{{");
+    expect(p).not.toContain("<!--@");
+    const c = buildContextPrompt("slack", [{ src: "slack", key: item().url, from: "Kim", text: "q", ts: iso(ROOT) }]);
+    expect(c).not.toContain("thread_summary");
+    expect(c).not.toContain("{{");
+  });
+});
+
+describe("end to end (NED_NO_LLM fixtures, temp NED_HOME)", () => {
+  it("phase 1 keeps threads across refreshes, phase 2 reads them, drafts get the thread excerpt", async () => {
+    fs.writeFileSync(CONFIG_PATH, YAML.stringify({ notify: "off", sources: { calendar: false, jira: false, github: false, gmail: false, slack: true, sentry: false } }));
+    const fx = path.join(NED_HOME, "fx-agenda.json");
+    const now = Date.now(), s0 = Math.floor(now / 1000);
+    const R = `${s0 - 3600}.000100`, M = `${s0 - 1800}.000100`, K = `${s0 - 60}.000100`;
+    fs.writeFileSync(fx, JSON.stringify({ slack: { summary: "", items: [], all: [{ channel: "#dev", from: "Kim", text: "배포?", url: link("C1", R), ts: R, reason: "mention", answered: true }], watch: [] } }));
+    process.env.NED_NO_LLM_AGENDA = fx;
+    try {
+      await refreshAgenda(loadConfig());
+      let a = readAgenda();
+      expect(a.slack?.threads?.map((t) => t.key)).toEqual([`C1:${R}`]);
+
+      const tf = path.join(NED_HOME, "fx-threads.json");
+      fs.writeFileSync(tf, JSON.stringify({ threads: [{ key: `C1:${R}`, reply_count: 2, thread_summary: "배포 시각 다시 물음", messages: [{ from: "Kim", ts: R, text: "배포?" }, { from: "나", ts: M, text: "오후" }, { from: "Kim", ts: K, text: "몇 시?" }] }] }));
+      process.env.NED_NO_LLM_THREADS = tf;
+      expect(await processThreads(loadConfig())).toBe("ok");
+      a = readAgenda();
+      expect(a.slack?.items).toHaveLength(1);
+      expect(a.slack?.items[0]).toMatchObject({ reopened: true, thread: { thread_summary: "배포 시각 다시 물음", last_reply_from: "Kim", new_since_me: 1 } });
+      // Read just now and nothing newer from phase 1 → not read again.
+      expect(await processThreads(loadConfig())).toBe("none");
+
+      const ctx = agendaContext({ source: "slack", ref: { channel: "C1", ts: K, thread_ts: R } });
+      expect(ctx?.kind === "slack" && ctx.ctx.messages.at(-1)?.text).toBe("몇 시?");
+
+      // Next phase-1 run: the list comes back with the row answered again — thread state survives and reopens it.
+      await refreshAgenda(loadConfig());
+      a = readAgenda();
+      expect(a.slack?.threads?.[0]).toMatchObject({ last_reply_ts: K, thread_summary: "배포 시각 다시 물음" });
+      expect(a.slack?.items[0]?.reopened).toBe(true);
+      patchAgenda((x) => void markThreadSeen(x.slack, `slack:C1:${R}@${K}`, true));
+      expect(readAgenda().slack?.threads?.[0].seen_reply_ts).toBe(K);
+    } finally {
+      delete process.env.NED_NO_LLM_AGENDA;
+      delete process.env.NED_NO_LLM_THREADS;
+    }
+  });
+});

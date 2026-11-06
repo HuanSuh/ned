@@ -8,6 +8,7 @@ import { extractJson, llmDisabled, runClaude } from "./claude.js";
 import { filtersPrompt, jqlExclude, watchChannels, type NedConfig } from "./config.js";
 import { personaPrompt } from "./persona.js";
 import { AGENDA_PATH, AGENDA_RAW_PATH, log, readJson, writeJsonAtomic } from "./paths.js";
+import { applyThreadState, syncThreadsFromList, type SlackThread, type ThreadRowFields } from "./slack-threads.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PROMPTS_DIR = path.resolve(here, "../../../prompts");
@@ -112,7 +113,7 @@ export interface MailAllItem {
 
 export type SlackReason = "mention" | "dm" | "thread";
 
-export interface SlackItem {
+export interface SlackItem extends ThreadRowFields {
   /** "#channel" or "DM" / "그룹 DM". */
   channel: string;
   from: string;
@@ -137,9 +138,11 @@ export interface SlackBlock {
   all: SlackAllItem[];
   /** Followed channels (filters.slack.watch_channels): last 24h per channel, read without needing a mention. [] when none. */
   watch: SlackWatchChannel[];
+  /** Followed threads (slack-threads.ts): phase 1 upserts, phase 2 re-reads the active ones. Absent in older agenda.json. */
+  threads?: SlackThread[];
 }
 
-export interface SlackWatchHighlight {
+export interface SlackWatchHighlight extends ThreadRowFields {
   from: string;
   /** ≤200 chars. */
   text: string;
@@ -246,7 +249,7 @@ function readMail(m: unknown): MailBlock | null {
 function readSlack(m: unknown): SlackBlock | null {
   if (!m || typeof m !== "object") return null;
   const b = m as Partial<SlackBlock>;
-  return { summary: str(b.summary), items: Array.isArray(b.items) ? b.items : [], all: Array.isArray(b.all) ? b.all : [], watch: Array.isArray(b.watch) ? b.watch : [] };
+  return { summary: str(b.summary), items: Array.isArray(b.items) ? b.items : [], all: Array.isArray(b.all) ? b.all : [], watch: Array.isArray(b.watch) ? b.watch : [], threads: Array.isArray(b.threads) ? b.threads : [] };
 }
 
 /** Connector tools each phase-1 list call may use (loaded via ToolSearch). github is `gh`, not a connector. */
@@ -643,6 +646,11 @@ function carryContexts(prev: Agenda, next: AgendaPayload, keys: AgendaSourceKey[
     const byUrl = new Map<string, SlackContext>();
     for (const x of [...prev.slack.items, ...prev.slack.all, ...prev.slack.watch.flatMap((w) => w.highlights)]) if (x.context && x.url) byUrl.set(x.url, x.context);
     for (const x of [...next.slack.items, ...next.slack.all, ...next.slack.watch.flatMap((w) => w.highlights)]) if (!x.context && byUrl.has(x.url)) x.context = byUrl.get(x.url);
+  }
+  // Thread follow-up survives list refreshes; the new rows join it, and what earlier reads learned flows back onto them.
+  if (keys.includes("slack") && next.slack) {
+    next.slack.threads = syncThreadsFromList(prev.slack?.threads, next.slack);
+    applyThreadState(next.slack);
   }
   if (keys.includes("mail") && next.mail && prev.mail) {
     const byId = new Map(prev.mail.items.filter((x) => x.context).map((x) => [x.id, x]));

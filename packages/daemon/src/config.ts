@@ -48,6 +48,8 @@ export interface NedConfig {
   agenda_all_limit: number;
   /** Agenda phase 2: reply-needing items per context-collection `claude -p` (narrow tools, ≤6 turns). */
   agenda_context_batch: number;
+  /** Agenda phase 2: followed Slack threads re-read (slack_read_thread) per run, at most. */
+  agenda_thread_batch: number;
   /** Agenda phase 2 stops (and won't start) once today's total `claude -p` spend (~/.ned/costs.json) reaches this. */
   agenda_daily_budget_usd: number;
   /** Model for every agenda `claude -p` (phase-1 per-source lists, phase-2 context batches); null = claude_model. */
@@ -284,6 +286,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   drafts_pregenerate: false,
   agenda_all_limit: 20,
   agenda_context_batch: 5,
+  agenda_thread_batch: 8,
   agenda_daily_budget_usd: 15,
   agenda_light_model: "sonnet",
   dashboard: DEFAULT_DASHBOARD,
@@ -317,6 +320,7 @@ export function loadConfig(): NedConfig {
       dashboard: normalizeDashboard(parsed.dashboard),
       agenda_all_limit: numIn(parsed.agenda_all_limit, 1, 50, DEFAULT_CONFIG.agenda_all_limit),
       agenda_context_batch: numIn(parsed.agenda_context_batch, 1, 10, DEFAULT_CONFIG.agenda_context_batch),
+      agenda_thread_batch: numIn(parsed.agenda_thread_batch, 0, 20, DEFAULT_CONFIG.agenda_thread_batch),
       agenda_daily_budget_usd: numIn(parsed.agenda_daily_budget_usd, 0, 10_000, DEFAULT_CONFIG.agenda_daily_budget_usd, false),
       agenda_light_model: parsed.agenda_light_model === null ? null : typeof parsed.agenda_light_model === "string" && parsed.agenda_light_model.trim() ? parsed.agenda_light_model.trim() : DEFAULT_CONFIG.agenda_light_model,
       filters: mergeFilters(normalizeFilters(DEFAULT_CONFIG.filters), parsed.filters),

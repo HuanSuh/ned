@@ -205,8 +205,9 @@ function candidates(): Cand[] {
       if (seen.has(id)) continue;
       seen.add(id);
       out.push({
-        type: "slack", id, title: x.text || "(내용 없음)", detail: `${x.channel} · ${x.from}`, ts: isoTs(x.ts), url: url(x.url), kind: "slack", tab: "home", anchor: "card:slack",
-        fields: [[x.text, 3], [x.channel, 2], [x.from, 2]],
+        type: "slack", id, title: x.text || "(내용 없음)", detail: [`${x.channel} · ${x.from}`, x.thread?.thread_summary].filter(Boolean).join(" — "), ts: isoTs(x.ts), url: url(x.url), kind: "slack", tab: "home", anchor: "card:slack",
+        // Followed thread: its summary and latest reply are searchable too.
+        fields: [[x.text, 3], [x.channel, 2], [x.from, 2], [x.thread?.thread_summary, 2], [x.thread?.last_reply_text, 1], [x.thread?.last_reply_from, 1]],
       });
     }
   }

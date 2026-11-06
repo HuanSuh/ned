@@ -258,7 +258,9 @@ export function agendaContext(req: Pick<DraftRequest, "source" | "ref">, agenda:
       if (!x.context) return false;
       if (req.ref.url && x.url === req.ref.url) return true;
       const u = parseSlackUrl(x.url);
-      return !!t.channel_id && !!t.ts && u.channel === t.channel_id && u.ts === t.ts;
+      if (!!t.channel_id && !!t.ts && u.channel === t.channel_id && u.ts === t.ts) return true;
+      // Same thread (ref.thread_ts from the followed thread): its rows carry the latest thread excerpt.
+      return !!t.channel_id && !!t.thread_ts && u.channel === t.channel_id && (u.thread_ts ?? u.ts) === t.thread_ts;
     });
     return hit?.context && !Number.isNaN(Date.parse(hit.context.collected_at)) ? { kind: "slack", ctx: hit.context, age: age(hit.context.collected_at) } : null;
   }

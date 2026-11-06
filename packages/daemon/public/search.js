@@ -154,7 +154,8 @@
       for (const x of [...(a.slack.items || []), ...(a.slack.all || [])]) {
         const id = x.url || `${x.channel}:${x.ts}`;
         if (seen.has(id)) continue; seen.add(id);
-        out.push({ type: "slack", id, title: x.text || "(내용 없음)", detail: `${x.channel} · ${x.from}`, ts: isoTs(x.ts), url: safeUrl(x.url), kind: "slack", tab: "home", anchor: "card:slack", fields: [[x.text, 3], [x.channel, 2], [x.from, 2]] });
+        const th = x.thread || {}; // followed thread: summary + latest reply are searchable too
+        out.push({ type: "slack", id, title: x.text || "(내용 없음)", detail: [`${x.channel} · ${x.from}`, th.thread_summary].filter(Boolean).join(" — "), ts: isoTs(x.ts), url: safeUrl(x.url), kind: "slack", tab: "home", anchor: "card:slack", fields: [[x.text, 3], [x.channel, 2], [x.from, 2], [th.thread_summary, 2], [th.last_reply_text, 1], [th.last_reply_from, 1]] });
       }
     }
     for (const t of Array.isArray(d.todos) ? d.todos : []) out.push({ type: "todo", id: t.id, title: t.title, detail: [t.done ? "완료" : "", t.due ? `마감 ${t.due}` : "", t.note || ""].filter(Boolean).join(" · "), ts: t.created_at, url: null, kind: "me", tab: "home", anchor: "card:todo", done: !!t.done, fields: [[t.title, 3], [t.note, 1]] });

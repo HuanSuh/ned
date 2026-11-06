@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { parseSendRequest, performSend, readActionLog } from "./actions.js";
-import { agendaBusy, readAgenda, refreshAgenda } from "./agenda.js";
+import { agendaBusy, patchAgenda, readAgenda, refreshAgenda } from "./agenda.js";
 import { contextStatus, requestContext } from "./agenda-context.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
@@ -15,6 +15,7 @@ import { checkStatus, dismissAttention, heartbeat, listBriefings, runCheck } fro
 import { log } from "./paths.js";
 import { SOURCE_KEY, readSourceReviewed, readState, setReviewed, writeState } from "./state.js";
 import { registerSearch } from "./search.js";
+import { markThreadSeen } from "./slack-threads.js";
 import { addTodo, deleteTodo, listTodos, updateTodo } from "./todos.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -111,6 +112,8 @@ export function startServer(getConfig: () => NedConfig): void {
     // Source items (mail: / slack: / jira: / github:) have no attention entry; their key is stable across agenda runs.
     if (!SOURCE_KEY.test(id) && !readState().attention.some((a) => a.id === id)) return c.json({ error: "not found" }, 404);
     const at = setReviewed(id, reviewed);
+    // Slack: the thread remembers which reply was seen (key carries `@<last_reply_ts>`; a newer reply reopens it).
+    if (id.startsWith("slack:")) try { patchAgenda((a) => void markThreadSeen(a.slack, id, reviewed)); } catch (e) { log(`review: thread seen mark failed — ${String(e).slice(0, 200)}`); }
     return c.json({ ok: true, id, reviewed_at: at, attention_open_count: readState().attention_open_count });
   });
   app.post("/api/attention/:id/dismiss", (c) => {

@@ -21,7 +21,11 @@ export const clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) 
 /** ref for a Slack message: channel id + ts (+ thread_ts) from its permalink. */
 export function slackRef(x) {
   const m = /\/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})/.exec(x.url || ""), tt = /[?&]thread_ts=([\d.]+)/.exec(x.url || "");
-  return clean({ url: x.url, channel: m?.[1] || x.channel, ts: m ? `${m[2]}.${m[3]}` : undefined, thread_ts: tt?.[1], title: [x.channel, x.from].filter(Boolean).join(" · ") || x.title, text: x.text || x.detail });
+  // Followed thread (agenda slack.threads): reply into it, and let /api/draft use its latest excerpt.
+  const key = m ? `${m[1]}:${tt?.[1] || `${m[2]}.${m[3]}`}` : "";
+  const th = x.thread || (key && (S.agenda?.slack?.threads || []).find((t) => t.key === key));
+  const thread_ts = tt?.[1] || (th && th.reply_count > 0 ? th.thread_ts : undefined);
+  return clean({ url: x.url, channel: m?.[1] || x.channel, ts: m ? `${m[2]}.${m[3]}` : undefined, thread_ts, title: [x.channel, x.from].filter(Boolean).join(" · ") || x.title, text: x.text || x.detail });
 }
 export const mailRef = (x) => clean({ url: x.url, thread_id: x.id || /#[\w-]+\/([^|?&#\s]+)/.exec(x.url || "")?.[1], title: [x.subject || x.title, x.from].filter(Boolean).join(" — "), text: x.why || x.snippet || x.detail });
 export const sessionRef = (x) => clean({ session_id: x.id, title: x.worktree, text: x.last_summary || (x.last_prompt ? "» " + x.last_prompt : "") });
