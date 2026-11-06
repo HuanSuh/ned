@@ -75,6 +75,35 @@ struct LastBriefing: Codable {
     }
 }
 
+/// `state.json` `notifications` (daemon config.notifications). Every field defaults to the daemon's
+/// DEFAULT_NOTIFICATIONS, so an older daemon (no field) or a partial object behaves as before.
+struct NotifySettings: Codable, Sendable {
+    var enabled: Bool = true
+    /// Per attention kind (session/email/slack/jira/github/sentry/calendar). Missing kind = on.
+    var kinds: [String: Bool] = [:]
+    var briefing: Bool = true
+    /// More than this many new items at once → one summary notification.
+    var summary_threshold: Int = 3
+    /// "skip" | "silent"; `nil` = absent → the `quietDelivery` user default (then "skip").
+    var quiet_delivery: String? = nil
+    var sound: Bool = true
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? true
+        kinds = (try? c.decodeIfPresent([String: Bool].self, forKey: .kinds)) ?? [:]
+        briefing = (try? c.decodeIfPresent(Bool.self, forKey: .briefing)) ?? true
+        summary_threshold = max(0, (try? c.decodeIfPresent(Int.self, forKey: .summary_threshold)) ?? 3)
+        let q = try? c.decodeIfPresent(String.self, forKey: .quiet_delivery)
+        quiet_delivery = (q == "skip" || q == "silent") ? q : nil
+        sound = (try? c.decodeIfPresent(Bool.self, forKey: .sound)) ?? true
+    }
+
+    func kindEnabled(_ kind: String) -> Bool { kinds[kind] ?? true }
+}
+
 /// Decodes an element, or drops it (logging) instead of failing the whole array.
 private struct Lossy<T: Decodable>: Decodable {
     let value: T?
@@ -95,6 +124,8 @@ struct NedState: Codable {
     var quiet: Bool = false
     /// Raw `persona` from the daemon (config.persona). Missing/unknown → ned via `personaID`.
     var persona: String? = nil
+    /// Notification preferences; defaults when the daemon does not write them.
+    var notifications = NotifySettings()
 
     var personaID: PersonaID { PersonaID(raw: persona) }
 
@@ -111,6 +142,7 @@ struct NedState: Codable {
         next_heartbeat_at = try? c.decodeIfPresent(Double.self, forKey: .next_heartbeat_at)
         quiet = (try? c.decodeIfPresent(Bool.self, forKey: .quiet)) ?? false
         persona = try? c.decodeIfPresent(String.self, forKey: .persona)
+        notifications = (try? c.decodeIfPresent(NotifySettings.self, forKey: .notifications)) ?? NotifySettings()
     }
 
     /// Daemon writes state at least every heartbeat; treat >20 min silence as dead.
