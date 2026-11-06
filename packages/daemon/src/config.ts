@@ -38,6 +38,12 @@ export interface NedConfig {
   actions: NedActions;
   /** Voice for reply drafts (POST /api/draft) — the USER's own voice, not the persona's. */
   reply_tone: string;
+  /** Agenda-collected Slack/mail context younger than this feeds the no-tool fast draft path; older → full (tool) path. */
+  draft_context_max_age_minutes: number;
+  /** Model for no-tool (fast) drafts, run with `--effort low`. Default "sonnet" (≈9s vs ≈12-15s on the default model); null = claude_model. */
+  draft_fast_model: string | null;
+  /** After each agenda run, pre-generate the 'normal' draft (fast path, max 6, sequential) for items that need a reply. */
+  drafts_pregenerate: boolean;
 }
 
 export interface NedActions {
@@ -165,6 +171,9 @@ export const DEFAULT_CONFIG: NedConfig = {
   notifications: DEFAULT_NOTIFICATIONS,
   actions: DEFAULT_ACTIONS,
   reply_tone: DEFAULT_REPLY_TONE,
+  draft_context_max_age_minutes: 180,
+  draft_fast_model: "sonnet",
+  drafts_pregenerate: false,
 };
 
 export function loadConfig(): NedConfig {
@@ -182,6 +191,8 @@ export function loadConfig(): NedConfig {
       notifications: normalizeNotifications(parsed.notifications),
       actions: normalizeActions(parsed.actions),
       reply_tone: normalizeReplyTone(parsed.reply_tone),
+      draft_context_max_age_minutes: Number.isFinite(Number(parsed.draft_context_max_age_minutes)) && Number(parsed.draft_context_max_age_minutes) >= 0 ? Number(parsed.draft_context_max_age_minutes) : DEFAULT_CONFIG.draft_context_max_age_minutes,
+      drafts_pregenerate: parsed.drafts_pregenerate === true,
       filters: mergeFilters(normalizeFilters(DEFAULT_CONFIG.filters), parsed.filters),
     };
   }

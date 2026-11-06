@@ -79,6 +79,7 @@ JQL 에 그대로 들어가므로 그 밖의 값은 버린다). heartbeat.md · 
 | PATCH | `/api/todos/:id` | `{title?, done?, due?, note?}` 부분 갱신. 없으면 404 |
 | DELETE | `/api/todos/:id` | 삭제. 없으면 404 |
 | POST | `/api/draft` | 답장 초안 3개 (Slack / 메일 / 에이전트 세션). 읽기 전용 `claude -p`. 아래 참고 |
+| GET | `/api/draft/status` | 초안 미리 생성 마지막 실행 `{ pregenerated, skipped_cached, failed, cost_usd, last_run_ts, running }` |
 | POST | `/api/send` | 초안 보내기 — `config.actions` 로 켠 것만. 꺼져 있으면 403 |
 | GET | `/api/actions` | `sent-actions.log` 최근 50건 (최신 먼저) |
 
@@ -98,8 +99,8 @@ Agenda 응답 형태:
 - calendar: 오늘(로컬 날짜) 일정, 종일 일정 먼저 그다음 시작 시각 순
 - jira: `assignee = currentUser() AND statusCategory != Done`, 마감 오름차순 → 갱신 내림차순, 최대 25
 - github: 내 리뷰 요청 PR + 변경 요청/승인된 내 열린 PR, 최대 20
-- mail: `unread` 는 최근 2일 안 읽은 받은편지함 스레드 수(최대 50, 50 에 닿으면 `unread_capped: true` → 홈은 "50+통"), `items` 는 최근 3일 중 사람이 보낸 업무 메일로 내 행동이 필요한 것(최대 10, 급한 순). 본문은 열지 않고 검색 결과의 발신자·제목·스니펫만 본다. 읽음 처리 등 쓰기는 하지 않는다. `mail: null` 은 아직 안 가져옴(mail 도입 전 agenda.json) 또는 gmail 소스 꺼짐. `GET /api/agenda`·`POST /api/agenda/refresh` 응답에는 `mail_enabled`(= `sources.gmail`)가 붙고, false 면 홈은 메일 묶음을 숨긴다
-- slack: 최근 24시간, 나를 멘션했거나 DM/스레드에서 질문·요청했고 내가 아직 답하지 않은 것(최대 10, 급한 순). 검색 3번(멘션 `<@me>` / `is:dm` / `is:thread with:<@me>`)과 필요할 때만 `slack_read_thread` 최대 3개. Slack epoch ts 는 ISO 로 바꾼다. 응답에는 `slack_enabled`(= `sources.slack`)가 붙고, false 면 홈은 Slack 카드를 숨긴다
+- mail: `unread` 는 최근 2일 안 읽은 받은편지함 스레드 수(최대 50, 50 에 닿으면 `unread_capped: true` → 홈은 "50+통"), `items` 는 최근 3일 중 사람이 보낸 업무 메일로 내 행동이 필요한 것(최대 10, 급한 순). 선별은 검색 결과의 발신자·제목·스니펫으로 하고, 고른 `items` 만 `get_thread`(PLAIN_TEXT)를 한 턴에 병렬로 읽어 답장 초안용 `context: { from, to, subject, body_excerpt(인용 제거, ≤1500자), attachments[], message_id, reply_to, collected_at }` 를 채운다. 읽음 처리 등 쓰기는 하지 않는다. `mail: null` 은 아직 안 가져옴(mail 도입 전 agenda.json) 또는 gmail 소스 꺼짐. `GET /api/agenda`·`POST /api/agenda/refresh` 응답에는 `mail_enabled`(= `sources.gmail`)가 붙고, false 면 홈은 메일 묶음을 숨긴다
+- slack: 최근 24시간, 나를 멘션했거나 DM/스레드에서 질문·요청했고 내가 아직 답하지 않은 것(최대 10, 급한 순). 검색 3번(멘션 `<@me>` / `is:dm` / `is:thread with:<@me>`)과 필요할 때만 `slack_read_thread` 최대 3개. Slack epoch ts 는 ISO 로 바꾼다. `items[]` 와 답하지 않은 `all[]` 항목에는 모델이 이미 본 검색 context·스레드에서 옮긴 `context: { participants[], messages[{from,ts,text}](최근 5개, 각 ≤300자), collected_at }` 가 붙는다(같은 permalink 면 Ned 가 서로 복사). agenda `--max-turns` 는 20 → 22 응답에는 `slack_enabled`(= `sources.slack`)가 붙고, false 면 홈은 Slack 카드를 숨긴다
 
 ### 답장 초안 · 보내기 (`src/drafts.ts`, `src/actions.ts`, `prompts/draft.md`)
 
@@ -121,9 +122,20 @@ Agenda 응답 형태:
 
 - 필요한 ref: slack 은 `url`(permalink — channel/ts/thread_ts 를 파싱) 또는 `channel`(+`ts`/`thread_ts`), 없으면 `text` 만으로 씀.
   email 은 `thread_id`(agenda `mail.items[].id`) 권장, 없으면 `title`/`text` 로 1회 검색. session 은 `session_id` 필수.
-- `claude -p` 는 plan 모드 + `--tools ToolSearch` + 소스별 읽기 도구만: slack `slack_read_thread`/`slack_read_channel`, email
-  `get_thread`/`search_threads`, session 은 도구 없음(`--tools ""`) — `~/.ned/events` 에서 그 세션의 `transcript_path` 를 찾아
-  최근 user/assistant 텍스트 12개(최대 6000자)와 마지막 Notification/Stop 을 프롬프트에 넣는다. `--max-turns 8`.
+- 응답에 `mode: "fast" | "full"` 와 `context_age_minutes` 가 붙는다.
+  - **fast** (목표 ≤10s): ref 가 agenda 항목(slack `items`/`all` 은 permalink 또는 channel+ts, mail `items` 는 thread id)과 맞고 그 항목의
+    `context` 가 `config.draft_context_max_age_minutes`(기본 180) 안이면, 그 맥락만으로 프롬프트를 만들고
+    `claude -p --tools "" --max-turns 1 --permission-mode plan --setting-sources "" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --disable-slash-commands`
+    `--effort low --model <draft_fast_model>`(기본 `sonnet`, null 이면 `claude_model`) 로 돌린다(사용자 hooks·플러그인·MCP 를 띄우지 않아
+    기동 ~40s → ~3s). 지연의 대부분은 출력 토큰이라 모델은 `excerpt`/`reply_meta` 를 비워 두고 Ned 가 맥락(마지막 상대 메시지,
+    메일 `message_id`·`reply_to`·`Re: 제목`)으로 채운다. hint·재생성도 같은 맥락을 쓴다. 실패하면 full 로 한 번 넘어간다.
+    session 은 항상 fast(`context_age_minutes: 0`) — `~/.ned/events` 에서 그 세션의 `transcript_path` 를 찾아 최근 user/assistant 텍스트
+    12개(최대 6000자)와 마지막 Notification/Stop 을 프롬프트에 넣는다. 도구 없음.
+  - **full**: 맥락이 없거나 오래됐을 때. plan 모드 + `--tools ToolSearch` + 소스별 읽기 도구만: slack `slack_read_thread`/`slack_read_channel`,
+    email `get_thread`/`search_threads`. `--max-turns 8`. `context_age_minutes: null`.
+- 미리 생성(선택): `config.drafts_pregenerate: true`(기본 false)면 agenda 실행 뒤 백그라운드에서 답장이 필요한 항목(slack `items` +
+  mail `items` 중 reason `reply|approval|request`, 맥락이 신선한 것)을 순서대로 최대 6개 fast 경로로 생성해 캐시한다(모달이 바로 열림).
+  `GET /api/draft/status` → `{ pregenerated, skipped_cached, failed, cost_usd, last_run_ts, running }` (마지막 실행 기준, 로그에 총 비용).
 - 초안은 **사용자 본인 목소리**: `{{PERSONA}}` 를 쓰지 않고 `tone` → `config.reply_tone`(기본 `간결하고 정중한 존댓말, 핵심 먼저`)을 따른다.
 - 캐시: `~/.ned/drafts/<id>.json`, id = sha1(source + ref 키) 앞 16자. 1시간 안이고 hint·tone 이 같으면 `cached: true` 로 그대로
   (session 은 마지막 이벤트 ts 도 키에 들어가 세션이 진행되면 새로 쓴다). `force: true` 면 무시. 같은 키 동시 요청은 실행 하나를 공유.
@@ -183,14 +195,16 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
                          persona (ned|alfred|oracle|jarvis), filters.{slack.exclude_channels, jira.exclude_projects} (트래킹 제외, 기본 []),
                          port, claude_model, claude_max_turns, session_stale_minutes, agenda_refresh_minutes, notify,
                          actions.{slack_send=false, gmail_draft=true, gmail_send=false, session_send=true} (POST /api/send 허용),
-                         reply_tone (답장 초안 말투, 기본 "간결하고 정중한 존댓말, 핵심 먼저")
+                         reply_tone (답장 초안 말투, 기본 "간결하고 정중한 존댓말, 핵심 먼저"),
+                         draft_context_max_age_minutes=180 (agenda 맥락 → fast 초안), draft_fast_model="sonnet", drafts_pregenerate=false
   state.json             menu bar / 대시보드가 읽는 단일 뷰 (sessions, attention, last_briefing, quiet …)
   cursor.json            heartbeat 가 처리한 마지막 이벤트 ts
   events/YYYY-MM-DD.jsonl  훅(packages/hook/ned-hook.sh)이 append 하는 이벤트. 로컬 날짜 기준
   briefings/<iso-ts>.json  heartbeat / daily 브리핑 결과 (status, action_items, updates, fyi, sessions, cost_usd)
   briefings/sent.log     이미 알린 항목 키 (title 또는 url) — 중복 억제
   agenda.json            HOME 탭 agenda: {updated_at, cost_usd, error?, calendar, jira, github, mail, slack}
-  drafts/<id>.json       답장 초안 캐시 (1시간): {id, source, context, drafts, cost_usd, created_at, hint, tone, meta}
+  drafts/<id>.json       답장 초안 캐시 (1시간): {id, source, mode, context_age_minutes, context, drafts, cost_usd, created_at, hint, tone, meta}
+  drafts/_pregenerate.json  마지막 미리 생성 실행 결과 (GET /api/draft/status)
   sent-actions.log       POST /api/send 시도 기록 JSONL (거절·실패 포함)
   todos.json             개인 할 일. 완료 후 7일 지난 항목은 로드할 때 정리된다
   dismissed.json         dismiss 한 세션 attention: {id: {alert_ts, at}} (7일 보관)

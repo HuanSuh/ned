@@ -7,7 +7,7 @@ import { parseSendRequest, performSend, readActionLog } from "./actions.js";
 import { agendaBusy, readAgenda, refreshAgenda } from "./agenda.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
 import { PERSONAS, loadConfig, mergeFilters, normalizeActions, normalizeNotifications, normalizeReplyTone, normalizePersona, saveConfig, type NedConfig, type PersonaId } from "./config.js";
-import { DraftError, generateDraft, parseDraftRequest } from "./drafts.js";
+import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { dismissAttention, heartbeat, listBriefings } from "./heartbeat.js";
 import { log } from "./paths.js";
@@ -165,6 +165,7 @@ export function startServer(getConfig: () => NedConfig): void {
       return c.json({ error: String(e) }, 500);
     }
   });
+  app.get("/api/draft/status", (c) => c.json(pregenStatus()));
   app.post("/api/send", async (c) => {
     const req = parseSendRequest(await readBody(c));
     if (typeof req === "string") return c.json({ ok: false, error: req }, 400);
