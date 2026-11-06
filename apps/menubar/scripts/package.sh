@@ -29,6 +29,19 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>LSMinimumSystemVersion</key><string>14.0</string>
 </dict></plist>
 PLIST
-# Ad-hoc sign so SMAppService (Login Items) and TCC see a stable identity.
-codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+# Sign with a stable identity so TCC (문서 폴더 등 권한) and SMAppService (Login Items) keep recognising
+# the app across rebuilds. An ad-hoc signature (`--sign -`) changes with every build's code hash, so macOS
+# asks for the same permissions again after every install. Identity: $NED_SIGN_IDENTITY, else
+# "Ned Local Signing" from the keychain (create it once with scripts/make-signing-cert.sh), else ad-hoc.
+IDENTITY="${NED_SIGN_IDENTITY:-}"
+if [ -z "$IDENTITY" ] && security find-identity -p codesigning 2>/dev/null | grep -q '"Ned Local Signing"'; then
+  IDENTITY="Ned Local Signing"
+fi
+if [ -n "$IDENTITY" ]; then
+  codesign --force --sign "$IDENTITY" --identifier com.ned.menubar "$APP"
+else
+  echo "! ad-hoc 서명 — 매 설치마다 권한을 다시 묻게 됨 — scripts/make-signing-cert.sh 실행" >&2
+  codesign --force --sign - --identifier com.ned.menubar "$APP" >/dev/null 2>&1 || true
+fi
+codesign -dv "$APP" 2>&1 | grep -E '^(Identifier|Authority|Signature)=' | sed 's/^/  sign: /' || true
 echo "✓ $PWD/$APP"
