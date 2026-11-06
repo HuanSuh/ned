@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.omc/
+.build/
+*.log
+.DS_Store

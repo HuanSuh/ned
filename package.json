@@ -1,0 +1,13 @@
+{
+  "name": "ned",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Ned — the guy in the monitor. A quiet assistant that watches your agent sessions and work signals, and briefs you.",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm --filter @ned/daemon dev",
+    "install:hooks": "node packages/hook/install-hooks.mjs",
+    "install:all": "bash scripts/install.sh"
+  },
+  "packageManager": "pnpm@11.25.0"
+}
