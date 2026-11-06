@@ -188,7 +188,9 @@ details.tdone summary::before { content: "▸ "; } details.tdone[open] summary::
 #hgrid.free:not(.locked) .lhd { cursor: grab; }
 #hgrid.free:not(.locked) .lrs { display: block; position: absolute; z-index: 4; touch-action: none; }
 #hgrid.free .lrs-e { top: 14px; bottom: 18px; right: -3px; width: 9px; cursor: ew-resize; }
-#hgrid.free .lrs-se { right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; }
+#hgrid.free .lrs-s { left: 14px; right: 22px; bottom: -3px; height: 9px; cursor: ns-resize; }
+#hgrid.free .lrs-s:hover, #hgrid.free .lp.lresize > .lrs-s { background: linear-gradient(180deg, transparent 3px, color-mix(in srgb, var(--hero) 60%, transparent) 3px 5px, transparent 5px); }
+#hgrid.free .lrs-se { right: 0; bottom: 0; width: 24px; height: 24px; cursor: nwse-resize; }
 #hgrid.free .lrs-se::after { content: ""; position: absolute; right: 4px; bottom: 4px; width: 8px; height: 8px; border-right: 2px solid var(--faint); border-bottom: 2px solid var(--faint); border-bottom-right-radius: 3px; opacity: 0; transition: opacity .12s; }
 #hgrid.free .lp:hover > .lrs-se::after, #hgrid.free .lp.lresize > .lrs-se::after { opacity: .8; }
 #hgrid.free .lrs-e:hover, #hgrid.free .lp.lresize > .lrs-e { background: linear-gradient(90deg, transparent 3px, color-mix(in srgb, var(--hero) 60%, transparent) 3px 5px, transparent 5px); }

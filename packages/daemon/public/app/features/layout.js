@@ -189,7 +189,7 @@ export function setLocked(on) {
 }
 
 // ---------------------------------------------------------------- pointer: drag header to move, edge / corner to resize
-let drag = null; // { id, mode: "move" | "e" | "se", pid, sx, sy, orig, base, started, target }
+let drag = null; // { id, mode: "move" | "e" | "s" | "se", pid, sx, sy, orig, base, started, target }
 let swallowClick = false;
 function steps() {
   const g = $("hgrid"), cw = (g.clientWidth - (COLS - 1) * GAP) / COLS;
@@ -233,8 +233,9 @@ function onMove(e) {
     $(PANEL_EL[drag.id]).style.transform = `translate(${dx}px, ${dy}px)`;
     r = { ...o, x: Math.max(0, Math.min(COLS - o.w, Math.round(o.x + dx / col))), y: Math.max(0, Math.round(o.y + dy / row)) };
   } else {
-    const w = Math.max(m.w, Math.min(COLS - o.x, Math.round(o.w + dx / col)));
-    const h = drag.mode === "se" ? Math.max(m.h, Math.min(48, Math.round(o.h + dy / row))) : o.h;
+    // e = width only, s = height only, se = both
+    const w = drag.mode === "s" ? o.w : Math.max(m.w, Math.min(COLS - o.x, Math.round(o.w + dx / col)));
+    const h = drag.mode === "e" ? o.h : Math.max(m.h, Math.min(48, Math.round(o.h + dy / row)));
     r = { ...o, w, h };
   }
   const key = `${r.x},${r.y},${r.w},${r.h}`;
@@ -331,7 +332,7 @@ export function init() {
     el.classList.add("lp");
     hd.classList.add("lhd");
     hd.insertAdjacentHTML("afterbegin", `<button type="button" class="lgrip" data-lgrip="${id}" aria-label="${PANEL_LABEL[id]} 패널 옮기기 — 방향키 이동, Shift+방향키 크기, Enter 저장, Esc 취소" title="드래그해서 옮기기 · 방향키 이동 · Shift+방향키 크기"><svg viewBox="0 0 10 16" width="8" height="13" aria-hidden="true"><g fill="currentColor"><circle cx="2.5" cy="3" r="1.3"/><circle cx="7.5" cy="3" r="1.3"/><circle cx="2.5" cy="8" r="1.3"/><circle cx="7.5" cy="8" r="1.3"/><circle cx="2.5" cy="13" r="1.3"/><circle cx="7.5" cy="13" r="1.3"/></g></svg></button>`);
-    el.insertAdjacentHTML("beforeend", `<span class="lrs lrs-e" data-lrs="e" data-panel="${id}" aria-hidden="true" title="폭 조절"></span><span class="lrs lrs-se" data-lrs="se" data-panel="${id}" aria-hidden="true" title="크기 조절"></span>`);
+    el.insertAdjacentHTML("beforeend", `<span class="lrs lrs-e" data-lrs="e" data-panel="${id}" aria-hidden="true" title="폭 조절"></span><span class="lrs lrs-s" data-lrs="s" data-panel="${id}" aria-hidden="true" title="높이 조절"></span><span class="lrs lrs-se" data-lrs="se" data-panel="${id}" aria-hidden="true" title="크기 조절"></span>`);
   }
   const meta = document.querySelector(".hmeta");
   meta?.insertAdjacentHTML("beforeend", `<button type="button" class="btn small iconly" id="lay-lock" aria-pressed="false"></button><span class="vh" id="lay-live" aria-live="polite"></span>`);
