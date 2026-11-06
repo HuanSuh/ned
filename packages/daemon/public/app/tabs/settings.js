@@ -5,6 +5,7 @@ import { readCardLayout, renderCardLayout } from "../features/cardlayout.js";
 import { ACTION_DEFAULTS, ACTION_KO } from "../features/drafts.js";
 import { readToneBySource, syncWriteActionGroups, writeActionsHtml } from "./settings-actions.js";
 import { persona } from "../features/personas.js";
+import { applyTheme, normTheme, syncTheme, themeHtml } from "../features/theme.js";
 import { loadAgenda } from "../main.js";
 import { S } from "../state.js";
 import { KIND_ICON, KIND_KO, SOURCE_LABEL } from "../ui/icons.js";
@@ -174,6 +175,8 @@ export function renderConfig() {
   renderWriteActions(c);
   renderActionLog(); loadActionLog();
   $("c-tone").value = c.reply_tone || "";
+  syncTheme(c.dashboard); // server value wins over the <head> cache (and drops an unsaved preview)
+  $("c-theme").innerHTML = themeHtml(c.dashboard?.theme);
   renderCardLayout(c.dashboard ?? null);
   excl.slack = [...(c.filters?.slack?.exclude_channels || [])];
   excl.jira = [...(c.filters?.jira?.exclude_projects || [])];
@@ -202,6 +205,9 @@ export function renderConfig() {
   syncNav();
 }
 
+/** 외형 → 테마 radio (none rendered yet → "system"). */
+export const readTheme = () => normTheme(document.querySelector("input[name=c-theme]:checked")?.value);
+
 /** The PUT /api/config body, read from every section of the form. */
 export function readBody() {
   const sources = {};
@@ -215,7 +221,7 @@ export function readBody() {
     quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
     sources,
     filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack] }, jira: { exclude_projects: [...excl.jira] } },
-    dashboard: readCardLayout(),
+    dashboard: { ...readCardLayout(), theme: readTheme() },
     notifications: readNotifications(),
     actions: Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])),
     reply_tone: $("c-tone").value.trim(),
@@ -229,8 +235,9 @@ export function readBody() {
 // ---------- 저장 안 된 변경: body as rendered vs. now ----------
 // dashboard is left out of the snapshot: lock / 팔로업 카드 save on their own, and order/width edits show up as
 // readCardLayout().layout (cardlayout.js re-derives the grid only when they were touched here).
+// theme is part of dashboard but only saves with the form, so it stays in the snapshot.
 let saved = "";
-const snap = () => { const { dashboard, ...rest } = readBody(); return JSON.stringify(rest); };
+const snap = () => { const { dashboard, ...rest } = readBody(); return JSON.stringify({ ...rest, theme: dashboard.theme }); };
 export const isDirty = () => !!S.config && (snap() !== saved || !!readCardLayout().layout);
 export function syncDirty() {
   const d = isDirty();
@@ -290,6 +297,7 @@ export function init() {
     const [k, i] = b.dataset.xdel.split(":");
     excl[k].splice(Number(i), 1); renderExcl(); $(`x-${k}-in`).focus();
   });
+  $("c-theme").addEventListener("change", (e) => { if (e.target.name === "c-theme") applyTheme(e.target.value); }); // preview only; 저장 makes it stick
   $("n-on").addEventListener("change", syncNotifyEnabled);
   $("c-qon").addEventListener("change", syncNotifyEnabled);
   $("c-agmin").addEventListener("input", syncIntervalPlaceholders);
