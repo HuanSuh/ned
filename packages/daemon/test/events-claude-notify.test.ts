@@ -81,7 +81,8 @@ describe("claude helpers (no spawn)", () => {
   });
   it("buildClaudeArgs: plan mode default, allowlist, isolation flags", () => {
     const a = buildClaudeArgs({ allowedTools: ["ToolSearch"], maxTurns: 3, model: "sonnet", isolated: true, effort: "low", tools: [] });
-    expect(a.slice(0, 7)).toEqual(["-p", "--output-format", "json", "--permission-mode", "plan", "--max-turns", "3"]);
+    // stream-json + --verbose since the fast-startup work (connector availability is read from the stream).
+    expect(a.slice(0, 8)).toEqual(["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "plan", "--max-turns", "3"]);
     expect(a).toContain("--allowedTools");
     expect(a).toContain("--strict-mcp-config");
     expect(a[a.indexOf("--tools") + 1]).toBe("");
