@@ -1,7 +1,42 @@
 # Ned 대시보드 (`public/index.html`)
 
-daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙하는 **단일 파일** 로컬 대시보드.
+daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙하는 로컬 대시보드. `index.html` 은 껍데기(head·헤더·탭 컨테이너)이고
+화면 로직은 `app/**` 의 ES 모듈, 스타일은 `css/*.css` — 아래 **모듈 맵**.
 빌드 단계·프레임워크·CDN 의존성 없음 (오프라인 동작). 시스템 폰트, `prefers-color-scheme` 라이트/다크.
+
+## 모듈 맵
+
+`index.html` → `<link>` 8개(순서 = cascade 순서) + `<script type="module" src="/app/main.js">` + `<script defer src="/search.js">`(⌘K 검색, 독립 파일).
+
+| 파일 | 맡는 것 |
+|---|---|
+| `app/main.js` | 부팅: 헤더(daemon LED·점검 버튼), 로더(`loadState/Agenda/Todos/…`)·폴링(10s/60s), `renderAll`, 해시 라우팅(`setView`), 전역 키보드 맵, `window.NED`, 각 모듈 `init()` 호출 |
+| `app/state.js` | 공유 상태 `S`(서버 데이터) · `ui`(화면 상태) + pub/sub(`subscribe`/`emit`, `renderAll` 뒤에 `"render"`) · `store` |
+| `app/api.js` | `api(path, opts)`(JSON, 실패 시 `status` 달린 Error) · `postJson` |
+| `app/util.js` | `$`, `esc`, `safeUrl`, 시간 포맷(`hhmm`/`rel`/`dayLabel`…), `lsGet`/`lsSet`, 마감 칩 — 상태 없음, import 없음 |
+| `app/ui/icons.js` | kind 아이콘·라벨 표, `iconBtn`(24px 항목 아이콘) |
+| `app/ui/chips.js` | 소스 pill 줄(`pillRow`, `PF`, `ned.pf.*`), 소스 on/off(`srcOn`) |
+| `app/ui/popover.js` | `errBadge` + 오류 팝오버 |
+| `app/ui/modal.js` | 모달 열기/닫기(`body.modal-open`)·Tab 포커스 트랩 |
+| `app/ui/toast.js` | `toast()` |
+| `app/tabs/home.js` · `inbox.js` · `timeline.js` · `settings.js` | 탭별 렌더와 그 탭 안 이벤트 |
+| `app/features/calendar.js` | 일정 패널(일/주, `/api/calendar` 범위, `ned.cal`) |
+| `app/features/cards.js` | 소스 카드(메일·Jira·Slack·GitHub), `packCards` |
+| `app/features/drafts.js` | 답장 초안 모달 |
+| `app/features/reviewed.js` | 확인 완료(attention·소스 항목) |
+| `app/features/personas.js` | `VOICE`, 마크, `applyPersona`, 말풍선 `say`, mood·opener |
+| `css/tokens.css` → `base` → `inbox` → `timeline` → `settings` → `home` → `components` → `responsive` | 토큰·페르소나 / 셸·카드·칩 / 탭별 / 오류 배지·모달·아이콘 / 모든 미디어쿼리(마지막이어야 함) |
+
+규칙
+- 모듈은 필요한 이름만 `import` 한다. 순환 import 는 허용(함수 안에서만 쓰는 이름) — **모듈 최상위에서 다른 모듈의 `const` 를 실행 시점에 읽지 말 것**(TDZ). 최상위 부수효과(리스너 등록 등)는 `export function init()` 안에 두고 `main.js` 의 init 목록에 넣는다. 목록 순서 = document 리스너 순서(예: 오류 팝오버의 Esc 가 페이지 키보다 먼저).
+- 다른 모듈의 `let` 을 대입하지 않는다(ES import 는 읽기 전용) — 상태는 `S`/`ui` 속성으로.
+- id·class·`localStorage` 키(`ned.*`)는 `search.js` 와 사용자 저장 상태가 기대므로 바꾸지 않는다. `window.NED = { store, api, nav }` (`nav.go(view)`, `nav.tab(t)`, `nav.view()`); `data` 키는 일부러 없다 — `search.js` 는 자체 30초 캐시로 API 를 읽는다.
+- 한 모듈 ~600줄 이하.
+
+새 탭 추가: `index.html` 에 `<main class="view page" id="v-<name>" hidden>` + `nav#views` 에 `<a href="#<name>" data-v="<name>">` → `app/tabs/<name>.js` 에 `render<Name>()`(+필요하면 `init()`) → `main.js` 의 `VIEWS` 에 이름, `renderAll` 에 `if (ui.view === "<name>") render<Name>();`, init 목록에 추가 → 스타일은 `css/<name>.css` 를 `responsive.css` 앞에 링크.
+새 기능 추가: `app/features/<name>.js` 에 렌더 함수 + `init()`; 탭 쪽에서 import 해 부르거나 `subscribe("render", …)` 로 붙는다. 데이터는 `api()` 로 받아 `S.<key>` 에 둔다.
+
+회귀 확인(헤드리스, GUI 없음): `node scripts/dash-capture.mjs capture --out <dir>` (픽스처 `NED_HOME=/tmp/ned-mods`, 포트 7790, `NED_NO_LLM=1`, 시계 고정) → `compare <before> <after>` 가 탭별 스크린샷(다크/라이트 × 1600/390)·DOM/계산 스타일 해시·인터랙션 단계(j/k/e, ⌘K, 페르소나, 확인 완료, 초안, 설정 PUT, 주간 이동)·콘솔 에러를 비교. 이전 커밋과 비교하려면 그 커밋의 `packages/daemon` 을 `git worktree` 로 꺼내 `--daemon <dir>` 로 찍는다.
 
 ## 섹션
 | 섹션 | 데이터 | 비고 |

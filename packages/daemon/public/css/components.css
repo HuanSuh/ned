@@ -1,0 +1,62 @@
+/* Error badge + popover, reply-draft modal, item action icons, 확인 완료 folds.
+ * Split from the old single-file index.html; link order in index.html is the cascade order. */
+/* error badge: just the ⚠ (warning colour); details live in the popover */
+.erri { appearance: none; display: inline-flex; align-items: center; gap: 5px; height: 22px; min-width: 22px; padding: 0 3px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--amber); cursor: pointer; font: 600 12px var(--sans); vertical-align: middle; }
+.erri svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.erri:hover { background: color-mix(in srgb, var(--amber) 14%, transparent); border-color: color-mix(in srgb, var(--amber) 40%, transparent); }
+.erri:focus-visible { outline: 2px solid var(--info); outline-offset: 1px; }
+.errpop { position: fixed; z-index: 40; width: min(440px, calc(100vw - 16px)); padding: 10px 12px; background: var(--raise); color: var(--fg); border: 1px solid var(--edge); border-radius: 10px; box-shadow: 0 12px 36px rgba(0, 0, 0, .4); }
+.errpop .eph { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.errpop .eph .sp { flex: 1; }
+.errpop .eph .when { font: 11px var(--mono); color: var(--faint); white-space: nowrap; }
+.errpop .epmsg { margin: 8px 0; max-height: 220px; overflow: auto; padding: 8px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); font: 11.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; color: var(--dim); }
+.errpop .epf { display: flex; gap: 6px; justify-content: flex-end; }
+/* reply-draft modal */
+.modal { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, #000 55%, transparent); }
+.mbox { width: min(720px, 100%); max-height: calc(100dvh - 32px); display: flex; flex-direction: column; background: var(--pane); border: 1px solid var(--edge); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, .45); overflow: hidden; }
+.mhd { display: flex; gap: 10px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); min-width: 0; }
+.mhd h3 { margin: 0; font-size: 15px; font-family: var(--head); font-weight: var(--head-w); flex: none; }
+.mhd .mt { color: var(--dim); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mhd .sp { flex: 1; }
+.mbd { padding: 12px 16px; overflow: auto; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.mctx .sum { font-size: 13px; }
+.mctx blockquote { margin: 6px 0 0; padding: 6px 10px; border-left: 3px solid var(--info); background: var(--bubble); color: var(--dim); font-size: 12.5px; white-space: pre-wrap; max-height: 120px; overflow: auto; border-radius: 0 6px 6px 0; }
+.mmeta { margin-top: 4px; font: 10.5px var(--mono); color: var(--faint); }
+.mtabs { display: flex; gap: 4px; }
+#dm-text { width: 100%; min-height: 150px; resize: vertical; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font: 13.5px/1.55 var(--sans); }
+#dm-text:focus { outline: 2px solid var(--info); outline-offset: 0; }
+#dm-text:disabled { opacity: .6; }
+.mregen { display: flex; gap: 6px; }
+.mregen input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+.mconfirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border: 1px solid var(--hero); border-radius: 8px; background: color-mix(in srgb, var(--hero) 10%, var(--pane)); }
+.mconfirm .tgt { flex: 1 1 100%; font-size: 13px; font-weight: 600; }
+.mconfirm .pv { flex: 1 1 100%; color: var(--dim); font-size: 12px; white-space: pre-wrap; }
+.merr { color: var(--dim); font-size: 12.5px; }
+.merr:empty { display: none; }
+.mft { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--side); }
+.mft .btn.dis { opacity: .45; cursor: not-allowed; }
+body.modal-open { overflow: hidden; }
+.drb { white-space: nowrap; }
+/* item action icons */
+.ib { appearance: none; display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; flex: none; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--dim); cursor: pointer; text-decoration: none; }
+.ib svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ib:hover { color: var(--hero-text, var(--hero)); background: color-mix(in srgb, var(--hero) 12%, transparent); border-color: color-mix(in srgb, var(--hero) 35%, transparent); text-decoration: none; }
+.ib:focus-visible { outline: 2px solid var(--info); outline-offset: 1px; }
+.ib.on { color: var(--hero-text, var(--hero)); }
+.ib-check.on svg { stroke-width: 2.8; }
+.ti .ra { gap: 2px; }
+.ti.reviewed { opacity: .55; } .ti.reviewed:hover, .ti.reviewed:focus-within { opacity: .9; }
+details.rvfold { margin-top: 2px; }
+details.rvfold summary { cursor: pointer; padding: 5px 10px; font: 600 11px var(--mono); color: var(--faint); list-style: none; }
+details.rvfold summary::-webkit-details-marker { display: none; }
+details.rvfold summary::before { content: "▸ "; } details.rvfold[open] summary::before { content: "▾ "; }
+.row.reviewed { opacity: .55; }
+.row.has-acts .sb { grid-column: 2 / 3; }
+.row .racts { grid-column: 3; grid-row: 2; display: flex; gap: 2px; justify-content: flex-end; }
+.revfold-row { appearance: none; display: block; width: calc(100% - 12px); margin: 6px 6px 2px; padding: 5px 10px; border: 0; border-top: 1px dashed var(--line); background: none; text-align: left; font: 600 11px var(--mono); color: var(--faint); cursor: pointer; }
+.revfold-row:hover { color: var(--fg); }
+.dacts .dkeys { margin-left: 6px; color: var(--faint); font-size: 11.5px; }
+.unit .drb { grid-column: 2 / 4; justify-self: start; margin-top: 4px; }
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; gap: 9px; align-items: center; background: var(--raise); color: var(--fg); border: 1px solid var(--edge); padding: 8px 14px 8px 10px; border-radius: 10px; font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.25); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 20; max-width: min(560px, 92vw); }
+.toast.show { opacity: 1; }
+.toast svg { width: 24px; flex: none; }
