@@ -289,12 +289,15 @@ export function saveConfig(cfg: NedConfig): void {
 
 export function inQuietHours(cfg: NedConfig, now = new Date()): boolean {
   if (!cfg.quiet_hours) return false;
-  const toMin = (s: string) => {
-    const [h, m] = s.split(":").map(Number);
+  // Tolerate a hand-edited config: a missing/invalid "HH:MM" disables quiet hours instead of throwing.
+  const toMin = (s: unknown): number | null => {
+    if (typeof s !== "string" || !/^\d{1,2}:\d{2}$/.test(s.trim())) return null;
+    const [h, m] = s.trim().split(":").map(Number);
     return h * 60 + m;
   };
-  const cur = now.getHours() * 60 + now.getMinutes();
   const start = toMin(cfg.quiet_hours.start);
   const end = toMin(cfg.quiet_hours.end);
+  if (start === null || end === null) return false;
+  const cur = now.getHours() * 60 + now.getMinutes();
   return start <= end ? cur >= start && cur < end : cur >= start || cur < end;
 }

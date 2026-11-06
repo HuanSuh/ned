@@ -124,7 +124,7 @@ describe("known bugs (see test/BUGS.md) — it.fails passes while the bug exists
     delete process.env.NED_NO_LLM_RESULT;
   });
 
-  it.fails("BUG-2: an item with url \"\" is never deduped (keyOf uses ?? so the key is empty and sent.log drops it)", async () => {
+  it("BUG-2 (fixed): an item with url \"\" is never deduped (keyOf uses ?? so the key is empty and sent.log drops it)", async () => {
     process.env.NED_NO_LLM_RESULT = JSON.stringify({ status: "UPDATE", action_items: [{ title: "Same thing again", url: "" }] });
     await heartbeat(loadConfig(), { force: true });
     const b2 = (await heartbeat(loadConfig(), { force: true }))!;

@@ -3,14 +3,14 @@
 Not fixed here (src is owned by other sessions). Each one is pinned by an `it.fails(...)` test: it passes while the bug
 exists and turns red once fixed — then flip it to `it(...)`.
 
-## BUG-1 — partial `quiet_hours` crashes `inQuietHours` (`src/config.ts`)
+## BUG-1 (FIXED 2026-11-06) — partial `quiet_hours` crashed `inQuietHours` (`src/config.ts`)
 `loadConfig` spreads `parsed.quiet_hours` as-is (no deep merge / validation). A hand-edited `config.yaml` with
 `quiet_hours: {start: "23:00"}` (no `end`) makes `inQuietHours` call `undefined.split(":")` → TypeError, which is
 called from `refreshSessions` every tick and from `notifyBriefing`. Same for a non-"HH:MM" string (NaN → never quiet, silent).
 Fix idea: normalize `quiet_hours` in `loadConfig` (both strings matching `/^\d{1,2}:\d{2}$/`, else default or null).
 Test: `test/config.test.ts` › BUG-1.
 
-## BUG-2 — briefing items with `url: ""` are never deduped (`src/heartbeat.ts`)
+## BUG-2 (FIXED 2026-11-06) — briefing items with `url: ""` were never deduped (`src/heartbeat.ts`)
 `keyOf = (s) => (s.url ?? s.title)…` — `??` doesn't fall back on an empty string, so the key is `""`; `sentKeys()`
 filters empty lines out of `sent.log`, so the item is never "already sent" and is re-surfaced (and re-notified) on every
 heartbeat. Fix: `(s.url || s.title)`. Test: `test/heartbeat-todos.test.ts` › BUG-2.

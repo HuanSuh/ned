@@ -133,7 +133,7 @@ describe("inQuietHours", () => {
 });
 
 describe("known bugs (see test/BUGS.md) — it.fails passes while the bug exists", () => {
-  it.fails("BUG-1: a partial quiet_hours block in config.yaml makes inQuietHours throw", () => {
+  it("BUG-1 (fixed): a partial quiet_hours block in config.yaml makes inQuietHours throw", () => {
     write({ quiet_hours: { start: "23:00" } });
     expect(() => inQuietHours(loadConfig(), at(1))).not.toThrow();
   });

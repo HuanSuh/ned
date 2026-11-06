@@ -51,7 +51,7 @@ export function markSent(keys: string[]): void {
   if (keys.length) fs.appendFileSync(SENT_LOG, keys.join("\n") + "\n");
 }
 
-export const keyOf = (s: BriefingSection) => (s.url ?? s.title).trim().toLowerCase();
+export const keyOf = (s: BriefingSection) => (s.url || s.title || "").trim().toLowerCase();
 
 function summarizeEvents(events: NedEvent[]): string {
   if (!events.length) return "(없음)";

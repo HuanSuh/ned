@@ -207,7 +207,7 @@ export interface ContextStatus {
   updated_at: number;
   cost_usd: number;
   /** "budget": stopped because today's spend hit config.agenda_daily_budget_usd. */
-  stopped: "budget" | null;
+  stopped: "budget" | "error" | null;
   /** Sources skipped because their list signature equals the one whose context was last completed. */
   skipped: string[];
 }
