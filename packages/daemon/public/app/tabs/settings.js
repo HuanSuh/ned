@@ -10,16 +10,18 @@ import { $, esc } from "../util.js";
 
 // ---------- settings ----------
 // ---------- tracking exclusions (settings) ----------
-export const excl = { slack: [], jira: [], watch: [] }; // watch = 팔로업 채널 (filters.slack.watch_channels), same chip UI
+export const excl = { slack: [], jira: [], watch: [], ack: [] }; // watch = 팔로업 채널 (filters.slack.watch_channels), ack = 답 필요 해제 이모지 (filters.slack.ack_reactions), same chip UI
+const ACK_SUGGEST = ["white_check_mark", "eyes", "+1", "heavy_check_mark", "ok_hand", "raised_hands", "pray", "done"];
 export const normX = {
   slack: (v) => v.trim().replace(/^#+/, "").replace(/\s+/g, ""),
   watch: (v) => v.trim().replace(/^#+/, "").replace(/\s+/g, ""),
   jira: (v) => v.trim().toUpperCase().replace(/-\d*$/, ""), // "MNT-123" → "MNT"
+  ack: (v) => v.trim().replace(/^:+|:+$/g, "").toLowerCase(), // ":Eyes:" → "eyes"
 };
-export const validX = { slack: (v) => v.length > 0 && v.length <= 80, watch: (v) => v.length > 0 && v.length <= 80, jira: (v) => /^[A-Z][A-Z0-9_]{0,19}$/.test(v) };
-export const showX = { slack: (v) => `#${v}`, watch: (v) => `#${v}`, jira: (v) => v };
+export const validX = { slack: (v) => v.length > 0 && v.length <= 80, watch: (v) => v.length > 0 && v.length <= 80, jira: (v) => /^[A-Z][A-Z0-9_]{0,19}$/.test(v), ack: (v) => /^[\p{Ll}\p{Lo}\p{N}_+'.-]{1,64}$/u.test(v) };
+export const showX = { slack: (v) => `#${v}`, watch: (v) => `#${v}`, jira: (v) => v, ack: (v) => `:${v}:` };
 export function renderExcl() {
-  for (const k of ["slack", "jira", "watch"]) {
+  for (const k of ["slack", "jira", "watch", "ack"]) {
     $("x-" + k).innerHTML = excl[k].map((v, i) => `<span class="xchip"${k === "watch" && excl.slack.some((x) => x.toLowerCase() === v.toLowerCase()) ? ` style="opacity:.5" title="트래킹 제외에도 있어서 건너뛰어"` : ""}>${esc(showX[k](v))}<button type="button" data-xdel="${k}:${i}" aria-label="${esc(showX[k](v))} 빼기" title="빼기">✕</button></span>`).join("");
   }
   // Candidates: channels / project keys seen so far in agenda.json and briefings (client-side, no new API).
@@ -35,6 +37,7 @@ export function renderExcl() {
   }
   $("dl-slack").innerHTML = [...ch].filter((v) => !excl.slack.includes(v)).sort().map((v) => `<option value="#${esc(v)}">`).join("");
   $("dl-watch").innerHTML = [...ch].filter((v) => !excl.watch.includes(v) && !excl.slack.includes(v)).sort().map((v) => `<option value="#${esc(v)}">`).join("");
+  $("dl-ack").innerHTML = ACK_SUGGEST.filter((v) => !excl.ack.includes(v)).map((v) => `<option value=":${esc(v)}:">`).join("");
   $("dl-jira").innerHTML = [...pj].filter((v) => !excl.jira.includes(v)).sort().map((v) => `<option value="${esc(v)}">`).join("");
 }
 export function addExcl(k, raw) {
@@ -43,9 +46,10 @@ export function addExcl(k, raw) {
     if (!part.trim()) continue;
     const v = normX[k](part);
     if (!validX[k](v)) { bad.push(part.trim()); continue; }
+    if (k === "ack" && excl.ack.length >= 8 && !excl.ack.includes(v)) { bad.push(`${part.trim()} (최대 8개)`); continue; }
     if (!excl[k].includes(v)) { excl[k].push(v); added++; }
   }
-  $(k === "watch" ? "w-msg" : "x-msg").textContent = bad.length ? `${k === "jira" ? "프로젝트 키는 영문 대문자로 시작하는 영숫자만 돼" : "채널 이름이 비었거나 너무 길어"}: ${bad.join(", ")}` : added ? "추가했어. 저장을 눌러야 적용돼." : "";
+  $(k === "watch" ? "w-msg" : k === "ack" ? "a-msg" : "x-msg").textContent = bad.length ? `${k === "jira" ? "프로젝트 키는 영문 대문자로 시작하는 영숫자만 돼" : k === "ack" ? "이모지 이름에 공백·기호는 안 돼 (영문·한글·숫자·_+-.' 만)" : "채널 이름이 비었거나 너무 길어"}: ${bad.join(", ")}` : added ? "추가했어. 저장을 눌러야 적용돼." : "";
   renderExcl();
 }
 
@@ -147,7 +151,8 @@ export function renderConfig() {
   excl.slack = [...(c.filters?.slack?.exclude_channels || [])];
   excl.jira = [...(c.filters?.jira?.exclude_projects || [])];
   excl.watch = [...(c.filters?.slack?.watch_channels || [])];
-  $("x-msg").textContent = $("w-msg").textContent = "";
+  excl.ack = [...(c.filters?.slack?.ack_reactions || [])];
+  $("x-msg").textContent = $("w-msg").textContent = $("a-msg").textContent = "";
   renderExcl();
   $("cfg-port").textContent = c.port ? `port ${c.port}` : "";
   $("c-hb").value = c.heartbeat_minutes ?? "";
@@ -174,7 +179,7 @@ export function init() {
     AL[f.dataset.alf] = f.type === "checkbox" ? f.checked : f.value; renderActionLog();
   });
   $("cfg").addEventListener("click", (e) => { if (e.target.closest("[data-alrefresh]")) { e.preventDefault(); loadActionLog(); } });
-  for (const k of ["slack", "jira", "watch"]) {
+  for (const k of ["slack", "jira", "watch", "ack"]) {
     const input = $(`x-${k}-in`);
     input.addEventListener("keydown", (e) => {
       if ((e.key === "Enter" || e.key === ",") && !e.isComposing) { e.preventDefault(); if (input.value.trim()) { addExcl(k, input.value); input.value = ""; } }
@@ -206,7 +211,7 @@ export function init() {
       quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
       sources,
       persona: document.querySelector("#c-persona input[name=persona]:checked")?.value || S.config?.persona || "ned",
-      filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch] }, jira: { exclude_projects: [...excl.jira] } },
+      filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack] }, jira: { exclude_projects: [...excl.jira] } },
       dashboard: readCardLayout(),
       notifications: readNotifications(),
       actions: Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])),

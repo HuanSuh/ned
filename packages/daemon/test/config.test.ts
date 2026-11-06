@@ -9,6 +9,7 @@ import {
   jqlExclude,
   loadConfig,
   mergeFilters,
+  normalizeAckReactions,
   normalizeActions,
   normalizeDashboard,
   normalizeFilters,
@@ -54,6 +55,7 @@ describe("loadConfig", () => {
     const cfg = loadConfig();
     expect(cfg.filters.slack.exclude_channels).toEqual(["random", "devchat"]);
     expect(cfg.filters.slack.watch_channels).toEqual([]);
+    expect(cfg.filters.slack.ack_reactions).toEqual(["white_check_mark", "eyes", "+1", "heavy_check_mark"]);
     expect(cfg.filters.jira.exclude_projects).toEqual(["MNT", "IP2"]);
   });
 
@@ -111,7 +113,20 @@ describe("normalizers", () => {
   it("mergeFilters: a patch with only slack keeps jira", () => {
     const cur = normalizeFilters({ slack: { exclude_channels: ["a"] }, jira: { exclude_projects: ["MNT"] } });
     const next = mergeFilters(cur, { slack: { watch_channels: ["#ops"] } });
-    expect(next).toEqual({ slack: { exclude_channels: ["a"], watch_channels: ["ops"] }, jira: { exclude_projects: ["MNT"] } });
+    expect(next).toEqual({ slack: { exclude_channels: ["a"], watch_channels: ["ops"], ack_reactions: ["white_check_mark", "eyes", "+1", "heavy_check_mark"] }, jira: { exclude_projects: ["MNT"] } });
+  });
+  it("ack_reactions: absent → defaults, explicit [] stays off, colons/case stripped, junk dropped, deduped, capped", () => {
+    expect(normalizeFilters({}).slack.ack_reactions).toEqual(["white_check_mark", "eyes", "+1", "heavy_check_mark"]);
+    expect(normalizeFilters({ slack: { ack_reactions: [] } }).slack.ack_reactions).toEqual([]);
+    expect(normalizeAckReactions([":White_Check_Mark:", " eyes ", ":+1:", "eyes", "bad emoji", "", 3, "::", "skin-tone-2", ":통신보안:", "a:b"])).toEqual(["white_check_mark", "eyes", "+1", "skin-tone-2", "통신보안"]);
+    expect(normalizeAckReactions(":done:, :Eyes:")).toEqual(["done", "eyes"]);
+    expect(normalizeAckReactions(Array.from({ length: 12 }, (_, i) => `e${i}`))).toHaveLength(8);
+  });
+  it("mergeFilters: ack_reactions replaces as a list and survives a patch without it", () => {
+    const cur = mergeFilters(normalizeFilters({}), { slack: { ack_reactions: [":ok_hand:"] } });
+    expect(cur.slack.ack_reactions).toEqual(["ok_hand"]);
+    expect(mergeFilters(cur, { slack: { exclude_channels: ["x"] } }).slack.ack_reactions).toEqual(["ok_hand"]);
+    expect(mergeFilters(cur, { slack: { ack_reactions: [] } }).slack.ack_reactions).toEqual([]);
   });
   it("watchChannels removes excluded channels case-insensitively; jqlExclude formats", () => {
     const f = normalizeFilters({ slack: { exclude_channels: ["OPS"], watch_channels: ["ops", "dev"] }, jira: { exclude_projects: ["A", "B"] } });

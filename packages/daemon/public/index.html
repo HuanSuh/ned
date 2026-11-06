@@ -175,6 +175,14 @@
                 <span class="excl-msg" id="w-msg" role="status"></span>
                 <datalist id="dl-watch"></datalist>
               </div>
+              <div class="f full"><span class="lab">답 필요 해제 이모지</span>
+                <span class="hint">멘션·DM·참여 스레드에서 내 답글이 보이거나, 내가 여기 있는 이모지로 리액션한 메시지는 '확인 필요'에서 빠지고 답한 것으로 쳐. 쉼표(또는 엔터)로 추가, ✕ 로 빼기. 이모지 하나마다 Slack 검색이 하나 늘어서 최대 8개, 다 빼면 리액션은 안 봐.</span>
+                <div class="excl">
+                  <div class="chipin" data-xbox="ack"><span class="cl">SLACK 이모지</span><span class="chips" id="x-ack"></span><input type="text" id="x-ack-in" data-x="ack" list="dl-ack" placeholder=":white_check_mark:, :eyes: ⏎" aria-label="답 필요 해제 이모지 추가" autocomplete="off"></div>
+                </div>
+                <span class="excl-msg" id="a-msg" role="status"></span>
+                <datalist id="dl-ack"></datalist>
+              </div>
               <div class="f full"><span class="lab" id="wa-lab">쓰기 액션</span>
                 <span class="hint">'답장 초안' 팝업에서 쓸 수 있는 실제 쓰기 동작. 꺼 둔 건 버튼이 비활성으로 보이고, 보내는 동작은 늘 대상을 한 번 더 확인해.</span>
                 <div class="toggles" id="c-actions" role="group" aria-labelledby="wa-lab"></div>
