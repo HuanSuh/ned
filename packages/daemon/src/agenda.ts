@@ -103,6 +103,8 @@ export interface AgendaPayload {
 
 export interface Agenda extends AgendaPayload {
   updated_at: number;
+  /** Local dates (inclusive) the calendar list covers: yesterday … today+13. Absent in older agenda.json (= today only). */
+  calendar_range?: { from: string; to: string };
   cost_usd: number;
   error?: string;
 }
@@ -110,7 +112,7 @@ export interface Agenda extends AgendaPayload {
 /** Must match the `unread` search limit in prompts/agenda.md. */
 export const MAIL_UNREAD_CAP = 50;
 const EMPTY: Agenda = { updated_at: 0, cost_usd: 0, calendar: [], jira: [], github: [], mail: null, slack: null };
-const emptyAgenda = (now: number): Agenda => ({ ...EMPTY, updated_at: now });
+const emptyAgenda = (now: number): Agenda => ({ ...EMPTY, updated_at: now, calendar_range: calendarRange(new Date(now)) });
 
 export function readAgenda(): Agenda {
   const a = readJson<Partial<Agenda>>(AGENDA_PATH, {});
@@ -163,11 +165,28 @@ function slackTs(v: unknown): string {
   return t;
 }
 
-/** Coerce model output into the exact contract the dashboard expects. */
-function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedConfig): AgendaPayload {
-  const arr = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter((x) => x && typeof x === "object") : []);
-  const calendar: CalendarItem[] = cfg.sources.calendar
-    ? arr(raw.calendar)
+const arr = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter((x) => x && typeof x === "object") : []) as Record<string, unknown>[];
+
+/** Local YYYY-MM-DD. */
+export function ymd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** The agenda's calendar window: yesterday … today+13 (local dates, inclusive). */
+export function calendarRange(now = new Date()): { from: string; to: string } {
+  const at = (n: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + n);
+  return { from: ymd(at(-1)), to: ymd(at(13)) };
+}
+
+/** ISO bounds for a local date range: start of `from` … start of the day after `to`. */
+export function rangeBounds(from: string, to: string): { start: string; end: string } {
+  const [fy, fm, fd] = from.split("-").map(Number), [ty, tm, td] = to.split("-").map(Number);
+  return { start: isoLocal(new Date(fy, fm - 1, fd)), end: isoLocal(new Date(ty, tm - 1, td + 1)) };
+}
+
+/** Coerce model calendar output into CalendarItem[] (shared by the agenda job and /api/calendar). */
+export function normalizeCalendar(raw: unknown): CalendarItem[] {
+  return arr(raw)
         .map((e) => ({
           id: str(e.id),
           title: str(e.title),
@@ -180,8 +199,12 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
           rsvp: RSVPS.includes(e.rsvp as Rsvp) ? (e.rsvp as Rsvp) : "needsAction",
           attendees: Number(e.attendees) || 0,
         }))
-        .sort((a, b) => (a.all_day === b.all_day ? Date.parse(a.start) - Date.parse(b.start) || 0 : a.all_day ? -1 : 1))
-    : [];
+        .sort((a, b) => (a.all_day === b.all_day ? Date.parse(a.start) - Date.parse(b.start) || 0 : a.all_day ? -1 : 1));
+}
+
+/** Coerce model output into the exact contract the dashboard expects. */
+function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedConfig): AgendaPayload {
+  const calendar: CalendarItem[] = cfg.sources.calendar ? normalizeCalendar(raw.calendar) : [];
   const jira: JiraItem[] = cfg.sources.jira
     ? arr(raw.jira)
         .slice(0, 25)
@@ -256,15 +279,16 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
 }
 
 export function buildPrompt(cfg: NedConfig, now = new Date()): string {
-  const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const dayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const cr = calendarRange(now), cb = rangeBounds(cr.from, cr.to);
   const off = (on: boolean) => (on ? "ON" : "OFF — 조회하지 말고 빈 배열 []");
   return fs
     .readFileSync(path.join(PROMPTS_DIR, "agenda.md"), "utf8")
     .replaceAll("{{NOW}}", isoLocal(now))
     .replaceAll("{{TZ}}", Intl.DateTimeFormat().resolvedOptions().timeZone)
-    .replaceAll("{{DAY_START}}", isoLocal(dayStart))
-    .replaceAll("{{DAY_END}}", isoLocal(dayEnd))
+    .replaceAll("{{CAL_FROM}}", cr.from)
+    .replaceAll("{{CAL_TO}}", cr.to)
+    .replaceAll("{{CAL_START}}", cb.start)
+    .replaceAll("{{CAL_END}}", cb.end)
     .replaceAll("{{CALENDAR}}", off(cfg.sources.calendar))
     .replaceAll("{{JIRA}}", off(cfg.sources.jira))
     .replaceAll("{{GITHUB}}", off(cfg.sources.github))
@@ -310,11 +334,11 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
   }
 
   log(`agenda: asking claude${filtersPrompt(cfg.filters) !== "(없음)" ? ` (filters — ${filtersPrompt(cfg.filters).split("\n")[0]})` : ""}`);
-  const res = await runClaude(buildPrompt(cfg), { allowedTools: agendaTools(cfg), maxTurns: 16, model: cfg.claude_model, timeoutMs: 5 * 60_000 });
+  const res = await runClaude(buildPrompt(cfg), { allowedTools: agendaTools(cfg), maxTurns: 18, model: cfg.claude_model, timeoutMs: 5 * 60_000 });
   const parsed = res.ok ? extractJson<Partial<Record<keyof AgendaPayload, unknown>>>(res.text) : null;
   let agenda: Agenda;
   if (parsed) {
-    agenda = { updated_at: Date.now(), cost_usd: res.cost_usd, ...normalize(parsed, cfg) };
+    agenda = { updated_at: Date.now(), cost_usd: res.cost_usd, calendar_range: calendarRange(new Date(now)), ...normalize(parsed, cfg) };
   } else {
     // Keep the last good lists so the dashboard doesn't blank out on a transient failure.
     const prev = readAgenda();

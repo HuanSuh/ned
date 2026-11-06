@@ -24,8 +24,8 @@
 ## 트래킹 제외
 {{FILTERS}}
 
-## 1. calendar — 오늘(로컬 날짜) 일정
-- 기본(primary) 캘린더에서 `{{DAY_START}}` ~ `{{DAY_END}}` 사이 이벤트를 `list_events` 로 조회 (단일 이벤트로 펼친 것, 시작 순).
+## 1. calendar — 어제 ~ 13일 뒤 (로컬 날짜 {{CAL_FROM}} ~ {{CAL_TO}}, 2주치) 일정
+- 기본(primary) 캘린더에서 `{{CAL_START}}` ~ `{{CAL_END}}` 사이 이벤트를 `list_events` 로 조회 (단일 이벤트로 펼친 것, 시작 순, pageSize 250). 결과에 다음 페이지 토큰이 있으면 한 번만 더 조회한다.
 - 종일 일정 포함. 내가 거절(declined)한 일정도 포함하되 `rsvp` 로 표시.
 - `start`/`end`: 시간 일정은 오프셋 포함 ISO-8601 그대로, 종일 일정은 `YYYY-MM-DD` 와 `"all_day": true`.
 - `url`: 이벤트 htmlLink. `meet_url`: hangoutLink 또는 conferenceData 의 video 진입점 (없으면 "").

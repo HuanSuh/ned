@@ -394,8 +394,10 @@
   .htop .bubble .lead { font-size: 14.5px; }
   .hmeta { display: flex; gap: 10px; align-items: center; font: 11px var(--mono); color: var(--faint); flex-wrap: wrap; justify-content: flex-end; padding-top: 4px; }
   .hmeta .err { color: var(--red); }
-  .hgrid { display: grid; grid-template-columns: clamp(360px, 26vw, 440px) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .hgrid { display: grid; grid-template-columns: clamp(360px, 26vw, 440px) minmax(0, 1fr); gap: 16px; align-items: stretch; }
+  .hgrid.wk { grid-template-columns: clamp(540px, 38vw, 760px) minmax(0, 1fr); } /* week view needs room for 7 columns */
   .hcol { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .hgrid > .card { display: flex; flex-direction: column; }
   .hgrid .card > .hd { min-height: 44px; }
   .hgrid .card > .bd { padding: 10px 14px 14px; }
   /* day timeline */
@@ -426,6 +428,37 @@
   .nowline::before { content: ""; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--hero); }
   .nowline span { position: absolute; left: -46px; top: -9px; font: 700 10.5px var(--mono); color: var(--hero-text, var(--hero)); background: var(--pane); padding-right: 2px; }
   .hzero { padding: 18px 4px 8px; }
+  #cal-card > .hd { flex-wrap: wrap; row-gap: 6px; }
+  #cal-card:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+  .calnav { display: flex; gap: 6px; align-items: center; }
+  .calnav .seg { display: inline-flex; }
+  .calnav .seg .btn { border-radius: 0; } .calnav .seg .btn:first-child { border-radius: 7px 0 0 7px; } .calnav .seg .btn:last-child { border-radius: 0 7px 7px 0; margin-left: -1px; }
+  .calnav .btn[aria-pressed="true"], #cal-today.on { border-color: var(--hero); color: var(--fg); background: var(--hover); }
+  .calload { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 18px 6px; color: var(--dim); font-size: 12.5px; }
+  .calload .hint { color: var(--faint); font-size: 11.5px; }
+  .calload.err { color: var(--red); }
+  .wk { --wl: 30px; font-size: 11.5px; }
+  .wk-head, .wk-all { display: grid; grid-template-columns: var(--wl) repeat(7, minmax(0, 1fr)); gap: 0 2px; }
+  .wk-head .wd { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 0 0 6px; font: 10.5px var(--mono); color: var(--dim); }
+  .wk-head .wd b { font: 600 13px var(--sans); color: var(--fg); min-width: 24px; text-align: center; border-radius: 999px; padding: 0 5px; }
+  .wk-head .wd.today span { color: var(--hero-text, var(--hero)); }
+  .wk-head .wd.today b { background: var(--hero-fill, var(--accent)); color: var(--hero-ink, #fff); }
+  .wk-head .wd.we span, .wk-head .wd.we b { opacity: .75; }
+  .wk-all { border-top: 1px solid var(--line); padding: 4px 0; }
+  .wk-all .wl { font: 9.5px var(--mono); color: var(--faint); align-self: center; }
+  .wk-all .wc { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .wk-all .wa { font-size: 10.5px; padding: 0 4px; border-radius: 4px; background: var(--raise); border: 1px solid var(--line); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .wk-all .wa a { color: inherit; }
+  .wk-body { position: relative; margin-left: var(--wl); border-top: 1px solid var(--line); }
+  .wk-lines .hr { position: absolute; left: calc(-1 * var(--wl)); right: 0; border-top: 1px solid var(--line); }
+  .wk-lines .hr span { position: absolute; left: 0; top: -7px; width: calc(var(--wl) - 4px); font: 10px var(--mono); color: var(--faint); background: var(--pane); }
+  .wk-cols { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0 2px; }
+  .wcol { position: relative; border-left: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+  .wcol.today { background: color-mix(in srgb, var(--hero) 6%, transparent); }
+  .cev.wev { padding: 1px 3px; font-size: 10.5px; line-height: 1.25; border-left-width: 2px; white-space: normal; }
+  .cev.wev .tm { font: 9.5px var(--mono); color: var(--dim); }
+  .cev.wev .tt { font-weight: 600; }
+  .wcol .nowline { left: 0; } .wcol .nowline::before { left: -3px; }
   /* todo groups */
   .tgrp + .tgrp { margin-top: 14px; }
   .tgrp > .gh { display: flex; align-items: center; gap: 8px; padding: 6px 2px 6px; border-bottom: 1px solid var(--line); font: 700 11px var(--mono); letter-spacing: .06em; color: var(--dim); }
@@ -435,8 +468,15 @@
   .tgrp .gl { border-left: 2px solid var(--gc, var(--line)); margin-top: 4px; }
   .g-ned { --gc: var(--mint); } .g-jira { --gc: var(--blue); } .g-gh { --gc: var(--dim); } .g-mail { --gc: var(--violet); } .g-slack { --gc: var(--hero); } .g-me { --gc: var(--amber); }
   /* source cards (mail · jira · slack · github): shrink (summary + top item) ⇄ expanded (full list) */
-  .sgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
-  .scard { border-top: 2px solid var(--gc); overflow: hidden; }
+  /* Source cards are packed into --cols columns by packCards() (shortest column first, like masonry); each column's
+     last card stretches so every column ends at the row's bottom edge. Spare space stays empty. */
+  .sgrid { --cols: 2; display: flex; gap: 16px; align-items: stretch; flex: 1 1 auto; min-width: 0; }
+  .scol { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+  .scol:empty { display: none; }
+  .scard { display: flex; flex-direction: column; }
+  .scard.last { flex: 1 1 auto; }
+  .sgrid.measuring .scard { flex: none !important; }
+  .scard { border-top: 2px solid var(--gc); overflow: hidden; min-height: 0; }
   .scard > .sh { appearance: none; background: none; border: 0; color: var(--dim); width: 100%; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 14px; cursor: pointer; text-align: left; font: 700 11px var(--mono); letter-spacing: .06em; }
   .scard > .sh:hover { background: var(--hover); }
   .scard > .sh:focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
@@ -500,6 +540,11 @@
     .hwrap, .pwrap { padding-left: 32px; padding-right: 32px; }
     /* home: 3 columns — timeline | source cards | Ned actions + personal todos (.hcol dissolves into the grid) */
     .hgrid { grid-template-columns: clamp(360px, 22vw, 440px) minmax(0, 1fr) clamp(360px, 24vw, 520px); grid-template-areas: "cal cards todo"; }
+    .hgrid.wk { grid-template-columns: clamp(540px, 32vw, 760px) minmax(0, 1fr) clamp(340px, 22vw, 480px); }
+    .hgrid.wk .sgrid { --cols: 1; }
+    /* the todo column doesn't set the row height (contain: size); its list scrolls inside instead */
+    #todo-card { contain: size; min-height: 560px; display: flex; flex-direction: column; }
+    #todo-card > .bd { flex: 1 1 auto; min-height: 0; overflow: auto; }
     .hgrid > .card:first-child { grid-area: cal; }
     .hcol { display: contents; }
     #todo-card { grid-area: todo; }
@@ -514,7 +559,7 @@
     .inbox.rail-off .rail { display: block; }
     #rail-toggle { display: none; }
   }
-  @media (min-width: 2000px) { .sgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (min-width: 2000px) { .sgrid { --cols: 3; } .hgrid.wk .sgrid { --cols: 2; } }
 
   /* ---------- responsive ---------- */
   @media (max-width: 1180px) {
@@ -523,9 +568,10 @@
     details.msess { display: block; }
     #rail-toggle { display: none; }
   }
-  @media (max-width: 1100px) { .sgrid { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 1400px) { .hgrid.wk .sgrid { --cols: 1; } }
+  @media (max-width: 1100px) { .sgrid { --cols: 1; } }
   @media (max-width: 1020px) { .leds .opt { display: none; } }
-  @media (max-width: 899px) { .hgrid { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 899px) { .hgrid, .hgrid.wk { grid-template-columns: minmax(0, 1fr); } .hgrid { align-items: start; } }
   @media (max-width: 760px) {
     header.hq { padding: 8px 12px; gap: 8px 10px; }
     .who .mood { font-size: 9.5px; }
@@ -588,9 +634,13 @@
         <div class="say-slot" id="say-home" style="flex:1 1 420px;min-width:0"></div>
         <div class="hmeta"><span id="ag-meta"></span><button class="btn small" id="ag-refresh" title="캘린더·Jira·GitHub·메일·Slack 다시 가져오기 — 1~2분">새로고침</button></div>
       </div>
-      <div class="hgrid">
-        <section class="card">
-          <div class="hd"><h2>오늘 일정</h2><span class="count" id="ag-date"></span><span class="sp"></span><span class="count" id="ag-count"></span></div>
+      <div class="hgrid" id="hgrid">
+        <section class="card" id="cal-card" tabindex="0" aria-label="일정 (←/→ 이동, t 오늘, d/w 일·주)">
+          <div class="hd"><h2>일정</h2><span class="count" id="ag-date"></span><span class="count" id="ag-count"></span><span class="sp"></span>
+            <div class="calnav" role="toolbar" aria-label="일정 보기">
+              <span class="seg"><button type="button" class="btn small" data-cv="day" title="일 (d)">일</button><button type="button" class="btn small" data-cv="week" title="주 (w)">주</button></span>
+              <button type="button" class="btn small" data-cn="-1" title="이전 (←)" aria-label="이전">◀</button><button type="button" class="btn small" id="cal-today" data-cn="0" title="오늘 (t)">오늘</button><button type="button" class="btn small" data-cn="1" title="다음 (→)" aria-label="다음">▶</button>
+            </div></div>
           <div class="bd" id="agenda"></div>
         </section>
         <div class="hcol">
@@ -1335,14 +1385,68 @@
   const dueChip = (due) => { const x = dueInfo(due); return x ? `<span class="chipx ${x.cls}">${esc(x.label)}</span>` : ""; };
   const byDue = (a, b) => (a.due ? 0 : 1) - (b.due ? 0 : 1) || String(a.due || "").localeCompare(String(b.due || ""));
 
-  /** Today's calendar split into all-day + timed (clipped to today, ms timestamps in s/en). */
-  function todayEvents() {
-    const cal = S.agenda?.calendar || [], d0 = midnight(), d1 = d0 + 86400000, today = ymdOf(new Date());
+  // ---------- calendar: day / week views over agenda.calendar (yesterday … +13) and /api/calendar ranges ----------
+  const parseYmd = (s) => { const [y, m, d] = String(s).slice(0, 10).split("-").map(Number); return new Date(y, m - 1, d); };
+  const addDays = (s, n) => { const d = parseYmd(s); d.setDate(d.getDate() + n); return ymdOf(d); };
+  const mondayOf = (s) => addDays(s, -((parseYmd(s).getDay() + 6) % 7));
+  const todayYmd = () => ymdOf(new Date());
+  function loadCal() {
+    try {
+      const c = JSON.parse(lsGet("ned.cal") || "{}");
+      // A date picked on an earlier day snaps back to today; the day/week choice is kept.
+      return { view: c.view === "week" ? "week" : "day", date: c.saved === todayYmd() && /^\d{4}-\d{2}-\d{2}$/.test(c.date || "") ? c.date : todayYmd() };
+    } catch { return { view: "day", date: todayYmd() }; }
+  }
+  ui.cal = loadCal();
+  const saveCal = () => lsSet("ned.cal", JSON.stringify({ ...ui.cal, saved: todayYmd() }));
+  const calDays = () => (ui.cal.view === "week" ? Array.from({ length: 7 }, (_, i) => addDays(mondayOf(ui.cal.date), i)) : [ui.cal.date]);
+  S.calRanges = {};
+  /**
+   * Events for `days`: agenda.calendar covers agenda.calendar_range; only the days outside it (at most a span before
+   * and a span after) come from /api/calendar. Returns {status: ok|loading|error, cal} — while a span loads, what we
+   * already have is still drawn.
+   */
+  function calSource(days) {
+    const r = S.agenda?.calendar_range || { from: todayYmd(), to: todayYmd() }; // older agenda.json: today only
+    const before = days.filter((d) => d < r.from), after = days.filter((d) => d > r.to);
+    let cal = [...(S.agenda?.calendar || [])], status = "ok", error = "";
+    for (const span of [before, after]) {
+      if (!span.length) continue;
+      const key = `${span[0]}_${span[span.length - 1]}`;
+      if (!S.calRanges[key]) fetchCalRange(span[0], span[span.length - 1]);
+      const got = S.calRanges[key];
+      if (got.status === "loading") status = "loading";
+      else if (got.status === "error") { if (status === "ok") status = "error"; error = got.error; }
+      cal = cal.concat(got.cal);
+    }
+    const seen = new Set(); // an event crossing the range edge can come from both sources
+    cal = cal.filter((e) => { const k = `${e.id}|${e.start}`; if (seen.has(k)) return false; seen.add(k); return true; });
+    return { status, cal, error };
+  }
+  async function fetchCalRange(from, to) {
+    const key = `${from}_${to}`;
+    S.calRanges[key] = { status: "loading", cal: [] };
+    try {
+      const r = await api(`/api/calendar?from=${from}&to=${to}`);
+      S.calRanges[key] = { status: r.error && !(r.calendar || []).length ? "error" : "ok", cal: r.calendar || [], error: r.error, cached: r.cached };
+    } catch (e) { S.calRanges[key] = { status: "error", cal: [], error: e.message }; }
+    if (ui.view === "home") { renderAgenda(); packCards(); }
+  }
+  function calMove(step) {
+    ui.cal.date = step === 0 ? todayYmd() : addDays(ui.cal.date, step * (ui.cal.view === "week" ? 7 : 1));
+    saveCal(); renderAgenda(); packCards();
+  }
+  function calView(v) { ui.cal.view = v; saveCal(); renderAgenda(); packCards(); }
+
+  /** One local day's events split into all-day + timed (timed clipped to the day, ms in s/en). */
+  function eventsForDay(cal, day) {
+    const d0 = parseYmd(day).getTime(), d1 = parseYmd(addDays(day, 1)).getTime();
     const allDay = [], timed = [];
     for (const e of cal) {
       if (e.all_day) {
         const sd = String(e.start || "").slice(0, 10), ed = String(e.end || "").slice(0, 10);
-        if ((sd && sd > today) || (ed && ed !== sd && ed <= today)) continue; // Google all-day end is exclusive
+        const endEx = ed && ed > sd ? ed : sd ? addDays(sd, 1) : ""; // Google all-day end is exclusive
+        if (!sd || !(sd <= day && day < endEx)) continue;
         allDay.push(e); continue;
       }
       const s = Date.parse(e.start); if (!Number.isFinite(s)) continue;
@@ -1353,6 +1457,8 @@
     timed.sort((a, b) => a.s - b.s || b.en - a.en);
     return { allDay, timed, d0 };
   }
+  /** Today only, from agenda.calendar — what the greeting / "next meeting" use, same as before the 2-week range. */
+  const todayEvents = () => eventsForDay(S.agenda?.calendar || [], todayYmd());
   /** Side-by-side columns for overlapping events (per overlap cluster). Uses the drawn end so short blocks don't collide. */
   function layoutCols(evs) {
     let cluster = [], cols = [], clusterEnd = 0;
@@ -1367,41 +1473,58 @@
     flush();
   }
   const meetings = (timed) => timed.filter((e) => e.rsvp !== "declined");
+  const hourSpan = (per) => {
+    let h0 = 8, h1 = 20;
+    for (const p of per) for (const e of p.timed) { h0 = Math.min(h0, Math.floor((e.s - p.d0) / 3600000)); h1 = Math.max(h1, Math.ceil((e.en - p.d0) / 3600000)); }
+    return [Math.max(0, h0), Math.min(24, h1)];
+  };
 
   function renderAgenda() {
     fitPPH();
-    const box = $("agenda"), now = Date.now(), dn = new Date();
-    $("ag-date").textContent = `${dn.getMonth() + 1}월 ${dn.getDate()}일 (${WEEK[dn.getDay()]})`;
+    const days = calDays(), box = $("agenda"), a = parseYmd(days[0]), z = parseYmd(days[days.length - 1]);
+    $("ag-date").textContent = days.length === 1 ? `${a.getMonth() + 1}월 ${a.getDate()}일 (${WEEK[a.getDay()]})` : `${a.getMonth() + 1}/${a.getDate()} – ${z.getMonth() + 1}/${z.getDate()}`;
+    for (const b of document.querySelectorAll("[data-cv]")) b.setAttribute("aria-pressed", String(b.dataset.cv === ui.cal.view));
+    $("cal-today").classList.toggle("on", days.includes(todayYmd()));
+    $("hgrid").classList.toggle("wk", ui.cal.view === "week");
     if (S.agenda === undefined) { box.innerHTML = `<div class="gnone">불러오는 중…</div>`; $("ag-count").textContent = ""; return; }
-    const { allDay, timed, d0 } = todayEvents();
+    const src = calSource(days);
+    if (ui.cal.view === "week") renderWeek(box, days, src.cal); else renderDay(box, days[0], src.cal);
+    // Days outside agenda.calendar_range: say we're fetching (or that it failed) above what we already have.
+    const note = src.status === "loading" ? `<div class="calload"><span class="spin"></span>범위 밖 날짜 일정 가져오는 중… <span class="hint">처음 보는 기간이면 30초쯤 걸려.</span></div>`
+      : src.status === "error" ? `<div class="calload err">일부 날짜 일정을 못 가져왔어. <span class="hint">${esc(String(src.error || "").slice(0, 120))}</span> <button class="btn small" type="button" data-cretry="1">다시</button></div>` : "";
+    if (note) box.insertAdjacentHTML("afterbegin", note);
+  }
+
+  function renderDay(box, day, cal) {
+    const now = Date.now(), isToday = day === todayYmd();
+    const { allDay, timed, d0 } = eventsForDay(cal, day);
     const mt = meetings(timed);
-    $("ag-count").textContent = timed.length ? `회의 ${mt.length}${allDay.length ? ` · 종일 ${allDay.length}` : ""}` : "";
+    $("ag-count").textContent = timed.length ? `회의 ${mt.length}${allDay.length ? ` · 종일 ${allDay.length}` : ""}` : allDay.length ? `종일 ${allDay.length}` : "";
     let html = "";
     if (allDay.length) html += `<div class="allday">${allDay.map((e) => {
       const r = RSVP[e.rsvp];
       return `<div class="ad"><span class="tag">종일</span><span class="tt">${safeUrl(e.url) ? ext(safeUrl(e.url), esc(e.title)) : esc(e.title)}</span>${r && e.rsvp !== "organizer" ? `<span class="stk ${r[0]} flat">${r[1]}</span>` : ""}</div>`;
     }).join("")}</div>`;
     if (!timed.length) {
-      html += `<div class="hzero">${S.agenda ? say("ned", "오늘은 회의 없음. 딥워크 데이.", "끼어드는 일정 생기면 바로 알려 줄게.") : say("ned", "일정을 아직 못 받아 왔어.", "agenda 가 연결되면 여기 오늘 하루가 그려져.")}</div>`;
+      html += `<div class="hzero">${!isToday ? say("ned", "이 날은 회의 없음.", "◀ ▶ 로 다른 날을 볼 수 있어.") : S.agenda ? say("ned", "오늘은 회의 없음. 딥워크 데이.", "끼어드는 일정 생기면 바로 알려 줄게.") : say("ned", "일정을 아직 못 받아 왔어.", "agenda 가 연결되면 여기 오늘 하루가 그려져.")}</div>`;
       box.innerHTML = html; return;
     }
-    let h0 = 8, h1 = 20;
-    for (const e of timed) { h0 = Math.min(h0, Math.floor((e.s - d0) / 3600000)); h1 = Math.max(h1, Math.ceil((e.en - d0) / 3600000)); }
-    h0 = Math.max(0, h0); h1 = Math.min(24, h1);
+    const [h0, h1] = hourSpan([{ timed, d0 }]);
     const y = (t) => ((t - d0) / 3600000 - h0) * PPH;
     layoutCols(timed);
-    const next = mt.find((e) => e.s > now);
+    const next = isToday ? mt.find((e) => e.s > now) : null;
     let g = "";
     for (let h = h0; h <= h1; h++) {
-      const nearNow = Math.abs(now - (d0 + h * 3600000)) < 12 * 60000; // the now-label takes this slot
+      const nearNow = isToday && Math.abs(now - (d0 + h * 3600000)) < 12 * 60000; // the now-label takes this slot
       g += `<div class="hr" style="top:${(h - h0) * PPH}px">${nearNow ? "" : `<span>${pad(h)}:00</span>`}</div>`;
       if (h < h1) g += `<div class="hr half" style="top:${(h - h0 + 0.5) * PPH}px"></div>`;
     }
     for (const e of timed) {
       const top = y(e.s), hgt = Math.max(MIN_EV_PX, y(e.en) - top) - 2;
-      const cls = [e.en <= now ? "past" : "", e.s <= now && now < e.en && e.rsvp !== "declined" ? "now" : "", e.rsvp === "needsAction" ? "ask" : "", e.rsvp === "declined" ? "no" : "", hgt < 38 ? "tiny" : ""].join(" ");
+      const live = e.s <= now && now < e.en && e.rsvp !== "declined";
+      const cls = [e.en <= now ? "past" : "", live ? "now" : "", e.rsvp === "needsAction" ? "ask" : "", e.rsvp === "declined" ? "no" : "", hgt < 38 ? "tiny" : ""].join(" ");
       const r = RSVP[e.rsvp];
-      const stk = (e === next ? `<span class="stk g flat">${untilLabel(e.s - now)}</span>` : "") + (e.s <= now && now < e.en && e.rsvp !== "declined" ? `<span class="stk g flat">진행 중</span>` : "")
+      const stk = (e === next ? `<span class="stk g flat">${untilLabel(e.s - now)}</span>` : "") + (live ? `<span class="stk g flat">진행 중</span>` : "")
         + (r && (e.rsvp !== "organizer" || hgt >= 38) ? `<span class="stk ${r[0]} flat">${r[1]}</span>` : "");
       const where = [e.location ? `<span class="loc">📍 ${esc(e.location)}</span>` : "", e.meet ? ext(e.meet, "Meet ↗") : ""].filter(Boolean).join("");
       const tip = `${hhmm(e.s)}–${hhmm(e.en)} ${e.title}${e.location ? " · " + e.location : ""}${e.attendees ? ` · ${Array.isArray(e.attendees) ? e.attendees.length : e.attendees}명` : ""}`;
@@ -1409,9 +1532,35 @@
         <div class="t1"><span class="tm">${hhmm(e.s)}–${hhmm(e.en)}</span><span class="tt">${e.url ? ext(e.url, esc(e.title)) : esc(e.title)}</span>${hgt < 38 ? stk : ""}</div>
         ${hgt >= 38 ? `<div class="t2">${stk}${where}</div>` : ""}</div>`;
     }
-    if (now >= d0 + h0 * 3600000 && now <= d0 + h1 * 3600000) g += `<div class="nowline" style="top:${y(now)}px"><span>${hhmm(now)}</span></div>`;
+    if (isToday && now >= d0 + h0 * 3600000 && now <= d0 + h1 * 3600000) g += `<div class="nowline" style="top:${y(now)}px"><span>${hhmm(now)}</span></div>`;
     html += `<div class="day" style="height:${(h1 - h0) * PPH}px">${g}</div>`;
     box.innerHTML = html;
+  }
+
+  /** Mon–Sun: header (today highlighted), all-day row, 7 timed columns; the now-line only in today's column. */
+  function renderWeek(box, days, cal) {
+    const now = Date.now(), today = todayYmd();
+    const per = days.map((d) => ({ day: d, ...eventsForDay(cal, d) }));
+    const [h0, h1] = hourSpan(per);
+    const total = per.reduce((n, p) => n + meetings(p.timed).length, 0), allN = per.reduce((n, p) => n + p.allDay.length, 0);
+    $("ag-count").textContent = [total ? `회의 ${total}` : "", allN ? `종일 ${allN}` : ""].filter(Boolean).join(" · ");
+    const head = per.map((p) => { const d = parseYmd(p.day), wd = d.getDay(); return `<div class="wd${p.day === today ? " today" : ""}${wd === 0 || wd === 6 ? " we" : ""}"><span>${WEEK[wd]}</span><b>${d.getDate()}</b></div>`; }).join("");
+    const allRow = allN ? `<div class="wk-all"><span class="wl">종일</span>${per.map((p) => `<div class="wc">${p.allDay.map((e) => { const u = safeUrl(e.url); return `<div class="wa" title="${esc(e.title)}">${u ? ext(u, esc(e.title)) : esc(e.title)}</div>`; }).join("")}</div>`).join("")}</div>` : "";
+    let lines = "";
+    for (let h = h0; h <= h1; h++) lines += `<div class="hr" style="top:${(h - h0) * PPH}px"><span>${pad(h)}</span></div>`;
+    const cols = per.map((p) => {
+      layoutCols(p.timed);
+      const y = (t) => ((t - p.d0) / 3600000 - h0) * PPH;
+      let g = "";
+      for (const e of p.timed) {
+        const top = y(e.s), hgt = Math.max(MIN_EV_PX, y(e.en) - top) - 2;
+        const cls = [e.en <= now ? "past" : "", e.s <= now && now < e.en && e.rsvp !== "declined" ? "now" : "", e.rsvp === "needsAction" ? "ask" : "", e.rsvp === "declined" ? "no" : ""].join(" ");
+        g += `<div class="cev wev ${cls}" title="${esc(`${hhmm(e.s)}–${hhmm(e.en)} ${e.title}${e.location ? " · " + e.location : ""}`)}" style="top:${top + 1}px;height:${hgt}px;left:calc(${(e.col / e.ncol) * 100}% + 1px);width:calc(${100 / e.ncol}% - 2px)"><span class="tm">${hhmm(e.s)}</span> <span class="tt">${e.url ? ext(e.url, esc(e.title)) : esc(e.title)}</span></div>`;
+      }
+      if (p.day === today && now >= p.d0 + h0 * 3600000 && now <= p.d0 + h1 * 3600000) g += `<div class="nowline" style="top:${y(now)}px"></div>`;
+      return `<div class="wcol${p.day === today ? " today" : ""}">${g}</div>`;
+    }).join("");
+    box.innerHTML = `<div class="wk"><div class="wk-head"><span class="wl"></span>${head}</div>${allRow}<div class="wk-body" style="height:${(h1 - h0) * PPH}px"><div class="wk-lines">${lines}</div><div class="wk-cols">${cols}</div></div></div>`;
   }
 
   function group(id, n, hot, rows, emptyMsg) {
@@ -1558,6 +1707,29 @@
     return { lead: `${greet()} ${bits.join(" ")}`, sub: sub.join(" · ") };
   }
 
+  /** Pack visible source cards into --cols columns (each card to the currently shortest column) and stretch the last
+   *  card of every column, so columns end together at the row bottom. Re-run after content / open state / width changes. */
+  function packCards() {
+    const g = $("sgrid");
+    const n = Math.max(1, Number(getComputedStyle(g).getPropertyValue("--cols")) || 1);
+    const cards = ["mail", "jira", "slack", "gh"].map((id) => $("sc-" + id));
+    let cols = [...g.querySelectorAll(":scope > .scol")];
+    if (cols.length !== n) {
+      for (const c of cols) c.remove();
+      cols = Array.from({ length: n }, () => { const d = document.createElement("div"); d.className = "scol"; g.appendChild(d); return d; });
+    }
+    g.classList.add("measuring");
+    for (const c of cards) { c.classList.remove("last"); cols[0].appendChild(c); } // same width in any column → measure here
+    const sums = cols.map(() => 0), gap = 16;
+    for (const c of cards) {
+      if (c.hidden) continue;
+      const h = c.offsetHeight, i = sums.indexOf(Math.min(...sums));
+      cols[i].appendChild(c); sums[i] += h + gap;
+    }
+    for (const col of cols) { const vis = [...col.children].filter((c) => !c.hidden); if (vis.length) vis[vis.length - 1].classList.add("last"); }
+    g.classList.remove("measuring");
+  }
+
   function renderHome() {
     const o = homeLine();
     $("say-home").innerHTML = say(`ned · ${hhmm(Date.now())}`, esc(o.lead), esc(o.sub));
@@ -1566,6 +1738,7 @@
       : ag ? [ag.updated_at ? `<span title="${esc(mdhm(ag.updated_at))}">일정 갱신 ${esc(rel(ag.updated_at))}</span>` : "", ag.cost_usd != null ? `<span>$${Number(ag.cost_usd).toFixed(2)}</span>` : "", ag.error ? `<span class="err" title="${esc(ag.error)}">⚠ ${esc(String(ag.error).slice(0, 60))}</span>` : ""].filter(Boolean).join(" · ") : "";
     renderAgenda();
     renderTodoGroups();
+    packCards();
     setAgBusy();
   }
 
@@ -1626,6 +1799,12 @@
   }
 
   $("ag-refresh").addEventListener("click", refreshAgenda);
+  $("cal-card").addEventListener("click", (e) => {
+    const v = e.target.closest("[data-cv]"), n = e.target.closest("[data-cn]"), r = e.target.closest("[data-cretry]");
+    if (v) calView(v.dataset.cv);
+    else if (n) calMove(Number(n.dataset.cn));
+    else if (r) { for (const k of Object.keys(S.calRanges)) if (S.calRanges[k].status === "error") delete S.calRanges[k]; renderAgenda(); packCards(); }
+  });
   $("tadd").addEventListener("submit", (e) => {
     e.preventDefault();
     const t = $("tadd-t"), d = $("tadd-d"), title = t.value.trim();
@@ -1640,6 +1819,7 @@
     const el = h.closest(".scard"), open = !el.classList.contains("open");
     el.classList.toggle("open", open); h.setAttribute("aria-expanded", String(open));
     lsSet(cardKey(h.dataset.card), open ? "1" : "0");
+    packCards();
   });
   const homeCard = $("todo-card");
   homeCard.addEventListener("click", (e) => {
@@ -1718,6 +1898,11 @@
     if (ev.key === "h") { location.hash = "#home"; return; }
     if (ev.key === "i") { location.hash = "#inbox"; return; }
     if (ui.view === "home") {
+      // Calendar panel focused (it or a control inside): ←/→ move, t today, d/w day/week.
+      if ($("cal-card").contains(document.activeElement)) {
+        const k = { ArrowLeft: () => calMove(-1), ArrowRight: () => calMove(1), t: () => calMove(0), d: () => calView("day"), w: () => calView("week") }[ev.key];
+        if (k) { k(); ev.preventDefault(); return; }
+      }
       if (ev.key === "n") { $("tadd-t").focus(); ev.preventDefault(); }
       else if (TAB_KEYS[ev.key]) { ui.tab = TAB_KEYS[ev.key]; ui.sel = 0; ui.selKey = null; location.hash = "#inbox"; }
       return;
@@ -1745,7 +1930,7 @@
   let resizeT = 0;
   window.addEventListener("resize", () => {
     syncRailButton();
-    clearTimeout(resizeT); resizeT = setTimeout(() => { if (ui.view === "home") renderAgenda(); }, 150); // timeline height follows the window
+    clearTimeout(resizeT); resizeT = setTimeout(() => { if (ui.view === "home") { renderAgenda(); packCards(); } }, 150); // timeline height follows the window
   });
 
   setView();

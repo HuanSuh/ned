@@ -11,6 +11,8 @@ export const CURSOR_PATH = path.join(NED_HOME, "cursor.json");
 export const CONFIG_PATH = path.join(NED_HOME, "config.yaml");
 export const SENT_LOG = path.join(BRIEFINGS_DIR, "sent.log");
 export const AGENDA_PATH = path.join(NED_HOME, "agenda.json");
+/** Cached calendar ranges outside agenda.calendar_range: <from>_<to>.json. */
+export const CALENDAR_DIR = path.join(NED_HOME, "calendar");
 export const TODOS_PATH = path.join(NED_HOME, "todos.json");
 export const DISMISSED_PATH = path.join(NED_HOME, "dismissed.json");
 
@@ -21,7 +23,7 @@ export function localDay(d = new Date()): string {
 }
 
 export function ensureDirs(): void {
-  for (const d of [NED_HOME, EVENTS_DIR, BRIEFINGS_DIR, LOGS_DIR]) fs.mkdirSync(d, { recursive: true });
+  for (const d of [NED_HOME, EVENTS_DIR, BRIEFINGS_DIR, LOGS_DIR, CALENDAR_DIR]) fs.mkdirSync(d, { recursive: true });
 }
 
 export function writeJsonAtomic(file: string, data: unknown): void {

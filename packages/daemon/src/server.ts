@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { agendaBusy, readAgenda, refreshAgenda } from "./agenda.js";
+import { checkRange, fetchCalendarRange } from "./calendar.js";
 import { PERSONAS, loadConfig, mergeFilters, normalizePersona, saveConfig, type NedConfig, type PersonaId } from "./config.js";
 import { readRecentEvents } from "./events.js";
 import { dismissAttention, heartbeat, listBriefings } from "./heartbeat.js";
@@ -101,6 +102,14 @@ export function startServer(getConfig: () => NedConfig): void {
     const cfg = loadConfig();
     const a = await refreshAgenda(cfg);
     return c.json({ ...a, mail_enabled: cfg.sources.gmail, slack_enabled: cfg.sources.slack });
+  });
+
+  // HOME tab: calendar ranges outside agenda.calendar_range (week view navigation). Cached 6 h; one claude -p at a time.
+  app.get("/api/calendar", async (c) => {
+    const from = c.req.query("from"), to = c.req.query("to");
+    const bad = checkRange(from, to);
+    if (bad) return c.json({ error: bad }, 400);
+    return c.json(await fetchCalendarRange(loadConfig(), from as string, to as string));
   });
 
   // HOME tab: personal todos.
