@@ -1,5 +1,6 @@
 /* Settings tab: config form, persona picker, exclusions, notifications, write actions. */
 import { api } from "../api.js";
+import { readCardLayout, renderCardLayout } from "../features/cardlayout.js";
 import { ACTION_DEFAULTS, ACTION_KO } from "../features/drafts.js";
 import { PERSONA_IDS, VOICE, applyPersona, markSvg, persona } from "../features/personas.js";
 import { loadAgenda } from "../main.js";
@@ -92,6 +93,7 @@ export function renderConfig() {
   $("c-actions").innerHTML = Object.keys(ACTION_DEFAULTS).map((k) => `<label><input type="checkbox" data-act="${k}" ${acts[k] ? "checked" : ""}>${esc(ACTION_KO[k])}</label>`).join("");
   $("c-tone").value = c.reply_tone || "";
   renderPersonaPicker(c.persona || "ned");
+  renderCardLayout(c.dashboard ?? null);
   excl.slack = [...(c.filters?.slack?.exclude_channels || [])];
   excl.jira = [...(c.filters?.jira?.exclude_projects || [])];
   excl.watch = [...(c.filters?.slack?.watch_channels || [])];
@@ -148,6 +150,7 @@ export function init() {
       sources,
       persona: document.querySelector("#c-persona input[name=persona]:checked")?.value || S.config?.persona || "ned",
       filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch] }, jira: { exclude_projects: [...excl.jira] } },
+      dashboard: readCardLayout(),
       notifications: readNotifications(),
       actions: Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])),
       reply_tone: $("c-tone").value.trim(),

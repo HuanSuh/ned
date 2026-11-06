@@ -1,4 +1,5 @@
 /* Home source cards (mail · jira · slack · github): render, shrink/expand, list modes, packing. */
+import { CARD_DOM, dashLayout } from "./cardlayout.js";
 import { draftFor } from "./drafts.js";
 import { isOpenSrc, revCls, srcCheck, srcKey } from "./reviewed.js";
 import { ui } from "../state.js";
@@ -49,6 +50,20 @@ export function collapseDMs(list) {
   return list.filter((x) => x.reason !== "dm" || best.get(slackConv(x)) === x).map((x) => (x.reason === "dm" && total.get(slackConv(x)) > 1 ? { ...x, count: total.get(slackConv(x)) } : x));
 }
 export const moreBadge = (x) => (x.count > 1 ? `<span class="chipx more" title="이 대화에서 답 안 한 메시지 ${x.count}건">+${x.count - 1}</span>` : "");
+/** The "전체" list = all ∪ items, one row per item key (Slack channel id + ts, mail thread id — srcKey; else the
+ *  link), the `all` record winning (it carries answered / unread), newest first. `isNeed` = the item is in `items`. */
+export function unionAll(kind, items, all, tsOf) {
+  const key = (x) => srcKey(kind, x) || x.url || "";
+  const need = new Set(items.map(key).filter(Boolean)), seen = new Set(), list = [];
+  for (const x of [...all, ...items]) {
+    const k = key(x);
+    if (k && seen.has(k)) continue;
+    if (k) seen.add(k);
+    list.push(x);
+  }
+  list.sort((a, b) => toMs(tsOf(b)) - toMs(tsOf(a)));
+  return { list, isNeed: (x) => need.has(key(x)) };
+}
 /** Mail / Slack card list mode: "need" (the picked items) or "all" (everything recent), per card in localStorage. */
 export const cardMode = (id) => (lsGet(`ned.cardmode.${id}`) === "all" ? "all" : "need");
 export const counts = (pairs, sep = ", ") => pairs.filter(([, k]) => k > 0).map(([label, k]) => `${label} ${k}`).join(sep);
@@ -79,27 +94,27 @@ export function renderSlackWatch(watch, needN) {
     }).join("") + `</details>`;
 }
 
-/** Pack visible source cards into --cols columns (each card to the currently shortest column) and stretch the last
- *  card of every column, so columns end together at the row bottom. Re-run after content / open state / width changes. */
+/** Lay the source cards out in rows: config.dashboard order, each card 1 or 2 of the grid's --cols (≤ 2) columns —
+ *  a card that doesn't fit the current row starts the next one (grid auto-placement does the same). The last row
+ *  takes the leftover height (`.last` cards stretch their list). Re-run after content / open state / width changes. */
 export function packCards() {
   const g = $("sgrid");
-  const n = Math.max(1, Number(getComputedStyle(g).getPropertyValue("--cols")) || 1);
-  const cards = ["mail", "jira", "slack", "gh"].map((id) => $("sc-" + id));
-  let cols = [...g.querySelectorAll(":scope > .scol")];
-  if (cols.length !== n) {
-    for (const c of cols) c.remove();
-    cols = Array.from({ length: n }, () => { const d = document.createElement("div"); d.className = "scol"; g.appendChild(d); return d; });
-  }
-  g.classList.add("measuring");
-  for (const c of cards) { c.classList.remove("last"); cols[0].appendChild(c); } // same width in any column → measure here
-  const sums = cols.map(() => 0), gap = 16;
-  for (const c of cards) {
+  const n = Math.min(2, Math.max(1, Number(getComputedStyle(g).getPropertyValue("--cols")) || 1));
+  const { card_order, card_span } = dashLayout();
+  let rows = 0, used = 0;
+  const placed = [];
+  for (const id of card_order) {
+    const c = $("sc-" + CARD_DOM[id]), span = Math.min(n, card_span[id]);
+    g.appendChild(c); // DOM order = visual order (keyboard / screen readers follow it)
+    c.classList.remove("last");
+    c.style.gridColumn = `span ${span}`;
     if (c.hidden) continue;
-    const h = c.offsetHeight, i = sums.indexOf(Math.min(...sums));
-    cols[i].appendChild(c); sums[i] += h + gap;
+    if (!rows || used + span > n) { rows++; used = 0; }
+    used += span;
+    placed.push([c, rows]);
   }
-  for (const col of cols) { const vis = [...col.children].filter((c) => !c.hidden); if (vis.length) vis[vis.length - 1].classList.add("last"); }
-  g.classList.remove("measuring");
+  for (const [c, r] of placed) if (r === rows) c.classList.add("last");
+  g.style.gridTemplateRows = rows > 1 ? `repeat(${rows - 1}, auto) minmax(auto, 1fr)` : "minmax(auto, 1fr)";
 }
 
 /** Listeners + one-time setup; main.js calls every module's init() once, in the old file's order. */

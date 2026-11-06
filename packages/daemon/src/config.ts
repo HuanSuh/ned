@@ -44,6 +44,28 @@ export interface NedConfig {
   draft_fast_model: string | null;
   /** After each agenda run, pre-generate the 'normal' draft (fast path, max 6, sequential) for items that need a reply. */
   drafts_pregenerate: boolean;
+  /** Dashboard home: source card order + width (1 = half row, 2 = full row) — Settings → 홈 카드 배치. */
+  dashboard: NedDashboard;
+}
+
+export const DASHBOARD_CARDS = ["slack", "mail", "jira", "github"] as const;
+export type DashboardCard = (typeof DASHBOARD_CARDS)[number];
+export interface NedDashboard {
+  card_order: DashboardCard[];
+  card_span: Record<DashboardCard, 1 | 2>;
+}
+/** Slack first (most real-time), mail + Jira side by side, then GitHub. */
+export const DEFAULT_DASHBOARD: NedDashboard = { card_order: ["slack", "mail", "jira", "github"], card_span: { slack: 2, mail: 1, jira: 1, github: 2 } };
+
+/** Known card ids only, each once; missing ones keep `base`'s relative order at the end. Spans are 1 | 2, else `base`'s. */
+export function normalizeDashboard(raw: unknown, base: NedDashboard = DEFAULT_DASHBOARD): NedDashboard {
+  const r = (raw && typeof raw === "object" ? raw : {}) as { card_order?: unknown; card_span?: unknown };
+  const isCard = (v: unknown): v is DashboardCard => DASHBOARD_CARDS.includes(v as DashboardCard);
+  const order = Array.isArray(r.card_order) ? [...new Set(r.card_order.filter(isCard))] : [...base.card_order];
+  for (const id of base.card_order) if (!order.includes(id)) order.push(id);
+  const spans = (r.card_span && typeof r.card_span === "object" ? r.card_span : {}) as Record<string, unknown>;
+  const card_span = Object.fromEntries(DASHBOARD_CARDS.map((id) => [id, Number(spans[id]) === 1 || Number(spans[id]) === 2 ? Number(spans[id]) : base.card_span[id]])) as NedDashboard["card_span"];
+  return { card_order: order, card_span };
 }
 
 export interface NedActions {
@@ -197,6 +219,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   draft_context_max_age_minutes: 180,
   draft_fast_model: "sonnet",
   drafts_pregenerate: false,
+  dashboard: DEFAULT_DASHBOARD,
 };
 
 export function loadConfig(): NedConfig {
@@ -216,6 +239,7 @@ export function loadConfig(): NedConfig {
       reply_tone: normalizeReplyTone(parsed.reply_tone),
       draft_context_max_age_minutes: Number.isFinite(Number(parsed.draft_context_max_age_minutes)) && Number(parsed.draft_context_max_age_minutes) >= 0 ? Number(parsed.draft_context_max_age_minutes) : DEFAULT_CONFIG.draft_context_max_age_minutes,
       drafts_pregenerate: parsed.drafts_pregenerate === true,
+      dashboard: normalizeDashboard(parsed.dashboard),
       filters: mergeFilters(normalizeFilters(DEFAULT_CONFIG.filters), parsed.filters),
     };
   }

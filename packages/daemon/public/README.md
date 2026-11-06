@@ -21,7 +21,8 @@ daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙�
 | `app/ui/toast.js` | `toast()` |
 | `app/tabs/home.js` · `inbox.js` · `timeline.js` · `settings.js` | 탭별 렌더와 그 탭 안 이벤트 |
 | `app/features/calendar.js` | 일정 패널(일/주, `/api/calendar` 범위, `ned.cal`) |
-| `app/features/cards.js` | 소스 카드(메일·Jira·Slack·GitHub), `packCards` |
+| `app/features/cards.js` | 소스 카드(메일·Jira·Slack·GitHub), `packCards`(행 배치), `unionAll`(전체 뷰) |
+| `app/features/cardlayout.js` | 홈 카드 배치: `config.dashboard` 정규화·기본값, 설정 섹션(↑/↓, 1열/2열, 미리보기) |
 | `app/features/drafts.js` | 답장 초안 모달 |
 | `app/features/reviewed.js` | 확인 완료(attention·소스 항목) |
 | `app/features/personas.js` | `VOICE`, 마크, `applyPersona`, 말풍선 `say`, mood·opener |
@@ -71,7 +72,7 @@ daemon 을 `NED_HOME=/some/fixture` 로 띄우거나, 같은 라우트를 흉내
 ## 넓은 화면 레이아웃
 
 폰트 크기는 그대로, 밀도만 폭에 맞춘다. 페이지 컨테이너(`.hwrap` 홈, `.pwrap` 타임라인·설정)는 최대 2560px, 좌우 24px(≥1600 에서 32px).
-- 홈: <900 1열 · 900~1600 2열(일정 | 할 일 + 소스 카드, 카드는 ≤1100 에서 1열) · ≥1600 3열(일정 | 소스 카드 2열 | Ned 액션 + 개인 할 일 — `.hcol` 이 `display: contents` 로 풀려 grid-area 로 배치) · ≥2000 소스 카드 3열.
+- 홈: <900 1열 · 900~1600 2열(일정 | 할 일 + 소스 카드, 카드는 ≤1100 에서 1열) · ≥1600 3열(일정 | 소스 카드 2열 | Ned 액션 + 개인 할 일 — `.hcol` 이 `display: contents` 로 풀려 grid-area 로 배치) · 소스 카드는 최대 2열(주 뷰·≤1100 에서 1열).
 - 일정 타임라인: 폭은 `clamp(360px, 22~26vw, 440px)` 로 고정, 시간당 높이(PPH)만 창 높이에 따라 52~72px.
 - 인박스: 목록 390px, ≥1600 480px. 상세 본문 max 72ch. 세션 레일은 ≥1800 에서 항상 펼침(접기 버튼 숨김, `ned.railOff` 무시).
 - 설정 폼은 2열 그리드(≤760 에서 1열).
@@ -82,7 +83,8 @@ daemon 을 `NED_HOME=/some/fixture` 로 띄우거나, 같은 라우트를 흉내
 
 ## 카드 높이
 
-홈 그리드는 `align-items: stretch`. 소스 카드는 `packCards()` 가 `--cols` 개의 열에 (가장 짧은 열부터) 채워 넣고 열마다 마지막 카드를 늘려 모든 열이 행 바닥에서 끝난다(남는 공간은 비움). ≥1600 3열에서는 할 일 열이 `contain: size` 로 행 높이를 정하지 않고 안에서 스크롤한다.
+홈 그리드는 `align-items: stretch`. 소스 카드는 **행 단위** 그리드(`--cols` 1 또는 2열): `packCards()` 가 `config.dashboard` 순서대로 놓고 카드마다 `grid-column: span 1|2`(열 수보다 크면 줄임), 현재 행에 안 들어가는 카드는 다음 행으로. 같은 행 카드는 높이를 맞추고, 마지막 행이 남는 높이를 받는다(`grid-template-rows: … minmax(auto, 1fr)`, `.last`).
+기본 배치(`DEFAULT_DASHBOARD`, `src/config.ts`): Slack(2열) → 메일·Jira(1열씩, 같은 행) → GitHub(2열). 설정 → **홈 카드 배치** 에서 ↑/↓ 로 순서, `1열/2열` 로 폭을 바꾸고 오른쪽 미리보기로 행을 확인 → 저장 = `PUT /api/config` 의 `dashboard: { card_order: ['slack','mail','jira','github'], card_span: { slack, mail, jira, github: 1|2 } }` (서버가 모르는 id·중복을 버리고 빠진 카드는 뒤에 붙이며, 폭은 1|2 아니면 이전 값). DOM id 는 `sc-gh` 이지만 설정 id 는 `github`. ≥1600 3열에서는 할 일 열이 `contain: size` 로 행 높이를 정하지 않고 안에서 스크롤한다.
 
 ## 소스 pill 필터
 
@@ -99,8 +101,8 @@ daemon 을 `NED_HOME=/some/fixture` 로 띄우거나, 같은 라우트를 흉내
 ## 알림 설정 · 메일/Slack 전체 보기
 
 - 설정 → 알림: 마스터 스위치, 소스별 토글 그리드, 아침 브리핑·소리, 묶음 기준(숫자), 조용한 시간 처리(보내지 않음 / 소리 없이). 마스터를 끄면 나머지는 비활성. 저장 = `PUT /api/config` 의 `notifications`.
-- 메일·Slack 카드 헤더 오른쪽 `확인 필요 | 전체` (카드별 `localStorage` `ned.cardmode.<mail|slack>`). 전체는 `mail.all` / `slack.all`, 그중 확인 필요 항목은 왼쪽 포인트색 바, Slack 에서 이미 답한 건 흐리게 + '답함'. '전체' 를 고르면 접힌 카드는 펼친다. 배지 숫자는 확인 필요 개수 그대로.
-- 카드 안 리스트도 카드 높이를 채운다(≥900): 소스 카드는 헤더·요약 auto, 리스트 영역(`.sl`)이 나머지를 차지하고 왼쪽 색 구분선이 바닥까지 이어진다 — 열의 마지막 카드가 남는 높이를 받고(최소 220px) 긴 리스트는 그 안에서 스크롤, 다른 카드는 460px 에서 스크롤. 할 일 카드는 Ned 액션 / 개인 할 일 두 섹션이 내용 크기 비율로 높이를 나누고 각자 안에서 스크롤. 일정 패널 본문도 바닥까지(안에서 스크롤).
+- 메일·Slack 카드 헤더 오른쪽 `확인 필요 | 전체` (카드별 `localStorage` `ned.cardmode.<mail|slack>`). 전체는 `items ∪ all` — 항목 키(`srcKey`: Slack 채널 id + ts, 메일 thread id; 없으면 링크)로 합쳐 한 줄씩(같으면 `all` 쪽 레코드), 최신순. 그래서 `all` 에 없는 확인 필요 항목(스레드 질문·오래된 마감 메일)도 보인다. 확인 필요 항목은 왼쪽 포인트색 바, Slack 에서 이미 답한 건 흐리게 + '답함'. '전체' 를 고르면 접힌 카드는 펼친다. 배지 숫자는 확인 필요 개수 그대로.
+- 카드 안 리스트도 카드 높이를 채운다(≥900): 소스 카드는 헤더·요약 auto, 리스트 영역(`.sl`)이 나머지를 차지하고 왼쪽 색 구분선이 바닥까지 이어진다 — 마지막 행 카드가 남는 높이를 받고(최소 220px) 긴 리스트는 그 안에서 스크롤, 다른 카드는 460px 에서 스크롤. 할 일 카드는 Ned 액션 / 개인 할 일 두 섹션이 내용 크기 비율로 높이를 나누고 각자 안에서 스크롤. 일정 패널 본문도 바닥까지(안에서 스크롤).
 - Slack DM 은 대화당 최신 1건만(같은 채널 ID 기준, 안전망으로 클라이언트에서도 묶음). 묶인 메시지가 더 있으면 `+N` 배지(N = count − 1). 카드 배지·요약·인사말 개수도 묶은 뒤 기준.
 
 ## 답장 초안 팝업

@@ -408,7 +408,16 @@ async function capture(o) {
     await step("persona-ned", async () => { await click('#c-persona input[value="ned"]'); return evalJs(`(() => { document.getElementById("cfg").requestSubmit(); return "ok"; })()`); }, { wait: 800, until: SAVED });
     await step("timeline", () => evalJs(`location.hash = "#timeline"`));
     await step("poll-tick", () => evalJs("__nedTick()"), { wait: 1200 });
-    await step("home-after-poll", () => evalJs(`location.hash = "#home"`));
+    await step("home-after-poll", () => evalJs(`location.hash = "#home"`), { shot: true });
+    // 홈 카드 배치 + 전체 뷰 (items ∪ all)
+    await step("slack-all", () => click('#sc-slack [data-vm="slack"][data-mode="all"]'), { shot: true });
+    await step("mail-all", () => click('#sc-mail [data-vm="mail"][data-mode="all"]'), { shot: true });
+    await step("settings-cards", () => evalJs(`(() => { location.hash = "#settings"; setTimeout(() => document.getElementById("c-cards").scrollIntoView({ block: "center" }), 50); return "ok"; })()`), { shot: true });
+    await step("cards-move-github-up", () => click('#c-cards [data-cl="github"] [data-clmove="-1"]'));
+    await step("cards-span-slack-1", () => click('#c-cards [data-cl="slack"] [data-clspan="1"]'), { shot: true });
+    await step("cards-save", () => evalJs(`(() => { document.getElementById("cfg").requestSubmit(); return "ok"; })()`), { wait: 800, until: SAVED });
+    await step("cards-home", () => evalJs(`location.hash = "#home"`), { shot: true });
+    await step("cards-config", () => evalJs(`fetch("/api/config").then((r) => r.json()).then((c) => JSON.stringify(c.dashboard))`));
     fs.writeFileSync(path.join(out, "steps.json"), JSON.stringify(steps, null, 2));
     page.close();
   } finally {

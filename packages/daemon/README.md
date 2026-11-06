@@ -58,6 +58,10 @@ osascript 폴백도 같은 규칙: 꺼져 있으면 안 보냄, 켜진 kind 의 
 `NED_OK` / `UPDATE` 와 JSON 키는 페르소나와 무관하게 그대로. `state.json.persona` 에 같은 값을 미러링한다(세션 갱신마다,
 `PUT /api/config` 직후) — 대시보드와 메뉴바 앱이 이걸 읽는다. 캐릭터 이름만 표기하고 로고·실제 대사·이미지는 쓰지 않는다.
 
+**홈 카드 배치** (`config.dashboard`): `{ card_order: ("slack"|"mail"|"jira"|"github")[], card_span: { <id>: 1|2 } }`, 기본
+Slack(2) → 메일(1)·Jira(1) → GitHub(2). 읽을 때·`PUT /api/config`(보낸 경우만) 모두 `normalizeDashboard` — 모르는 id·중복은 버리고 빠진 카드는
+뒤에 붙이고, 폭이 1|2 가 아니면 이전 값. 대시보드 화면만 쓴다(`public/README.md` "카드 높이").
+
 **트래킹 제외** (`config.filters`): `slack.exclude_channels`(채널명, `#` 없이) · `jira.exclude_projects`(프로젝트 키, 대문자 영숫자만 —
 JQL 에 그대로 들어가므로 그 밖의 값은 버린다). heartbeat.md · briefing.md · agenda.md 의 `{{FILTERS}}` 가
 `제외 채널: #a, #b / 제외 Jira 프로젝트: KEY1, KEY2 — 이들에 속한 항목은 조회·보고하지 말 것` + Jira JQL 에 넣을

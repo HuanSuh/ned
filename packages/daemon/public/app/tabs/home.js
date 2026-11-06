@@ -1,7 +1,7 @@
 /* Home tab: greeting line, todo card (Ned actions + personal todos), agenda refresh. */
 import { api } from "../api.js";
 import { meetings, renderAgenda, todayEvents } from "../features/calendar.js";
-import { GH_REASON, MAIL_REASON, PRIO_LED, SLACK_REASON, card, cardMode, collapseDMs, counts, group, moreBadge, packCards, preview, renderSlackWatch, watchNeeds } from "../features/cards.js";
+import { GH_REASON, MAIL_REASON, PRIO_LED, SLACK_REASON, card, cardMode, collapseDMs, counts, group, moreBadge, packCards, preview, renderSlackWatch, unionAll, watchNeeds } from "../features/cards.js";
 import { draftFor } from "../features/drafts.js";
 import { V, greet, say } from "../features/personas.js";
 import { isOpenSrc, openAtt, revAt, revCls, srcCheck, srcKey, withFold } from "../features/reviewed.js";
@@ -34,11 +34,14 @@ export function renderTodoGroups() {
   $("mail-sum").innerHTML = mail?.summary ? `<span>${esc(mail.summary)}</span>` : "";
   const mr = (k) => mi.filter((x) => (MAIL_REASON[x.reason] ? x.reason : "request") === k).length;
   const mailRow = (x) => MAIL_REASON[x.reason] || MAIL_REASON.request;
-  const mailAll = mail?.all || [], mailNeed = new Set(miAll.flatMap((x) => [x.id, x.url].filter(Boolean)));
-  const mailAllRows = withFold("mail-all", "email", mailAll, (x) => {
-    const u = safeUrl(x.url), need = mailNeed.has(x.id) || mailNeed.has(x.url);
-    return `<div class="ti${need ? " need" : ""}${revCls("email", x)}"><span class="ic" title="${x.unread ? "안 읽음" : "읽음"}">${x.unread ? "●" : "○"}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.subject || "(제목 없음)")) : esc(x.subject || "(제목 없음)")}</span>
-        <div class="sb"><span class="from">${esc(x.from)}</span>${need ? `<span class="chipx today">확인 필요</span>` : ""}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div></div>
+  // 전체 = all ∪ items by thread id, so a 확인 필요 mail older than / missing from `all` still shows (with the bar).
+  const mailU = unionAll("email", miAll, mail?.all || [], (x) => x.ts || x.received);
+  const mailAllRows = withFold("mail-all", "email", mailU.list, (x) => {
+    const u = safeUrl(x.url), need = mailU.isNeed(x), ts = x.ts || x.received;
+    // an item-only row has no unread flag: show its reason icon instead of a read/unread dot
+    const ic = "unread" in x ? `<span class="ic" title="${x.unread ? "안 읽음" : "읽음"}">${x.unread ? "●" : "○"}</span>` : `<span class="ic">${mailRow(x)[2]}</span>`;
+    return `<div class="ti${need ? " need" : ""}${revCls("email", x)}">${ic}<div class="mn"><span class="tt">${u ? ext(u, esc(x.subject || "(제목 없음)")) : esc(x.subject || "(제목 없음)")}</span>
+        <div class="sb"><span class="from">${esc(x.from)}</span>${need ? `<span class="chipx today">확인 필요</span>` : ""}${ts ? `<span>${rel(toMs(ts))}</span>` : ""}</div></div>
         <div class="ra">${draftFor("email", x, srcKey("email", x))}${openIcon(u)}${srcCheck("email", x)}</div></div>`;
   });
   card("mail", {
@@ -76,8 +79,10 @@ export function renderTodoGroups() {
   const slackNeed = new Set(siAll.map((x) => x.url).filter(Boolean));
   const watch = slack?.watch || [], wNeed = watchNeeds(slack).filter((h) => !slackNeed.has(h.url));
   renderSlackWatch(watch, wNeed.length);
-  const slackAllRows = withFold("slack-all", "slack", collapseDMs(slack?.all || []), (x) => {
-    const u = safeUrl(x.url), r = slRow(x), need = slackNeed.has(x.url);
+  // 전체 = all ∪ items by channel id + ts (a thread ask is often missing from `all`, and its link carries ?thread_ts).
+  const slackU = unionAll("slack", siAll, slack?.all || [], (x) => x.ts);
+  const slackAllRows = withFold("slack-all", "slack", collapseDMs(slackU.list), (x) => {
+    const u = safeUrl(x.url), r = slRow(x), need = slackU.isNeed(x);
     return `<div class="ti${need ? " need" : ""}${x.answered && !need ? " answered" : ""}${revCls("slack", x)}"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
         <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span>${need ? `<span class="chipx today">답 필요</span>` : x.answered ? `<span class="chipx ok">답함</span>` : `<span class="chipx ${r[0]}">${r[1]}</span>`}${moreBadge(x)}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div></div>
         <div class="ra">${draftFor("slack", x, srcKey("slack", x))}${openIcon(u)}${srcCheck("slack", x)}</div></div>`;

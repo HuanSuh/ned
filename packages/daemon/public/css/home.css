@@ -81,14 +81,10 @@
 .tgrp .gl { border-left: 2px solid var(--gc, var(--line)); margin-top: 4px; }
 .g-ned { --gc: var(--mint); } .g-jira { --gc: var(--blue); } .g-gh { --gc: var(--dim); } .g-mail { --gc: var(--violet); } .g-slack { --gc: var(--hero); } .g-me { --gc: var(--amber); }
 /* source cards (mail · jira · slack · github): shrink (summary + top item) ⇄ expanded (full list) */
-/* Source cards are packed into --cols columns by packCards() (shortest column first, like masonry); each column's
-   last card stretches so every column ends at the row's bottom edge. Spare space stays empty. */
-.sgrid { --cols: 2; display: flex; gap: 16px; align-items: stretch; flex: 1 1 auto; min-width: 0; }
-.scol { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
-.scol:empty { display: none; }
-.scard { display: flex; flex-direction: column; }
-.scard.last { flex: 1 1 auto; }
-.sgrid.measuring .scard { flex: none !important; }
+/* Source cards sit in rows of a --cols (1 or 2) column grid, in config.dashboard order; packCards() sets each card's
+   span (1 / 2) and makes the last row take the leftover height. Cards in one row share its height. */
+.sgrid { --cols: 2; display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: 16px; align-items: stretch; align-content: start; flex: 1 1 auto; min-width: 0; }
+.scard { display: flex; flex-direction: column; min-width: 0; }
 .scard { border-top: 2px solid var(--gc); overflow: hidden; min-height: 0; }
 .scard > .sh, .scard > .shw > .sh { appearance: none; background: none; border: 0; color: var(--dim); width: 100%; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 14px; cursor: pointer; text-align: left; font: 700 11px var(--mono); letter-spacing: .06em; }
 .scard > .sh:hover, .scard > .shw > .sh:hover { background: var(--hover); }

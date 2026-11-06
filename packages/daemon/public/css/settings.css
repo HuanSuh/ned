@@ -37,3 +37,18 @@
 .form-foot .msg { font-size: 13px; color: var(--dim); }
 .form-foot .msg.ok { color: var(--mint); } .form-foot .msg.err { color: var(--red); }
 .pwrap .say-slot { margin-bottom: 14px; }
+/* 홈 카드 배치: rows (order, ↑/↓, 1열/2열) + a small preview of the resulting rows */
+.clay { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 16px; align-items: start; max-width: 760px; }
+.cllist { display: flex; flex-direction: column; gap: 6px; }
+.clrow { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.clrow .cln { font: 11px var(--mono); color: var(--faint); width: 14px; }
+.clrow .cll { font-size: 13px; }
+.clrow .sp { flex: 1; }
+.clrow .seg { display: inline-flex; margin-right: 6px; }
+.clrow .seg .btn { border-radius: 0; } .clrow .seg .btn:first-child { border-radius: 7px 0 0 7px; } .clrow .seg .btn:last-child { border-radius: 0 7px 7px 0; margin-left: -1px; }
+.clrow .seg .btn[aria-pressed="true"] { border-color: var(--hero); color: var(--fg); background: var(--hover); }
+.clrow .btn:disabled { opacity: .35; cursor: default; }
+.clprev { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 8px; border: 1px dashed var(--line); border-radius: 8px; }
+.clp { font: 11px var(--mono); color: var(--dim); background: var(--hover); border-radius: 5px; padding: 6px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clp.s2 { grid-column: span 2; }
+@media (max-width: 760px) { .clay { grid-template-columns: 1fr; } }
