@@ -12,6 +12,13 @@ struct NedApp: App {
     @State private var inserted = true
 
     init() {
+        // When the item is hidden (⌘-drag off the bar, or the macOS 26 Menu Bar toggle) AppKit writes
+        // "NSStatusItem Visible(CC) Item-0" = 0 into our defaults and keeps the item hidden on every later launch,
+        // even after the toggle is on again (seen live 2026-11-07). A menu bar app with no icon is unreachable,
+        // so forget that flag at start-up; the user can still hide it for the current run.
+        for key in ["NSStatusItem Visible Item-0", "NSStatusItem VisibleCC Item-0"] {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
         // Headless: before any scene, store, daemon or notification center exists.
         if CommandLine.arguments.contains("--notify-selftest") { exit(NotifySelfTest.run()) }
         // Read-only: print SMAppService.mainApp status (registers nothing) and exit.
