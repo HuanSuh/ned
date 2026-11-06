@@ -34,6 +34,13 @@ export interface ClaudeRunOptions {
   permissionMode?: "plan" | "dontAsk";
   /** `--tools`: restrict the built-in tool set (e.g. ["ToolSearch"], or [] = no built-ins). Omitted = default set. */
   tools?: string[];
+  /**
+   * Skip the user's settings (hooks, plugins), every MCP server and slash commands/skills. Only for no-tool runs whose
+   * whole input is in the prompt: cuts `claude -p` start-up from ~40s to ~4s (measured, see drafts fast path).
+   */
+  isolated?: boolean;
+  /** `--effort`; omitted = the CLI default. */
+  effort?: "low" | "medium" | "high";
 }
 
 /** The exact argv `runClaude` spawns `claude` with (exported so action runs can log / test it). */
@@ -42,6 +49,8 @@ export function buildClaudeArgs(opts: ClaudeRunOptions): string[] {
   if (opts.tools) args.push("--tools", opts.tools.join(","));
   if (opts.allowedTools.length) args.push("--allowedTools", ...opts.allowedTools);
   if (opts.model) args.push("--model", opts.model);
+  if (opts.effort) args.push("--effort", opts.effort);
+  if (opts.isolated) args.push("--setting-sources", "", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--disable-slash-commands");
   return args;
 }
 

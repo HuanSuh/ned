@@ -46,6 +46,31 @@ export interface GithubItem {
 
 export type MailReason = "reply" | "approval" | "deadline" | "request";
 
+/** Size limits for agenda-collected draft context (must match prompts/agenda.md). */
+export const CTX_LIMITS = { slackMessages: 5, slackText: 300, mailBody: 1500, attachments: 10 } as const;
+
+/** Thread excerpt the agenda model already saw, so a reply draft needs no second fetch (drafts.ts fast path). */
+export interface SlackContext {
+  participants: string[];
+  /** Oldest first, last CTX_LIMITS.slackMessages, each text ≤ CTX_LIMITS.slackText chars. */
+  messages: { from: string; ts: string; text: string }[];
+  /** ISO time the agenda run collected it. */
+  collected_at: string;
+}
+
+export interface MailContext {
+  from: string;
+  to: string;
+  subject: string;
+  /** Latest message from someone else, quoted replies stripped, ≤ CTX_LIMITS.mailBody chars. */
+  body_excerpt: string;
+  attachments: string[];
+  /** Gmail id of that message + its sender address (reply addressing for POST /api/send). */
+  message_id?: string;
+  reply_to?: string;
+  collected_at: string;
+}
+
 export interface MailItem {
   id: string;
   from: string;
@@ -56,6 +81,7 @@ export interface MailItem {
   reason: MailReason;
   /** One short line: why this needs me (e.g. "금요일까지 회신 요청"). */
   why: string;
+  context?: MailContext;
 }
 
 export interface MailBlock {
@@ -95,6 +121,7 @@ export interface SlackItem {
   reason: SlackReason;
   /** DMs only: unanswered messages in this conversation, collapsed into this (latest) one. */
   count?: number;
+  context?: SlackContext;
 }
 
 export interface SlackBlock {
@@ -159,7 +186,7 @@ function agendaTools(cfg: NedConfig): string[] {
   if (cfg.sources.calendar) t.push("mcp__claude_ai_Google_Calendar__list_events", "mcp__claude_ai_Google_Calendar__search_events");
   if (cfg.sources.jira) t.push("mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql");
   if (cfg.sources.github) t.push("Bash(gh search prs:*)", "Bash(gh pr list:*)", "Bash(gh api:*)");
-  if (cfg.sources.gmail) t.push("mcp__claude_ai_Gmail__search_threads");
+  if (cfg.sources.gmail) t.push("mcp__claude_ai_Gmail__search_threads", "mcp__claude_ai_Gmail__get_thread");
   if (cfg.sources.slack) t.push("mcp__claude_ai_Slack__slack_search_public_and_private", "mcp__claude_ai_Slack__slack_read_thread");
   return t;
 }
@@ -183,6 +210,39 @@ function slackTs(v: unknown): string {
   const t = str(v);
   if (/^\d{9,11}(\.\d+)?$/.test(t)) return new Date(Number(t) * 1000).toISOString();
   return t;
+}
+
+/** Model `context` → SlackContext (limits enforced), or undefined when it carries no messages. */
+export function normalizeSlackContext(v: unknown, collectedAt: string): SlackContext | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const c = v as Record<string, unknown>;
+  const messages = arr(c.messages)
+    .map((m) => ({ from: str(m.from).slice(0, 80), ts: slackTs(m.ts), text: str(m.text).replace(/\s+/g, " ").trim().slice(0, CTX_LIMITS.slackText) }))
+    .filter((m) => m.text)
+    .slice(-CTX_LIMITS.slackMessages);
+  if (!messages.length) return undefined;
+  const participants = [...new Set([...(Array.isArray(c.participants) ? c.participants.map((p) => str(p).slice(0, 80)) : []), ...messages.map((m) => m.from)].filter(Boolean))].slice(0, 20);
+  return { participants, messages, collected_at: str(c.collected_at) && !Number.isNaN(Date.parse(str(c.collected_at))) ? str(c.collected_at) : collectedAt };
+}
+
+/** Model `context` → MailContext (limits enforced), or undefined when it has no body. */
+export function normalizeMailContext(v: unknown, collectedAt: string): MailContext | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const c = v as Record<string, unknown>;
+  const body = str(c.body_excerpt).trim().slice(0, CTX_LIMITS.mailBody);
+  if (!body) return undefined;
+  const opt = (x: unknown, n: number) => (str(x).trim() ? { v: str(x).trim().slice(0, n) } : null);
+  const mid = opt(c.message_id, 200), rt = opt(c.reply_to, 200);
+  return {
+    from: str(c.from).slice(0, 200),
+    to: str(c.to).slice(0, 300),
+    subject: str(c.subject).slice(0, 200),
+    body_excerpt: body,
+    attachments: (Array.isArray(c.attachments) ? c.attachments.map((a) => str(a).slice(0, 120)).filter(Boolean) : []).slice(0, CTX_LIMITS.attachments),
+    ...(mid ? { message_id: mid.v } : {}),
+    ...(rt ? { reply_to: rt.v } : {}),
+    collected_at: str(c.collected_at) && !Number.isNaN(Date.parse(str(c.collected_at))) ? str(c.collected_at) : collectedAt,
+  };
 }
 
 const arr = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter((x) => x && typeof x === "object") : []) as Record<string, unknown>[];
@@ -249,7 +309,8 @@ export function normalizeCalendar(raw: unknown): CalendarItem[] {
 }
 
 /** Coerce model output into the exact contract the dashboard expects. */
-function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedConfig): AgendaPayload {
+function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedConfig, collectedAt = new Date().toISOString()): AgendaPayload {
+  const withCtx = <T extends object>(x: T, ctx: object | undefined): T => (ctx ? { ...x, context: ctx } : x);
   const calendar: CalendarItem[] = cfg.sources.calendar ? normalizeCalendar(raw.calendar) : [];
   const jira: JiraItem[] = cfg.sources.jira
     ? arr(raw.jira)
@@ -296,7 +357,8 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
             url: str(e.url) || (e.id ? `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(str(e.id))}` : ""),
             reason: MAIL_REASONS.includes(e.reason as MailReason) ? (e.reason as MailReason) : "request",
             why: str(e.why).slice(0, 120),
-          })),
+          }))
+          .map((x, i) => withCtx(x, normalizeMailContext(arr(m.items)[i]?.context, collectedAt))),
         all: arr(m.all)
           .slice(0, 50)
           .map((e) => ({
@@ -324,6 +386,7 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
             ts: slackTs(e.ts),
             reason: e.reason as SlackReason,
             ...(Number(e.count) > 1 ? { count: Math.min(99, Math.trunc(Number(e.count))) } : {}),
+            ...(normalizeSlackContext(e.context, collectedAt) ? { context: normalizeSlackContext(e.context, collectedAt) } : {}),
           })),
         all: arr(sl.all)
           .slice(0, 50)
@@ -336,6 +399,7 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
             reason: SLACK_REASONS.includes(e.reason as SlackReason) ? (e.reason as SlackReason) : "mention",
             answered: e.answered === true,
             ...(Number(e.count) > 1 ? { count: Math.min(99, Math.trunc(Number(e.count))) } : {}),
+            ...(normalizeSlackContext(e.context, collectedAt) ? { context: normalizeSlackContext(e.context, collectedAt) } : {}),
           })),
       }
     : null;
@@ -344,7 +408,14 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
   const exChannels = new Set(cfg.filters.slack.exclude_channels.map((c) => c.toLowerCase()));
   const jiraKept = jira.filter((j) => !exProjects.has(j.key.split("-")[0].toUpperCase()));
   const keepCh = (x: { channel: string }) => !exChannels.has(x.channel.replace(/^#/, "").toLowerCase());
-  if (slack) { slack.items = collapseDMs(slack.items.filter(keepCh)); slack.all = collapseDMs(slack.all.filter(keepCh)); }
+  if (slack) {
+    slack.items = collapseDMs(slack.items.filter(keepCh));
+    slack.all = collapseDMs(slack.all.filter(keepCh));
+    // The prompt lets all[] skip context for rows already in items[]: share it by permalink, both ways.
+    const byUrl = new Map<string, SlackContext>();
+    for (const x of [...slack.items, ...slack.all]) if (x.context && x.url) byUrl.set(x.url, x.context);
+    for (const x of [...slack.items, ...slack.all]) if (!x.context && byUrl.has(x.url)) x.context = byUrl.get(x.url);
+  }
   return { calendar, jira: jiraKept, github, mail, slack };
 }
 
@@ -404,11 +475,12 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
   }
 
   log(`agenda: asking claude${filtersPrompt(cfg.filters) !== "(없음)" ? ` (filters — ${filtersPrompt(cfg.filters).split("\n")[0]})` : ""}`);
-  const res = await runClaude(buildPrompt(cfg), { allowedTools: agendaTools(cfg), maxTurns: 20, model: cfg.claude_model, timeoutMs: 5 * 60_000 });
+  // 22 = the old 20 + one turn for the parallel get_thread reads that fill mail item context.
+  const res = await runClaude(buildPrompt(cfg), { allowedTools: agendaTools(cfg), maxTurns: 22, model: cfg.claude_model, timeoutMs: 5 * 60_000 });
   const parsed = res.ok ? extractJson<Partial<Record<keyof AgendaPayload, unknown>>>(res.text) : null;
   let agenda: Agenda;
   if (parsed) {
-    agenda = { updated_at: Date.now(), cost_usd: res.cost_usd, calendar_range: calendarRange(new Date(now)), ...normalize(parsed, cfg) };
+    agenda = { updated_at: Date.now(), cost_usd: res.cost_usd, calendar_range: calendarRange(new Date(now)), ...normalize(parsed, cfg, new Date(now).toISOString()) };
   } else {
     // Keep the last good lists so the dashboard doesn't blank out on a transient failure.
     const prev = readAgenda();
@@ -417,6 +489,12 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
     log(`agenda: failed — ${error.slice(0, 300)}`);
   }
   writeJsonAtomic(AGENDA_PATH, agenda);
+  if (parsed && cfg.drafts_pregenerate) {
+    // Background, after the agenda is on disk; drafts.ts imports agenda.ts, so load it lazily.
+    import("./drafts.js").then((m) => m.pregenerateDrafts(agenda, cfg)).catch((e) => log(`pregenerate: failed ${String(e)}`));
+  }
+  const ctxN = (agenda.slack?.items.filter((x) => x.context).length ?? 0) + (agenda.mail?.items.filter((x) => x.context).length ?? 0);
+  log(`agenda: ${ctxN} items with draft context`);
   log(`agenda: ${agenda.calendar.length} events / ${agenda.jira.length} jira / ${agenda.github.length} prs / ${agenda.mail?.items.length ?? "-"} mails / ${agenda.slack?.items.length ?? "-"} slack ($${res.cost_usd.toFixed(2)}, ${res.num_turns} turns, ${Math.round(res.duration_ms / 1000)}s)`);
   return agenda;
 }
