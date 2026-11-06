@@ -11,6 +11,41 @@ export const COMMS_VOICE = {
 };
 export const commsVoice = (p) => COMMS_VOICE[p] || COMMS_VOICE.ned;
 
+// ---------- greeting (new chat: Ned speaks first, a different line each time) ----------
+/** Per persona: [새벽 <5, 아침 <12, 오후 <18, 저녁] → candidate opening lines. The hint (voice.empty) follows as a second line. */
+export const COMMS_HELLO = {
+  ned: [
+    ["아직 안 잤어? 나도 깨어 있어.", "새벽 근무 동지네. 뭐 찾아줄까?", "늦었다. 빨리 끝내고 자자 — 뭐 필요해?"],
+    ["좋은 아침! 오늘 뭐부터 볼까?", "굿모닝. 커피 한 잔 하면서 물어봐.", "아침이야. 오늘 일정부터 훑어줄까?", "왔구나! 밤사이 온 거 정리해 줄 수 있어."],
+    ["오후 체크인. 뭐 막힌 거 있어?", "점심은 먹었어? 필요한 거 말해.", "오후도 달려보자. 뭐 찾아줄까?", "여기 있어. 궁금한 거 던져봐."],
+    ["저녁이네. 오늘 마무리할 거 있어?", "퇴근 전에 놓친 거 없나 볼까?", "수고했어. 남은 거 같이 정리하자.", "아직 일하는 중? 도와줄게."],
+  ],
+  alfred: [
+    ["늦은 시간까지 수고가 많으십니다. 무엇을 도와드릴까요?", "밤이 깊었습니다. 필요한 것이 있으시면 말씀하십시오."],
+    ["좋은 아침입니다. 오늘 일정부터 아뢸까요?", "아침 준비는 끝났습니다. 무엇부터 보시겠습니까?", "평안한 아침입니다. 분부만 내리십시오."],
+    ["오후입니다. 살펴 드릴 일이 있으신지요?", "차 한 잔 곁들이시지요. 무엇을 알아볼까요?", "대기하고 있습니다. 말씀하십시오."],
+    ["저녁입니다. 오늘 정리할 일이 남으셨습니까?", "하루 수고 많으셨습니다. 마무리를 도와드리지요.", "늦지 않게 끝내시지요. 무엇이 필요하십니까?"],
+  ],
+  oracle: [
+    ["[야간] 채널 열림. 질의하라.", "[야간] 아직 접속 중이군. 무엇을 찾나?"],
+    ["[오전] 링크 확립. 오늘 무엇을 조회할까?", "[오전] 시계탑 온라인. 질의 대기.", "[오전] 신호 양호. 첫 질의를 보내라."],
+    ["[오후] 링크 안정. 무엇을 추적할까?", "[오후] 대기 중. 필요한 정보를 말하라.", "[오후] 모든 채널 감시 중. 질의하라."],
+    ["[야간] 링크 유지 중. 마무리 점검할까?", "[야간] 오늘의 신호 정리 가능. 질의하라.", "[야간] 아직 근무 중이군. 무엇을 찾나?"],
+  ],
+  jarvis: [
+    ["늦은 시간이네요. 무엇을 확인해 드릴까요?", "아직 작업 중이시군요. 필요한 걸 말씀하세요."],
+    ["좋은 아침이에요. 오늘 일정부터 볼까요?", "모든 시스템 정상이에요. 무엇부터 시작할까요?", "아침 브리핑 준비됐어요. 물어보세요."],
+    ["오후 현황 점검할까요?", "온라인이에요. 무엇을 분석해 드릴까요?", "오후도 순조롭게 가 보죠. 필요한 게 있나요?"],
+    ["저녁이에요. 오늘 남은 일을 정리해 드릴까요?", "하루 마무리 점검, 시작할까요?", "수고하셨어요. 놓친 게 없는지 볼까요?"],
+  ],
+};
+const helloBucket = (h) => (h < 5 ? 0 : h < 12 ? 1 : h < 18 ? 2 : 3);
+/** Pick an opening line for persona `p` at hour `h`; `seed` (e.g. Date.now() at chat start) varies it per chat. */
+export function helloLine(p, h, seed = 0) {
+  const lines = (COMMS_HELLO[p] || COMMS_HELLO.ned)[helloBucket(h)];
+  return lines[Math.abs(Math.floor(seed)) % lines.length];
+}
+
 // ---------- panel size (resize handles; persisted as ned.comms.size) ----------
 /** Expanded-panel size limits: min 360×420, max viewport − 32 on each axis; default 420×620. */
 export const COMMS_SIZE = { minW: 360, minH: 420, defW: 420, defH: 620, gap: 32 };
@@ -127,8 +162,10 @@ export function feedHtml(items, voice, relFn = () => "") {
 export const usd = (n) => `$${(Number(n) || 0).toFixed(2)}`;
 
 /** Message list. `live` = the streaming answer ({ text, tool, thinking }) or null. */
-export function messagesHtml(msgs, voice, live = null, timeFn = () => "") {
-  if (!msgs.length && !live) return `<div class="cm-empty">${esc(voice.empty)}</div>`;
+export function messagesHtml(msgs, voice, live = null, timeFn = () => "", hello = "") {
+  if (!msgs.length && !live) return hello
+    ? `<div class="cm-msg ned hello"><div class="bb"><b class="hi">${esc(hello)}</b><span class="hint">${esc(voice.empty)}</span></div></div>`
+    : `<div class="cm-empty">${esc(voice.empty)}</div>`;
   const row = (m) => {
     const me = m.role === "user";
     const meta = [timeFn(m.ts), !me && m.cost_usd ? usd(m.cost_usd) : "", m.stopped ? "중단됨" : ""].filter(Boolean).join(" · ");

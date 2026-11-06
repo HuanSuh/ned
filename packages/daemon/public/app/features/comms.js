@@ -5,7 +5,7 @@
 import { S, alive, subscribe } from "../state.js";
 import { $, lsGet, lsSet, hhmm, rel } from "../util.js";
 import { MINI, persona } from "./personas.js";
-import { buildFeed, clampSize, commsVoice, createSseParser, feedHtml, messagesHtml, readSize, shellHtml, tickerOf, usd } from "./chat-core.js";
+import { buildFeed, clampSize, commsVoice, createSseParser, feedHtml, helloLine, messagesHtml, readSize, shellHtml, tickerOf, usd } from "./chat-core.js";
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const MOD = MAC ? "⌘" : "Ctrl+";
@@ -17,7 +17,7 @@ const st = {
   open: false, tab: lsGet(LS.tab) === "msgs" ? "msgs" : "chat",
   chatId: lsGet(LS.chat) || null, msgs: [], cost: 0, live: null, running: false, err: "",
   seen: new Set(readJ(LS.seen, [])), seeded: lsGet(LS.seen) != null, notes: readJ(LS.notes, []),
-  feed: [], prevUnread: -1, persona: null, logSig: "",
+  feed: [], prevUnread: -1, persona: null, logSig: "", helloSeed: Date.now(),
 };
 let root, dock, panel, log, q;
 
@@ -202,7 +202,7 @@ async function stop() {
 }
 function newChat() {
   if (st.running) return;
-  setChat(null); st.msgs = []; st.cost = 0; st.err = ""; render(); q.focus();
+  setChat(null); st.msgs = []; st.cost = 0; st.err = ""; st.helloSeed = Date.now(); render(); q.focus();
 }
 
 // ---------- render ----------
@@ -246,10 +246,11 @@ export function render() {
   $("cm-allread").hidden = st.tab !== "msgs" || !unread;
 
   if (st.tab === "chat") {
-    const sig = JSON.stringify([st.msgs.length, st.msgs.at(-1)?.ts, st.live, st.err, st.persona]);
+    const hello = helloLine(persona, new Date().getHours(), st.helloSeed);
+    const sig = JSON.stringify([st.msgs.length, st.msgs.at(-1)?.ts, st.live, st.err, st.persona, hello]);
     if (sig !== st.logSig) {
       st.logSig = sig;
-      log.innerHTML = messagesHtml(st.msgs, v, st.live, (ts) => hhmm(ts)) + (st.err ? `<div class="cm-err">⚠ ${st.err.replace(/[<>&]/g, "")}</div>` : "");
+      log.innerHTML = messagesHtml(st.msgs, v, st.live, (ts) => hhmm(ts), hello) + (st.err ? `<div class="cm-err">⚠ ${st.err.replace(/[<>&]/g, "")}</div>` : "");
     }
     const send = $("cm-send");
     send.textContent = st.running ? "중단" : "전송"; send.classList.toggle("go", !st.running); send.classList.toggle("stop", st.running);

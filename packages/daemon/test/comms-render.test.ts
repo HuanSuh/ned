@@ -1,7 +1,7 @@
 /** Ned 통신기 (public/app/features/chat-core.js): markdown-lite, feed, ticker and panel HTML snapshots. */
 import { describe, expect, it } from "vitest";
 // @ts-expect-error — plain browser ES module (public/app), no types
-import { COMMS_SIZE, COMMS_VOICE, buildFeed, clampSize, commsVoice, feedHtml, mdLite, messagesHtml, readSize, shellHtml, tickerOf } from "../public/app/features/chat-core.js";
+import { COMMS_HELLO, COMMS_SIZE, COMMS_VOICE, buildFeed, helloLine, clampSize, commsVoice, feedHtml, mdLite, messagesHtml, readSize, shellHtml, tickerOf } from "../public/app/features/chat-core.js";
 
 const MARK = "<svg class=\"mark\"></svg>";
 const NOW = Date.UTC(2026, 10, 7, 3, 0, 0);
@@ -80,5 +80,20 @@ describe("panel size", () => {
     expect(html).toContain('<i class="cm-tag" id="cm-tag">ORACLE · LINK</i>');
     expect([...html.matchAll(/data-rs="(\w+)"/g)].map((m) => m[1])).toEqual(["w", "n", "nw"]);
     for (const v of Object.values(COMMS_VOICE)) expect((v as { tag: string }).tag).toMatch(/ · /);
+  });
+});
+
+describe("greeting", () => {
+  it("helloLine: time-of-day bucket per persona, seed varies the line, unknown persona → ned", () => {
+    expect(helloLine("ned", 9, 0)).toBe(COMMS_HELLO.ned[1][0]);
+    expect(helloLine("ned", 9, 1)).toBe(COMMS_HELLO.ned[1][1]);
+    expect(helloLine("alfred", 3, 0)).toBe(COMMS_HELLO.alfred[0][0]);
+    expect(helloLine("oracle", 14, 7)).toBe(COMMS_HELLO.oracle[2][7 % COMMS_HELLO.oracle[2].length]);
+    expect(helloLine("jarvis", 21, 2)).toBe(COMMS_HELLO.jarvis[3][2]);
+    expect(helloLine("nope", 9, 0)).toBe(COMMS_HELLO.ned[1][0]);
+    for (const p of Object.keys(COMMS_VOICE)) expect(COMMS_HELLO[p as keyof typeof COMMS_HELLO].every((b: string[]) => b.length >= 2)).toBe(true);
+  });
+  it("empty chat renders Ned's greeting bubble (escaped) + the hint", () => {
+    expect(messagesHtml([], COMMS_VOICE.ned, null, () => "", "좋은 <아침>!")).toBe('<div class="cm-msg ned hello"><div class="bb"><b class="hi">좋은 &lt;아침&gt;!</b><span class="hint">뭐든 물어봐. 오늘 일정, 답할 거, PR 상태 — 아는 건 바로, 모르는 건 찾아볼게.</span></div></div>');
   });
 });
