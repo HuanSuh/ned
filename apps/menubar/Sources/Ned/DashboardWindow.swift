@@ -25,7 +25,8 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
     /// The boot screen stays at least this long, even when the daemon answers at once (cache hit ≈ <1 s),
     /// so it never flashes; then it fades out (0.32 s, BootScreen CSS) into the dashboard.
-    static let minBootScreenSeconds: TimeInterval = 1.5
+    /// 2.5 s = the mark's draw-in (~2.0 s, BootScreen CSS) plus the first light sweep finishing (~2.5 s).
+    static let minBootScreenSeconds: TimeInterval = 2.5
     static let fadeSeconds: TimeInterval = 0.35
 
     func show() {

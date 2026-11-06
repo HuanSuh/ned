@@ -94,7 +94,7 @@ cache → miss; own defaults suite, the app's cache is untouched) and writes the
 `$NED_BOOT_HTML_OUT` (default `$TMPDIR/ned-boot-selftest`) for a headless render check.
 `--boot-transition-selftest [--cold]` (no scene / menu bar item; temp `NED_HOME` + `NED_PORT`, `NED_REPO` = a checkout
 with a built daemon, `NED_TOOL_CACHE_SUITE` = throwaway defaults suite) runs the real daemon start + the boot screen
-in a window-less web view and passes if the dashboard load starts ≤ 1.5 s after healthy (or after the 1.5 s minimum):
+in a window-less web view and passes if the dashboard load starts ≤ 1.5 s after healthy (or after the minimum on-screen time):
 `NED_HOME=$TMPDIR/bt NED_PORT=7789 NED_NO_LLM=1 NED_REPO=~/orca/projects/ned NED_TOOL_CACHE_SUITE=com.ned.menubar.transition-selftest .build/Ned.app/Contents/MacOS/Ned --boot-transition-selftest --cold`
 
 ## Start-up (tool cache + boot screen)
@@ -107,7 +107,7 @@ in a window-less web view and passes if the dashboard load starts ≤ 1.5 s afte
 - **Boot screen** (dashboard window, `Sources/Ned/BootScreen.swift`): the persona's mark draws in, light sweeps
   across it, Ned gets a faint web; steps 도구 찾는 중 → 데몬 시작 → 연결 확인 → 대시보드 로드 + status line + elapsed,
   pushed every 0.5 s via `nedBoot(step, text, elapsed, failed)` — fire-and-forget: the switch never waits on a JS
-  round-trip (those took up to 18 s with a cold / occluded web view); it follows DaemonManager's `$status`. Shown at least 1.5 s
+  round-trip (those took up to 18 s with a cold / occluded web view); it follows DaemonManager's `$status`. Shown at least 2.5 s
   (`DashboardWindowController.minBootScreenSeconds`), then fades into the dashboard; skipped when the daemon is
   already healthy as the window opens. `.failed` → red step + 다시 시작 button. Reduced motion → static mark.
 - **Menu**: while `.checking` / `.starting` the daemon line becomes a spinner + `시작 중 n/4 · <step>`; `.failed`

@@ -266,7 +266,7 @@ enum BootSelfTest {
 /// `--boot-transition-selftest [--cold]` (temp NED_HOME + NED_PORT, NED_REPO = a checkout with a built daemon,
 /// NED_TOOL_CACHE_SUITE = a throwaway defaults suite): no scene and no menu bar item. Starts the real DaemonManager
 /// and the dashboard controller in a window-less web view, and checks that the dashboard load starts within
-/// 1.5 s of the daemon turning healthy (or of the 1.5 s minimum, when the daemon is faster than that).
+/// 1.5 s of the daemon turning healthy (or of minBootScreenSeconds, when the daemon is faster than that).
 /// `--cold` empties the tool cache first (cache-miss start). Exit 0 = PASS. Stops the daemon it spawned.
 @MainActor
 enum BootTransitionSelfTest {
