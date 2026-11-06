@@ -14,7 +14,7 @@ import { recordCost, todayCost } from "./costs.js";
 import { parseSlackUrl } from "./drafts.js";
 import { log, readJson } from "./paths.js";
 import { personaPrompt } from "./persona.js";
-import { applyThreadState, mergeThreadReads, threadCandidates, type SlackThread } from "./slack-threads.js";
+import { applyThreadState, DM_BATCH_MAX, dmCandidates, mergeThreadReads, threadCandidates, type SlackThread } from "./slack-threads.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PROMPT = path.resolve(here, "../../../prompts/agenda-context.md");
@@ -116,14 +116,19 @@ export function mergeContexts(src: CtxSource, raw: unknown[], collectedAt = new 
 // ---------- Slack thread follow-up (slack-threads.ts) ----------
 
 const THREAD_TOOLS = ["mcp__claude_ai_Slack__slack_read_thread"];
+const DM_TOOLS = ["mcp__claude_ai_Slack__slack_read_channel"];
 const THREAD_SCHEMA = '{"threads":[{"key":"<항목 key 그대로>","reply_count":0,"my_last_reply_ts":"","new_since_me":0,"thread_summary":"한 줄 ≤60자 (다시 쓸 필요 없으면 빈 문자열)","participants":["이름"],"messages":[{"from":"이름|나","ts":"1730860000.123456","text":"원문 ≤300자"}]}]}';
 
-/** The batch prompt that re-reads followed threads (prompts/agenda-context.md, `threads` section). */
-export function buildThreadPrompt(batch: SlackThread[], cfg: NedConfig): string {
+/** Tools a thread/DM batch needs: slack_read_channel only when it has DM conversations. */
+const threadTools = (dms: SlackThread[]) => [...THREAD_TOOLS, ...(dms.length ? DM_TOOLS : [])];
+
+/** The batch prompt that re-reads followed threads + DM conversations (prompts/agenda-context.md, `threads` section). */
+export function buildThreadPrompt(batch: SlackThread[], cfg: NedConfig, dms: SlackThread[] = []): string {
   // known_last_reply_ts + has_summary: the model writes thread_summary only when the thread moved (or has none yet).
-  const items = batch.map((t) => ({ key: t.key, channel_id: t.channel_id, thread_ts: t.thread_ts, channel: t.channel, known_last_reply_ts: t.last_reply_ts ?? "", has_summary: !!t.thread_summary }));
+  const items: object[] = batch.map((t) => ({ key: t.key, channel_id: t.channel_id, thread_ts: t.thread_ts, channel: t.channel, known_last_reply_ts: t.last_reply_ts ?? "", has_summary: !!t.thread_summary }));
+  for (const d of dms) items.push({ key: d.key, kind: "dm", channel_id: d.channel_id, channel: d.channel, known_last_ts: d.last_reply_ts ?? "" });
   return pickSections(fs.readFileSync(PROMPT, "utf8"), new Set(["threads"]))
-    .replace("{{TOOL_SELECT}}", `select:${THREAD_TOOLS.join(",")}`)
+    .replace("{{TOOL_SELECT}}", `select:${threadTools(dms).join(",")}`)
     .replace("{{PERSONA}}", () => personaPrompt(cfg.persona))
     .replace("{{ITEMS}}", () => items.map((i) => JSON.stringify(i)).join("\n"))
     .replace("{{SCHEMA}}", () => THREAD_SCHEMA);
@@ -133,8 +138,9 @@ export function buildThreadPrompt(batch: SlackThread[], cfg: NedConfig): string 
 export function mergeThreads(raw: unknown[], now = Date.now()): string[] {
   let keys: string[] = [];
   patchAgenda((a) => {
-    if (!a.slack?.threads) return;
-    keys = mergeThreadReads(a.slack.threads, raw, now);
+    if (!a.slack) return;
+    const isDm = (r: unknown) => String((r as { key?: unknown })?.key ?? "").startsWith("dm:");
+    keys = [...mergeThreadReads(a.slack.threads ?? [], raw.filter((r) => !isDm(r)), now), ...mergeThreadReads(a.slack.dms ?? [], raw.filter(isDm), now)];
     applyThreadState(a.slack);
   });
   return keys;
@@ -147,15 +153,16 @@ export function mergeThreads(raw: unknown[], now = Date.now()): string[] {
 export async function processThreads(cfg: NedConfig, now = Date.now()): Promise<"ok" | "none" | "budget"> {
   const a = readAgenda();
   const batch = threadCandidates(a.slack?.threads, cfg.agenda_thread_batch, now);
-  if (!batch.length) return "none";
+  const dms = dmCandidates(a.slack?.dms, DM_BATCH_MAX, now);
+  if (!batch.length && !dms.length) return "none";
   if (overBudget(cfg)) {
-    log(`agenda-threads: today's spend $${todayCost().toFixed(2)} ≥ budget $${cfg.agenda_daily_budget_usd} — not reading ${batch.length} thread(s)`);
+    log(`agenda-threads: today's spend $${todayCost().toFixed(2)} ≥ budget $${cfg.agenda_daily_budget_usd} — not reading ${batch.length} thread(s), ${dms.length} DM(s)`);
     setStatus({ stopped: "budget" });
     return "budget";
   }
   const t = Date.now();
   let raw: unknown[] = [], cost = 0, turns = 0, err = "";
-  const keys = new Set(batch.map((x) => x.key));
+  const keys = new Set([...batch, ...dms].map((x) => x.key));
   if (llmDisabled()) {
     // NED_NO_LLM_THREADS = path to {"threads":[…]} (model-shaped); only the batch's keys are applied.
     const file = process.env.NED_NO_LLM_THREADS;
@@ -164,8 +171,8 @@ export async function processThreads(cfg: NedConfig, now = Date.now()): Promise<
     // Unknown to the fixture: count it as read (nothing new) so it waits for the recheck interval.
     for (const k of keys) if (!raw.some((r) => (r as { key?: unknown }).key === k)) raw.push({ key: k, messages: [] });
   } else {
-    const res = await runClaude(buildThreadPrompt(batch, cfg), {
-      allowedTools: ["ToolSearch", ...THREAD_TOOLS],
+    const res = await runClaude(buildThreadPrompt(batch, cfg, dms), {
+      allowedTools: ["ToolSearch", ...threadTools(dms)],
       tools: ["ToolSearch"],
       maxTurns: 6,
       model: cfg.agenda_light_model ?? cfg.claude_model,
@@ -182,7 +189,7 @@ export async function processThreads(cfg: NedConfig, now = Date.now()): Promise<
   const done = err ? [] : mergeThreads(raw, now);
   setStatus({ cost_usd: Math.round((status.cost_usd + cost) * 10000) / 10000 });
   const fresh = readAgenda().slack?.threads?.filter((x) => done.includes(x.key) && x.new_since_me > 0).length ?? 0;
-  log(`agenda-threads: ${done.length}/${batch.length} threads read${fresh ? `, ${fresh} with replies after mine` : ""} — $${cost.toFixed(3)}, ${turns} turns, ${((Date.now() - t) / 1000).toFixed(1)}s${err ? ` — ${err}` : ""}`);
+  log(`agenda-threads: ${done.length}/${batch.length + dms.length} threads/DMs read${fresh ? `, ${fresh} with replies after mine` : ""} — $${cost.toFixed(3)}, ${turns} turns, ${((Date.now() - t) / 1000).toFixed(1)}s${err ? ` — ${err}` : ""}`);
   return "ok";
 }
 

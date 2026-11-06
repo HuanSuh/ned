@@ -17,10 +17,15 @@ export const THREAD_KEEP_DAYS = 7;
  */
 export const THREAD_RECHECK_MINUTES = 15;
 const MAX_THREADS = 200;
-const RECENT_KEEP = 5;
-const VIEW_RECENT = 3;
+/** Messages kept per thread / DM conversation (the card's history panel shows all of them). */
+export const RECENT_KEEP = 10;
+/** Kept message text, chars. */
+export const HIST_TEXT = 220;
 const TEXT_MAX = 300;
 const LINE_MAX = 160;
+/** DM conversations read per phase-2 batch (needs-me ones first). */
+export const DM_BATCH_MAX = 5;
+const MAX_DMS = 50;
 
 export interface ThreadMessage {
   from: string;
@@ -88,7 +93,17 @@ export interface SlackThreadView {
   new_since_me: number;
   my_last_reply_at?: string;
   seen_reply_ts?: string;
-  /** Last VIEW_RECENT messages, oldest first. */
+  /** Every kept message (≤ RECENT_KEEP), oldest first — the row shows the last 3, the history panel all. */
+  recent: ThreadMessage[];
+}
+
+/** What a DM row carries about its conversation (slack.dms, key `dm:<channel_id>`). */
+export interface SlackDmView {
+  key: string;
+  channel_id: string;
+  last_reply_ts?: string;
+  checked_at?: string;
+  /** Last RECENT_KEEP messages of the conversation (mine included, from `나`), oldest first. */
   recent: ThreadMessage[];
 }
 
@@ -97,6 +112,8 @@ export interface ThreadRowFields {
   thread?: SlackThreadView;
   /** Put back into "확인 필요" because someone replied after my last message. */
   reopened?: boolean;
+  /** DM rows: the conversation's recent history, once phase 2 read it. */
+  dm?: SlackDmView;
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v : v == null ? "" : String(v));
@@ -200,6 +217,81 @@ export function threadCandidates(threads: SlackThread[] | undefined, n: number, 
     .slice(0, n);
 }
 
+// ---------- DM conversations (slack.dms, key `dm:<channel_id>`) ----------
+// Same record shape as a thread (thread_ts ""), but one per DM conversation: phase 2 reads its latest messages with
+// slack_read_channel so a DM row can unfold the conversation's history. No summary, no reopen logic.
+
+/** `dm:<channel_id>` for a DM permalink, or "". */
+export const dmKeyOf = (url: string | undefined): string => {
+  const r = threadRef(url);
+  return r ? `dm:${r.channel_id}` : "";
+};
+
+/** Phase 1 → DM conversation records: one per DM conversation in items / all (needs me = prio 0), quiet ones expire like threads. */
+export function syncDmsFromList(prev: SlackThread[] | undefined, next: SlackBlock, now = Date.now()): SlackThread[] {
+  const byKey = new Map<string, SlackThread>((prev ?? []).filter((t) => t && t.key).map((t) => [t.key, { ...t, prio: 9 }]));
+  const listed = new Set<string>();
+  const nowIso = new Date(now).toISOString();
+  const rows: [Row, number][] = [
+    ...next.items.filter((x) => x.reason === "dm").map((x): [Row, number] => [x, 0]),
+    ...next.all.filter((x) => x.reason === "dm").map((x): [Row, number] => [x, (x as { answered?: boolean }).answered ? 1 : 0]),
+  ];
+  for (const [x, prio] of rows) {
+    const r = threadRef(x.url);
+    if (!r) continue;
+    const key = `dm:${r.channel_id}`;
+    listed.add(key);
+    let t = byKey.get(key);
+    if (!t) {
+      t = { key, channel_id: r.channel_id, thread_ts: "", channel: x.channel || "DM", url: x.url, prio, first_seen_at: nowIso, reply_count: 0, new_since_me: 0, participants: [], recent: [] };
+      byKey.set(key, t);
+    }
+    t.prio = Math.min(t.prio, prio);
+    if (!(tsNum(t.search_latest_ts) >= tsNum(r.ts))) { t.search_latest_ts = r.ts; t.url = x.url; }
+  }
+  const keepAfter = now / 1000 - THREAD_KEEP_DAYS * 86400;
+  return [...byKey.values()]
+    .map((t) => (listed.has(t.key) ? t : { ...t, prio: t.prio === 9 ? 3 : t.prio }))
+    .filter((t) => listed.has(t.key) || threadActivity(t) >= keepAfter)
+    .sort((a, b) => threadActivity(b) - threadActivity(a))
+    .slice(0, MAX_DMS);
+}
+
+/**
+ * DM conversations phase 2 should read now, at most min(n, DM_BATCH_MAX): same freshness rule as threads (never read,
+ * phase 1 saw a newer message than the last read, or the last read is THREAD_RECHECK_MINUTES old). Needs-me first.
+ */
+export function dmCandidates(dms: SlackThread[] | undefined, n = DM_BATCH_MAX, now = Date.now()): SlackThread[] {
+  const cap = Math.min(n, DM_BATCH_MAX);
+  if (cap <= 0) return [];
+  const since = now / 1000 - THREAD_FOLLOW_HOURS * 3600;
+  const newer = (t: SlackThread) => tsNum(t.search_latest_ts) > (tsNum(t.last_reply_ts) || 0);
+  const checked = (t: SlackThread) => (t.checked_at ? Date.parse(t.checked_at) || 0 : 0);
+  return (dms ?? [])
+    .filter((t) => threadActivity(t) >= since)
+    .filter((t) => !t.checked_at || newer(t) || now - checked(t) >= THREAD_RECHECK_MINUTES * 60_000)
+    .sort((a, b) => a.prio - b.prio || Number(newer(b)) - Number(newer(a)) || Number(!b.checked_at) - Number(!a.checked_at) || checked(a) - checked(b))
+    .slice(0, cap);
+}
+
+export function dmView(t: SlackThread): SlackDmView {
+  const v: SlackDmView = { key: t.key, channel_id: t.channel_id, recent: t.recent.slice(-RECENT_KEEP) };
+  if (t.last_reply_ts) v.last_reply_ts = t.last_reply_ts;
+  if (t.checked_at) v.checked_at = t.checked_at;
+  return v;
+}
+
+/** DM rows (items / all) get `dm` = their conversation's history, once read. */
+export function applyDmState(s: SlackBlock): void {
+  const byKey = new Map((s.dms ?? []).map((t) => [t.key, t]));
+  for (const x of [...s.items, ...s.all] as (SlackItem & ThreadRowFields)[]) {
+    if (x.reason !== "dm") { delete x.dm; continue; }
+    const t = byKey.get(dmKeyOf(x.url));
+    if (t && t.recent.length) x.dm = dmView(t);
+    else delete x.dm;
+  }
+}
+
 /**
  * One slack_read_thread result (model JSON) → the thread's latest state. Mutates `threads`; returns the keys updated.
  * Raw shape: {key, reply_count, my_last_reply_ts, new_since_me, participants[], messages[{from, ts, text}]} — `나` = me.
@@ -247,7 +339,7 @@ export function mergeThreadReads(threads: SlackThread[], raw: unknown[], now = D
       t.new_since_me = windowCut ? Math.max(counted, Math.trunc(Number(o.new_since_me)) || 0) : counted;
     } else t.new_since_me = 0;
     t.participants = [...new Set([...(Array.isArray(o.participants) ? o.participants.map((p) => oneLine(str(p), 80)) : []), ...msgs.map((m) => m.from)].filter(Boolean))].slice(0, 20);
-    t.recent = msgs.slice(-RECENT_KEEP);
+    t.recent = msgs.slice(-RECENT_KEEP).map((m) => ({ ...m, text: m.text.slice(0, HIST_TEXT) }));
   }
   return done;
 }
@@ -259,7 +351,7 @@ export function threadContext(t: SlackThread): SlackContext | undefined {
 }
 
 export function threadView(t: SlackThread): SlackThreadView {
-  const v: SlackThreadView = { key: t.key, thread_ts: t.thread_ts, reply_count: t.reply_count, new_since_me: t.new_since_me, recent: t.recent.slice(-VIEW_RECENT) };
+  const v: SlackThreadView = { key: t.key, thread_ts: t.thread_ts, reply_count: t.reply_count, new_since_me: t.new_since_me, recent: t.recent.slice(-RECENT_KEEP) };
   for (const k of ["root_text", "root_from", "thread_summary", "last_reply_ts", "last_reply_at", "last_reply_from", "last_reply_text", "my_last_reply_at", "seen_reply_ts"] as const) if (t[k]) v[k] = t[k];
   return v;
 }
@@ -313,6 +405,7 @@ export function applyThreadState(s: SlackBlock): void {
       }
     }
   }
+  applyDmState(s);
 }
 
 /**

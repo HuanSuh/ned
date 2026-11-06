@@ -179,6 +179,29 @@ describe("sourceSignature / pickSections", () => {
   });
 });
 
+describe("slack.watch recent (normalizeWatch)", () => {
+  const c = cfg({ filters: normalizeFilters({ slack: { watch_channels: ["ops", "infra"] } }) });
+  it("keeps the newest 3 messages, one line ≤120 chars, epoch ts → ISO; missing → []", () => {
+    const m = (i: number, text = `msg ${i}`) => ({ from: ` u${i} `, text, ts: `17623900${String(i).padStart(2, "0")}.000100`, url: slackUrl("C9", `17623900${String(i).padStart(2, "0")}000100`) });
+    const p = normalize({ slack: { items: [], all: [], watch: [
+      { channel: "#ops", summary: "", highlights: [], recent: [m(1), m(4, "a\n  b " + "x".repeat(200)), m(2), m(3), "junk", { from: "x" }] },
+      { channel: "infra", summary: "s", highlights: [] },
+    ] } }, c, AT);
+    const [ops, infra] = p.slack!.watch;
+    expect(ops.recent.map((r) => r.from)).toEqual(["u4", "u3", "u2"]);
+    expect(ops.recent[0].text).toHaveLength(120);
+    expect(ops.recent[0].text.startsWith("a b x")).toBe(true);
+    expect(ops.recent[0].ts).toBe(new Date(1762390004000.1).toISOString());
+    expect(ops.recent[0].url).toBe(m(4).url);
+    expect(infra.recent).toEqual([]);
+  });
+  it("the list prompt asks for recent alongside highlights", () => {
+    const pr = buildListsPrompt(c, ["slack"]);
+    expect(pr).toContain("`recent`");
+    expect(pr).toContain('"recent":[{"from":"","text":"","ts":"ISO","url":""}]');
+  });
+});
+
 describe("slack ack reactions (filters.slack.ack_reactions)", () => {
   const u1 = slackUrl("C1", "1762390000000100"), u2 = slackUrl("C2", "1762390000000200"), u3 = slackUrl("C3", "1762390000000300");
   const raw = {

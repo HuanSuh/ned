@@ -2,6 +2,7 @@
 import { cardDomId, cardIds, dashLayout } from "./cardlayout.js";
 import { applyLayout, cardOrder } from "./layout.js";
 import { isOpenSrc, srcKey } from "./reviewed.js";
+import { recentHtml } from "./slackthread.js";
 import { watchRow } from "./watchcards.js";
 import { ui } from "../state.js";
 import { renderTodoGroups } from "../tabs/home.js";
@@ -84,7 +85,7 @@ export function renderSlackWatch(watch, needN) {
     watch.map((w) => {
       const n = (w.highlights || []).filter((h) => h.needs_me && isOpenSrc("slack")(h)).length;
       return `<div class="swch"><div class="swh">${esc(w.channel)}${n ? `<span class="chipx today">${n}</span>` : ""}</div>` +
-        (w.summary ? `<div class="sws">${esc(w.summary)}</div>` : `<div class="gnone">지난 24시간 눈에 띄는 대화 없음.</div>`) +
+        (w.summary ? `<div class="sws">${esc(w.summary)}</div>` : (!(w.highlights || []).length && recentHtml(w.recent)) || `<div class="gnone">지난 24시간 눈에 띄는 대화 없음.</div>`) +
         (w.highlights || []).map((h) => hl(w, h)).join("") + `</div>`;
     }).join("") + `</details>`;
 }

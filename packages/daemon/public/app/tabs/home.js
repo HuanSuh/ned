@@ -2,7 +2,7 @@
 import { api } from "../api.js";
 import { costHtml, followAgenda, loadCosts, renderAgStatus } from "../features/agstatus.js";
 import { meetings, renderAgenda, todayEvents } from "../features/calendar.js";
-import { threadMain, threadPreview } from "../features/slackthread.js";
+import { histPanel, histToggle, threadMain, threadPreview } from "../features/slackthread.js";
 import { GH_REASON, MAIL_REASON, PRIO_LED, SLACK_REASON, card, cardMode, collapseDMs, counts, group, moreBadge, packCards, preview, renderSlackWatch, unionAll, watchNeeds } from "../features/cards.js";
 import { watchCardsOn } from "../features/cardlayout.js";
 import { draftFor } from "../features/drafts.js";
@@ -90,8 +90,8 @@ export function renderTodoGroups() {
   const slackAllRows = withFold("slack-all", "slack", collapseDMs(slackU.list), (x) => {
     const u = safeUrl(x.url), r = slRow(x), need = slackU.isNeed(x);
     const chip = need ? `<span class="chipx today">답 필요</span>` : x.answered ? `<span class="chipx ok">답함</span>` : `<span class="chipx ${r[0]}">${r[1]}</span>`;
-    return `<div class="ti${need ? " need" : ""}${x.answered && !need ? " answered" : ""}${revCls("slack", x)}"><span class="ic">${r[2]}</span><div class="mn">${threadMain(x, u, chip + moreBadge(x)) || `<span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
-        <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span>${chip}${moreBadge(x)}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div>`}</div>
+    return `<div class="ti${need ? " need" : ""}${x.answered && !need ? " answered" : ""}${revCls("slack", x)}"><span class="ic">${r[2]}</span><div class="mn">${threadMain(x, u, chip + moreBadge(x) + histToggle(x)) ||`<span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
+        <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span>${chip}${moreBadge(x)}${histToggle(x)}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div>`}${histPanel(x)}</div>
         <div class="ra">${draftFor("slack", x, srcKey("slack", x))}${openIcon(u)}${srcCheck("slack", x)}</div></div>`;
   });
   card("slack", {
@@ -99,8 +99,8 @@ export function renderTodoGroups() {
     mode: cardMode("slack"), allRows: slackAllRows, allEmpty: slack ? "최근 24시간 멘션·DM 목록 없음 (다음 새로고침 때 채워져)." : "다음 새로고침 때 Slack 도 가져올게.",
     rows: withFold("slack", "slack", siAll, (x) => {
       const u = safeUrl(x.url), r = slRow(x);
-      return `<div class="ti${revCls("slack", x)}"><span class="ic">${r[2]}</span><div class="mn">${threadMain(x, u, `<span class="chipx ${r[0]}">${x.reopened ? "새 답글" : r[1]}</span>${moreBadge(x)}`) || `<span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
-          <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span><span class="chipx ${r[0]}">${r[1]}</span>${moreBadge(x)}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div>`}</div>
+      return `<div class="ti${revCls("slack", x)}"><span class="ic">${r[2]}</span><div class="mn">${threadMain(x, u, `<span class="chipx ${r[0]}">${x.reopened ? "새 답글" : r[1]}</span>${moreBadge(x)}${histToggle(x)}`) ||`<span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
+          <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span><span class="chipx ${r[0]}">${r[1]}</span>${moreBadge(x)}${histToggle(x)}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div>`}${histPanel(x)}</div>
           <div class="ra">${draftFor("slack", x, srcKey("slack", x))}${openIcon(u)}${srcCheck("slack", x)}</div></div>`;
     }),
     empty: unavailable || (slack ? "답할 Slack 없음." : "다음 새로고침 때 Slack 도 가져올게."),
