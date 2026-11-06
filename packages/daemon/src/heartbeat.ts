@@ -36,7 +36,7 @@ interface LlmBriefing {
   sessions?: BriefingSection[];
 }
 
-function sentKeys(): Set<string> {
+export function sentKeys(): Set<string> {
   try {
     return new Set(fs.readFileSync(SENT_LOG, "utf8").split("\n").filter(Boolean));
   } catch {
@@ -44,11 +44,11 @@ function sentKeys(): Set<string> {
   }
 }
 
-function markSent(keys: string[]): void {
+export function markSent(keys: string[]): void {
   if (keys.length) fs.appendFileSync(SENT_LOG, keys.join("\n") + "\n");
 }
 
-const keyOf = (s: BriefingSection) => (s.url ?? s.title).trim().toLowerCase();
+export const keyOf = (s: BriefingSection) => (s.url ?? s.title).trim().toLowerCase();
 
 function summarizeEvents(events: NedEvent[]): string {
   if (!events.length) return "(없음)";
