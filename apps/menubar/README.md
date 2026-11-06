@@ -7,7 +7,7 @@ Ned.app is the one thing you run. It:
   when it exits (more than 5 exits in 10 min → failed state), and stops it on quit (SIGTERM, 3 s, SIGKILL).
   If a daemon is already healthy on the port (e.g. a leftover LaunchAgent), it **adopts** it and spawns nothing.
 - **hosts the dashboard** in a native window (`WKWebView` at `http://127.0.0.1:<port>/`),
-- shows attention items and agent sessions in a `MenuBarExtra`, read from `state.json`,
+- shows attention items and agent sessions in a menu bar item (AppKit `NSStatusItem` + popover), read from `state.json`,
 - can register itself as a Login Item (`SMAppService.mainApp`),
 - posts native notifications (`UNUserNotificationCenter`) from `state.json` changes — see below.
 
@@ -15,7 +15,8 @@ The daemon and the dashboard HTML are unchanged; the app only wraps them.
 
 | File | Role |
 | --- | --- |
-| `Sources/Ned/NedApp.swift` | `@main` app, status item label, app delegate (starts/stops the daemon, SIGTERM → quit) |
+| `Sources/Ned/NedApp.swift` | `@main` app (empty Settings scene), app delegate (store, status item, starts/stops the daemon, SIGTERM → quit) |
+| `Sources/Ned/StatusItemController.swift` | `NSStatusItem` (unique autosave name, icon/badge/count), MenuContent popover, StatusItemGuard |
 | `Sources/Ned/MenuContent.swift` | Dropdown: daemon status, attention, sessions, Login Item toggle, repo picker, footer |
 | `Sources/Ned/StateStore.swift` | `state.json` model, directory watcher, daemon HTTP calls |
 | `Sources/Ned/DaemonManager.swift` | Daemon supervisor + `node`/`claude` resolution |
@@ -121,6 +122,8 @@ Launch args: `--dashboard` opens the window at launch (`NED_OPEN_DASHBOARD=1` do
 `--boot-selftest` (headless, stdout) checks the node/claude tool cache (cold miss → cached, warm hit, broken
 cache → miss; own defaults suite, the app's cache is untouched) and writes the boot screen HTML per persona to
 `$NED_BOOT_HTML_OUT` (default `$TMPDIR/ned-boot-selftest`) for a headless render check.
+`--statusitem-selftest` (run the bare `.build/release/Ned`, not the bundle) creates the status item, logs autosaveName /
+isVisible / behavior / button image, checks a re-render keeps the same NSStatusItem, sizes the popover content, removes it.
 `--boot-transition-selftest [--cold]` (no scene / menu bar item; temp `NED_HOME` + `NED_PORT`, `NED_REPO` = a checkout
 with a built daemon, `NED_TOOL_CACHE_SUITE` = throwaway defaults suite) runs the real daemon start + the boot screen
 in a window-less web view and passes if the dashboard load starts ≤ outro + 1 s after healthy (or after the minimum on-screen time):
@@ -208,13 +211,17 @@ On macOS 26 the system can hide a bundled app's status item. You can see this in
 preference the system writes for the app:
 
 ```sh
-defaults read com.ned.menubar      # "NSStatusItem VisibleCC Item-0" = 0 means hidden
+defaults read com.ned.menubar      # "NSStatusItem VisibleCC com.ned.menubar.status" = 0 means hidden
 ```
 
-To show it, turn Ned on under System Settings > Menu Bar > Allow in the Menu Bar.
-The app stays running while hidden because `MenuBarExtra(isInserted:)` is bound to a
-state flag. Without that binding SwiftUI would quit the app. The bare binary is not
-affected, which makes it the quickest way to check UI changes.
+Root cause of the old "icon gone right after launch": SwiftUI `MenuBarExtra` gave the item the default autosave
+name `Item-0`, and Control Center's own defaults (`com.apple.controlcenter`) held `NSStatusItem Visible Item-0`…`Item-9`
+= false, so macOS hid it on every launch and wrote `NSStatusItem VisibleCC Item-0 = 0` into our domain. The item is
+now an AppKit `NSStatusItem` with the unique autosave name `com.ned.menubar.status`, `isVisible = true` at creation
+and `behavior = []` (no ⌘-drag removal); it is created once and only its image/title change. StatusItemGuard clears
+hidden flags (legacy `Item-0` and the new name) at start-up and every 10 s and re-asserts `isVisible`.
+If it is still hidden, turn Ned on under System Settings > Menu Bar > Allow in the Menu Bar.
+The bare binary is not affected, which makes it the quickest way to check UI changes.
 
 ## Fixture testing
 
