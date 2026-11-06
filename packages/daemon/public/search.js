@@ -374,6 +374,12 @@
         for (const h of g.slice(0, PER_GROUP)) { const i = rows.length; rows.push({ ...h, key: `${h.type}:${h.id}` }); html += rowHtml(h, i, toks); }
       }
       if (!rows.length) html = `<div class="none">${st.serverQ === st.q.trim() ? `‘${esc(st.q.trim())}’ — 못 찾았어.` : "찾는 중…"}</div>`;
+      // Last row: hand the query to Ned's chat (features/comms.js). Alone (no hits) it is the ⏎ default.
+      if (window.NED && window.NED.comms) {
+        const i = rows.length, q = st.q.trim();
+        rows.push({ key: "ask", type: "ask", q });
+        html += `<div class="gh">Ned</div><div class="it" role="option" id="nsp-o${i}" data-i="${i}" aria-selected="false"><span class="ic" aria-hidden="true">🗨</span><span class="tt">Ned 에게 묻기: “${esc(q.length > 80 ? q.slice(0, 79) + "…" : q)}”</span><span class="sb">통신기를 열고 이 질문을 보내</span><span class="rt"><span class="chip">${MOD}J</span></span></div>`;
+      }
     }
     st.rows = rows;
     if (st.selKey) { const i = rows.findIndex((r) => r.key === st.selKey); if (i >= 0) st.sel = i; }
@@ -426,6 +432,7 @@
   // ---------- actions ----------
   function act(r, how) {
     if (!r) return;
+    if (r.type === "ask") { pushRecent(r.q); close(); window.NED.comms.ask(r.q); return; }
     if (r.type === "recent") { input.value = r.q; st.q = r.q; st.sel = 0; st.selKey = null; refresh(); input.focus(); return; }
     pushRecent(st.q);
     if (how === "newtab") {

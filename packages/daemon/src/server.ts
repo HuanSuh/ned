@@ -8,6 +8,7 @@ import { parseCalendarCreate } from "./calendar-create.js";
 import { getSendJob, linkOf, startSendJob, viewJob } from "./send-jobs.js";
 import { AGENDA_SOURCES, agendaBusy, enabledSources, patchAgenda, readAgenda, runningSources, startAgendaRefresh, type AgendaSourceKey } from "./agenda.js";
 import { contextStatus, requestContext } from "./agenda-context.js";
+import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runChatTurn, sseFrame, stopChat } from "./chat.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
 import { PERSONAS, loadConfig, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeDashboard, normalizeNotifications, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, saveConfig, sourceRefreshMinutes, watchChannels, type NedConfig, type PersonaId } from "./config.js";
@@ -259,6 +260,40 @@ export function startServer(getConfig: () => NedConfig): void {
   });
   app.get("/api/calendar/events/:job_id", jobView);
   app.get("/api/actions", (c) => c.json(readActionLog(50)));
+
+  // Ned 채팅 (dashboard PDA → 대화). POST answers as text/event-stream: start → delta* (turn / tool) → done | error.
+  // 400 empty / > CHAT_INPUT_MAX chars, 404 unknown conversation_id, 409 another turn running, 429 over the daily budget.
+  // The turn keeps running (and is saved) if the browser goes away; POST /api/chat/:id/stop SIGTERMs it.
+  app.post("/api/chat", async (c) => {
+    const prep = prepareChatTurn(loadConfig(), await readBody(c));
+    if (!prep.ok) {
+      const { ok: _o, status, ...out } = prep;
+      return c.json(out, status);
+    }
+    const enc = new TextEncoder();
+    let closed = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(ctrl) {
+        const send = (ev: string, data: Record<string, unknown>) => {
+          if (closed) return;
+          try { ctrl.enqueue(enc.encode(sseFrame(ev, data))); } catch { closed = true; }
+        };
+        void runChatTurn(prep, send).finally(() => {
+          if (closed) return;
+          closed = true;
+          try { ctrl.close(); } catch { /* already gone */ }
+        });
+      },
+      cancel() { closed = true; },
+    });
+    return new Response(stream, { headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", "x-accel-buffering": "no" } });
+  });
+  app.get("/api/chats", (c) => c.json({ chats: listChats(), active: activeChat(), input_max: CHAT_INPUT_MAX }));
+  app.get("/api/chat/:id", (c) => {
+    const chat = readChat(c.req.param("id"));
+    return chat ? c.json({ ...chat, running: activeChat() === chat.id }) : c.json({ error: "not found" }, 404);
+  });
+  app.post("/api/chat/:id/stop", (c) => (stopChat(c.req.param("id")) ? c.json({ ok: true }) : c.json({ ok: false, error: "not running" }, 404)));
 
   registerSearch(app); // GET /api/search (src/search.ts) — before the static catch-all
   // Static files under public/ (proposals, svg mark, ...). Registered last so /api/* wins.
