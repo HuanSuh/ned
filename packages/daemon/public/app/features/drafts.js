@@ -14,8 +14,8 @@ import { $, esc, safeUrl } from "../util.js";
 
 // ---------- reply drafts: "답장 초안" → POST /api/draft → modal (3 drafts, edit, regenerate) → POST /api/send ----------
 // Write actions are opt-in (config.actions); sending ones (Slack 전송 / 메일 보내기 / 세션에 보내기) always ask once more.
-export const ACTION_DEFAULTS = { slack_send: false, gmail_draft: true, gmail_send: false, session_send: true, jira_comment: false, jira_transition: false, github_review: false, calendar_rsvp: false };
-export const ACTION_KO = { slack_send: "Slack 전송", gmail_draft: "Gmail 초안 저장", gmail_send: "메일 보내기", session_send: "세션에 보내기", jira_comment: "Jira 코멘트", jira_transition: "Jira 상태 변경", github_review: "GitHub 리뷰·코멘트", calendar_rsvp: "캘린더 참석 응답" };
+export const ACTION_DEFAULTS = { slack_send: false, gmail_draft: true, gmail_send: false, session_send: true, jira_comment: false, jira_transition: false, github_review: false, calendar_rsvp: false, calendar_create: false };
+export const ACTION_KO = { slack_send: "Slack 전송", gmail_draft: "Gmail 초안 저장", gmail_send: "메일 보내기", session_send: "세션에 보내기", jira_comment: "Jira 코멘트", jira_transition: "Jira 상태 변경", github_review: "GitHub 리뷰·코멘트", calendar_rsvp: "캘린더 참석 응답", calendar_create: "캘린더 일정 생성" };
 export const actionsOn = () => ({ ...ACTION_DEFAULTS, ...(S.config?.actions || {}) });
 export const DRAFT_SRC_KO = { slack: "Slack", email: "메일", session: "세션", jira: "Jira 코멘트", github: "PR 리뷰" };
 export const clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== ""));

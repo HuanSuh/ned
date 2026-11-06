@@ -1,0 +1,35 @@
+/* New calendar event (features/calcreate.js): #cal-modal form, drag selection, pending blocks. Loaded by calcreate.js. */
+.ccbox { width: min(560px, 100%); }
+.ccform input[type="text"], .ccform input[type="date"], .ccform input[type="time"], .ccform textarea {
+  background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; font: 13px/1.45 var(--sans); min-width: 0;
+}
+.ccform input:focus, .ccform textarea:focus { outline: 2px solid var(--info); outline-offset: 0; }
+.ccform input:disabled, .ccform textarea:disabled { opacity: .6; }
+.ccform textarea { resize: vertical; width: 100%; }
+.ccform .cctitle { font-size: 15px; font-weight: 600; padding: 8px 10px; }
+.ccrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ccrow .sp { flex: 1; }
+.cctime, .ccend { display: inline-flex; gap: 6px; align-items: center; }
+.cctime[hidden], .ccend[hidden] { display: none; }
+.ccrow .dash { color: var(--dim); }
+.cctog, .cccal { display: inline-flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--dim); cursor: pointer; }
+.cccal input { width: 180px; }
+
+/* time grid: where a click / drag can start, and the live selection */
+#agenda .day[data-day], #agenda .wcol[data-day] { cursor: cell; }
+#agenda .day .cev, #agenda .wcol .cev { cursor: default; }
+body.ccdragging { user-select: none; -webkit-user-select: none; }
+.ccsel {
+  position: absolute; left: 2px; right: 2px; z-index: 3; pointer-events: none; border-radius: 6px;
+  background: color-mix(in srgb, var(--hero) 18%, transparent); border: 1px dashed var(--hero);
+  font: 10.5px var(--mono); color: var(--fg); padding: 2px 5px; overflow: hidden; white-space: nowrap;
+}
+
+/* optimistic: just created, waiting for the calendar refresh */
+.cev.pend, .ad.pend, .wa.pend { border-style: dashed; opacity: .75; background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--info) 12%, var(--pane)) 0 6px, var(--pane) 6px 12px); }
+
+/* toast with a clickable link (the shared toast ignores the pointer) */
+.toast.cclink { pointer-events: auto; }
+.toast .cclk { flex: none; white-space: nowrap; }
+.toast:not(.cclink) .cclk { display: none; }
+.merr .ccmsg { color: var(--fg); }

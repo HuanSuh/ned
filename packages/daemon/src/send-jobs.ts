@@ -4,9 +4,11 @@
  *
  * - Same request (draft_id or ref, + source/mode/text) while one is running → that job's id, never a second send.
  * - Same draft_id + source/mode already sent ok within 10 min (memory or ~/.ned/sent-actions.log) → 409 already_sent.
+ *   Calendar `create` has no draft: the same event (calendar + title + start/end) created ok within 10 min → 409.
  * - Jobs live in memory only; after a daemon restart GET answers 404 and the client looks in GET /api/actions.
  */
 import { randomUUID } from "node:crypto";
+import { eventKey } from "./calendar-create.js";
 import { appendActionLog, gateKey, performSend, readActionLog, type SendRequest, type SendResult } from "./actions.js";
 import type { NedConfig } from "./config.js";
 import { log } from "./paths.js";
@@ -41,6 +43,7 @@ const jobs = new Map<string, SendJob>();
 
 /** Identity of "the same send": the draft (or the ref when there is none) + source/mode + exact text. */
 export function sendKey(req: SendRequest): string {
+  if (req.event) return `${req.source}|${req.mode}|e:${JSON.stringify(req.event)}`;
   const who = req.draft_id ? `d:${req.draft_id}` : `r:${JSON.stringify(req.ref)}`;
   return `${req.source}|${req.mode}|${who}|${req.text}`;
 }
@@ -68,6 +71,15 @@ export function getSendJob(id: string): SendJob | undefined {
 
 /** A successful send of this draft (same source/mode) in the last 10 min — from memory, else from the action log. */
 export function findRecentSent(req: SendRequest, now = Date.now()): { at: string; detail: string; job_id?: string } | null {
+  if (req.event) {
+    const k = eventKey(req.event);
+    for (const j of jobs.values()) {
+      const r = j.result;
+      if (j.state === "done" && r?.ok && j.req.event && eventKey(j.req.event) === k && now - (j.finished_at ?? 0) <= ALREADY_SENT_MS) return { at: r.logged_at, detail: r.detail, job_id: j.id };
+    }
+    const hit = readActionLog(500).find((e) => e.ok && e.event_key === k && now - Date.parse(e.ts) <= ALREADY_SENT_MS);
+    return hit ? { at: hit.ts, detail: hit.result } : null;
+  }
   if (!req.draft_id) return null;
   for (const j of jobs.values()) {
     const r = j.result;

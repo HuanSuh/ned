@@ -40,7 +40,7 @@ async function poll(p, onTick, deadline) {
   for (;;) {
     let r = null;
     try {
-      const res = await fetch(`/api/send/${encodeURIComponent(p.job_id)}`, { headers: { accept: "application/json" } });
+      const res = await fetch(`${p.endpoint || "/api/send"}/${encodeURIComponent(p.job_id)}`, { headers: { accept: "application/json" } });
       r = { status: res.status, data: await res.json().catch(() => null) };
     } catch { /* daemon briefly unreachable — keep trying until the deadline */ }
     if (r?.status === 404) return fromActionLog(p);
@@ -57,12 +57,15 @@ async function poll(p, onTick, deadline) {
  * - 409 + data.already_sent: this draft was already sent ok in the last 10 min (data.link);
  * - `unknown: true` when the daemon never confirmed (restart with no log line, 4-min deadline, network) — no retry then.
  * `opts.label` is kept with the pending job so a reload can say what finished.
+ * `opts.endpoint` (default /api/send): another job route with the same shape (POST → 202, GET <endpoint>/:id), e.g.
+ * /api/calendar/events with `opts.match` = {source, mode, ref} for the action-log fallback.
  */
-export async function sendAndWait(body, { onTick, label } = {}) {
+export async function sendAndWait(body, { onTick, label, endpoint = "/api/send", match } = {}) {
   // A POST that never got an answer is safe to retry: the daemon joins a running job / answers 409 for a sent draft.
-  const r = await postJson("/api/send", body).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
+  const r = await postJson(endpoint, body).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
   if (r.status !== 202 || !r.data?.job_id) return r;
-  const p = { job_id: r.data.job_id, started_at: r.data.started_at || new Date().toISOString(), label, source: body.source, mode: body.mode, draft_id: body.draft_id, ref: body.ref, text: (body.text || "").trim() };
+  const m = match || body;
+  const p = { job_id: r.data.job_id, started_at: r.data.started_at || new Date().toISOString(), label, endpoint, source: m.source, mode: m.mode, draft_id: m.draft_id, ref: m.ref, text: (m.text || "").trim() };
   if (body.mode !== "transitions") addPending(p); // a read-only listing isn't worth reporting after a reload
   const out = await poll(p, onTick);
   if (!out.timedOut) dropPending(p.job_id); // a timed-out job stays: the next page load checks once more

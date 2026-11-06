@@ -137,6 +137,7 @@ const ACTION_HINT = {
   jira_transition: "Jira 항목 ⋯ → 상태 변경 (가능한 전환을 먼저 읽어 옴) → 확인 후 전환",
   github_review: "PR 항목 ⋯ → 리뷰 초안 / 승인 / 변경 요청 / 코멘트 (gh pr review · gh pr comment)",
   calendar_rsvp: "일정 ⋯ → 수락 / 미정 / 거절",
+  calendar_create: "일정 카드 ＋ / 주 보기 드래그 / 일 보기 빈 시간 클릭 → 새 일정 팝업 → 확인 후 Google Calendar 에 생성",
 };
 const SRC_KO = { slack: "Slack", email: "메일", session: "세션", jira: "Jira", github: "GitHub", calendar: "캘린더" };
 const OUTCOME_KO = { ok: ["성공", "ok"], refused: ["거절(꺼짐)", ""], dry_run: ["dry-run", ""], failed: ["실패", "today"] };

@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
-import { parseSendRequest, readActionLog } from "./actions.js";
+import { parseSendRequest, readActionLog, type SendRequest } from "./actions.js";
+import { parseCalendarCreate } from "./calendar-create.js";
 import { getSendJob, linkOf, startSendJob, viewJob } from "./send-jobs.js";
 import { AGENDA_SOURCES, agendaBusy, enabledSources, patchAgenda, readAgenda, runningSources, startAgendaRefresh, type AgendaSourceKey } from "./agenda.js";
 import { contextStatus, requestContext } from "./agenda-context.js";
@@ -224,11 +225,9 @@ export function startServer(getConfig: () => NedConfig): void {
     }
   });
   app.get("/api/draft/status", (c) => c.json(pregenStatus()));
-  app.post("/api/send", async (c) => {
-    const req = parseSendRequest(await readBody(c));
-    if (typeof req === "string") return c.json({ ok: false, error: req }, 400);
-    // Connector sends take 30~60s (claude -p) — longer than the app's WebView waits — so they run as a job:
-    // 202 {job_id} now, GET /api/send/:job_id for the result. A switched-off action is still refused here (403).
+  // Connector sends take 30~60s (claude -p) — longer than the app's WebView waits — so they run as a job:
+  // 202 {job_id} now, GET /api/send/:job_id for the result. A switched-off action is still refused here (403).
+  const startJob = async (c: Context, req: SendRequest) => {
     const st = await startSendJob(req, loadConfig());
     if (st.kind === "sync") {
       const { status, ...out } = st.result;
@@ -239,11 +238,26 @@ export function startServer(getConfig: () => NedConfig): void {
       return c.json({ ok: false, already_sent: true, sent_at: at, detail, link: linkOf(detail), job_id, error: `이미 전송됨 (${at})` }, 409);
     }
     return c.json({ ok: true, job_id: st.job.id, reused: st.reused, started_at: new Date(st.job.started_at).toISOString() }, 202);
-  });
-  app.get("/api/send/:job_id", (c) => {
-    const j = getSendJob(c.req.param("job_id"));
+  };
+  const jobView = (c: Context) => {
+    const j = getSendJob(c.req.param("job_id") ?? "");
     return j ? c.json(viewJob(j)) : c.json({ error: "unknown job (daemon restarted?) — look in GET /api/actions" }, 404);
+  };
+  app.post("/api/send", async (c) => {
+    const req = parseSendRequest(await readBody(c));
+    if (typeof req === "string") return c.json({ ok: false, error: req }, 400);
+    if (req.mode === "create") return c.json({ ok: false, error: "calendar create goes through POST /api/calendar/events" }, 400);
+    return startJob(c, req);
   });
+  app.get("/api/send/:job_id", jobView);
+  // New Google Calendar event (config.actions.calendar_create): same job flow as /api/send — 400 bad input, 403 off,
+  // 202 {job_id} (joins an identical running request), 409 already_sent when the same title + time was created in 10 min.
+  app.post("/api/calendar/events", async (c) => {
+    const ev = parseCalendarCreate(await readBody(c));
+    if (typeof ev === "string") return c.json({ ok: false, error: ev }, 400);
+    return startJob(c, { source: "calendar", mode: "create", text: "", ref: { title: ev.title, calendar_id: ev.calendar_id }, event: ev });
+  });
+  app.get("/api/calendar/events/:job_id", jobView);
   app.get("/api/actions", (c) => c.json(readActionLog(50)));
 
   registerSearch(app); // GET /api/search (src/search.ts) — before the static catch-all

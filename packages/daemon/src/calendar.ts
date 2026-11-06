@@ -49,6 +49,20 @@ export function fetchCalendarRange(cfg: NedConfig, from: string, to: string): Pr
   return p.finally(() => inflight.delete(key));
 }
 
+/** Drop cached /api/calendar ranges that overlap [from, to] (a new event there would be missing for 6 h). Returns how many. */
+export function invalidateCalendarRanges(from: string, to: string): number {
+  let n = 0;
+  try {
+    for (const f of fs.readdirSync(CALENDAR_DIR)) {
+      const m = /^(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})\.json$/.exec(f);
+      if (m && m[1] <= to && from <= m[2]) { fs.rmSync(path.join(CALENDAR_DIR, f), { force: true }); n++; }
+    }
+  } catch {
+    /* no cache dir yet */
+  }
+  return n;
+}
+
 export function calendarBusy(): string[] {
   return [...inflight.keys()];
 }
