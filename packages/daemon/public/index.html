@@ -558,6 +558,33 @@
   details.tdone summary::before { content: "▸ "; } details.tdone[open] summary::before { content: "▾ "; }
   .hkeys { margin-top: 14px; color: var(--faint); font-size: 11.5px; display: flex; gap: 12px; flex-wrap: wrap; }
 
+  /* reply-draft modal */
+  .modal { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, #000 55%, transparent); }
+  .mbox { width: min(720px, 100%); max-height: calc(100dvh - 32px); display: flex; flex-direction: column; background: var(--pane); border: 1px solid var(--edge); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, .45); overflow: hidden; }
+  .mhd { display: flex; gap: 10px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); min-width: 0; }
+  .mhd h3 { margin: 0; font-size: 15px; font-family: var(--head); font-weight: var(--head-w); flex: none; }
+  .mhd .mt { color: var(--dim); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .mhd .sp { flex: 1; }
+  .mbd { padding: 12px 16px; overflow: auto; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  .mctx .sum { font-size: 13px; }
+  .mctx blockquote { margin: 6px 0 0; padding: 6px 10px; border-left: 3px solid var(--info); background: var(--bubble); color: var(--dim); font-size: 12.5px; white-space: pre-wrap; max-height: 120px; overflow: auto; border-radius: 0 6px 6px 0; }
+  .mmeta { margin-top: 4px; font: 10.5px var(--mono); color: var(--faint); }
+  .mtabs { display: flex; gap: 4px; }
+  #dm-text { width: 100%; min-height: 150px; resize: vertical; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font: 13.5px/1.55 var(--sans); }
+  #dm-text:focus { outline: 2px solid var(--info); outline-offset: 0; }
+  #dm-text:disabled { opacity: .6; }
+  .mregen { display: flex; gap: 6px; }
+  .mregen input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  .mconfirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border: 1px solid var(--hero); border-radius: 8px; background: color-mix(in srgb, var(--hero) 10%, var(--pane)); }
+  .mconfirm .tgt { flex: 1 1 100%; font-size: 13px; font-weight: 600; }
+  .mconfirm .pv { flex: 1 1 100%; color: var(--dim); font-size: 12px; white-space: pre-wrap; }
+  .merr { color: var(--red); font-size: 12.5px; }
+  .merr:empty { display: none; }
+  .mft { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--side); }
+  .mft .btn.dis { opacity: .45; cursor: not-allowed; }
+  body.modal-open { overflow: hidden; }
+  .drb { white-space: nowrap; }
+  .unit .drb { grid-column: 2 / 4; justify-self: start; margin-top: 4px; }
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; gap: 9px; align-items: center; background: var(--raise); color: var(--fg); border: 1px solid var(--edge); padding: 8px 14px 8px 10px; border-radius: 10px; font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.25); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 20; max-width: min(560px, 92vw); }
   .toast.show { opacity: 1; }
   .toast svg { width: 24px; flex: none; }
@@ -803,6 +830,11 @@
                 <span class="excl-msg" id="x-msg" role="status"></span>
                 <datalist id="dl-slack"></datalist><datalist id="dl-jira"></datalist>
               </div>
+              <div class="f full"><span class="lab" id="wa-lab">쓰기 액션</span>
+                <span class="hint">'답장 초안' 팝업에서 쓸 수 있는 실제 쓰기 동작. 꺼 둔 건 버튼이 비활성으로 보이고, 보내는 동작은 늘 대상을 한 번 더 확인해.</span>
+                <div class="toggles" id="c-actions" role="group" aria-labelledby="wa-lab"></div>
+                <div class="inl"><label for="c-tone">답장 말투</label><input type="text" id="c-tone" placeholder="예: 간결하고 정중하게, 존댓말, 이모지 없이" maxlength="200" style="max-width:460px"></div>
+              </div>
               <div class="f full"><span class="lab" id="n-lab">알림</span>
                 <span class="hint">Ned.app 배너와 데몬의 osascript 폴백이 모두 이 설정을 따라.</span>
                 <div class="ntf" role="group" aria-labelledby="n-lab">
@@ -825,6 +857,20 @@
   </main>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="modal" id="draft-modal" hidden>
+  <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="dm-title">
+    <div class="mhd"><h3 id="dm-title">답장 초안</h3><span class="mt" id="dm-sub"></span><span class="sp"></span><button type="button" class="btn small" data-mclose="1" aria-label="닫기" title="닫기 (Esc)">✕</button></div>
+    <div class="mbd">
+      <div class="mctx" id="dm-ctx"></div>
+      <div class="tabs mtabs" id="dm-tabs" role="tablist" aria-label="초안"></div>
+      <textarea id="dm-text" rows="7" aria-label="초안 본문 (편집 가능)" spellcheck="false"></textarea>
+      <div class="mregen"><input type="text" id="dm-hint" placeholder="다시 생성: 어떻게 바꿀지 (예: 더 짧게, 일정 확인 질문 추가)" aria-label="다시 생성 힌트"><button type="button" class="btn small" id="dm-regen">다시 생성</button></div>
+      <div class="mconfirm" id="dm-confirm" hidden></div>
+      <div class="merr" id="dm-err" role="alert"></div>
+    </div>
+    <div class="mft" id="dm-actions"></div>
+  </div>
+</div>
 
 <script>
 (() => {
@@ -1017,7 +1063,7 @@
 
   // ---------- persona ----------
   function mood() {
-    if (S.busy || S.agBusy) return "scanning";
+    if (S.busy || S.agBusy || S.drafting) return "scanning";
     if (!alive()) return "offline";
     if (S.state.attention.length) return "headsup";
     if (S.state.quiet) return "quiet";
@@ -1259,6 +1305,7 @@
         <div class="dacts">
           ${it.url ? `<a class="btn go" href="${esc(it.url)}" target="_blank" rel="noopener">열기 <kbd>⏎</kbd></a>` : ""}
           ${it.att ? `<button class="btn" id="done">완료 <kbd>e</kbd></button>` : ""}
+          ${it.sess ? draftBtn("session", sessionRef(it.sess)) : it.kind === "slack" ? draftBtn("slack", slackRef(it)) : it.kind === "email" ? draftBtn("email", mailRef(it)) : ""}
         </div>
         <div class="ctx">${ctx}</div></div>`;
     }
@@ -1286,7 +1333,7 @@
   // ---------- sessions (rail + phone drawer) ----------
   function renderSessions() {
     const ss = S.state?.sessions ?? [];
-    const units = ss.map((x) => `<div class="unit" title="${esc(x.cwd)}"><span class="led ${STATUS_LED[x.status] || ""}"></span><span class="nm">${esc(x.worktree)}${x.subagents_active ? ` <span class="sa">+${x.subagents_active}</span>` : ""}</span><span class="r">${rel(x.last_event_ts)}</span><span class="s">${esc(x.last_summary || (x.last_prompt ? "» " + x.last_prompt : ""))}</span></div>`).join("");
+    const units = ss.map((x) => `<div class="unit" title="${esc(x.cwd)}"><span class="led ${STATUS_LED[x.status] || ""}"></span><span class="nm">${esc(x.worktree)}${x.subagents_active ? ` <span class="sa">+${x.subagents_active}</span>` : ""}</span><span class="r">${rel(x.last_event_ts)}</span><span class="s">${esc(x.last_summary || (x.last_prompt ? "» " + x.last_prompt : ""))}</span>${draftBtn("session", sessionRef(x))}</div>`).join("");
     const rack = units ? `<div class="rack">${units}</div>` : `<div class="none">출동 중인 에이전트 없음.</div>`;
     const tape = [...S.briefings].sort((a, b) => b.ts - a.ts).slice(0, 8).map((b) => `<div class="tr ${b.status === "NED_OK" ? "ok" : ""}"><span class="h">${dayLabel(b.ts) === "오늘" ? "" : esc(dayLabel(b.ts)) + " "}${hhmm(b.ts)}</span><span>${b.status === "NED_OK" ? "· 이상 무" : `▲ ${esc(b.headline || "업데이트")}`}</span></div>`).join("");
     $("rail").innerHTML = `<h3>장비실 · 세션 <span class="n">${ss.length}</span><button class="btn small" id="rail-toggle" title="세션 패널 접기">접기</button></h3>${rack}<h3>순찰 기록 <span class="n">${S.briefings.length}</span></h3>${tape ? `<div class="tape">${tape}</div>` : `<div class="none">아직 기록 없음.</div>`}`;
@@ -1441,6 +1488,9 @@
   function renderConfig() {
     const c = S.config; if (!c) return;
     renderNotifications(c.notifications);
+    const acts = { ...ACTION_DEFAULTS, ...(c.actions || {}) };
+    $("c-actions").innerHTML = Object.keys(ACTION_DEFAULTS).map((k) => `<label><input type="checkbox" data-act="${k}" ${acts[k] ? "checked" : ""}>${esc(ACTION_KO[k])}</label>`).join("");
+    $("c-tone").value = c.reply_tone || "";
     renderPersonaPicker(c.persona || "ned");
     excl.slack = [...(c.filters?.slack?.exclude_channels || [])];
     excl.jira = [...(c.filters?.jira?.exclude_projects || [])];
@@ -1476,6 +1526,8 @@
       persona: document.querySelector("#c-persona input[name=persona]:checked")?.value || S.config?.persona || "ned",
       filters: { slack: { exclude_channels: [...excl.slack] }, jira: { exclude_projects: [...excl.jira] } },
       notifications: readNotifications(),
+      actions: Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])),
+      reply_tone: $("c-tone").value.trim(),
       claude_model: $("c-model").value.trim() || null,
       claude_max_turns: Number($("c-turns").value),
     };
@@ -1489,6 +1541,152 @@
       console.warn(err); msg.className = "msg err"; msg.textContent = `저장 실패: ${err.message}`;
     } finally { btn.disabled = false; }
   });
+
+  // ---------- reply drafts: "답장 초안" → POST /api/draft → modal (3 drafts, edit, regenerate) → POST /api/send ----------
+  // Write actions are opt-in (config.actions); sending ones (Slack 전송 / 메일 보내기 / 세션에 보내기) always ask once more.
+  const ACTION_DEFAULTS = { slack_send: false, gmail_draft: true, gmail_send: false, session_send: true };
+  const ACTION_KO = { slack_send: "Slack 전송", gmail_draft: "Gmail 초안 저장", gmail_send: "메일 보내기", session_send: "세션에 보내기" };
+  const actionsOn = () => ({ ...ACTION_DEFAULTS, ...(S.config?.actions || {}) });
+  const DRAFT_SRC_KO = { slack: "Slack", email: "메일", session: "세션" };
+  const clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+  /** ref for a Slack message: channel id + ts (+ thread_ts) from its permalink. */
+  function slackRef(x) {
+    const m = /\/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})/.exec(x.url || ""), tt = /[?&]thread_ts=([\d.]+)/.exec(x.url || "");
+    return clean({ url: x.url, channel: m?.[1] || x.channel, ts: m ? `${m[2]}.${m[3]}` : undefined, thread_ts: tt?.[1], title: [x.channel, x.from].filter(Boolean).join(" · ") || x.title, text: x.text || x.detail });
+  }
+  const mailRef = (x) => clean({ url: x.url, thread_id: x.id || /#all\/([\w-]+)/.exec(x.url || "")?.[1], title: [x.subject || x.title, x.from].filter(Boolean).join(" — "), text: x.why || x.snippet || x.detail });
+  const sessionRef = (x) => clean({ session_id: x.id, title: x.worktree, text: x.last_summary || (x.last_prompt ? "» " + x.last_prompt : "") });
+  /** Button that opens the draft modal; `small` for list rows. */
+  const draftBtn = (source, ref, label = "답장 초안") =>
+    `<button type="button" class="btn small drb" data-draft="${esc(JSON.stringify({ source, ref }))}" aria-label="답장 초안" title="답장 초안 — Ned 가 3가지 말투로 써 줘">✍ ${esc(label)}</button>`;
+  const draftFor = (kind, item) => (kind === "slack" ? draftBtn("slack", slackRef(item), "초안") : kind === "email" ? draftBtn("email", mailRef(item), "초안") : "");
+
+  let DR = { open: false };
+  async function postJson(path, body) {
+    const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify(body) });
+    let data = null; try { data = await r.json(); } catch { /* empty */ }
+    return { status: r.status, ok: r.ok, data };
+  }
+  function openDraft(source, ref) {
+    DR = { open: true, source, ref, loading: false, resp: null, tab: null, edits: {}, error: "", confirm: null, sending: null, back: document.activeElement };
+    $("dm-hint").value = ""; $("dm-text").value = ""; $("dm-text").dataset.tab = ""; // nothing carries over from the last popup
+    $("draft-modal").hidden = false;
+    document.body.classList.add("modal-open");
+    requestDraft();
+  }
+  function closeDraft() {
+    if (!DR.open) return;
+    DR.open = false;
+    $("draft-modal").hidden = true;
+    document.body.classList.remove("modal-open");
+    DR.back?.focus?.();
+  }
+  async function requestDraft(hint) {
+    DR.loading = true; DR.error = ""; DR.confirm = null; S.drafting = true; renderHeader(); renderDraft();
+    const r = await postJson("/api/draft", clean({ source: DR.source, ref: DR.ref, hint: hint || undefined, tone: S.config?.reply_tone || undefined })).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
+    if (!DR.open) { S.drafting = false; renderHeader(); return; }
+    if (r.ok && r.data) { DR.resp = r.data; DR.tab = (r.data.drafts?.[1] || r.data.drafts?.[0])?.id ?? null; DR.edits = {}; }
+    else DR.error = r.status === 404 ? "초안 API 가 아직 없어 (daemon 업데이트가 필요해)." : `초안을 못 만들었어${r.data?.error ? `: ${r.data.error}` : ` (${r.status || "network"})`}.`;
+    DR.loading = false; S.drafting = false; renderHeader(); renderDraft();
+    if (DR.resp) $("dm-text")?.focus();
+  }
+  /** Action buttons for the source; `primary` is what ⌘⏎ does. */
+  function draftActions() {
+    const on = actionsOn(), src = DR.source, list = [{ key: "copy", label: "복사" }];
+    if (src === "slack") {
+      if (DR.ref.url) list.push({ key: "open", label: "Slack 에서 열기", href: DR.ref.url });
+      list.push({ key: "slack_send", label: "Slack 전송", mode: "send", confirm: true });
+    } else if (src === "email") {
+      if (DR.ref.url) list.push({ key: "open", label: "Gmail 에서 열기", href: DR.ref.url });
+      list.push({ key: "gmail_draft", label: "Gmail 초안 저장", mode: "gmail_draft" }, { key: "gmail_send", label: "메일 보내기", mode: "send", confirm: true });
+    } else if (src === "session") list.push({ key: "session_send", label: "세션에 보내기", mode: "session", confirm: true });
+    for (const a of list) a.off = a.mode ? !on[a.key] : false;
+    const pick = src === "email" ? ["gmail_draft", "gmail_send"] : src === "slack" ? ["slack_send"] : ["session_send"];
+    const primary = list.find((a) => pick.includes(a.key) && !a.off) || list[0];
+    primary.primary = true;
+    return list;
+  }
+  const curDraft = () => DR.resp?.drafts?.find((d) => d.id === DR.tab) || null;
+  const curText = () => (DR.tab in DR.edits ? DR.edits[DR.tab] : curDraft()?.text || "");
+  function confirmTarget(a) {
+    const t = DR.ref.title || "";
+    return DR.source === "slack" ? `Slack ${t} 에 이 내용으로 보냄` : DR.source === "email" ? `메일 회신 보냄: ${t}` : `세션 ${t} 에 입력으로 보냄`;
+  }
+  function renderDraft() {
+    if (!DR.open) return;
+    const r = DR.resp, ctx = r?.context || {};
+    $("dm-title").textContent = `답장 초안 · ${DRAFT_SRC_KO[DR.source] || DR.source}`;
+    $("dm-sub").textContent = DR.ref.title || "";
+    $("dm-ctx").innerHTML = DR.loading ? `<div class="calload"><span class="spin"></span>맥락 읽고 초안 쓰는 중… <span class="hint">보통 10~30초</span></div>`
+      : r ? `${ctx.summary ? `<div class="sum">${esc(ctx.summary)}</div>` : ""}${ctx.excerpt ? `<blockquote>${esc(ctx.excerpt)}</blockquote>` : ""}<div class="mmeta">${r.cached ? "캐시 · " : ""}$${Number(r.cost_usd || 0).toFixed(3)}</div>` : "";
+    $("dm-tabs").innerHTML = (r?.drafts || []).map((d) => `<button type="button" class="tab ${d.id === DR.tab ? "on" : ""}" role="tab" aria-selected="${d.id === DR.tab}" data-dtab="${esc(d.id)}">${esc(d.label)}</button>`).join("");
+    const ta = $("dm-text");
+    if (document.activeElement !== ta || ta.dataset.tab !== String(DR.tab)) { ta.value = curText(); ta.dataset.tab = String(DR.tab); }
+    ta.disabled = DR.loading || !r;
+    $("dm-regen").disabled = $("dm-hint").disabled = DR.loading;
+    $("dm-err").textContent = DR.error;
+    const acts = draftActions();
+    $("dm-actions").innerHTML = acts.map((a) => {
+      const title = a.off ? `설정 → 쓰기 액션에서 '${ACTION_KO[a.key]}' 을 허용해야 써` : a.confirm ? "누르면 보낼 대상을 한 번 더 보여 줘" : "";
+      const body = `${esc(a.label)}${a.primary ? ` <kbd>⌘⏎</kbd>` : ""}${DR.sending === a.key ? ` <span class="spin"></span>` : ""}`;
+      if (a.href) return `<a class="btn" href="${esc(safeUrl(a.href) || "#")}" target="_blank" rel="noopener">${body}</a>`;
+      return `<button type="button" class="btn${a.primary ? " go" : ""}${a.off ? " dis" : ""}" data-dact="${a.key}" aria-disabled="${a.off}" title="${esc(title)}" ${!r || DR.loading || DR.sending ? "disabled" : ""}>${body}</button>`;
+    }).join("");
+    const c = DR.confirm ? acts.find((a) => a.key === DR.confirm) : null;
+    $("dm-confirm").hidden = !c;
+    if (c) $("dm-confirm").innerHTML = `<div class="tgt">⚠️ ${esc(confirmTarget(c))}</div><div class="pv">${esc(curText().slice(0, 160))}${curText().length > 160 ? "…" : ""}</div>
+      <button type="button" class="btn go" data-dconfirm="1">확인 — ${esc(c.label)} <kbd>⌘⏎</kbd></button><button type="button" class="btn" data-dcancel="1">취소 <kbd>Esc</kbd></button>`;
+  }
+  async function copyDraft() {
+    const t = $("dm-text").value;
+    try { await navigator.clipboard.writeText(t); }
+    catch { const ta = $("dm-text"); ta.disabled = false; ta.select(); document.execCommand("copy"); }
+    toast("초안을 클립보드에 복사했어.");
+  }
+  async function runAction(key) {
+    const a = draftActions().find((x) => x.key === key); if (!a) return;
+    if (a.key === "copy") return copyDraft();
+    if (a.off) { toast(`설정 → 쓰기 액션에서 '${ACTION_KO[a.key]}' 을 허용해야 해.`); return; }
+    if (a.confirm && DR.confirm !== a.key) { DR.confirm = a.key; renderDraft(); $("dm-confirm").querySelector("[data-dconfirm]")?.focus(); return; }
+    DR.confirm = null; DR.sending = a.key; DR.error = ""; renderDraft();
+    const r = await postJson("/api/send", { draft_id: curDraft()?.id, source: DR.source, ref: DR.ref, text: $("dm-text").value, mode: a.mode }).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
+    DR.sending = null;
+    if (r.ok && r.data?.ok !== false) { toast(r.data?.detail || `${a.label} 완료.`, 5000); closeDraft(); return; }
+    DR.error = r.status === 403 ? `'${a.label}' 은 설정에서 꺼져 있어 (daemon 이 거절함).` : `${a.label} 실패: ${r.data?.detail || r.data?.error || r.status}`;
+    toast(DR.error, 6000); renderDraft();
+  }
+  $("draft-modal").addEventListener("click", (e) => {
+    if (e.target === $("draft-modal") || e.target.closest("[data-mclose]")) return closeDraft();
+    const t = e.target.closest("[data-dtab]"); if (t) { DR.tab = t.dataset.dtab; DR.confirm = null; renderDraft(); return; }
+    const a = e.target.closest("[data-dact]"); if (a) return runAction(a.dataset.dact);
+    if (e.target.closest("[data-dconfirm]")) return runAction(DR.confirm);
+    if (e.target.closest("[data-dcancel]")) { DR.confirm = null; renderDraft(); }
+  });
+  $("dm-text").addEventListener("input", (e) => { if (DR.tab != null) DR.edits[DR.tab] = e.target.value; if (DR.confirm) { DR.confirm = null; renderDraft(); } });
+  $("dm-regen").addEventListener("click", () => requestDraft($("dm-hint").value.trim()));
+  $("dm-hint").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing && !(e.metaKey || e.ctrlKey)) { e.preventDefault(); requestDraft(e.target.value.trim()); } });
+  // Modal keys win over page shortcuts: Esc closes (or backs out of the confirm step), ⌘⏎ / Ctrl⏎ runs the primary action.
+  document.addEventListener("keydown", (e) => {
+    if (!DR.open) return;
+    if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); if (DR.confirm) { DR.confirm = null; renderDraft(); } else closeDraft(); return; }
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (DR.loading || DR.sending || !DR.resp) return;
+      runAction(DR.confirm || draftActions().find((a) => a.primary).key);
+      return;
+    }
+    if (e.key === "Tab") { // keep focus inside the dialog
+      const f = [...$("draft-modal").querySelectorAll("button:not([disabled]), a[href], textarea:not([disabled]), input:not([disabled])")];
+      if (!f.length) return;
+      if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+    }
+  }, true);
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest(".drb[data-draft]"); if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    try { const { source, ref } = JSON.parse(b.dataset.draft); openDraft(source, ref); } catch (err) { console.warn("draft ref", err); }
+  }, true);
 
   // ---------- home ----------
   const HOME_POLL_MS = 60 * 1000, MIN_EV_PX = 22; // min block height
@@ -1752,7 +1950,7 @@
     group("ned", ned.length, ned.length, ned.map((a) => {
       const u = safeUrl(a.url);
       return `<div class="ti"><span class="ic">${KIND_ICON[a.kind] || "🔔"}</span><div class="mn"><span class="tt">${u ? ext(u, esc(a.title)) : esc(a.title)}</span>${a.detail ? `<div class="sb"><span class="d">${esc(a.detail)}</span></div>` : ""}</div>
-        <div class="ra">${u ? ext(u, "열기", "btn small") : ""}<button class="btn small" data-dismiss="${esc(a.id)}" title="처리 완료로 닫기">닫기</button></div></div>`;
+        <div class="ra">${draftFor(a.kind, a)}${u ? ext(u, "열기", "btn small") : ""}<button class="btn small" data-dismiss="${esc(a.id)}" title="처리 완료로 닫기">닫기</button></div></div>`;
     }).join(""), !s ? "불러오는 중…" : PF.home.size ? "선택한 소스엔 액션 아이템 없음." : "내가 챙겨 둔 거 없어.");
 
     const unavailable = ag === null ? "agenda 연결 안 됨." : ag === undefined ? "불러오는 중…" : "";
@@ -1767,7 +1965,7 @@
       const u = safeUrl(x.url), need = mailNeed.has(x.id) || mailNeed.has(x.url);
       return `<div class="ti${need ? " need" : ""}"><span class="ic" title="${x.unread ? "안 읽음" : "읽음"}">${x.unread ? "●" : "○"}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.subject || "(제목 없음)")) : esc(x.subject || "(제목 없음)")}</span>
         <div class="sb"><span class="from">${esc(x.from)}</span>${need ? `<span class="chipx today">확인 필요</span>` : ""}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div></div>
-        <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
+        <div class="ra">${draftFor("email", x)}${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
     }).join("");
     card("mail", {
       hidden: !mailOn, n: mi.length, hot: mi.some((x) => x.reason === "deadline" || x.reason === "approval"),
@@ -1776,7 +1974,7 @@
         const u = safeUrl(x.url), r = mailRow(x);
         return `<div class="ti"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.subject || "(제목 없음)")) : esc(x.subject || "(제목 없음)")}</span>
           <div class="sb"><span class="from">${esc(x.from)}</span><span class="chipx ${r[0]}">${r[1]}</span>${x.why ? `<span class="d">${esc(x.why)}</span>` : ""}${x.received ? `<span>${rel(toMs(x.received))}</span>` : ""}</div></div>
-          <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
+          <div class="ra">${draftFor("email", x)}${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
       }).join(""),
       empty: unavailable || (mail ? "확인할 메일 없음." : "다음 새로고침 때 메일도 가져올게."),
       sum: mail ? esc([counts([["결재", mr("approval")], ["마감", mr("deadline")], ["답장", mr("reply")], ["확인", mr("request")]], " · "), `안 읽은 ${unreadN}`].filter(Boolean).join(" · ")) : "",
@@ -1806,7 +2004,7 @@
       const u = safeUrl(x.url), r = slRow(x), need = slackNeed.has(x.url);
       return `<div class="ti${need ? " need" : ""}${x.answered && !need ? " answered" : ""}"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
         <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span>${need ? `<span class="chipx today">답 필요</span>` : x.answered ? `<span class="chipx ok">답함</span>` : `<span class="chipx ${r[0]}">${r[1]}</span>`}${moreBadge(x)}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div></div>
-        <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
+        <div class="ra">${draftFor("slack", x)}${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
     }).join("");
     card("slack", {
       hidden: !slackOn, n: si.length, hot: si.some((x) => x.reason === "dm" || x.reason === "mention"),
@@ -1815,7 +2013,7 @@
         const u = safeUrl(x.url), r = slRow(x);
         return `<div class="ti"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
           <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span><span class="chipx ${r[0]}">${r[1]}</span>${moreBadge(x)}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div></div>
-          <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
+          <div class="ra">${draftFor("slack", x)}${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
       }).join(""),
       empty: unavailable || (slack ? "답할 Slack 없음." : "다음 새로고침 때 Slack 도 가져올게."),
       sum: si.length ? esc(`${counts([["멘션", si.filter((x) => x.reason === "mention").length], ["DM", si.filter((x) => x.reason === "dm").length], ["스레드", si.filter((x) => x.reason === "thread").length]])} 답 필요`) : "",
@@ -2078,6 +2276,7 @@
 
   const TAB_KEYS = { 1: "priority", 2: "other", 3: "history" };
   document.addEventListener("keydown", (ev) => {
+    if (DR.open) return; // the draft modal owns the keyboard
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
     const t = ev.target;
     if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
