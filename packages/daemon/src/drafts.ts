@@ -192,7 +192,8 @@ export function agendaContext(req: Pick<DraftRequest, "source" | "ref">, agenda:
   const age = (iso: string) => Math.max(0, Math.round((now - Date.parse(iso)) / 60_000));
   if (req.source === "slack" && agenda.slack) {
     const t = slackTarget(req.ref);
-    const hit = [...agenda.slack.items, ...agenda.slack.all].find((x) => {
+    const watched = (agenda.slack.watch ?? []).flatMap((w) => w.highlights.map((h) => ({ url: h.url, context: h.context })));
+    const hit = [...agenda.slack.items, ...agenda.slack.all, ...watched].find((x) => {
       if (!x.context) return false;
       if (req.ref.url && x.url === req.ref.url) return true;
       const u = parseSlackUrl(x.url);
@@ -437,12 +438,12 @@ async function runDraft(req: DraftRequest, cfg: NedConfig, id: string, tone: str
   if (noTools) {
     // Everything is in the prompt: no tools, one turn, and none of the user's hooks / plugins / MCP servers (start-up ~4s instead of ~40s).
     log(`draft: asking claude (${req.source} ${id}, fast${fast ? `, context ${fast.age}m old` : ""})`);
-    res = await runClaude(prompt, { allowedTools: [], tools: [], maxTurns: 1, isolated: true, effort: "low", model: cfg.draft_fast_model ?? cfg.claude_model, timeoutMs: 90_000 });
+    res = await runClaude(prompt, { allowedTools: [], tools: [], maxTurns: 1, isolated: true, effort: "low", model: cfg.draft_fast_model ?? cfg.claude_model, timeoutMs: 90_000, job: "draft" });
   } else {
     const tools = draftTools(req.source);
     log(`draft: asking claude (${req.source} ${id}, full, tools=${tools.join(",")})`);
     // Read-only: plan mode + read tools only; built-ins narrowed to ToolSearch.
-    res = await runClaude(prompt, { allowedTools: tools, tools: ["ToolSearch"], maxTurns: 8, model: cfg.claude_model, timeoutMs: 4 * 60_000 });
+    res = await runClaude(prompt, { allowedTools: tools, tools: ["ToolSearch"], maxTurns: 8, model: cfg.claude_model, timeoutMs: 4 * 60_000, job: "draft" });
   }
   const parsed = res.ok ? extractJson<LlmDraft>(res.text) : null;
   const drafts = parsed ? normalizeDrafts(id, parsed.drafts) : [];

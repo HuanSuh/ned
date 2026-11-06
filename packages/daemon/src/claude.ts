@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { recordCost, type CostJob } from "./costs.js";
 import { log } from "./paths.js";
 
 export interface ClaudeRunResult {
@@ -41,6 +42,8 @@ export interface ClaudeRunOptions {
   isolated?: boolean;
   /** `--effort`; omitted = the CLI default. */
   effort?: "low" | "medium" | "high";
+  /** Record this run's cost under that job in ~/.ned/costs.json (daily budget, GET /api/costs). Not part of argv. */
+  job?: CostJob;
 }
 
 /** The exact argv `runClaude` spawns `claude` with (exported so action runs can log / test it). */
@@ -60,7 +63,14 @@ export function buildClaudeArgs(opts: ClaudeRunOptions): string[] {
  */
 export function runClaude(prompt: string, opts: ClaudeRunOptions): Promise<ClaudeRunResult> {
   const args = buildClaudeArgs(opts);
+  return spawnClaude(prompt, args, opts.timeoutMs).then((r) => {
+    if (opts.job && r.cost_usd > 0) recordCost(opts.job, r.cost_usd);
+    return r;
+  });
+}
 
+function spawnClaude(prompt: string, args: string[], timeoutMs: number | undefined): Promise<ClaudeRunResult> {
+  const opts = { timeoutMs };
   return new Promise((resolve) => {
     const started = Date.now();
     const child = spawn("claude", args, { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, NED_CHILD: "1" } });
