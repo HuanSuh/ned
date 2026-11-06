@@ -3,7 +3,7 @@
  * Mounted once on <body>, outside main.view, so tab switches never touch it. ⌘J toggles, Esc / outside click / ▾ collapse.
  * Persona changes only swap words (COMMS_VOICE) and theme tokens (css/comms.css). Pure parts live in chat-core.js. */
 import { S, alive, subscribe } from "../state.js";
-import { $, lsGet, lsSet, hhmm, rel } from "../util.js";
+import { $, esc, lsGet, lsSet, hhmm, rel } from "../util.js";
 import { MINI, persona } from "./personas.js";
 import { buildFeed, commsVoice, createSseParser, feedHtml, messagesHtml, shellHtml, tickerOf, usd } from "./chat-core.js";
 
@@ -212,7 +212,7 @@ export function render() {
     const sig = JSON.stringify([st.msgs.length, st.msgs.at(-1)?.ts, st.live, st.err, st.persona]);
     if (sig !== st.logSig) {
       st.logSig = sig;
-      log.innerHTML = messagesHtml(st.msgs, v, st.live, (ts) => hhmm(ts)) + (st.err ? `<div class="cm-err">⚠ ${st.err.replace(/[<>&]/g, "")}</div>` : "");
+      log.innerHTML = messagesHtml(st.msgs, v, st.live, (ts) => hhmm(ts)) + (st.err ? `<div class="cm-err">⚠ ${esc(st.err)}</div>` : "");
     }
     const send = $("cm-send");
     send.textContent = st.running ? "중단" : "전송"; send.classList.toggle("go", !st.running); send.classList.toggle("stop", st.running);

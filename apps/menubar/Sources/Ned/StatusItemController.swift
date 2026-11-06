@@ -73,7 +73,11 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         b.setAccessibilityLabel(n > 0 ? "\(p.displayName): 확인할 것 \(n)건" : p.displayName)
     }
 
-    @objc private func toggle(_ sender: Any?) {
+    /// For `StatusItemSelfTest` (same file): popover state without exposing the popover itself.
+    fileprivate var popoverShown: Bool { popover.isShown }
+    fileprivate var popoverHasContent: Bool { popover.contentViewController != nil }
+
+    @objc fileprivate func toggle(_ sender: Any?) {
         if popover.isShown { popover.performClose(sender); return }
         guard let b = statusItem.button else { return }
         // Fresh content per open: MenuContent's onAppear (login item refresh, ⌥ → 페르소나) runs every time.
@@ -149,6 +153,7 @@ final class StatusItemGuard {
     }
 
     func start() {
+        guard timer == nil else { return }
         Self.clearFlags()
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in
             Task { @MainActor in StatusItemGuard.shared.check() }
@@ -167,9 +172,9 @@ final class StatusItemGuard {
     }
 }
 
-/// `--statusitem-selftest`: creates the real StatusItemController (no popover opened, no input), logs autosaveName /
+/// `--statusitem-selftest`: creates the real StatusItemController (no input), logs autosaveName /
 /// isVisible / behavior / button image, re-renders with a changed state and checks the item is the same object,
-/// then removes the item and exits. Run the bare binary (`.build/release/Ned`), not the bundle.
+/// opens and closes the popover once via toggle(), then removes the item and exits. Run the bare binary (`.build/release/Ned`), not the bundle.
 @MainActor
 enum StatusItemSelfTest {
     static func run() -> Never {
@@ -195,6 +200,21 @@ enum StatusItemSelfTest {
         let host = NSHostingController(rootView: MenuContent(store: store, daemon: .shared))
         let size = host.view.fittingSize
         check(size.width >= 300 && size.height > 50, "popover content (MenuContent) fitting size \(Int(size.width))×\(Int(size.height))")
+        // Popover open → close once through toggle() (method calls only, no input): close must reach popoverDidClose,
+        // which drops the content controller. The close animates, so spin the run loop until it lands.
+        func spin(until done: () -> Bool) {
+            let deadline = Date().addingTimeInterval(2)
+            while !done() && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        }
+        print("statusitem-selftest: popover isShown before open = \(c.popoverShown)"); fflush(stdout)
+        c.toggle(nil)
+        spin { c.popoverShown }
+        print("statusitem-selftest: popover isShown after open = \(c.popoverShown)"); fflush(stdout)
+        check(c.popoverShown && c.popoverHasContent, "toggle() opens the popover with content")
+        c.toggle(nil)
+        spin { !c.popoverShown && !c.popoverHasContent }
+        print("statusitem-selftest: popover isShown after close = \(c.popoverShown)"); fflush(stdout)
+        check(!c.popoverShown && !c.popoverHasContent, "toggle() closes the popover and popoverDidClose drops its content")
         NSStatusBar.system.removeStatusItem(item)
         print("statusitem-selftest: \(failures == 0 ? "ALL PASS" : "\(failures) FAILED")")
         fflush(stdout)

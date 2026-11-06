@@ -29,7 +29,7 @@ export interface MarkReadOutcome {
 export function markThreadReadLocally(a: Agenda, threadId: string): boolean {
   const m = a.mail;
   if (!m) return false;
-  const row = m.all.find((x) => x.id === threadId);
+  const row = m.all?.find((x) => x.id === threadId);
   if (!row || !row.unread) return false;
   row.unread = false;
   m.unread = Math.max(0, m.unread - 1);
