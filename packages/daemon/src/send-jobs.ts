@@ -1,0 +1,127 @@
+/**
+ * POST /api/send as a background job. A connector send runs `claude -p` for 30~60s — longer than a WKWebView fetch
+ * waits — so the route answers 202 {job_id} at once and the dashboard polls GET /api/send/:job_id.
+ *
+ * - Same request (draft_id or ref, + source/mode/text) while one is running → that job's id, never a second send.
+ * - Same draft_id + source/mode already sent ok within 10 min (memory or ~/.ned/sent-actions.log) → 409 already_sent.
+ * - Jobs live in memory only; after a daemon restart GET answers 404 and the client looks in GET /api/actions.
+ */
+import { randomUUID } from "node:crypto";
+import { appendActionLog, gateKey, performSend, readActionLog, type SendRequest, type SendResult } from "./actions.js";
+import type { NedConfig } from "./config.js";
+import { log } from "./paths.js";
+
+export type SendJobState = "running" | "done";
+
+export interface SendJob {
+  id: string;
+  key: string;
+  req: SendRequest;
+  state: SendJobState;
+  started_at: number;
+  finished_at?: number;
+  result?: SendResult;
+}
+
+export interface SendJobView {
+  job_id: string;
+  state: SendJobState;
+  started_at: string;
+  elapsed_ms: number;
+  result?: Omit<SendResult, "status"> & { http_status: SendResult["status"]; error?: string };
+}
+
+/** Window in which a draft that was sent ok answers 409 instead of sending again. */
+export const ALREADY_SENT_MS = 10 * 60_000;
+/** Finished jobs are kept this long for GET /api/send/:id. */
+const KEEP_DONE_MS = 30 * 60_000;
+const MAX_JOBS = 300;
+
+const jobs = new Map<string, SendJob>();
+
+/** Identity of "the same send": the draft (or the ref when there is none) + source/mode + exact text. */
+export function sendKey(req: SendRequest): string {
+  const who = req.draft_id ? `d:${req.draft_id}` : `r:${JSON.stringify(req.ref)}`;
+  return `${req.source}|${req.mode}|${who}|${req.text}`;
+}
+
+function prune(now = Date.now()): void {
+  for (const [id, j] of jobs) if (j.state === "done" && now - (j.finished_at ?? now) > KEEP_DONE_MS) jobs.delete(id);
+  if (jobs.size <= MAX_JOBS) return;
+  const done = [...jobs.values()].filter((j) => j.state === "done").sort((a, b) => (a.finished_at ?? 0) - (b.finished_at ?? 0));
+  for (const j of done.slice(0, jobs.size - MAX_JOBS)) jobs.delete(j.id);
+}
+
+export function viewJob(j: SendJob, now = Date.now()): SendJobView {
+  const v: SendJobView = { job_id: j.id, state: j.state, started_at: new Date(j.started_at).toISOString(), elapsed_ms: (j.finished_at ?? now) - j.started_at };
+  if (j.result) {
+    const { status, ...rest } = j.result;
+    v.result = rest.ok ? { ...rest, http_status: status } : { ...rest, http_status: status, error: rest.detail };
+  }
+  return v;
+}
+
+export function getSendJob(id: string): SendJob | undefined {
+  prune();
+  return jobs.get(id);
+}
+
+/** A successful send of this draft (same source/mode) in the last 10 min — from memory, else from the action log. */
+export function findRecentSent(req: SendRequest, now = Date.now()): { at: string; detail: string; job_id?: string } | null {
+  if (!req.draft_id) return null;
+  for (const j of jobs.values()) {
+    const r = j.result;
+    if (j.state === "done" && r?.ok && j.req.draft_id === req.draft_id && j.req.source === req.source && j.req.mode === req.mode && now - (j.finished_at ?? 0) <= ALREADY_SENT_MS)
+      return { at: r.logged_at, detail: r.detail, job_id: j.id };
+  }
+  const hit = readActionLog(500).find((e) => e.ok && e.draft_id === req.draft_id && e.source === req.source && e.mode === req.mode && now - Date.parse(e.ts) <= ALREADY_SENT_MS);
+  return hit ? { at: hit.ts, detail: hit.result } : null;
+}
+
+/** First https link in a result detail (Slack permalink, Gmail url, PR comment url). */
+export function linkOf(detail: string): string | undefined {
+  return /https:\/\/[^\s"')]+/.exec(detail)?.[0];
+}
+
+export type StartOutcome =
+  | { kind: "sync"; result: SendResult }
+  | { kind: "already_sent"; sent: { at: string; detail: string; job_id?: string } }
+  | { kind: "job"; job: SendJob; reused: boolean };
+
+/**
+ * Start (or join) the job for `req`. A switched-off action is refused synchronously (instant, logged by performSend)
+ * so the popup can say so without polling. `run` is injectable for tests.
+ */
+export async function startSendJob(req: SendRequest, cfg: NedConfig, run: typeof performSend = performSend): Promise<StartOutcome> {
+  prune();
+  if (cfg.actions[gateKey(req)] !== true) return { kind: "sync", result: await run(req, cfg) };
+  const key = sendKey(req);
+  const live = [...jobs.values()].find((j) => j.state === "running" && j.key === key);
+  if (live) return { kind: "job", job: live, reused: true };
+  const sent = findRecentSent(req);
+  if (sent) return { kind: "already_sent", sent };
+
+  const job: SendJob = { id: randomUUID(), key, req, state: "running", started_at: Date.now() };
+  jobs.set(job.id, job);
+  void (async () => {
+    let result: SendResult;
+    try {
+      result = await run(req, cfg);
+    } catch (e) {
+      const detail = `send job crashed: ${String(e).slice(0, 300)}`;
+      log(`send: ${req.source}/${req.mode} job ${job.id} ${detail}`);
+      const logged_at = new Date().toISOString();
+      appendActionLog({ ts: logged_at, source: req.source, mode: req.mode, action: "error", ref: req.ref, draft_id: req.draft_id, text: req.text.slice(0, 120), ok: false, result: detail });
+      result = { ok: false, action: "error", detail, logged_at, status: 502 };
+    }
+    job.result = result;
+    job.state = "done";
+    job.finished_at = Date.now();
+  })();
+  return { kind: "job", job, reused: false };
+}
+
+/** Test helper: forget every job. */
+export function _resetSendJobs(): void {
+  jobs.clear();
+}

@@ -2,6 +2,7 @@
 import { postJson } from "../api.js";
 import { axBtn, init as initActions } from "./actions.js";
 import { SRC_KEY_RE, reviewAttention, reviewSource } from "./reviewed.js";
+import { resumePending, sendAndWait } from "./sendjob.js";
 import { renderHeader } from "../main.js";
 import { S } from "../state.js";
 import { select } from "../tabs/inbox.js";
@@ -111,7 +112,7 @@ export function renderDraft() {
   const acts = draftActions();
   $("dm-actions").innerHTML = acts.map((a) => {
     const title = a.off ? `설정 → 쓰기 액션에서 '${ACTION_KO[a.gate]}' 을 허용해야 써` : a.confirm ? "누르면 보낼 대상을 한 번 더 보여 줘" : "";
-    const body = `${esc(a.label)}${a.primary ? ` <kbd>⌘⏎</kbd>` : ""}${DR.sending === a.key ? ` <span class="spin"></span>` : ""}`;
+    const body = DR.sending === a.key ? `<span class="spin"></span> <span data-dsend-el>${sendingText()}</span>` : `${esc(a.label)}${a.primary ? ` <kbd>⌘⏎</kbd>` : ""}`;
     if (a.href) return `<a class="btn" href="${esc(safeUrl(a.href) || "#")}" target="_blank" rel="noopener">${body}</a>`;
     return `<button type="button" class="btn${a.primary ? " go" : ""}${a.off ? " dis" : ""}" data-dact="${a.key}" aria-disabled="${a.off}" title="${esc(title)}" ${!r || DR.loading || DR.sending ? "disabled" : ""}>${body}</button>`;
   }).join("");
@@ -126,22 +127,47 @@ export async function copyDraft() {
   catch { const ta = $("dm-text"); ta.disabled = false; ta.select(); document.execCommand("copy"); }
   toast("초안을 클립보드에 복사했어.");
 }
+const sendingText = () => `전송 중 ${Math.floor((DR.sendElapsed || 0) / 1000)}s`;
+const ago = (iso) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return Number.isFinite(m) ? (m < 1 ? "방금" : `${m}분 전`) : ""; };
+/** One-line outcome of a finished send, for a toast (popup closed) or the popup's error line. */
+function sendOutcome(label, r) {
+  if (r.ok && r.data?.ok !== false) return { ok: true, msg: r.data?.detail || `${label} 완료.` };
+  if (r.status === 409 && r.data?.already_sent) return { ok: true, msg: `이미 보냈어 (${ago(r.data.sent_at)})${r.data.link ? ` — ${r.data.link}` : ""}` };
+  const msg = r.status === 403 ? `'${label}' 은 설정에서 꺼져 있어 (daemon 이 거절함, HTTP 403).`
+    : r.unknown ? `${label} 결과 확인 못 함: ${r.data?.error || "알 수 없음"}`
+    : `${label} 실패: ${r.data?.detail || r.data?.error || `HTTP ${r.status || "network"}`}`;
+  return { ok: false, msg };
+}
+/**
+ * Send = a daemon job (features/sendjob.js): 202 → poll every 2s, the button counts up ("전송 중 34s"), max 4 min.
+ * Closing the popup (Esc) doesn't stop it — the outcome comes back as a toast. Retry is offered only when the daemon
+ * reported a failure; an unknown outcome (restart, 4-min deadline) never re-sends on its own.
+ */
 export async function runAction(key) {
   const a = draftActions().find((x) => x.key === key); if (!a) return;
   if (a.key === "copy") return copyDraft();
   if (a.off) { toast(`설정 → 쓰기 액션에서 '${ACTION_KO[a.gate]}' 을 허용해야 해.`); return; }
   if (a.confirm && DR.confirm !== a.key) { DR.confirm = a.key; renderDraft(); $("dm-confirm").querySelector("[data-dconfirm]")?.focus(); return; }
-  DR.confirm = null; DR.sending = a.key; DR.error = ""; renderDraft();
-  const r = await postJson("/api/send", { draft_id: curDraft()?.id, source: DR.source, ref: DR.ref, text: $("dm-text").value, mode: a.mode }).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
-  DR.sending = null;
-  if (r.ok && r.data?.ok !== false) { toast(r.data?.detail || `${a.label} 완료.`, 5000); closeDraft(); return; }
-  DR.error = r.status === 403 ? `'${a.label}' 은 설정에서 꺼져 있어 (daemon 이 거절함, HTTP 403).` : `${a.label} 실패: ${r.data?.detail || r.data?.error || `HTTP ${r.status}`}`;
-  DR.errWhere = a.label; DR.errLabel = `${a.label} 실패`; DR.errAt = Date.now(); DR.errRetry = r.status === 403 ? null : () => runAction(key);
-  toast(`${a.label} 실패 — ${errSummary(DR.error)}`, 6000); renderDraft();
+  const d = DR; // this popup; a later openDraft() replaces DR
+  d.confirm = null; d.sending = a.key; d.sendElapsed = 0; d.error = ""; renderDraft();
+  const r = await sendAndWait({ draft_id: curDraft()?.id, source: d.source, ref: d.ref, text: $("dm-text").value, mode: a.mode }, {
+    label: a.label,
+    onTick: (ms) => { d.sendElapsed = ms; if (DR === d && d.open) { const el = $("dm-actions").querySelector("[data-dsend-el]"); if (el) el.textContent = sendingText(); } },
+  });
+  d.sending = null;
+  const o = sendOutcome(a.label, r);
+  if (DR !== d || !d.open) { toast(o.ok ? `${a.label} 완료 — ${o.msg}` : o.msg, o.ok ? 6000 : 9000); return; } // popup closed meanwhile
+  if (o.ok) { toast(o.msg, 5000); closeDraft(); return; }
+  d.error = o.msg;
+  d.errWhere = a.label; d.errLabel = r.unknown ? `${a.label} 결과 모름` : `${a.label} 실패`; d.errAt = Date.now();
+  d.errRetry = r.status === 403 || r.unknown ? null : () => runAction(key); // retry only on a failure the daemon confirmed
+  toast(`${d.errLabel} — ${errSummary(d.error)}`, 6000); renderDraft();
 }
 
 /** Listeners + one-time setup; main.js calls every module's init() once, in the old file's order. */
 export function init() {
+  // a send that was still running when the page went away: report how it ended (never re-sends)
+  resumePending((p, r) => { const o = sendOutcome(p.label || "보내기", r); toast(o.ok ? `${p.label || "보내기"} 완료 — ${o.msg}` : o.msg, 9000); });
   initActions(); // ⋯ item actions (features/actions.js) — main.js's init list belongs to another module
   $("draft-modal").addEventListener("click", (e) => {
     if (e.target === $("draft-modal") || e.target.closest("[data-mclose]")) return closeDraft();
