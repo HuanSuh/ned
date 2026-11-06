@@ -93,6 +93,8 @@ export interface SlackItem {
   /** ISO-8601 (Slack epoch ts strings are converted). */
   ts: string;
   reason: SlackReason;
+  /** DMs only: unanswered messages in this conversation, collapsed into this (latest) one. */
+  count?: number;
 }
 
 export interface SlackBlock {
@@ -202,6 +204,32 @@ export function rangeBounds(from: string, to: string): { start: string; end: str
   return { start: isoLocal(new Date(fy, fm - 1, fd)), end: isoLocal(new Date(ty, tm - 1, td + 1)) };
 }
 
+/** Conversation key for a Slack message: the channel id in its permalink (D…/G…/C…), else channel + sender. */
+export function slackConvKey(x: { url: string; channel: string; from: string }): string {
+  const m = /\/archives\/([A-Z0-9]+)\//.exec(x.url || "");
+  return m ? m[1] : `${x.channel}|${x.from}`;
+}
+
+/** Keep one row per DM conversation (the latest), summing `count`; mentions / threads pass through in order. */
+export function collapseDMs<T extends { reason: SlackReason; ts: string; url: string; channel: string; from: string; count?: number }>(list: T[]): T[] {
+  const best = new Map<string, T>(), total = new Map<string, number>();
+  for (const x of list) {
+    if (x.reason !== "dm") continue;
+    const k = slackConvKey(x), cur = best.get(k);
+    total.set(k, (total.get(k) ?? 0) + Math.max(1, x.count ?? 1));
+    if (!cur || Date.parse(x.ts) > Date.parse(cur.ts)) best.set(k, x);
+  }
+  const out: T[] = [];
+  for (const x of list) {
+    if (x.reason !== "dm") { out.push(x); continue; }
+    const k = slackConvKey(x);
+    if (best.get(k) !== x) continue;
+    const n = total.get(k) ?? 1;
+    out.push(n > 1 ? { ...x, count: n } : x);
+  }
+  return out;
+}
+
 /** Coerce model calendar output into CalendarItem[] (shared by the agenda job and /api/calendar). */
 export function normalizeCalendar(raw: unknown): CalendarItem[] {
   return arr(raw)
@@ -295,6 +323,7 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
             url: str(e.url),
             ts: slackTs(e.ts),
             reason: e.reason as SlackReason,
+            ...(Number(e.count) > 1 ? { count: Math.min(99, Math.trunc(Number(e.count))) } : {}),
           })),
         all: arr(sl.all)
           .slice(0, 50)
@@ -306,6 +335,7 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
             ts: slackTs(e.ts),
             reason: SLACK_REASONS.includes(e.reason as SlackReason) ? (e.reason as SlackReason) : "mention",
             answered: e.answered === true,
+            ...(Number(e.count) > 1 ? { count: Math.min(99, Math.trunc(Number(e.count))) } : {}),
           })),
       }
     : null;
@@ -314,7 +344,7 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
   const exChannels = new Set(cfg.filters.slack.exclude_channels.map((c) => c.toLowerCase()));
   const jiraKept = jira.filter((j) => !exProjects.has(j.key.split("-")[0].toUpperCase()));
   const keepCh = (x: { channel: string }) => !exChannels.has(x.channel.replace(/^#/, "").toLowerCase());
-  if (slack) { slack.items = slack.items.filter(keepCh); slack.all = slack.all.filter(keepCh); }
+  if (slack) { slack.items = collapseDMs(slack.items.filter(keepCh)); slack.all = collapseDMs(slack.all.filter(keepCh)); }
   return { calendar, jira: jiraKept, github, mail, slack };
 }
 

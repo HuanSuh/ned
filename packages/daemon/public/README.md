@@ -51,8 +51,8 @@ daemon 을 `NED_HOME=/some/fixture` 로 띄우거나, 같은 라우트를 흉내
 
 ## 소스 pill 필터
 
-홈 '할 일' 영역 위와 인박스 탭 아래에 타임라인과 같은 chip(`.chips` / `.lbl` / `.chip` / `.chip.on`)으로 `소스` 줄: 전체 · 세션 · 메일 · Slack · Jira · GitHub · Sentry · 캘린더 · 개인(홈만). 각 chip 에 kind 아이콘과 개수(필터 전 기준), 0건은 흐리게. 클릭으로 다중 토글, '전체' 로 초기화. 상태는 `localStorage` `ned.pf.home` / `ned.pf.inbox`.
-- 홈: Ned 액션 아이템을 kind 로 거르고, 소스 카드는 선택한 소스만 남기고(메일=email · Jira · Slack · GitHub), 개인 할 일은 '개인' 을 고를 때만.
+홈 '할 일' 카드 헤더 바로 아래와 인박스 탭 아래에 타임라인과 같은 chip(`.chips` / `.lbl` / `.chip` / `.chip.on`)으로 `소스` 줄: 전체 · 세션 · 메일 · Slack · Jira · GitHub · Sentry · 캘린더 · 개인(홈만). 각 chip 에 kind 아이콘과 개수(필터 전 기준; 홈은 할 일 카드 안의 개수), 0건은 흐리게. 클릭으로 다중 토글, '전체' 로 초기화. 상태는 `localStorage` `ned.pf.home` / `ned.pf.inbox`.
+- 홈: **할 일 카드 안만** 거른다 — Ned 액션 아이템은 kind 로, 개인 할 일은 '개인' 을 고를 때만. 개수·헤더 'N건' 도 이 카드 기준. 소스 카드와 인사말 카운트는 필터와 무관하게 그대로.
 - 인박스: 우선·기타는 항목 kind, 기록은 브리핑에 그 kind 항목이 있을 때만. j/k·Enter·선택은 걸러진 목록 기준.
 - 설정에서 꺼진 소스는 카드·pill·인사말 카운트에서 바로 빠진다(`/api/config` 의 `sources`; `GET /api/agenda` 도 꺼진 소스를 비워서 준다).
 - 폰 폭에서는 줄바꿈 없이 가로 스크롤.
@@ -65,3 +65,9 @@ daemon 을 `NED_HOME=/some/fixture` 로 띄우거나, 같은 라우트를 흉내
 
 - 설정 → 알림: 마스터 스위치, 소스별 토글 그리드, 아침 브리핑·소리, 묶음 기준(숫자), 조용한 시간 처리(보내지 않음 / 소리 없이). 마스터를 끄면 나머지는 비활성. 저장 = `PUT /api/config` 의 `notifications`.
 - 메일·Slack 카드 헤더 오른쪽 `확인 필요 | 전체` (카드별 `localStorage` `ned.cardmode.<mail|slack>`). 전체는 `mail.all` / `slack.all`, 그중 확인 필요 항목은 왼쪽 포인트색 바, Slack 에서 이미 답한 건 흐리게 + '답함'. '전체' 를 고르면 접힌 카드는 펼친다. 배지 숫자는 확인 필요 개수 그대로.
+- 카드 안 리스트도 카드 높이를 채운다(≥900): 소스 카드는 헤더·요약 auto, 리스트 영역(`.sl`)이 나머지를 차지하고 왼쪽 색 구분선이 바닥까지 이어진다 — 열의 마지막 카드가 남는 높이를 받고(최소 220px) 긴 리스트는 그 안에서 스크롤, 다른 카드는 460px 에서 스크롤. 할 일 카드는 Ned 액션 / 개인 할 일 두 섹션이 내용 크기 비율로 높이를 나누고 각자 안에서 스크롤. 일정 패널 본문도 바닥까지(안에서 스크롤).
+- Slack DM 은 대화당 최신 1건만(같은 채널 ID 기준, 안전망으로 클라이언트에서도 묶음). 묶인 메시지가 더 있으면 `+N` 배지(N = count − 1). 카드 배지·요약·인사말 개수도 묶은 뒤 기준.
+
+## 답장 초안 팝업
+
+Slack·메일 항목(소스 카드 행, Ned 액션 아이템, 인박스 상세)과 세션(레일·인박스 상세)에 `✍ 답장 초안` 버튼. 누르면 모달: `POST /api/draft {source, ref, hint?, tone?}` (ref 는 permalink 에서 채널 id·ts·thread_ts, 메일은 thread id, 세션은 session_id 를 뽑아 보냄; tone = `config.reply_tone`) → 맥락 요약·발췌, 초안 탭 3개(짧게/보통/정중하게, 탭마다 편집 유지), 편집 가능한 textarea, `다시 생성`(힌트). 하단: 복사 · Slack/Gmail 에서 열기 · Slack 전송 · Gmail 초안 저장 · 메일 보내기 · 세션에 보내기 — `config.actions` (`slack_send` / `gmail_draft` / `gmail_send` / `session_send`, 화면 기본값: Slack 전송·메일 보내기 꺼짐)에 따라 꺼진 건 `aria-disabled` + "설정에서 허용" 툴팁·토스트. 보내는 동작(Slack 전송·메일 보내기·세션에 보내기)은 대상을 보여 주는 확인 단계를 거친다. `POST /api/send {draft_id, source, ref, text, mode}` 결과는 토스트, 403·실패는 모달 안 메시지 + 토스트. 초안을 받는 동안 헤더 안경은 '스캔 중'. 키: Esc 닫기(확인 단계에선 확인만 취소), ⌘⏎/Ctrl⏎ 주 액션(확인 단계에선 확인), Tab 은 모달 안에서 순환. 설정 → '쓰기 액션' 에 토글 4개 + 답장 말투.
