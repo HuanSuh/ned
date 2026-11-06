@@ -7,22 +7,29 @@
 import { api } from "../api.js";
 import { S } from "../state.js";
 import { toast } from "../ui/toast.js";
-import { $ } from "../util.js";
-import { normLayout, renderCardLayout } from "./cardlayout.js";
+import { $, esc } from "../util.js";
+import { cardDomId, isWatch, normLayout, renderCardLayout, watchCh, watchIds } from "./cardlayout.js";
 import { renderAgenda } from "./calendar.js";
 
+/** Fixed panels. The full list (panels()) also has one `watch:<channel>` card per followed channel, right after Slack. */
 export const PANELS = ["cal", "slack", "mail", "jira", "github", "todo"];
 export const PANEL_EL = { cal: "cal-card", todo: "todo-card", slack: "sc-slack", mail: "sc-mail", jira: "sc-jira", github: "sc-gh" };
 export const PANEL_LABEL = { cal: "일정", slack: "Slack", mail: "메일", jira: "Jira", github: "GitHub", todo: "할 일" };
-/** Same as src/config.ts PANEL_MIN / DEFAULT_LAYOUT. */
+/** Same as src/config.ts PANEL_MIN / WATCH_MIN / DEFAULT_LAYOUT. */
 export const PANEL_MIN = { cal: { w: 2, h: 4 }, todo: { w: 2, h: 3 }, slack: { w: 2, h: 2 }, mail: { w: 2, h: 2 }, jira: { w: 2, h: 2 }, github: { w: 2, h: 2 } };
+const WATCH_MIN = { w: 2, h: 2 }, WATCH_NEW = { w: 3, h: 4 };
+export const panels = () => ["cal", "slack", ...watchIds(), "mail", "jira", "github", "todo"];
+export const panelElId = (id) => (isWatch(id) ? cardDomId(id) : PANEL_EL[id]);
+export const panelLabel = (id) => (isWatch(id) ? `#${watchCh(id)}` : PANEL_LABEL[id]);
+const panelMin = (id) => PANEL_MIN[id] || WATCH_MIN;
+const elOf = (id) => $(panelElId(id));
 export const COLS = 12, BASE_ROWS = 12, GAP = 16, MIN_ROWH = 40;
 export const FREE_MQ = "(min-width: 1100px)";
 const HEADER_SEL = "#cal-card > .hd, #todo-card > .hd, .scard > .shw";
 
 // ---------------------------------------------------------------- model (pure)
 const clampRect = (id, r) => {
-  const m = PANEL_MIN[id];
+  const m = panelMin(id);
   const w = Math.max(m.w, Math.min(COLS, Math.trunc(r.w)));
   return { x: Math.max(0, Math.min(COLS - w, Math.trunc(r.x))), y: Math.max(0, Math.trunc(r.y)), w, h: Math.max(m.h, Math.min(48, Math.trunc(r.h))) };
 };
@@ -49,7 +56,8 @@ export function deriveLayout(d) {
  * then everything floats up in that order (moved first on ties). Only `ids` take part; the rest are copied as-is. */
 export function settle(L, ids, moved = null) {
   const out = { ...L };
-  const byY = (a, b) => out[a].y - out[b].y || (a === moved ? -1 : b === moved ? 1 : 0) || out[a].x - out[b].x || PANELS.indexOf(a) - PANELS.indexOf(b);
+  const all = panels();
+  const byY = (a, b) => out[a].y - out[b].y || (a === moved ? -1 : b === moved ? 1 : 0) || out[a].x - out[b].x || all.indexOf(a) - all.indexOf(b);
   const fall = (order, fixed) => {
     const placed = fixed ? [fixed] : [];
     for (const id of order) {
@@ -64,16 +72,34 @@ export function settle(L, ids, moved = null) {
   return out;
 }
 
-/** Every panel present (missing ones from the order/span layout), clamped, compacted. */
+/** First free cell of `size` below `anchor` (inside its columns, top → bottom, left → right) — where a new card goes. */
+export function freeBelow(L, anchor, size = WATCH_NEW) {
+  const a = L[anchor] || { x: 0, y: 0, w: COLS, h: 0 }, w = Math.min(size.w, a.w), h = size.h;
+  const taken = Object.values(L);
+  for (let y = a.y + a.h; y < 600; y++)
+    for (let x = a.x; x + w <= a.x + a.w; x++) {
+      const r = { x, y, w, h };
+      if (!taken.some((o) => hit(r, o))) return r;
+    }
+  return { x: a.x, y: a.y + a.h, w, h };
+}
+
+/** Every panel present, clamped, compacted. Missing ones come from the order/span layout — except a watch card new to a
+ * saved layout, which takes the first free spot below the Slack card. */
 export function fullLayout(dash) {
   const raw = dash?.layout && typeof dash.layout === "object" ? dash.layout : null;
-  const base = deriveLayout(dash);
-  const L = Object.fromEntries(PANELS.map((id) => [id, clampRect(id, valid(raw?.[id]) ? raw[id] : base[id])]));
-  return settle(L, PANELS);
+  const base = deriveLayout(dash), ids = panels(), L = {}, fresh = [];
+  for (const id of ids) {
+    if (valid(raw?.[id])) L[id] = clampRect(id, raw[id]);
+    else if (raw && isWatch(id)) fresh.push(id);
+    else L[id] = clampRect(id, base[id] || { x: 3, y: 0, ...WATCH_NEW });
+  }
+  for (const id of fresh) L[id] = clampRect(id, freeBelow(L, "slack"));
+  return settle(L, ids);
 }
-const same = (a, b) => PANELS.every((id) => ["x", "y", "w", "h"].every((k) => a?.[id]?.[k] === b?.[id]?.[k]));
+const same = (a, b) => panels().every((id) => ["x", "y", "w", "h"].every((k) => a?.[id]?.[k] === b?.[id]?.[k]));
 /** Source card ids in reading order (y, then x) — the stacked flow below 1100px and the settings list. */
-export const cardOrder = (L = fullLayout(dash())) => ["slack", "mail", "jira", "github"].sort((a, b) => L[a].y - L[b].y || L[a].x - L[b].x);
+export const cardOrder = (L = fullLayout(dash())) => ["slack", "mail", "jira", "github", ...watchIds()].filter((id) => L[id]).sort((a, b) => L[a].y - L[b].y || L[a].x - L[b].x);
 
 // ---------------------------------------------------------------- state
 const dash = () => S.config?.dashboard || {};
@@ -84,7 +110,7 @@ let confirmed = null;   // last dashboard the server confirmed (revert target)
 let migrated = false;
 let saveT = 0, seq = 0;
 let lastCalH = -1;
-const visible = () => PANELS.filter((id) => !$(PANEL_EL[id]).hidden);
+const visible = () => panels().filter((id) => { const el = elOf(id); return el && !el.hidden; });
 const current = () => work || fullLayout(dash());
 
 // ---------------------------------------------------------------- render
@@ -95,18 +121,20 @@ export function applyLayout() {
   g.classList.toggle("locked", locked());
   syncLockBtn();
   if (!on) {
-    for (const id of PANELS) { const el = $(PANEL_EL[id]); el.style.gridColumn = el.style.gridRow = ""; }
+    for (const id of panels()) { const el = elOf(id); if (el) el.style.gridColumn = el.style.gridRow = ""; }
     $("lay-ghost")?.remove();
     lastCalH = -1;
     return false;
   }
   migrate();
+  keepFresh();
   // Row unit: BASE_ROWS rows fill the grid's height (≥ MIN_ROWH); taller layouts scroll inside the grid.
   const rowh = Math.max(MIN_ROWH, Math.floor((g.clientHeight - (BASE_ROWS - 1) * GAP) / BASE_ROWS));
   g.style.setProperty("--rowh", rowh + "px");
   const ids = visible(), L = work ? work : settle(fullLayout(dash()), ids);
-  for (const id of PANELS) {
-    const el = $(PANEL_EL[id]), r = L[id];
+  for (const id of panels()) {
+    const el = elOf(id), r = L[id];
+    if (!el || !r) continue; // a watch card whose DOM isn't built yet (features/watchcards.js)
     if (drag?.id === id && drag.mode === "move") continue; // stays in its start cell, follows the pointer by transform
     el.style.gridColumn = `${r.x + 1} / span ${r.w}`;
     el.style.gridRow = `${r.y + 1} / span ${r.h}`;
@@ -119,7 +147,7 @@ export function applyLayout() {
 /** DOM order of the source cards = reading order (keyboard / screen readers); not during a drag (keeps capture). */
 function reorderDom(L) {
   const g = $("sgrid");
-  for (const id of cardOrder(L)) g.appendChild($(PANEL_EL[id]));
+  for (const id of cardOrder(L)) { const el = elOf(id); if (el) g.appendChild(el); }
 }
 
 function ghostAt(r) {
@@ -162,6 +190,17 @@ function migrate() {
   S.config.dashboard = { ...dash(), layout: deriveLayout(dash()) };
   saveDash(null, { quiet: true, failMsg: "" });
 }
+/** A watch card new to the saved layout got a spot below Slack (fullLayout): save it once, so adding / removing other
+ * channels later doesn't move it. */
+const freshTried = new Set(); // once per card per page load: a failing save reverts the layout and must not loop
+function keepFresh() {
+  const L = dash().layout;
+  if (!L || work || drag) return;
+  const fresh = panels().filter((id) => isWatch(id) && !valid(L[id]) && !freshTried.has(id));
+  if (!fresh.length) return;
+  for (const id of fresh) freshTried.add(id);
+  commit(fullLayout(dash()));
+}
 /** Called when config (re)loads: new revert target, re-place panels. */
 export function onConfig() {
   confirmed = S.config?.dashboard ? { ...S.config.dashboard } : null;
@@ -171,14 +210,14 @@ function commit(L) {
   seq++; // a save already in flight must not overwrite this newer layout when it returns
   const all = { ...fullLayout(dash()), ...L };
   work = null;
-  S.config.dashboard = { ...dash(), layout: Object.fromEntries(PANELS.map((id) => [id, { x: all[id].x, y: all[id].y, w: all[id].w, h: all[id].h }])) };
+  S.config.dashboard = { ...dash(), layout: Object.fromEntries(panels().filter((id) => all[id]).map((id) => [id, { x: all[id].x, y: all[id].y, w: all[id].w, h: all[id].h }])) };
   applyLayout(); reorderDom(all);
   scheduleSave();
 }
 export function resetLayout() {
   if (!S.config) return;
   work = null;
-  const d = normLayout(null);
+  const d = normLayout({ watch_cards: dash().watch_cards }); // default order / spans; the 팔로업 card toggle stays as it is
   saveDash({ ...d, layout: deriveLayout(d) }, { okMsg: "홈 배치를 기본값으로 돌렸어" });
   applyLayout(); reorderDom(current());
 }
@@ -206,7 +245,7 @@ function onDown(e) {
     const hd = t.closest(HEADER_SEL); if (!hd) return;
     // controls inside a header keep their own clicks (the card toggle button .sh and the grip may start a drag)
     if (t.closest("input, select, textarea, a, .calnav, .vmode, .srcst, .chips, button:not(.sh):not(.lgrip)")) return;
-    id = Object.keys(PANEL_EL).find((k) => $(PANEL_EL[k]).contains(hd)); mode = "move";
+    id = panels().find((k) => elOf(k)?.contains(hd)); mode = "move";
   }
   if (!id) return;
   const base = settle(fullLayout(dash()), visible());
@@ -224,13 +263,13 @@ function onMove(e) {
     drag.started = true;
     try { $("hgrid").setPointerCapture(e.pointerId); } catch { /* synthetic / gone */ }
     document.body.classList.add("ldragging", drag.mode === "move" ? "lmove" : "lsize");
-    $(PANEL_EL[drag.id]).classList.add(drag.mode === "move" ? "ldrag" : "lresize");
+    elOf(drag.id).classList.add(drag.mode === "move" ? "ldrag" : "lresize");
   }
   e.preventDefault();
-  const { col, row } = steps(), o = drag.orig, m = PANEL_MIN[drag.id];
+  const { col, row } = steps(), o = drag.orig, m = panelMin(drag.id);
   let r;
   if (drag.mode === "move") {
-    $(PANEL_EL[drag.id]).style.transform = `translate(${dx}px, ${dy}px)`;
+    elOf(drag.id).style.transform = `translate(${dx}px, ${dy}px)`;
     r = { ...o, x: Math.max(0, Math.min(COLS - o.w, Math.round(o.x + dx / col))), y: Math.max(0, Math.round(o.y + dy / row)) };
   } else {
     // e = width only, s = height only, se = both
@@ -253,8 +292,8 @@ function endDrag(save) {
   if (!d?.started) return;
   try { $("hgrid").releasePointerCapture(d.pid); } catch { /* already released */ }
   document.body.classList.remove("ldragging", "lmove", "lsize");
-  const el = $(PANEL_EL[d.id]);
-  el.classList.remove("ldrag", "lresize"); el.style.transform = "";
+  const el = elOf(d.id);
+  if (el) { el.classList.remove("ldrag", "lresize"); el.style.transform = ""; }
   ghostAt(null);
   swallowClick = true; setTimeout(() => { swallowClick = false; }, 0); // the click that ends a drag isn't a card toggle
   if (save && work && !same(work, d.base)) commit(work);
@@ -266,7 +305,7 @@ const onCancel = (e) => { if (drag && e.pointerId === drag.pid) endDrag(false); 
 // ---------------------------------------------------------------- keyboard on the grip: arrows move, Shift+arrows resize
 let kb = null; // { id, base }
 const live = (msg) => { const l = $("lay-live"); if (l) l.textContent = msg; };
-const where = (id, r) => `${PANEL_LABEL[id]}: ${r.x + 1}열, ${r.y + 1}행, 폭 ${r.w}, 높이 ${r.h}`;
+const where = (id, r) => `${panelLabel(id)}:${r.x + 1}열, ${r.y + 1}행, 폭 ${r.w}, 높이 ${r.h}`;
 function onKey(e) {
   const grip = e.target.closest?.(".lgrip"); if (!grip || !freeOn() || locked() || !S.config) return;
   const id = grip.dataset.lgrip, k = e.key;
@@ -279,7 +318,8 @@ function onKey(e) {
   if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(k)) return;
   e.preventDefault(); e.stopPropagation();
   if (!kb || kb.id !== id) kb = { id, base: settle(fullLayout(dash()), visible()) };
-  const ids = visible(), cur = (work || kb.base)[id], m = PANEL_MIN[id];
+  const ids = visible(), cur = (work || kb.base)[id], m = panelMin(id);
+  if (!cur) return;
   const from = work || kb.base;
   let next = null;
   if (e.shiftKey) {
@@ -325,15 +365,19 @@ function syncLockBtn() {
   b.hidden = !freeOn();
 }
 
+/** Grip (drag + keyboard) in the panel header, resize handles on the panel. Once per element (watch cards are built later). */
+export function decoratePanel(id) {
+  const el = elOf(id), hd = el?.querySelector(":scope > .hd, :scope > .shw");
+  if (!hd || el.classList.contains("lp")) return;
+  el.classList.add("lp");
+  hd.classList.add("lhd");
+  const eid = esc(id);
+  hd.insertAdjacentHTML("afterbegin", `<button type="button" class="lgrip" data-lgrip="${eid}" aria-label="${esc(panelLabel(id))} 패널 옮기기 — 방향키 이동, Shift+방향키 크기, Enter 저장, Esc 취소" title="드래그해서 옮기기 · 방향키 이동 · Shift+방향키 크기"><svg viewBox="0 0 10 16" width="8" height="13" aria-hidden="true"><g fill="currentColor"><circle cx="2.5" cy="3" r="1.3"/><circle cx="7.5" cy="3" r="1.3"/><circle cx="2.5" cy="8" r="1.3"/><circle cx="7.5" cy="8" r="1.3"/><circle cx="2.5" cy="13" r="1.3"/><circle cx="7.5" cy="13" r="1.3"/></g></svg></button>`);
+  el.insertAdjacentHTML("beforeend", `<span class="lrs lrs-e" data-lrs="e" data-panel="${eid}" aria-hidden="true" title="폭 조절"></span><span class="lrs lrs-s" data-lrs="s" data-panel="${eid}" aria-hidden="true" title="높이 조절"></span><span class="lrs lrs-se" data-lrs="se" data-panel="${eid}" aria-hidden="true" title="크기 조절"></span>`);
+}
+
 export function init() {
-  // grips (drag + keyboard) in every panel header, resize handles on every panel
-  for (const id of PANELS) {
-    const el = $(PANEL_EL[id]), hd = el.querySelector(":scope > .hd, :scope > .shw");
-    el.classList.add("lp");
-    hd.classList.add("lhd");
-    hd.insertAdjacentHTML("afterbegin", `<button type="button" class="lgrip" data-lgrip="${id}" aria-label="${PANEL_LABEL[id]} 패널 옮기기 — 방향키 이동, Shift+방향키 크기, Enter 저장, Esc 취소" title="드래그해서 옮기기 · 방향키 이동 · Shift+방향키 크기"><svg viewBox="0 0 10 16" width="8" height="13" aria-hidden="true"><g fill="currentColor"><circle cx="2.5" cy="3" r="1.3"/><circle cx="7.5" cy="3" r="1.3"/><circle cx="2.5" cy="8" r="1.3"/><circle cx="7.5" cy="8" r="1.3"/><circle cx="2.5" cy="13" r="1.3"/><circle cx="7.5" cy="13" r="1.3"/></g></svg></button>`);
-    el.insertAdjacentHTML("beforeend", `<span class="lrs lrs-e" data-lrs="e" data-panel="${id}" aria-hidden="true" title="폭 조절"></span><span class="lrs lrs-s" data-lrs="s" data-panel="${id}" aria-hidden="true" title="높이 조절"></span><span class="lrs lrs-se" data-lrs="se" data-panel="${id}" aria-hidden="true" title="크기 조절"></span>`);
-  }
+  for (const id of PANELS) decoratePanel(id);
   const meta = document.querySelector(".hmeta");
   meta?.insertAdjacentHTML("beforeend", `<button type="button" class="btn small iconly" id="lay-lock" aria-pressed="false"></button><span class="vh" id="lay-live" aria-live="polite"></span>`);
   $("lay-lock")?.addEventListener("click", () => setLocked(!locked()));

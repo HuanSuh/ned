@@ -100,6 +100,18 @@ describe("other routes", () => {
     expect(r.filters.slack.exclude_channels).toEqual(["rand"]);
   });
 
+  it("PUT /api/config: following / unfollowing a channel adds / drops its watch: card even without a dashboard patch", async () => {
+    fs.writeFileSync(CONFIG_PATH, YAML.stringify({ notify: "off" }));
+    const a = await (await request("/api/config", json("PUT", { filters: { slack: { watch_channels: ["#release"] } } }))).json();
+    expect(a.dashboard.card_order).toEqual(["slack", "mail", "jira", "github", "watch:release"]);
+    expect(a.dashboard.watch_cards).toBe(true);
+    const b = await (await request("/api/config", json("PUT", { dashboard: { layout: { slack: { x: 3, y: 0, w: 6, h: 4 }, "watch:release": { x: 3, y: 4, w: 3, h: 4 }, "watch:bogus": { x: 0, y: 0, w: 3, h: 3 } } } }))).json();
+    expect(Object.keys(b.dashboard.layout)).toEqual(["slack", "watch:release"]);
+    const c = await (await request("/api/config", json("PUT", { filters: { slack: { watch_channels: [] } } }))).json();
+    expect(c.dashboard.card_order).toEqual(["slack", "mail", "jira", "github"]);
+    expect(Object.keys(c.dashboard.layout)).toEqual(["slack"]);
+  });
+
   it("POST /api/attention/:id/review → 404 for unknown attention, ok for a source key", async () => {
     expect((await request("/api/attention/nope/review", { method: "POST" })).status).toBe(404);
     const r = await request(`/api/attention/${encodeURIComponent("jira:APP-1")}/review`, json("POST", { reviewed: true }));

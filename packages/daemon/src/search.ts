@@ -30,7 +30,7 @@ export interface SearchHit {
   kind: string;
   /** Dashboard tab the item lives on. */
   tab: SearchTab;
-  /** Where in that tab: "row:<attention id>", "briefing:<id>", "card:<mail|jira|slack|gh|todo|cal>", "day:YYYY-MM-DD", "session:<id>". */
+  /** Where in that tab: "row:<attention id>", "briefing:<id>", "card:<mail|jira|slack|gh|todo|cal>", "card:watch:<channel>", "day:YYYY-MM-DD", "session:<id>". */
   anchor: string;
   score: number;
   /** briefing hits: its items, so the palette can show a briefing the page hasn't loaded. */
@@ -207,6 +207,17 @@ function candidates(): Cand[] {
       out.push({
         type: "slack", id, title: x.text || "(내용 없음)", detail: `${x.channel} · ${x.from}`, ts: isoTs(x.ts), url: url(x.url), kind: "slack", tab: "home", anchor: "card:slack",
         fields: [[x.text, 3], [x.channel, 2], [x.from, 2]],
+      });
+    }
+    // 팔로업 channel highlights: their own card (`card:watch:<channel>`) unless dashboard.watch_cards is off (→ the Slack card's fold).
+    for (const w of a.slack.watch ?? []) for (const h of w.highlights ?? []) {
+      const id = h.url || `${w.channel}:${h.ts}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({
+        type: "slack", id, title: h.text || "(내용 없음)", detail: `${w.channel} · ${h.from}${h.needs_me ? " · 나한테" : ""}`, ts: isoTs(h.ts), url: url(h.url), kind: "slack", tab: "home",
+        anchor: cfg.dashboard.watch_cards === false ? "card:slack" : `card:watch:${w.channel.replace(/^#+/, "")}`,
+        fields: [[h.text, 3], [w.channel, 2], [h.from, 2], [w.summary, 1]],
       });
     }
   }

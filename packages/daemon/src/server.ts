@@ -8,7 +8,7 @@ import { agendaBusy, readAgenda, refreshAgenda } from "./agenda.js";
 import { contextStatus, requestContext } from "./agenda-context.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { PERSONAS, loadConfig, mergeFilters, normalizeActions, normalizeDashboard, normalizeNotifications, normalizeReplyTone, normalizePersona, saveConfig, type NedConfig, type PersonaId } from "./config.js";
+import { PERSONAS, loadConfig, mergeFilters, normalizeActions, normalizeDashboard, normalizeNotifications, normalizeReplyTone, normalizePersona, saveConfig, watchChannels, type NedConfig, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { checkStatus, dismissAttention, heartbeat, listBriefings, runCheck } from "./heartbeat.js";
@@ -79,7 +79,9 @@ export function startServer(getConfig: () => NedConfig): void {
     const cur = loadConfig();
     // filters is nested: merge it per source so a PUT carrying only filters.slack keeps filters.jira.
     // An unknown persona value keeps the current one.
-    const merged = { ...cur, ...body, persona: PERSONAS.includes(body.persona as PersonaId) ? normalizePersona(body.persona) : cur.persona, notifications: normalizeNotifications(body.notifications, cur.notifications), actions: normalizeActions(body.actions, cur.actions), reply_tone: normalizeReplyTone(body.reply_tone, cur.reply_tone), filters: mergeFilters(cur.filters, body.filters), dashboard: body.dashboard === undefined ? cur.dashboard : normalizeDashboard(body.dashboard, cur.dashboard) };
+    const merged = { ...cur, ...body, persona: PERSONAS.includes(body.persona as PersonaId) ? normalizePersona(body.persona) : cur.persona, notifications: normalizeNotifications(body.notifications, cur.notifications), actions: normalizeActions(body.actions, cur.actions), reply_tone: normalizeReplyTone(body.reply_tone, cur.reply_tone), filters: mergeFilters(cur.filters, body.filters) };
+    // Re-normalized even without body.dashboard: a 팔로업 channel added / removed in filters adds / drops its `watch:` card.
+    merged.dashboard = normalizeDashboard(body.dashboard ?? {}, cur.dashboard, watchChannels(merged.filters));
     saveConfig(merged);
     // Mirror the persona into state.json right away so the dashboard / menu-bar app switch without waiting a tick.
     const st = readState();
