@@ -272,11 +272,11 @@
   .tgrp > .gh .n { margin-left: auto; font-weight: 600; color: var(--faint); background: var(--hover); border-radius: 999px; padding: 0 8px; }
   .tgrp > .gh .n.hot { color: var(--accent-ink); background: var(--amber); }
   .tgrp .gl { border-left: 2px solid var(--gc, var(--line)); margin-top: 4px; }
-  .tgrp.g-ned { --gc: var(--mint); } .tgrp.g-jira { --gc: var(--blue); } .tgrp.g-gh { --gc: var(--dim); } .tgrp.g-mail { --gc: var(--violet); }
+  .tgrp.g-ned { --gc: var(--mint); } .tgrp.g-jira { --gc: var(--blue); } .tgrp.g-gh { --gc: var(--dim); } .tgrp.g-mail { --gc: var(--violet); } .tgrp.g-me { --gc: var(--amber); }
   .msum { display: flex; gap: 6px 10px; align-items: baseline; flex-wrap: wrap; padding: 6px 10px 4px; color: var(--dim); font-size: 12.5px; }
   .msum:empty { display: none; }
   .msum .u { font: 11px var(--mono); color: var(--faint); white-space: nowrap; }
-  .ti .from { font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 12em; } .tgrp.g-me { --gc: var(--amber); }
+  .ti .from { font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 12em; }
   .ti { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 0 8px; align-items: center; padding: 5px 6px 5px 8px; border-radius: 0 6px 6px 0; min-height: 32px; }
   .ti:hover { background: var(--hover); }
   .ti .ic { text-align: center; font-size: 13px; }
@@ -391,7 +391,7 @@
           <div class="hd"><h2>할 일</h2><span class="sp"></span><span class="count" id="todo-count"></span></div>
           <div class="bd">
             <div class="tgrp g-ned"><div class="gh"><span class="ico">👓</span>NED 액션 아이템<span class="n" id="n-ned">0</span></div><div class="gl" id="g-ned"></div></div>
-            <div class="tgrp g-mail"><div class="gh"><span class="ico">📬</span>메일 확인 필요<span class="n" id="n-mail">0</span></div><div class="gl"><div class="msum" id="mail-sum"></div><div id="g-mail"></div></div></div>
+            <div class="tgrp g-mail" id="grp-mail"><div class="gh"><span class="ico">📬</span>메일 확인 필요<span class="n" id="n-mail">0</span></div><div class="gl"><div class="msum" id="mail-sum"></div><div id="g-mail"></div></div></div>
             <div class="tgrp g-jira"><div class="gh"><span class="ico">📋</span>JIRA 내 이슈<span class="n" id="n-jira">0</span></div><div class="gl" id="g-jira"></div></div>
             <div class="tgrp g-gh"><div class="gh"><span class="ico">🐙</span>GITHUB 리뷰 요청<span class="n" id="n-gh">0</span></div><div class="gl" id="g-gh"></div></div>
             <div class="tgrp g-me"><div class="gh"><span class="ico">✅</span>개인 할 일<span class="n" id="n-me">0</span></div>
@@ -1013,8 +1013,11 @@
     }).join(""), s ? "내가 챙겨 둔 거 없어." : "불러오는 중…");
 
     const unavailable = ag === null ? "agenda 연결 안 됨." : ag === undefined ? "불러오는 중…" : "";
-    const mail = ag?.mail, mi = mail?.items || [];
-    $("mail-sum").innerHTML = mail ? `${mail.summary ? `<span>${esc(mail.summary)}</span>` : ""}<span class="u">안 읽은 메일 ${Number(mail.unread) || 0}통 · 최근 2일</span>` : "";
+    // Gmail source off → hide the group; mail === null → agenda.json predates mail (not fetched yet).
+    const mailOn = ag?.mail_enabled !== false, mail = mailOn ? ag?.mail : null, mi = mail?.items || [];
+    $("grp-mail").hidden = !mailOn;
+    const unreadN = `${Number(mail?.unread) || 0}${mail?.unread_capped ? "+" : ""}`;
+    $("mail-sum").innerHTML = mail ? `${mail.summary ? `<span>${esc(mail.summary)}</span>` : ""}<span class="u">안 읽은 메일 ${unreadN}통 · 최근 2일</span>` : "";
     group("mail", mi.length, mi.some((x) => x.reason === "deadline" || x.reason === "approval"), mi.map((x) => {
       const u = safeUrl(x.url), r = MAIL_REASON[x.reason] || MAIL_REASON.request;
       return `<div class="ti"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.subject || "(제목 없음)")) : esc(x.subject || "(제목 없음)")}</span>
@@ -1068,7 +1071,7 @@
         bits.push(t + ".");
       }
       const jira = ag.jira?.length || 0, rv = (ag.github || []).filter((g) => g.reason === "review_requested").length;
-      const mails = ag.mail?.items?.length || 0;
+      const mails = ag.mail_enabled !== false ? ag.mail?.items?.length || 0 : 0;
       const w = [jira ? `Jira ${jira}건` : "", rv ? `리뷰 ${rv}건` : "", mails ? `메일 ${mails}통` : ""].filter(Boolean);
       if (w.length) bits.push(`${w.join(", ")} 기다려.`);
     }

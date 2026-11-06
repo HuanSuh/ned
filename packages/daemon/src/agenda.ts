@@ -60,8 +60,10 @@ export interface MailItem {
 export interface MailBlock {
   /** One-line inbox summary in Ned's voice; "" when nothing notable. */
   summary: string;
-  /** Unread inbox threads in the last 2 days (capped at 50). */
+  /** Unread inbox threads in the last 2 days, at most MAIL_UNREAD_CAP. */
   unread: number;
+  /** True when the unread search hit MAIL_UNREAD_CAP, so the real count may be higher. */
+  unread_capped: boolean;
   /** Mails that need my action, most urgent first (max 10). */
   items: MailItem[];
 }
@@ -70,7 +72,8 @@ export interface AgendaPayload {
   calendar: CalendarItem[];
   jira: JiraItem[];
   github: GithubItem[];
-  mail: MailBlock;
+  /** null = not fetched (agenda.json predates mail, or the gmail source is off). */
+  mail: MailBlock | null;
 }
 
 export interface Agenda extends AgendaPayload {
@@ -79,13 +82,22 @@ export interface Agenda extends AgendaPayload {
   error?: string;
 }
 
-const EMPTY_MAIL: MailBlock = { summary: "", unread: 0, items: [] };
-const EMPTY: Agenda = { updated_at: 0, cost_usd: 0, calendar: [], jira: [], github: [], mail: EMPTY_MAIL };
-const emptyAgenda = (now: number): Agenda => ({ ...EMPTY, updated_at: now, mail: { ...EMPTY_MAIL, items: [] } });
+/** Must match the `unread` search limit in prompts/agenda.md. */
+export const MAIL_UNREAD_CAP = 50;
+const EMPTY: Agenda = { updated_at: 0, cost_usd: 0, calendar: [], jira: [], github: [], mail: null };
+const emptyAgenda = (now: number): Agenda => ({ ...EMPTY, updated_at: now });
 
 export function readAgenda(): Agenda {
   const a = readJson<Partial<Agenda>>(AGENDA_PATH, {});
-  return { ...EMPTY, ...a, calendar: a.calendar ?? [], jira: a.jira ?? [], github: a.github ?? [], mail: { ...EMPTY_MAIL, ...a.mail, items: a.mail?.items ?? [] } };
+  return { ...EMPTY, ...a, calendar: a.calendar ?? [], jira: a.jira ?? [], github: a.github ?? [], mail: readMail(a.mail) };
+}
+
+/** A missing/garbled mail block stays null so the dashboard can say mail hasn't been fetched yet. */
+function readMail(m: unknown): MailBlock | null {
+  if (!m || typeof m !== "object") return null;
+  const b = m as Partial<MailBlock>;
+  const unread = Math.max(0, Math.trunc(Number(b.unread) || 0));
+  return { summary: str(b.summary), unread, unread_capped: b.unread_capped ?? unread >= MAIL_UNREAD_CAP, items: Array.isArray(b.items) ? b.items : [] };
 }
 
 /** Read tools for the agenda job only — narrower than the heartbeat's set. */
@@ -158,10 +170,12 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
         }))
     : [];
   const m = raw.mail && typeof raw.mail === "object" ? (raw.mail as Record<string, unknown>) : {};
-  const mail: MailBlock = cfg.sources.gmail
+  const unread = Math.max(0, Math.trunc(Number(m.unread) || 0));
+  const mail: MailBlock | null = cfg.sources.gmail
     ? {
         summary: str(m.summary).slice(0, 200),
-        unread: Math.max(0, Math.trunc(Number(m.unread) || 0)),
+        unread: Math.min(unread, MAIL_UNREAD_CAP),
+        unread_capped: unread >= MAIL_UNREAD_CAP,
         items: arr(m.items)
           .slice(0, 10)
           .map((e) => ({
@@ -175,7 +189,7 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
             why: str(e.why).slice(0, 120),
           })),
       }
-    : { ...EMPTY_MAIL, items: [] };
+    : null;
   return { calendar, jira, github, mail };
 }
 
@@ -229,7 +243,7 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
   }
 
   log("agenda: asking claude");
-  const res = await runClaude(buildPrompt(cfg), { allowedTools: agendaTools(cfg), maxTurns: 10, model: cfg.claude_model, timeoutMs: 5 * 60_000 });
+  const res = await runClaude(buildPrompt(cfg), { allowedTools: agendaTools(cfg), maxTurns: 14, model: cfg.claude_model, timeoutMs: 5 * 60_000 });
   const parsed = res.ok ? extractJson<Partial<Record<keyof AgendaPayload, unknown>>>(res.text) : null;
   let agenda: Agenda;
   if (parsed) {
@@ -242,6 +256,6 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
     log(`agenda: failed — ${error.slice(0, 300)}`);
   }
   writeJsonAtomic(AGENDA_PATH, agenda);
-  log(`agenda: ${agenda.calendar.length} events / ${agenda.jira.length} jira / ${agenda.github.length} prs / ${agenda.mail.items.length} mails ($${res.cost_usd.toFixed(2)}, ${res.num_turns} turns, ${Math.round(res.duration_ms / 1000)}s)`);
+  log(`agenda: ${agenda.calendar.length} events / ${agenda.jira.length} jira / ${agenda.github.length} prs / ${agenda.mail?.items.length ?? "-"} mails ($${res.cost_usd.toFixed(2)}, ${res.num_turns} turns, ${Math.round(res.duration_ms / 1000)}s)`);
   return agenda;
 }
