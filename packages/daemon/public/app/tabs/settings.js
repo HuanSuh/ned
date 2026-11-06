@@ -83,7 +83,7 @@ export function syncNotifyEnabled() {
 // ---------- 소스: per-source sub groups (Slack / Jira) dim while that source is off; their values still save ----------
 export function syncSourceGroups() {
   for (const g of document.querySelectorAll("[data-srcgrp]")) {
-    const cb = document.querySelector(`[data-src="${g.dataset.srcgrp}"]`);
+    const cb = srcToggle(g.dataset.srcgrp);
     const off = !!cb && !cb.checked;
     g.classList.toggle("off", off);
     g.setAttribute("aria-disabled", String(off));
@@ -92,7 +92,7 @@ export function syncSourceGroups() {
   }
   // 소스별 자동 갱신 칸: dim + disable while that source is off (value kept and still saved).
   for (const f of document.querySelectorAll("[data-intsrc]")) {
-    const cb = document.querySelector(`[data-src="${f.dataset.intsrc}"]`);
+    const cb = srcToggle(f.dataset.intsrc);
     const off = !!cb && !cb.checked;
     f.classList.toggle("off", off);
     f.querySelector("input").disabled = off;
@@ -130,7 +130,11 @@ export const readNotifications = () => ({
 export function renderWriteActions(c) {
   $("wa-groups").innerHTML = writeActionsHtml(c, ACTION_DEFAULTS, ACTION_KO); // dims from c.sources; re-synced once 소스 toggles render
 }
-export const syncWriteActions = () => syncWriteActionGroups($("wa-groups"), (k) => document.querySelector(`[data-src="${k}"]`)?.checked !== false);
+export const syncWriteActions = () => syncWriteActionGroups($("wa-groups"), (k) => srcToggle(k)?.checked !== false);
+
+/** The 소스 checkbox for `key` — scoped to #c-sources: the home tab's 팔로업 cards also carry `data-src="slack"`
+ *  (status spans), and an unscoped querySelector picked one of those first → "Slack 소스가 꺼져 있어" while it was on. */
+const srcToggle = (key) => document.querySelector(`#c-sources input[data-src="${key}"]`);
 const SRC_KO = { slack: "Slack", email: "메일", session: "세션", jira: "Jira", github: "GitHub", calendar: "캘린더" };
 const OUTCOME_KO = { ok: ["성공", "ok"], refused: ["거절(꺼짐)", ""], dry_run: ["dry-run", ""], failed: ["실패", "today"] };
 export const outcomeOf = (e) => (e.ok ? "ok" : e.action === "refused" ? "refused" : String(e.action || "").startsWith("dry_run:") ? "dry_run" : "failed");
