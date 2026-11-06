@@ -11,6 +11,10 @@ struct MenuContent: View {
                 Label("Ned 데몬이 꺼져 있어요 — `ned run` 또는 launchctl 확인", systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.orange)
             }
+            if let e = store.lastError {
+                Label("state.json 읽기 실패 (이전 상태 표시 중)", systemImage: "doc.badge.ellipsis")
+                    .font(.caption2).foregroundStyle(.secondary).help(e)
+            }
             if !store.state.attention.isEmpty {
                 section("지금 봐야 할 것") {
                     ForEach(store.state.attention.prefix(5)) { item in
@@ -96,6 +100,7 @@ struct AttentionRow: View {
         case "jira": return "checklist"
         case "github": return "arrow.triangle.pull"
         case "sentry": return "exclamationmark.octagon"
+        case "calendar": return "calendar"
         default: return "bell"
         }
     }
