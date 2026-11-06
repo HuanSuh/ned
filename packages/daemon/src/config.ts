@@ -24,7 +24,7 @@ export interface NedConfig {
 
 export const DEFAULT_CONFIG: NedConfig = {
   heartbeat_minutes: 10,
-  signal_check_minutes: 30,
+  signal_check_minutes: 60,
   briefing_time: "09:00",
   quiet_hours: { start: "23:00", end: "08:00" },
   sources: { gmail: true, slack: true, jira: true, github: true, sentry: true, calendar: true },
