@@ -1,4 +1,5 @@
-/* Settings tab: config form, persona picker, exclusions, notifications, write actions. */
+/* Settings tab: one form, six section cards (외형 · 소스 · 알림 · 순찰 주기 · 쓰기 액션 · Claude), a jump nav and a sticky save bar.
+ * Field ids and the PUT /api/config body are unchanged; only the layout moved (index.html #v-settings). */
 import { api } from "../api.js";
 import { readCardLayout, renderCardLayout } from "../features/cardlayout.js";
 import { ACTION_DEFAULTS, ACTION_KO } from "../features/drafts.js";
@@ -40,6 +41,7 @@ export function renderExcl() {
   $("dl-ack").innerHTML = ACK_SUGGEST.filter((v) => !excl.ack.includes(v)).map((v) => `<option value=":${esc(v)}:">`).join("");
   $("dl-jira").innerHTML = [...pj].filter((v) => !excl.jira.includes(v)).sort().map((v) => `<option value="${esc(v)}">`).join("");
 }
+const X_MSG = { slack: "x-msg", jira: "j-msg", watch: "w-msg", ack: "a-msg" }; // one status line per chip box
 export function addExcl(k, raw) {
   let added = 0, bad = [];
   for (const part of String(raw).split(/[,\s]+/)) {
@@ -49,7 +51,7 @@ export function addExcl(k, raw) {
     if (k === "ack" && excl.ack.length >= 8 && !excl.ack.includes(v)) { bad.push(`${part.trim()} (최대 8개)`); continue; }
     if (!excl[k].includes(v)) { excl[k].push(v); added++; }
   }
-  $(k === "watch" ? "w-msg" : k === "ack" ? "a-msg" : "x-msg").textContent = bad.length ? `${k === "jira" ? "프로젝트 키는 영문 대문자로 시작하는 영숫자만 돼" : k === "ack" ? "이모지 이름에 공백·기호는 안 돼 (영문·한글·숫자·_+-.' 만)" : "채널 이름이 비었거나 너무 길어"}: ${bad.join(", ")}` : added ? "추가했어. 저장을 눌러야 적용돼." : "";
+  $(X_MSG[k]).textContent = bad.length ? `${k === "jira" ? "프로젝트 키는 영문 대문자로 시작하는 영숫자만 돼" : k === "ack" ? "이모지 이름에 공백·기호는 안 돼 (영문·한글·숫자·_+-.' 만)" : "채널 이름이 비었거나 너무 길어"}: ${bad.join(", ")}` : added ? "추가했어. 저장을 눌러야 적용돼." : "";
   renderExcl();
 }
 
@@ -76,11 +78,50 @@ export function renderNotifications(n) {
   for (const r of document.querySelectorAll("input[name=n-quiet]")) r.checked = r.value === (n.quiet_delivery || "skip");
   syncNotifyEnabled();
 }
+/** 알림 off → everything else in the section dims (values kept); quiet start/end also follow 조용한 시간 '사용'. */
 export function syncNotifyEnabled() {
   const on = $("n-on").checked, box = $("n-on").closest(".ntf");
   box.classList.toggle("off", !on);
   for (const el of box.querySelectorAll("input")) if (el.id !== "n-on") el.disabled = !on;
+  $("c-qs").disabled = $("c-qe").disabled = !on || !$("c-qon").checked;
 }
+
+// ---------- 소스: per-source sub groups (Slack / Jira) dim while that source is off; their values still save ----------
+export function syncSourceGroups() {
+  for (const g of document.querySelectorAll("[data-srcgrp]")) {
+    const cb = document.querySelector(`[data-src="${g.dataset.srcgrp}"]`);
+    const off = !!cb && !cb.checked;
+    g.classList.toggle("off", off);
+    g.setAttribute("aria-disabled", String(off));
+    g.querySelector(".offnote").hidden = !off;
+    g.querySelector(".sgb").toggleAttribute("inert", off);
+  }
+  // 소스별 자동 갱신 칸: dim + disable while that source is off (value kept and still saved).
+  for (const f of document.querySelectorAll("[data-intsrc]")) {
+    const cb = document.querySelector(`[data-src="${f.dataset.intsrc}"]`);
+    const off = !!cb && !cb.checked;
+    f.classList.toggle("off", off);
+    f.querySelector("input").disabled = off;
+    f.title = off ? "소스가 꺼져 있어 — 값은 그대로 보존돼" : "";
+  }
+}
+
+// ---------- 소스별 자동 갱신 주기: config.agenda_source_minutes { slack, mail, calendar, jira, github } (null/blank → agenda_refresh_minutes) ----------
+export const INT_KEYS = ["slack", "mail", "calendar", "jira", "github"];
+const posInt = (v) => { const n = Math.trunc(Number(v)); return String(v).trim() !== "" && Number.isFinite(n) && n >= 1 ? n : null; };
+export function renderIntervals(c) {
+  const base = c.agenda_refresh_minutes;
+  $("c-agmin").value = base ?? "";
+  const per = c.agenda_source_minutes && typeof c.agenda_source_minutes === "object" ? c.agenda_source_minutes : {}; // older daemon: no key → all blank
+  for (const k of INT_KEYS) { const el = $(`c-int-${k}`); el.value = posInt(per[k] ?? "") ?? ""; }
+  syncIntervalPlaceholders();
+}
+/** placeholder "기본 N분" follows the base field as it is typed. */
+export function syncIntervalPlaceholders() {
+  const n = posInt($("c-agmin").value);
+  for (const k of INT_KEYS) $(`c-int-${k}`).placeholder = n ? `기본 ${n}분` : "기본값";
+}
+export const readIntervals = () => Object.fromEntries(INT_KEYS.map((k) => [k, posInt($(`c-int-${k}`).value)]));
 export const readNotifications = () => ({
   enabled: $("n-on").checked,
   kinds: Object.fromEntries([...document.querySelectorAll("[data-nk]")].map((c) => [c.dataset.nk, c.checked])),
@@ -152,23 +193,89 @@ export function renderConfig() {
   excl.jira = [...(c.filters?.jira?.exclude_projects || [])];
   excl.watch = [...(c.filters?.slack?.watch_channels || [])];
   excl.ack = [...(c.filters?.slack?.ack_reactions || [])];
-  $("x-msg").textContent = $("w-msg").textContent = $("a-msg").textContent = "";
+  for (const id of Object.values(X_MSG)) $(id).textContent = "";
   renderExcl();
   $("cfg-port").textContent = c.port ? `port ${c.port}` : "";
   $("c-hb").value = c.heartbeat_minutes ?? "";
   $("c-sig").value = c.signal_check_minutes ?? "";
   $("c-bt").value = c.briefing_time ?? "";
+  renderIntervals(c);
   $("c-qon").checked = !!c.quiet_hours;
   $("c-qs").value = c.quiet_hours?.start ?? "23:00";
   $("c-qe").value = c.quiet_hours?.end ?? "08:00";
-  $("c-qs").disabled = $("c-qe").disabled = !c.quiet_hours;
+  syncNotifyEnabled(); // quiet start/end: off unless 알림 on and 조용한 시간 사용
   // Toggles come from config.sources keys, so new sources appear without touching this page.
   const keys = Object.keys(c.sources || {});
   $("c-sources").innerHTML = keys.length ? keys.map((k) => `<label><input type="checkbox" data-src="${esc(k)}" ${c.sources[k] ? "checked" : ""}>${esc(SOURCE_LABEL[k] || k)}</label>`).join("") : `<span class="hint">소스 없음</span>`;
+  syncSourceGroups();
   $("c-model").value = c.claude_model ?? "";
   $("c-turns").value = c.claude_max_turns ?? "";
   $("c-budget").value = c.agenda_daily_budget_usd ?? "";
   $("c-msg").textContent = ""; $("c-msg").className = "msg";
+  saved = snap(); syncDirty();
+  syncNav();
+}
+
+/** The PUT /api/config body, read from every section of the form. */
+export function readBody() {
+  const sources = {};
+  for (const cb of document.querySelectorAll("[data-src]")) sources[cb.dataset.src] = cb.checked;
+  return {
+    heartbeat_minutes: Number($("c-hb").value),
+    signal_check_minutes: Number($("c-sig").value),
+    briefing_time: $("c-bt").value,
+    agenda_refresh_minutes: Number($("c-agmin").value),
+    agenda_source_minutes: readIntervals(),
+    quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
+    sources,
+    persona: document.querySelector("#c-persona input[name=persona]:checked")?.value || S.config?.persona || "ned",
+    filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack] }, jira: { exclude_projects: [...excl.jira] } },
+    dashboard: readCardLayout(),
+    notifications: readNotifications(),
+    actions: Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])),
+    reply_tone: $("c-tone").value.trim(),
+    claude_model: $("c-model").value.trim() || null,
+    claude_max_turns: Number($("c-turns").value),
+    agenda_daily_budget_usd: Number($("c-budget").value),
+  };
+}
+
+// ---------- 저장 안 된 변경: body as rendered vs. now ----------
+// dashboard is left out of the snapshot: lock / 팔로업 카드 save on their own, and order/width edits show up as
+// readCardLayout().layout (cardlayout.js re-derives the grid only when they were touched here).
+let saved = "";
+const snap = () => { const { dashboard, ...rest } = readBody(); return JSON.stringify(rest); };
+export const isDirty = () => !!S.config && (snap() !== saved || !!readCardLayout().layout);
+export function syncDirty() {
+  const d = isDirty();
+  $("c-dirty").hidden = !d;
+  $("cfg").classList.toggle("dirty", d);
+}
+
+// ---------- section jump nav: click scrolls (hash stays #settings — it routes views), scroll marks the current one ----------
+const reduceMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+export function syncNav() {
+  const page = $("v-settings"), links = [...document.querySelectorAll("[data-sjump]")];
+  if (page.hidden || !links.length) return;
+  const top = page.getBoundingClientRect().top + 120;
+  let cur = links[0].dataset.sjump;
+  for (const a of links) if ($(a.dataset.sjump).getBoundingClientRect().top <= top) cur = a.dataset.sjump;
+  if (page.scrollTop + page.clientHeight >= page.scrollHeight - 4) cur = links[links.length - 1].dataset.sjump; // bottom: last section
+  for (const a of links) if (a.dataset.sjump === cur) a.setAttribute("aria-current", "true"); else a.removeAttribute("aria-current");
+}
+function initNav() {
+  $("s-nav").addEventListener("click", (e) => {
+    const a = e.target.closest("[data-sjump]"); if (!a) return;
+    e.preventDefault();
+    const sec = $(a.dataset.sjump);
+    sec.scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" });
+    sec.querySelector("h2")?.focus({ preventScroll: true });
+    for (const x of document.querySelectorAll("[data-sjump]")) if (x === a) x.setAttribute("aria-current", "true"); else x.removeAttribute("aria-current");
+  });
+  let raf = 0;
+  const schedule = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; syncNav(); }); };
+  $("v-settings").addEventListener("scroll", schedule, { passive: true });
+  window.addEventListener("hashchange", schedule); // entering the tab: mark the section in view
 }
 
 /** Listeners + one-time setup; main.js calls every module's init() once, in the old file's order. */
@@ -198,28 +305,17 @@ export function init() {
     excl[k].splice(Number(i), 1); renderExcl(); $(`x-${k}-in`).focus();
   });
   $("n-on").addEventListener("change", syncNotifyEnabled);
-  $("c-qon").addEventListener("change", (e) => { $("c-qs").disabled = $("c-qe").disabled = !e.target.checked; });
+  $("c-qon").addEventListener("change", syncNotifyEnabled);
+  $("c-agmin").addEventListener("input", syncIntervalPlaceholders);
+  $("c-sources").addEventListener("change", (e) => { if (e.target.dataset?.src) syncSourceGroups(); });
+  // Any edit anywhere (typing, toggles, chip add/remove, ↑/↓ in 홈 카드 배치) → re-check the dirty mark after handlers ran.
+  const later = () => queueMicrotask(syncDirty);
+  for (const ev of ["input", "change", "click", "keydown"]) $("cfg").addEventListener(ev, later);
+  initNav();
   $("cfg").addEventListener("submit", async (e) => {
     e.preventDefault();
     const msg = $("c-msg"), btn = $("c-save");
-    const sources = {};
-    for (const cb of document.querySelectorAll("[data-src]")) sources[cb.dataset.src] = cb.checked;
-    const body = {
-      heartbeat_minutes: Number($("c-hb").value),
-      signal_check_minutes: Number($("c-sig").value),
-      briefing_time: $("c-bt").value,
-      quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
-      sources,
-      persona: document.querySelector("#c-persona input[name=persona]:checked")?.value || S.config?.persona || "ned",
-      filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack] }, jira: { exclude_projects: [...excl.jira] } },
-      dashboard: readCardLayout(),
-      notifications: readNotifications(),
-      actions: Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])),
-      reply_tone: $("c-tone").value.trim(),
-      claude_model: $("c-model").value.trim() || null,
-      claude_max_turns: Number($("c-turns").value),
-      agenda_daily_budget_usd: Number($("c-budget").value),
-    };
+    const body = readBody();
     btn.disabled = true; msg.className = "msg"; msg.textContent = "저장 중…";
     try {
       S.config = await api("/api/config", { method: "PUT", body: JSON.stringify(body) });
