@@ -232,6 +232,19 @@
   .toggles label { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; padding: 4px 10px 4px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); }
   .toggles label:has(input:checked) { border-color: var(--accent); }
   .toggles input { accent-color: var(--mint); margin: 0; }
+  /* tracking exclusions: chip inputs */
+  .excl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+  .chipin { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 38px; padding: 5px 6px 5px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); cursor: text; }
+  .chipin:focus-within { border-color: var(--info); }
+  .chipin .cl { font: 600 11px var(--mono); color: var(--faint); letter-spacing: .04em; margin-right: 2px; }
+  .chipin .chips { display: contents; }
+  .xchip { display: inline-flex; align-items: center; gap: 2px; padding: 1px 2px 1px 9px; border: 1px solid var(--edge); border-radius: 999px; background: var(--raise); font: 12px var(--mono); white-space: nowrap; }
+  .xchip button { appearance: none; border: 0; background: none; color: var(--faint); cursor: pointer; width: 20px; height: 20px; border-radius: 50%; font-size: 11px; line-height: 1; }
+  .xchip button:hover { color: var(--fg); background: var(--hover); }
+  .xchip button:focus-visible { outline: 2px solid var(--info); outline-offset: 0; }
+  .chipin input[type=text] { flex: 1 1 120px; width: auto; min-width: 120px; border: 0; background: transparent; padding: 3px 2px; }
+  .chipin input[type=text]:focus { outline: none; }
+  .excl-msg { font-size: 11.5px; color: var(--amber); min-height: 1em; }
   .ck { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
   .ck input { accent-color: var(--mint); }
   .form-foot { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
@@ -371,7 +384,7 @@
     .back { display: inline-flex; }
     .dwrap { padding: 16px 16px 40px; }
     .pwrap { padding: 12px 12px 40px; }
-    .form { grid-template-columns: 1fr; }
+    .form, .excl { grid-template-columns: 1fr; }
     ul.tl li { grid-template-columns: 44px 1fr; }
     .hwrap { padding: 12px 12px 40px; }
     .hgrid, .sgrid { grid-template-columns: minmax(0, 1fr); }
@@ -507,6 +520,15 @@
               <div class="f"><span class="lab">조용한 시간 (알림 없음)</span>
                 <div class="inl"><label class="ck"><input type="checkbox" id="c-qon"> 사용</label><input type="time" id="c-qs" aria-label="시작"><span style="color:var(--faint)">~</span><input type="time" id="c-qe" aria-label="끝"></div></div>
               <div class="f full"><span class="lab">업무 신호 소스</span><div class="toggles" id="c-sources"></div></div>
+              <div class="f full"><span class="lab">트래킹 제외</span>
+                <span class="hint">여기 넣은 Slack 채널·Jira 프로젝트는 순찰·아침 브리핑·홈 agenda 에서 조회도 보고도 안 해. 엔터(또는 쉼표)로 추가, ✕ 로 빼기. 후보는 지금까지 본 채널·프로젝트에서 골라 줘.</span>
+                <div class="excl">
+                  <div class="chipin" data-xbox="slack"><span class="cl">SLACK 채널</span><span class="chips" id="x-slack"></span><input type="text" id="x-slack-in" data-x="slack" list="dl-slack" placeholder="#채널 ⏎" aria-label="제외할 Slack 채널 추가" autocomplete="off"></div>
+                  <div class="chipin" data-xbox="jira"><span class="cl">JIRA 프로젝트</span><span class="chips" id="x-jira"></span><input type="text" id="x-jira-in" data-x="jira" list="dl-jira" placeholder="KEY ⏎" aria-label="제외할 Jira 프로젝트 키 추가" autocomplete="off"></div>
+                </div>
+                <span class="excl-msg" id="x-msg" role="status"></span>
+                <datalist id="dl-slack"></datalist><datalist id="dl-jira"></datalist>
+              </div>
               <div class="f"><label for="c-model">Claude 모델 (비우면 기본값)</label><input id="c-model" type="text" placeholder="예: claude-sonnet-5-5"></div>
               <div class="f"><label for="c-turns">Claude 최대 턴</label><input id="c-turns" type="number" min="1" step="1" required></div>
             </div>
@@ -912,8 +934,68 @@
   }
 
   // ---------- settings ----------
+  // ---------- tracking exclusions (settings) ----------
+  const excl = { slack: [], jira: [] };
+  const normX = {
+    slack: (v) => v.trim().replace(/^#+/, "").replace(/\s+/g, ""),
+    jira: (v) => v.trim().toUpperCase().replace(/-\d*$/, ""), // "MNT-123" → "MNT"
+  };
+  const validX = { slack: (v) => v.length > 0 && v.length <= 80, jira: (v) => /^[A-Z][A-Z0-9_]{0,19}$/.test(v) };
+  const showX = { slack: (v) => `#${v}`, jira: (v) => v };
+  function renderExcl() {
+    for (const k of ["slack", "jira"]) {
+      $("x-" + k).innerHTML = excl[k].map((v, i) => `<span class="xchip">${esc(showX[k](v))}<button type="button" data-xdel="${k}:${i}" aria-label="${esc(showX[k](v))} 빼기" title="빼기">✕</button></span>`).join("");
+    }
+    // Candidates: channels / project keys seen so far in agenda.json and briefings (client-side, no new API).
+    const ch = new Set(), pj = new Set();
+    const ag = S.agenda;
+    for (const x of ag?.slack?.items || []) if (x.channel?.startsWith("#")) ch.add(x.channel.slice(1));
+    for (const j of ag?.jira || []) { const m = /^([A-Z][A-Z0-9_]*)-\d+/.exec(j.key || ""); if (m) pj.add(m[1]); }
+    for (const b of S.briefings || []) for (const it of [...(b.action_items || []), ...(b.updates || []), ...(b.fyi || [])]) {
+      const text = `${it.title || ""} ${it.detail || ""} ${it.url || ""}`;
+      // Korean particles glued to an ASCII name ("#foo으로") aren't part of it; Hangul names ("#cell_수익화랩") are kept.
+      if (it.kind === "slack") for (const m of text.matchAll(/#([\p{L}\p{N}_.-]{2,80})/gu)) ch.add(m[1].replace(/(?<=[A-Za-z0-9_.-])(으로|에서|에게|까지|부터|이랑|랑|로|에|의|은|는|이|가|을|를|와|과|도|만)$/u, ""));
+      if (it.kind === "jira" || /atlassian\.net\/browse\//.test(text)) for (const m of text.matchAll(/\b([A-Z][A-Z0-9_]{1,19})-\d+\b/g)) pj.add(m[1]);
+    }
+    $("dl-slack").innerHTML = [...ch].filter((v) => !excl.slack.includes(v)).sort().map((v) => `<option value="#${esc(v)}">`).join("");
+    $("dl-jira").innerHTML = [...pj].filter((v) => !excl.jira.includes(v)).sort().map((v) => `<option value="${esc(v)}">`).join("");
+  }
+  function addExcl(k, raw) {
+    let added = 0, bad = [];
+    for (const part of String(raw).split(/[,\s]+/)) {
+      if (!part.trim()) continue;
+      const v = normX[k](part);
+      if (!validX[k](v)) { bad.push(part.trim()); continue; }
+      if (!excl[k].includes(v)) { excl[k].push(v); added++; }
+    }
+    $("x-msg").textContent = bad.length ? `${k === "jira" ? "프로젝트 키는 영문 대문자로 시작하는 영숫자만 돼" : "채널 이름이 비었거나 너무 길어"}: ${bad.join(", ")}` : added ? "추가했어. 저장을 눌러야 적용돼." : "";
+    renderExcl();
+  }
+  for (const k of ["slack", "jira"]) {
+    const input = $(`x-${k}-in`);
+    input.addEventListener("keydown", (e) => {
+      if ((e.key === "Enter" || e.key === ",") && !e.isComposing) { e.preventDefault(); if (input.value.trim()) { addExcl(k, input.value); input.value = ""; } }
+      else if (e.key === "Backspace" && !input.value && excl[k].length) { excl[k].pop(); renderExcl(); }
+    });
+    // Picking a datalist option fires "input" with the full value; add it right away.
+    input.addEventListener("input", (e) => { if (e.inputType === "insertReplacementText" || e.inputType == null) { const o = [...$(`dl-${k}`).options].some((x) => x.value === input.value); if (o) { addExcl(k, input.value); input.value = ""; } } });
+  }
+  $("cfg").addEventListener("focusin", (e) => { if (e.target.dataset?.x) renderExcl(); }); // refresh candidates as data arrives
+  $("cfg").addEventListener("click", (e) => {
+    const box = e.target.closest("[data-xbox]");
+    if (box && !e.target.closest("button, input")) $(`x-${box.dataset.xbox}-in`).focus();
+    const b = e.target.closest("[data-xdel]"); if (!b) return;
+    e.preventDefault();
+    const [k, i] = b.dataset.xdel.split(":");
+    excl[k].splice(Number(i), 1); renderExcl(); $(`x-${k}-in`).focus();
+  });
+
   function renderConfig() {
     const c = S.config; if (!c) return;
+    excl.slack = [...(c.filters?.slack?.exclude_channels || [])];
+    excl.jira = [...(c.filters?.jira?.exclude_projects || [])];
+    $("x-msg").textContent = "";
+    renderExcl();
     $("cfg-port").textContent = c.port ? `port ${c.port}` : "";
     $("c-hb").value = c.heartbeat_minutes ?? "";
     $("c-sig").value = c.signal_check_minutes ?? "";
@@ -941,6 +1023,7 @@
       briefing_time: $("c-bt").value,
       quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
       sources,
+      filters: { slack: { exclude_channels: [...excl.slack] }, jira: { exclude_projects: [...excl.jira] } },
       claude_model: $("c-model").value.trim() || null,
       claude_max_turns: Number($("c-turns").value),
     };
@@ -1341,6 +1424,7 @@
     if (ui.view === "home") renderHome();
     if (ui.view === "inbox") renderInbox();
     if (ui.view === "timeline") renderTimeline();
+    if (ui.view === "settings" && S.config) renderExcl(); // candidates follow agenda/briefings as they load
   }
 
   // ---------- views + keys ----------

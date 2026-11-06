@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractJson, llmDisabled, runClaude } from "./claude.js";
-import type { NedConfig } from "./config.js";
+import { filtersPrompt, jqlExclude, type NedConfig } from "./config.js";
 import { AGENDA_PATH, log, readJson, writeJsonAtomic } from "./paths.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -246,10 +246,15 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
           })),
       }
     : null;
-  return { calendar, jira, github, mail, slack };
+  // Belt and braces for tracking exclusions: drop anything the model let through.
+  const exProjects = new Set(cfg.filters.jira.exclude_projects);
+  const exChannels = new Set(cfg.filters.slack.exclude_channels.map((c) => c.toLowerCase()));
+  const jiraKept = jira.filter((j) => !exProjects.has(j.key.split("-")[0].toUpperCase()));
+  if (slack) slack.items = slack.items.filter((x) => !exChannels.has(x.channel.replace(/^#/, "").toLowerCase()));
+  return { calendar, jira: jiraKept, github, mail, slack };
 }
 
-function buildPrompt(cfg: NedConfig, now = new Date()): string {
+export function buildPrompt(cfg: NedConfig, now = new Date()): string {
   const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const dayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
   const off = (on: boolean) => (on ? "ON" : "OFF — 조회하지 말고 빈 배열 []");
@@ -264,6 +269,8 @@ function buildPrompt(cfg: NedConfig, now = new Date()): string {
     .replaceAll("{{GITHUB}}", off(cfg.sources.github))
     .replaceAll("{{GMAIL}}", off(cfg.sources.gmail))
     .replaceAll("{{SLACK}}", off(cfg.sources.slack))
+    .replaceAll("{{FILTERS}}", () => filtersPrompt(cfg.filters))
+    .replaceAll("{{JQL_EXCLUDE}}", () => (jqlExclude(cfg.filters) ? ` ${jqlExclude(cfg.filters)}` : ""))
     .replaceAll("{{SLACK_SINCE}}", String(Math.floor(now.getTime() / 1000) - 24 * 3600));
 }
 
@@ -300,7 +307,7 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
     return a;
   }
 
-  log("agenda: asking claude");
+  log(`agenda: asking claude${filtersPrompt(cfg.filters) !== "(없음)" ? ` (filters — ${filtersPrompt(cfg.filters).split("\n")[0]})` : ""}`);
   const res = await runClaude(buildPrompt(cfg), { allowedTools: agendaTools(cfg), maxTurns: 16, model: cfg.claude_model, timeoutMs: 5 * 60_000 });
   const parsed = res.ok ? extractJson<Partial<Record<keyof AgendaPayload, unknown>>>(res.text) : null;
   let agenda: Agenda;

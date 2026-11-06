@@ -18,6 +18,9 @@
 - gmail: {{GMAIL}}
 - slack: {{SLACK}}
 
+## 트래킹 제외
+{{FILTERS}}
+
 ## 1. calendar — 오늘(로컬 날짜) 일정
 - 기본(primary) 캘린더에서 `{{DAY_START}}` ~ `{{DAY_END}}` 사이 이벤트를 `list_events` 로 조회 (단일 이벤트로 펼친 것, 시작 순).
 - 종일 일정 포함. 내가 거절(declined)한 일정도 포함하되 `rsvp` 로 표시.
@@ -27,7 +30,7 @@
 - `attendees`: 참석자 수 (없으면 0).
 
 ## 2. jira — 내게 할당된 미완료 이슈
-- JQL: `assignee = currentUser() AND statusCategory != Done ORDER BY duedate ASC, updated DESC`, 최대 25개.
+- JQL: `assignee = currentUser() AND statusCategory != Done{{JQL_EXCLUDE}} ORDER BY duedate ASC, updated DESC`, 최대 25개. 이 JQL 을 그대로 쓴다.
 - `cloudId` 는 사이트 호스트명(예: `xxx.atlassian.net`)도 된다. 모르면 `searchJiraIssuesUsingJql` 오류 메시지/결과로 파악.
 - fields 는 summary,status,priority,duedate,updated 만 요청.
 - `url`: `https://<사이트>/browse/<KEY>`. `due`: `YYYY-MM-DD` 또는 null.

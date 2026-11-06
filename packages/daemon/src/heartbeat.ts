@@ -2,12 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractJson, llmDisabled, noLlmResult, runClaude } from "./claude.js";
-import { inQuietHours, type NedConfig } from "./config.js";
+import { filtersPrompt, inQuietHours, type NedConfig } from "./config.js";
 import { readRecentEvents, readUnprocessedEvents, type NedEvent } from "./events.js";
 import { notify } from "./notify.js";
 import { BRIEFINGS_DIR, DISMISSED_PATH, SENT_LOG, log, readJson, writeJsonAtomic } from "./paths.js";
 import { reduceSessions } from "./sessions.js";
 import { readState, writeState, type AttentionItem, type Briefing, type BriefingSection } from "./state.js";
+
+type State = ReturnType<typeof readState>;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PROMPTS_DIR = path.resolve(here, "../../../prompts");
@@ -88,6 +90,20 @@ export interface HeartbeatOptions {
   daily?: boolean;
 }
 
+/** Render briefing.md / heartbeat.md with live inputs. Pure apart from reading the template and sent log. */
+export function buildHeartbeatPrompt(cfg: NedConfig, daily: boolean, state: State, events: NedEvent[]): string {
+  const template = fs.readFileSync(path.join(PROMPTS_DIR, daily ? "briefing.md" : "heartbeat.md"), "utf8");
+  const sent = sentKeys();
+  // Function replacers: inputs may contain "$&"-style sequences that a string replacement would expand.
+  return template
+    .replace("{{NOW}}", () => new Date().toLocaleString("ko-KR"))
+    .replace("{{SOURCES}}", () => Object.entries(cfg.sources).filter(([, v]) => v).map(([k]) => k).join(", "))
+    .replace("{{FILTERS}}", () => filtersPrompt(cfg.filters))
+    .replace("{{SESSIONS}}", () => (state.sessions.length ? state.sessions.map((s) => `- [${s.status}] ${s.worktree} — ${s.last_summary ?? s.last_prompt ?? ""}`).join("\n") : "(활성 세션 없음)"))
+    .replace("{{EVENTS}}", () => summarizeEvents(events))
+    .replace("{{ALREADY_SENT}}", () => [...sent].slice(-60).join("\n") || "(없음)");
+}
+
 /** One heartbeat: decide whether to think, then (maybe) ask Claude and publish a briefing. */
 export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Promise<Briefing | null> {
   refreshSessions(cfg);
@@ -103,15 +119,9 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
     return null;
   }
 
-  const promptFile = path.join(PROMPTS_DIR, opts.daily ? "briefing.md" : "heartbeat.md");
-  const template = fs.readFileSync(promptFile, "utf8");
   const sent = sentKeys();
-  const prompt = template
-    .replace("{{NOW}}", new Date().toLocaleString("ko-KR"))
-    .replace("{{SOURCES}}", Object.entries(cfg.sources).filter(([, v]) => v).map(([k]) => k).join(", "))
-    .replace("{{SESSIONS}}", state.sessions.length ? state.sessions.map((s) => `- [${s.status}] ${s.worktree} — ${s.last_summary ?? s.last_prompt ?? ""}`).join("\n") : "(활성 세션 없음)")
-    .replace("{{EVENTS}}", summarizeEvents(events))
-    .replace("{{ALREADY_SENT}}", [...sent].slice(-60).join("\n") || "(없음)");
+  const prompt = buildHeartbeatPrompt(cfg, !!opts.daily, state, events);
+  if (filtersPrompt(cfg.filters) !== "(없음)") log(`heartbeat: filters — ${filtersPrompt(cfg.filters).split("\n")[0]}`);
 
   let res;
   if (llmDisabled()) {

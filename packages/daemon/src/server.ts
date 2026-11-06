@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { agendaBusy, readAgenda, refreshAgenda } from "./agenda.js";
-import { loadConfig, saveConfig, type NedConfig } from "./config.js";
+import { loadConfig, mergeFilters, saveConfig, type NedConfig } from "./config.js";
 import { readRecentEvents } from "./events.js";
 import { dismissAttention, heartbeat, listBriefings } from "./heartbeat.js";
 import { log } from "./paths.js";
@@ -52,6 +52,10 @@ function resolvePublic(urlPath: string): string | null {
   }
 }
 
+/**
+ * Routes read config.yaml fresh (loadConfig) instead of the daemon's cached copy, so a PUT /api/config is
+ * visible right away (settings reload, agenda refresh) rather than after the next heartbeat tick.
+ */
 export function startServer(getConfig: () => NedConfig): void {
   const app = new Hono();
 
@@ -63,16 +67,18 @@ export function startServer(getConfig: () => NedConfig): void {
   app.get("/api/state", (c) => c.json(readState()));
   app.get("/api/events", (c) => c.json(readRecentEvents(Number(c.req.query("days") ?? 2))));
   app.get("/api/briefings", (c) => c.json(listBriefings(Number(c.req.query("limit") ?? 30))));
-  app.get("/api/config", (c) => c.json(getConfig()));
+  app.get("/api/config", (c) => c.json(loadConfig()));
   app.put("/api/config", async (c) => {
     const body = (await c.req.json()) as Partial<NedConfig>;
-    const merged = { ...loadConfig(), ...body };
+    const cur = loadConfig();
+    // filters is nested: merge it per source so a PUT carrying only filters.slack keeps filters.jira.
+    const merged = { ...cur, ...body, filters: mergeFilters(cur.filters, body.filters) };
     saveConfig(merged);
     return c.json(merged);
   });
   app.post("/api/heartbeat", async (c) => {
     const daily = c.req.query("daily") === "1";
-    const b = await heartbeat(getConfig(), { force: true, daily });
+    const b = await heartbeat(loadConfig(), { force: true, daily });
     return c.json(b ?? { status: "skipped" });
   });
   app.post("/api/attention/:id/dismiss", (c) => {
@@ -82,10 +88,13 @@ export function startServer(getConfig: () => NedConfig): void {
 
   // HOME tab: agenda (calendar / jira / github), refreshed by a cheap structured claude -p job.
   // mail_enabled / slack_enabled (= sources.gmail / sources.slack) let HOME hide those cards even if agenda.json still has old data.
-  app.get("/api/agenda", (c) => c.json({ ...readAgenda(), busy: agendaBusy(), mail_enabled: getConfig().sources.gmail, slack_enabled: getConfig().sources.slack }));
+  app.get("/api/agenda", (c) => {
+    const { sources } = loadConfig();
+    return c.json({ ...readAgenda(), busy: agendaBusy(), mail_enabled: sources.gmail, slack_enabled: sources.slack });
+  });
   app.post("/api/agenda/refresh", async (c) => {
     // Concurrent refreshes share the in-flight run instead of spawning another claude -p.
-    const cfg = getConfig();
+    const cfg = loadConfig();
     const a = await refreshAgenda(cfg);
     return c.json({ ...a, mail_enabled: cfg.sources.gmail, slack_enabled: cfg.sources.slack });
   });
