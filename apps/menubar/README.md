@@ -8,7 +8,8 @@ Ned.app is the one thing you run. It:
   If a daemon is already healthy on the port (e.g. a leftover LaunchAgent), it **adopts** it and spawns nothing.
 - **hosts the dashboard** in a native window (`WKWebView` at `http://127.0.0.1:<port>/`),
 - shows attention items and agent sessions in a `MenuBarExtra`, read from `state.json`,
-- can register itself as a Login Item (`SMAppService.mainApp`).
+- can register itself as a Login Item (`SMAppService.mainApp`),
+- posts native notifications (`UNUserNotificationCenter`) from `state.json` changes — see below.
 
 The daemon and the dashboard HTML are unchanged; the app only wraps them.
 
@@ -19,6 +20,7 @@ The daemon and the dashboard HTML are unchanged; the app only wraps them.
 | `Sources/Ned/StateStore.swift` | `state.json` model, directory watcher, daemon HTTP calls |
 | `Sources/Ned/DaemonManager.swift` | Daemon supervisor + `node`/`claude` resolution |
 | `Sources/Ned/DashboardWindow.swift` | Single dashboard window (`WKWebView`), placeholder, external links |
+| `Sources/Ned/Notifier.swift` | Native notifications: diffs `state.json`, seen-id store, actions |
 | `Sources/Ned/AppConfig.swift` | `NED_HOME` / `NED_PORT` / user defaults |
 | `Resources/Ned.icns` | App icon, generated from `packages/daemon/public/proposals/ned-glasses.svg` by `scripts/make-icon.sh` |
 
@@ -145,3 +147,28 @@ How decoding copes with bad input:
 The menu's Dismiss button removes the item at once and sends
 `POST /api/attention/<id>/dismiss`. If the daemon is not running, the request fails, the
 failure is logged, and the next reload of `state.json` restores the item.
+
+## Notifications
+
+The app asks for notification permission (alert, sound, badge) on first launch. macOS shows a
+"'Ned' 알림" banner; choose **옵션 → 허용**, or turn it on later under System Settings → 알림 → Ned.
+The spawned daemon gets `NED_NOTIFY=app` and stops showing osascript ("Script Editor") banners.
+
+On every `state.json` reload the app compares it with what it already notified:
+
+- **New attention ids**: one notification each (title, detail; category `ned.<kind>`, `ned.<kind>.link`
+  when the item has a url). More than 3 new at once: one summary, "Ned: 확인할 것 N건".
+- **`last_briefing` with a new id and status UPDATE**: the headline, unless the attention notifications
+  from the same reload came from that briefing.
+- `session` items (waiting/error) use `.timeSensitive`, everything else `.active`. An ad-hoc-signed
+  bundle has no time-sensitive entitlement, so macOS may treat them as `.active` (Focus still filters them).
+- **`state.quiet`**: the `quietDelivery` user default — `skip` (default) or `silent` (Notification Center
+  only, no sound, `.passive`). `defaults write com.ned.menubar quietDelivery silent`.
+- Click → dashboard window. **열기** (items with a url) → default browser. **닫기** → `POST /api/attention/:id/dismiss`.
+
+Seen ids are stored in UserDefaults per `NED_HOME` (`notifySeen:<home>`), so a restart does not
+re-notify and a test run with `NED_HOME=/tmp/…` does not touch the real set. The very first run marks
+existing items as seen instead of notifying. Session ids are forgotten once they leave `attention`
+(the next alert notifies again); others after 7 days. Every request and its result is logged to
+`$NED_HOME/logs/app-daemon.log` as `notify: …`. Notifications need the bundle (`scripts/package.sh`);
+the bare `.build/release/Ned` binary cannot use `UNUserNotificationCenter`.

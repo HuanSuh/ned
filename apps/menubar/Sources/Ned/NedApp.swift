@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sigterm = src
         MainActor.assumeIsolated {
             DaemonManager.shared.start()
+            Notifier.shared.start()
             // `open Ned.app --args --dashboard` (install.sh first launch) or NED_OPEN_DASHBOARD=1.
             if CommandLine.arguments.contains("--dashboard") || AppConfig.env["NED_OPEN_DASHBOARD"] == "1" {
                 DashboardWindowController.shared.show()

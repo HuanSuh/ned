@@ -157,6 +157,8 @@ final class DaemonManager: ObservableObject {
         env["PATH"] = dirs.filter { !$0.isEmpty && seen.insert($0).inserted }.joined(separator: ":")
         env["NED_PORT"] = String(AppConfig.port)
         env["NED_HOME"] = AppConfig.home
+        // The app posts notifications itself (Notifier); the daemon must not add osascript banners.
+        env["NED_NOTIFY"] = "app"
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: node)
@@ -181,7 +183,7 @@ final class DaemonManager: ObservableObject {
         }
         process = p
         status = .starting(pid: p.processIdentifier)
-        note("spawned daemon pid \(p.processIdentifier): \(node) \(cli) run (PATH=\(env["PATH"] ?? ""), NED_NO_LLM=\(env["NED_NO_LLM"] ?? "unset"))")
+        note("spawned daemon pid \(p.processIdentifier): \(node) \(cli) run (PATH=\(env["PATH"] ?? ""), NED_NO_LLM=\(env["NED_NO_LLM"] ?? "unset"), NED_NOTIFY=\(env["NED_NOTIFY"] ?? "unset"))")
     }
 
     private func childExited(_ proc: Process, code: Int32, signaled: Bool) {
