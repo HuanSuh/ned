@@ -11,7 +11,7 @@ import { DraftError, generateDraft, parseDraftRequest } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { dismissAttention, heartbeat, listBriefings } from "./heartbeat.js";
 import { log } from "./paths.js";
-import { readState, writeState } from "./state.js";
+import { readState, setReviewed, writeState } from "./state.js";
 import { registerSearch } from "./search.js";
 import { addTodo, deleteTodo, listTodos, updateTodo } from "./todos.js";
 
@@ -93,6 +93,15 @@ export function startServer(getConfig: () => NedConfig): void {
     const daily = c.req.query("daily") === "1";
     const b = await heartbeat(loadConfig(), { force: true, daily });
     return c.json(b ?? { status: "skipped" });
+  });
+  // 확인 완료 toggle: body {reviewed: boolean} (default true). The item stays in attention; counts skip it.
+  app.post("/api/attention/:id/review", async (c) => {
+    const id = c.req.param("id");
+    let reviewed = true;
+    try { const b = (await c.req.json()) as { reviewed?: unknown }; if (typeof b?.reviewed === "boolean") reviewed = b.reviewed; } catch { /* no body = mark */ }
+    if (!readState().attention.some((a) => a.id === id)) return c.json({ error: "not found" }, 404);
+    const at = setReviewed(id, reviewed);
+    return c.json({ ok: true, id, reviewed_at: at, attention_open_count: readState().attention_open_count });
   });
   app.post("/api/attention/:id/dismiss", (c) => {
     dismissAttention(c.req.param("id"));

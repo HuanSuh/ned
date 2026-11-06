@@ -15,6 +15,8 @@ export const AGENDA_PATH = path.join(NED_HOME, "agenda.json");
 export const CALENDAR_DIR = path.join(NED_HOME, "calendar");
 export const TODOS_PATH = path.join(NED_HOME, "todos.json");
 export const DISMISSED_PATH = path.join(NED_HOME, "dismissed.json");
+/** Attention ids the user marked 확인 완료 → when (ms). Survives attention being rebuilt. */
+export const REVIEWED_PATH = path.join(NED_HOME, "reviewed.json");
 
 /** Local calendar date as YYYY-MM-DD (matches the hook, which uses local time too). */
 export function localDay(d = new Date()): string {
