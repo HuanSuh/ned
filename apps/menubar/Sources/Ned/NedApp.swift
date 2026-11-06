@@ -9,7 +9,9 @@ struct NedApp: App {
     /// Bound so that the system hiding the item (macOS 26 "Allow in Menu Bar",
     /// a crowded/notched menu bar, Cmd-drag removal) does not terminate the app.
     /// In-memory on purpose: persisting it would keep the item hidden on every later launch.
-    @StateObject private var itemGuard = StatusItemGuard.shared
+    /// Must stay a plain @State: binding MenuBarExtra to an ObservableObject looped the main thread at 98 % CPU
+    /// (2026-11-07 — the system's own write of `false` re-ran the scene, which re-ran the write, forever).
+    @State private var inserted = true
 
     init() {
         // When the item is hidden (⌘-drag off the bar, or the macOS 26 Menu Bar toggle) AppKit writes
@@ -32,10 +34,16 @@ struct NedApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra(isInserted: $itemGuard.inserted) {
+        MenuBarExtra(isInserted: $inserted) {
             MenuContent(store: store, daemon: DaemonManager.shared)
         } label: {
             MenuBarLabel(store: store)
+                // StatusItemGuard found the hidden flag: re-insert once, outside SwiftUI's own update transaction.
+                .onReceive(NotificationCenter.default.publisher(for: StatusItemGuard.reinsert)) { _ in
+                    guard inserted else { inserted = true; return }
+                    inserted = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { inserted = true }
+                }
         }
         .menuBarExtraStyle(.window)
     }
@@ -45,12 +53,15 @@ struct NedApp: App {
 /// hides the item (⌘-drag, the macOS 26 Menu Bar toggle, or — seen live 2026-11-07 — a status item re-created by a
 /// label change) and then honours that flag on every later launch. A menu bar app with no icon is unreachable, so:
 /// forget the flag at start-up, and while running poll it every 10 s; if it reappears, clear it and re-insert the item.
+/// Not an ObservableObject on purpose (see `NedApp.inserted`): it only clears the flag and posts `reinsert`,
+/// at most once a minute, and the label view flips the @State binding from outside SwiftUI's transaction.
 @MainActor
-final class StatusItemGuard: ObservableObject {
+final class StatusItemGuard {
     static let shared = StatusItemGuard()
     static let keys = ["NSStatusItem Visible Item-0", "NSStatusItem VisibleCC Item-0"]
-    @Published var inserted = true
+    static let reinsert = Notification.Name("ned.statusItem.reinsert")
     private var timer: Timer?
+    private var lastReinsert = Date.distantPast
 
     static func clearFlags() {
         for k in keys { UserDefaults.standard.removeObject(forKey: k) }
@@ -67,10 +78,11 @@ final class StatusItemGuard: ObservableObject {
         let d = UserDefaults.standard
         let hidden = Self.keys.contains { d.object(forKey: $0) != nil && !d.bool(forKey: $0) }
         guard hidden else { return }
-        DaemonManager.shared.note("status item: macOS flagged it hidden — clearing the flag and re-inserting")
         Self.clearFlags()
-        inserted = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.inserted = true }
+        guard Date().timeIntervalSince(lastReinsert) > 60 else { return }
+        lastReinsert = Date()
+        DaemonManager.shared.note("status item: macOS flagged it hidden — flag cleared, re-inserting once")
+        NotificationCenter.default.post(name: Self.reinsert, object: nil)
     }
 }
 
