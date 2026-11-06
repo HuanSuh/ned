@@ -412,7 +412,10 @@ final class DaemonManager: ObservableObject {
 ///
 /// nvm/fnm usually hook in from `.zshrc`, which only an *interactive* shell reads, so `zsh -lc`
 /// alone can return a stale system node (seen: /usr/local/bin/node v16, which crashes hono).
-/// Order: `zsh -lic`, `zsh -lc`, then well-known dirs; the first node with major ≥ 18 wins.
+/// Order: `zsh -lc`, nvm's default alias (~/.nvm/alias/default), then well-known dirs; the first node with
+/// major ≥ 18 wins. `zsh -lic` is the last resort (only when that finds no node ≥ 18 or no claude): an
+/// interactive shell runs the whole `.zshrc` (oh-my-zsh, p10k, PATH entries and scripts under ~/Documents…),
+/// and that is what made macOS ask Ned.app for 문서 폴더 access.
 enum ToolResolver {
     struct Result: Sendable { var node: String?; var claude: String?; var source: String }
     static let minNodeMajor = 18
@@ -461,15 +464,23 @@ enum ToolResolver {
 
     static func resolve() -> Result {
         var nodes: [(String, String)] = [], claudes: [(String, String)] = []
-        for (flags, label) in [("-lic", "zsh -lic"), ("-lc", "zsh -lc")] {
+        func shell(_ flags: String) {
             for line in loginShell(flags, "command -v node; command -v claude") {
-                if line.hasSuffix("/node") { nodes.append((line, label)) }
-                if line.hasSuffix("/claude") { claudes.append((line, label)) }
+                if line.hasSuffix("/node") { nodes.append((line, "zsh \(flags)")) }
+                if line.hasSuffix("/claude") { claudes.append((line, "zsh \(flags)")) }
             }
         }
+        shell("-lc")
+        if let d = nvmDefaultDir(), isExec(d + "/node") { nodes.append((d + "/node", "nvm default")) }
         for d in fallbackDirs() {
             if isExec(d + "/node") { nodes.append((d + "/node", "fallback dirs")) }
             if isExec(d + "/claude") { claudes.append((d + "/claude", "fallback dirs")) }
+        }
+        // Interactive shell only as the last resort — it reads the whole .zshrc (see the type comment).
+        if claudes.isEmpty || !nodes.contains(where: { (nodeMajor($0.0) ?? 0) >= minNodeMajor }) {
+            let tail = nodes.count
+            shell("-lic")
+            nodes = Array(nodes[tail...]) + nodes[..<tail]   // what the terminal resolves beats our guesses
         }
         // claude: several installs may coexist (e.g. a stale /usr/local/bin/claude 1.x next to
         // ~/.local/bin/claude 2.x). Pick the highest version, not the first on PATH.
@@ -510,6 +521,20 @@ enum ToolResolver {
         let token = out.split(whereSeparator: { $0 == " " || $0 == "\n" }).first ?? ""
         let parts = token.split(separator: ".").compactMap { Int($0) }
         return parts.count >= 2 ? parts : []
+    }
+
+    /// bin dir of nvm's default node (`~/.nvm/alias/default`: "22.23.4", "v22", "22" → newest matching install);
+    /// nil for aliases like "node" / "lts/*" (fallbackDirs then offers the newest install).
+    static func nvmDefaultDir() -> String? {
+        let nvm = NSHomeDirectory() + "/.nvm"
+        guard let raw = try? String(contentsOfFile: nvm + "/alias/default", encoding: .utf8) else { return nil }
+        var want = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !want.hasPrefix("v") { want = "v" + want }
+        guard want.dropFirst().first?.isNumber == true else { return nil }
+        let versions = ((try? FileManager.default.contentsOfDirectory(atPath: nvm + "/versions/node")) ?? [])
+            .filter { $0 == want || $0.hasPrefix(want + ".") }
+            .sorted { $0.compare($1, options: .numeric) == .orderedDescending }
+        return versions.first.map { "\(nvm)/versions/node/\($0)/bin" }
     }
 
     static func fallbackDirs() -> [String] {

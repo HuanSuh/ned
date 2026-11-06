@@ -31,7 +31,7 @@ Requires macOS 14+ and Swift 6.2 (Xcode 26).
 ```sh
 cd apps/menubar
 swift build -c release          # binary: .build/release/Ned
-scripts/package.sh              # bundle: .build/Ned.app (icon, version 0.2.0, LSUIElement, ad-hoc signed)
+scripts/package.sh              # bundle: .build/Ned.app (icon, version 0.2.0, LSUIElement, signed — see below)
 scripts/make-icon.sh            # only when the SVG changes: regenerates Resources/Ned.icns
 ```
 
@@ -41,6 +41,28 @@ From the repo root, `scripts/install.sh` builds everything, installs the hooks, 
 
 The `-parse-as-library` flag in `Package.swift` is required. Without it the app exits right
 after launch.
+
+### macOS 가 권한을 매번 다시 물으면 (권한 확인이 매번 뜨면)
+
+macOS 의 TCC 는 앱을 코드 서명으로 알아본다. ad-hoc 서명(`codesign --sign -`)은 빌드할 때마다
+코드 해시가 달라지므로, 다시 설치할 때마다 새 앱으로 보고 "문서 폴더 접근 허용" 같은 확인을 또 띄운다.
+고정된 서명 정체성을 한 번 만들어 두면 이후 재설치에서는 묻지 않는다.
+
+```sh
+scripts/make-signing-cert.sh --dry-run   # 무엇을 할지 보기만
+scripts/make-signing-cert.sh             # 로그인 키체인에 "Ned Local Signing" (자체 서명, 10년) 생성; 이미 있으면 그대로
+# codesign 이 매번 키체인 암호를 묻지 않게 (로그인 암호 입력, 한 번만):
+security set-key-partition-list -S apple-tool:,apple: -s -k "<로그인 암호>" ~/Library/Keychains/login.keychain-db
+scripts/install.sh                       # 이제 "Ned Local Signing" 으로 서명된다
+```
+
+- `package.sh` 는 `$NED_SIGN_IDENTITY` → 키체인의 "Ned Local Signing" → ad-hoc 순으로 고르고
+  (`--identifier com.ned.menubar`), ad-hoc 이면 경고 한 줄을 남긴다. 서명 결과(`Authority=`)는 빌드 로그에 찍힌다.
+  확인: `codesign -dv --verbose=2 /Applications/Ned.app 2>&1 | grep Authority`.
+- 인증서로 바꾼 뒤 첫 설치에서는 한 번 더 묻는다(서명 정체성이 바뀌었으므로). 그다음부터는 묻지 않는다.
+- 문서 폴더 접근이 생기는 이유: node/claude 를 찾을 때 쓰던 `zsh -lic` 가 `.zshrc` 전체(oh-my-zsh, p10k,
+  `~/Documents/…` 아래 PATH 항목·스크립트)를 실행했기 때문. 이제 `zsh -lc` + nvm 기본 버전(`~/.nvm/alias/default`)
+  + 잘 알려진 경로로 먼저 찾고, node ≥ 18 이나 claude 를 못 찾을 때만 `zsh -lic` 를 쓴다.
 
 ## Daemon supervision
 
