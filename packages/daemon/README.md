@@ -288,6 +288,25 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
 `waiting`/`error` 세션은 매 tick `attention` 에 다시 올라온다. 단, 사용자가 dismiss 한 경우
 그 알림(`alert_ts` = 마지막 `Notification`/`StopFailure` 시각)이 바뀌기 전까지는 올리지 않는다.
 
+## Testing (vitest)
+
+```sh
+pnpm test                          # 루트: @ned/daemon 의 vitest 실행 (= pnpm --filter @ned/daemon test)
+pnpm --filter @ned/daemon test:watch
+```
+
+- 위치: `test/*.test.ts`, 설정 `test/vitest.config.ts`, 공통 준비 `test/setup.ts`.
+- 격리: `setup.ts` 가 **테스트 파일마다** 새 임시 `NED_HOME`(`$TMPDIR/ned-test-*`, 끝나면 삭제)을 만들고 `NED_NO_LLM=1`,
+  `NED_SEND_DRY_RUN=1`, `NED_NOTIFY=app`(osascript 배너 없음), `NED_PORT=7791` 을 건다. `paths.ts` 가 import 시점에 `NED_HOME` 을
+  읽으므로 파일 단위 격리(`isolate: true`, forks)가 필요하다. `claude` 는 절대 spawn 되지 않고 `~/.ned` 는 건드리지 않는다.
+- HTTP 라우트(`test/server.test.ts`): `@hono/node-server` 의 `serve` 를 `vi.mock` 으로 바꿔 `startServer` 가 넘기는 Hono `fetch` 를
+  받아 `Request` 를 직접 넣는다 — 포트를 열지 않는다.
+- 다루는 것: sessions 상태 머신 · events(parseLines, lastAssistantText) · claude(extractJson, argv) · notify · config(loadConfig 병합,
+  정규화, quiet hours) · agenda normalize*(calendar/mail/slack context, all⊇items, isEmptyPayload, signature) · heartbeat(sent 키
+  dedupe, NED_NO_LLM 종단) · todos CRUD · search 점수 · drafts fast/full 결정 · `/api/send` 게이팅(403) 외 라우트.
+- 알려진 버그는 `test/BUGS.md` 에 적고 `it.fails` 로 고정한다(버그가 고쳐지면 빨개진다 → `it` 으로 바꾼다).
+- 순수 함수를 테스트하려고 `export` 만 붙인 것: `events.parseLines`, `agenda.normalize`, `heartbeat.sentKeys/markSent/keyOf`.
+
 ## Smoke test (LLM 호출 없이)
 
 ```sh

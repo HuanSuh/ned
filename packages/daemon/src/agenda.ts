@@ -383,7 +383,7 @@ export function normalizeCalendar(raw: unknown): CalendarItem[] {
 }
 
 /** Coerce model output into the exact contract the dashboard expects. */
-function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedConfig, collectedAt = new Date().toISOString()): AgendaPayload {
+export function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedConfig, collectedAt = new Date().toISOString()): AgendaPayload {
   const withCtx = <T extends object>(x: T, ctx: object | undefined): T => (ctx ? { ...x, context: ctx } : x);
   const calendar: CalendarItem[] = cfg.sources.calendar ? normalizeCalendar(raw.calendar) : [];
   const jira: JiraItem[] = cfg.sources.jira

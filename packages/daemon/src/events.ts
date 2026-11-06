@@ -24,7 +24,7 @@ function dayFile(d: Date): string {
   return path.join(EVENTS_DIR, `${localDay(d)}.jsonl`);
 }
 
-function parseLines(text: string): NedEvent[] {
+export function parseLines(text: string): NedEvent[] {
   const out: NedEvent[] = [];
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
