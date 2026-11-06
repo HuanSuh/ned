@@ -86,11 +86,61 @@ export const readNotifications = () => ({
   sound: $("n-sound").checked,
 });
 
+// ---------- 쓰기 액션: hints + '오늘 한 액션' (GET /api/actions, filtered here) ----------
+const ACTION_HINT = {
+  jira_comment: "Jira 항목 ⋯ → 코멘트 초안 → 확인 후 코멘트 등록",
+  jira_transition: "Jira 항목 ⋯ → 상태 변경 (가능한 전환을 먼저 읽어 옴) → 확인 후 전환",
+  github_review: "PR 항목 ⋯ → 리뷰 초안 / 승인 / 변경 요청 / 코멘트 (gh pr review · gh pr comment)",
+  calendar_rsvp: "일정 ⋯ → 수락 / 미정 / 거절",
+};
+const SRC_KO = { slack: "Slack", email: "메일", session: "세션", jira: "Jira", github: "GitHub", calendar: "캘린더" };
+const OUTCOME_KO = { ok: ["성공", "ok"], refused: ["거절(꺼짐)", ""], dry_run: ["dry-run", ""], failed: ["실패", "today"] };
+export const outcomeOf = (e) => (e.ok ? "ok" : e.action === "refused" ? "refused" : String(e.action || "").startsWith("dry_run:") ? "dry_run" : "failed");
+export const AL = { list: null, error: "", source: "", result: "", reads: false };
+const localYmd = (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+export async function loadActionLog() {
+  try { AL.list = await api("/api/actions"); AL.error = ""; } catch (e) { AL.error = e.message; }
+  renderActionLog();
+}
+export function renderActionLog() {
+  let box = $("c-actlog");
+  if (!box) {
+    $("c-actions").insertAdjacentHTML("afterend", `<div class="actlog" id="c-actlog" role="region" aria-label="오늘 한 액션"></div>`);
+    box = $("c-actlog");
+  }
+  const today = localYmd(Date.now());
+  const all = (AL.list || []).filter((e) => localYmd(e.ts) === today);
+  const rows = all.filter((e) => (!AL.source || e.source === AL.source) && (!AL.result || outcomeOf(e) === AL.result) && (AL.reads || e.mode !== "transitions"));
+  const opt = (v, label, cur) => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(label)}</option>`;
+  box.innerHTML = `<div class="alh"><b>오늘 한 액션</b><span class="hint">${all.length}건 · ~/.ned/sent-actions.log (최근 50건 중 오늘)</span><span class="sp"></span>
+      <select data-alf="source" aria-label="소스">${opt("", "모든 소스", AL.source)}${Object.keys(SRC_KO).map((k) => opt(k, SRC_KO[k], AL.source)).join("")}</select>
+      <select data-alf="result" aria-label="결과">${opt("", "모든 결과", AL.result)}${Object.keys(OUTCOME_KO).map((k) => opt(k, OUTCOME_KO[k][0], AL.result)).join("")}</select>
+      <label class="ck" title="Jira 상태 전환 목록 읽기(쓰기 아님)도 보기"><input type="checkbox" data-alf="reads" ${AL.reads ? "checked" : ""}> 읽기 포함</label>
+      <button type="button" class="btn small" data-alrefresh="1">새로고침</button></div>
+    ${AL.error ? `<div class="hint" style="color:var(--red)">불러오지 못했어: ${esc(AL.error)}</div>` : AL.list === null ? `<div class="hint">불러오는 중…</div>`
+      : rows.length ? `<table class="altab"><thead><tr><th>시각</th><th>소스</th><th>동작</th><th>결과</th><th>내용</th></tr></thead><tbody>${rows.map((e) => {
+        const o = OUTCOME_KO[outcomeOf(e)], d = new Date(e.ts);
+        const what = e.ref?.title || e.ref?.key || (e.ref?.repo ? `${e.ref.repo}#${e.ref.number}` : "") || e.ref?.url || "";
+        return `<tr title="${esc(e.result || "")}"><td>${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}</td><td>${esc(SRC_KO[e.source] || e.source)}</td><td><code>${esc(e.action === "refused" ? `${e.mode} (refused)` : String(e.action).replace(/^dry_run:/, ""))}</code></td>
+          <td><span class="chipx ${o[1]}">${esc(o[0])}</span></td><td class="alw">${esc(what)}${e.text ? ` <span class="hint">“${esc(e.text.slice(0, 60))}”</span>` : ""}</td></tr>`;
+      }).join("")}</tbody></table>` : `<div class="hint">${all.length ? "필터에 맞는 액션 없음." : "오늘은 아직 한 액션 없음."}</div>`}`;
+}
+const ACTLOG_CSS = `.actlog { margin-top: 10px; padding: 10px; border: 1px solid var(--line, #8884); border-radius: 8px; }
+.actlog .alh { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+.actlog .alh .sp { flex: 1; }
+.actlog select { font: inherit; font-size: 12px; }
+.actlog .altab { width: 100%; border-collapse: collapse; font-size: 12px; }
+.actlog .altab th { text-align: left; color: var(--dim); font-weight: 500; padding: 3px 6px; border-bottom: 1px solid var(--line, #8884); }
+.actlog .altab td { padding: 4px 6px; vertical-align: top; border-bottom: 1px solid color-mix(in srgb, var(--line, #8884) 50%, transparent); }
+.actlog .altab code { font-size: 11px; }
+.actlog .alw { overflow-wrap: anywhere; }`;
+
 export function renderConfig() {
   const c = S.config; if (!c) return;
   renderNotifications(c.notifications);
   const acts = { ...ACTION_DEFAULTS, ...(c.actions || {}) };
-  $("c-actions").innerHTML = Object.keys(ACTION_DEFAULTS).map((k) => `<label><input type="checkbox" data-act="${k}" ${acts[k] ? "checked" : ""}>${esc(ACTION_KO[k])}</label>`).join("");
+  $("c-actions").innerHTML = Object.keys(ACTION_DEFAULTS).map((k) => `<label${ACTION_HINT[k] ? ` title="${esc(ACTION_HINT[k])}"` : ""}><input type="checkbox" data-act="${k}" ${acts[k] ? "checked" : ""}>${esc(ACTION_KO[k])}</label>`).join("");
+  renderActionLog(); loadActionLog();
   $("c-tone").value = c.reply_tone || "";
   renderPersonaPicker(c.persona || "ned");
   renderCardLayout(c.dashboard ?? null);
@@ -117,6 +167,12 @@ export function renderConfig() {
 
 /** Listeners + one-time setup; main.js calls every module's init() once, in the old file's order. */
 export function init() {
+  const st = document.createElement("style"); st.textContent = ACTLOG_CSS; document.head.appendChild(st);
+  $("cfg").addEventListener("change", (e) => {
+    const f = e.target.closest("[data-alf]"); if (!f) return;
+    AL[f.dataset.alf] = f.type === "checkbox" ? f.checked : f.value; renderActionLog();
+  });
+  $("cfg").addEventListener("click", (e) => { if (e.target.closest("[data-alrefresh]")) { e.preventDefault(); loadActionLog(); } });
   for (const k of ["slack", "jira", "watch"]) {
     const input = $(`x-${k}-in`);
     input.addEventListener("keydown", (e) => {

@@ -1,5 +1,6 @@
 /* Reply-draft modal: POST /api/draft → 3 drafts, edit, regenerate → POST /api/send. */
 import { postJson } from "../api.js";
+import { axBtn, init as initActions } from "./actions.js";
 import { SRC_KEY_RE, reviewAttention, reviewSource } from "./reviewed.js";
 import { renderHeader } from "../main.js";
 import { S } from "../state.js";
@@ -12,10 +13,10 @@ import { $, esc, safeUrl } from "../util.js";
 
 // ---------- reply drafts: "답장 초안" → POST /api/draft → modal (3 drafts, edit, regenerate) → POST /api/send ----------
 // Write actions are opt-in (config.actions); sending ones (Slack 전송 / 메일 보내기 / 세션에 보내기) always ask once more.
-export const ACTION_DEFAULTS = { slack_send: false, gmail_draft: true, gmail_send: false, session_send: true };
-export const ACTION_KO = { slack_send: "Slack 전송", gmail_draft: "Gmail 초안 저장", gmail_send: "메일 보내기", session_send: "세션에 보내기" };
+export const ACTION_DEFAULTS = { slack_send: false, gmail_draft: true, gmail_send: false, session_send: true, jira_comment: false, jira_transition: false, github_review: false, calendar_rsvp: false };
+export const ACTION_KO = { slack_send: "Slack 전송", gmail_draft: "Gmail 초안 저장", gmail_send: "메일 보내기", session_send: "세션에 보내기", jira_comment: "Jira 코멘트", jira_transition: "Jira 상태 변경", github_review: "GitHub 리뷰·코멘트", calendar_rsvp: "캘린더 참석 응답" };
 export const actionsOn = () => ({ ...ACTION_DEFAULTS, ...(S.config?.actions || {}) });
-export const DRAFT_SRC_KO = { slack: "Slack", email: "메일", session: "세션" };
+export const DRAFT_SRC_KO = { slack: "Slack", email: "메일", session: "세션", jira: "Jira 코멘트", github: "PR 리뷰" };
 export const clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== ""));
 /** ref for a Slack message: channel id + ts (+ thread_ts) from its permalink. */
 export function slackRef(x) {
@@ -26,7 +27,7 @@ export const mailRef = (x) => clean({ url: x.url, thread_id: x.id || /#[\w-]+\/(
 export const sessionRef = (x) => clean({ session_id: x.id, title: x.worktree, text: x.last_summary || (x.last_prompt ? "» " + x.last_prompt : "") });
 /** Button that opens the draft modal; `small` for list rows. */
 export const draftBtn = (source, ref, att = "") => iconBtn("draft", "답장 초안 — Ned 가 3가지 말투로 써 줘", { cls: "drb", attrs: `data-draft="${esc(JSON.stringify({ source, ref }))}"${att ? ` data-att="${esc(att)}"` : ""}` });
-export const draftFor = (kind, item, att = "") => (kind === "slack" ? draftBtn("slack", slackRef(item), att) : kind === "email" ? draftBtn("email", mailRef(item), att) : "");
+export const draftFor = (kind, item, att = "") => (kind === "slack" ? draftBtn("slack", slackRef(item), att) : kind === "email" ? draftBtn("email", mailRef(item), att) : kind === "jira" || kind === "github" || kind === "calendar" ? axBtn(kind, item) : "");
 
 export let DR = { open: false };
 export function openDraft(source, ref, att = "") {
@@ -68,8 +69,20 @@ export function draftActions() {
     if (DR.ref.url) list.push({ key: "open", label: "Gmail 에서 열기", href: DR.ref.url });
     list.push({ key: "gmail_draft", label: "Gmail 초안 저장", mode: "gmail_draft" }, { key: "gmail_send", label: "메일 보내기", mode: "send", confirm: true });
   } else if (src === "session") list.push({ key: "session_send", label: "세션에 보내기", mode: "session", confirm: true });
-  for (const a of list) a.off = a.mode ? !on[a.key] : false;
-  const pick = src === "email" ? ["gmail_draft", "gmail_send"] : src === "slack" ? ["slack_send"] : ["session_send"];
+  else if (src === "jira") {
+    if (DR.ref.url) list.push({ key: "open", label: "Jira 에서 열기", href: DR.ref.url });
+    list.push({ key: "jira_comment", label: "코멘트 달기", mode: "comment", confirm: true });
+  } else if (src === "github") {
+    if (DR.ref.url) list.push({ key: "open", label: "GitHub 에서 열기", href: DR.ref.url });
+    list.push(
+      { key: "gh_review_comment", gate: "github_review", label: "리뷰 코멘트", mode: "review_comment", confirm: true },
+      { key: "gh_request_changes", gate: "github_review", label: "변경 요청", mode: "request_changes", confirm: true },
+      { key: "gh_approve", gate: "github_review", label: "승인 + 코멘트", mode: "approve", confirm: true },
+      { key: "gh_comment", gate: "github_review", label: "PR 코멘트", mode: "comment", confirm: true },
+    );
+  }
+  for (const a of list) { a.gate ||= a.key; a.off = a.mode ? !on[a.gate] : false; }
+  const pick = src === "email" ? ["gmail_draft", "gmail_send"] : src === "slack" ? ["slack_send"] : src === "jira" ? ["jira_comment"] : src === "github" ? ["gh_review_comment"] : ["session_send"];
   const primary = list.find((a) => pick.includes(a.key) && !a.off) || list[0];
   primary.primary = true;
   return list;
@@ -78,12 +91,14 @@ export const curDraft = () => DR.resp?.drafts?.find((d) => d.id === DR.tab) || n
 export const curText = () => (DR.tab in DR.edits ? DR.edits[DR.tab] : curDraft()?.text || "");
 export function confirmTarget(a) {
   const t = DR.ref.title || "";
+  if (DR.source === "jira") return `Jira ${DR.ref.key || t} 에 이 코멘트를 남김`;
+  if (DR.source === "github") return `PR ${DR.ref.repo}#${DR.ref.number} 에 ${a.mode === "approve" ? "승인(Approve) 리뷰" : a.mode === "request_changes" ? "변경 요청(Request changes) 리뷰" : a.mode === "comment" ? "일반 코멘트" : "코멘트 리뷰"}로 남김`;
   return DR.source === "slack" ? `Slack ${t} 에 이 내용으로 보냄` : DR.source === "email" ? `메일 회신 보냄: ${t}` : `세션 ${t} 에 입력으로 보냄`;
 }
 export function renderDraft() {
   if (!DR.open) return;
   const r = DR.resp, ctx = r?.context || {};
-  $("dm-title").textContent = `답장 초안 · ${DRAFT_SRC_KO[DR.source] || DR.source}`;
+  $("dm-title").textContent = `${DR.source === "jira" || DR.source === "github" ? "코멘트 초안" : "답장 초안"} · ${DRAFT_SRC_KO[DR.source] || DR.source}`;
   $("dm-sub").textContent = DR.ref.title || "";
   $("dm-ctx").innerHTML = DR.loading ? `<div class="calload"><span class="spin"></span>맥락 읽고 초안 쓰는 중… <span class="hint">보통 10~30초</span></div>`
     : r ? `${ctx.summary ? `<div class="sum">${esc(ctx.summary)}</div>` : ""}${ctx.excerpt ? `<blockquote>${esc(ctx.excerpt)}</blockquote>` : ""}<div class="mmeta">${r.cached ? "캐시 · " : ""}$${Number(r.cost_usd || 0).toFixed(3)}</div>` : "";
@@ -95,7 +110,7 @@ export function renderDraft() {
   $("dm-err").innerHTML = DR.error ? errBadge("draft", { where: DR.errWhere || "답장 초안", message: DR.error, at: DR.errAt || Date.now(), retry: DR.errRetry || null, label: DR.errLabel || "실패" }) : "";
   const acts = draftActions();
   $("dm-actions").innerHTML = acts.map((a) => {
-    const title = a.off ? `설정 → 쓰기 액션에서 '${ACTION_KO[a.key]}' 을 허용해야 써` : a.confirm ? "누르면 보낼 대상을 한 번 더 보여 줘" : "";
+    const title = a.off ? `설정 → 쓰기 액션에서 '${ACTION_KO[a.gate]}' 을 허용해야 써` : a.confirm ? "누르면 보낼 대상을 한 번 더 보여 줘" : "";
     const body = `${esc(a.label)}${a.primary ? ` <kbd>⌘⏎</kbd>` : ""}${DR.sending === a.key ? ` <span class="spin"></span>` : ""}`;
     if (a.href) return `<a class="btn" href="${esc(safeUrl(a.href) || "#")}" target="_blank" rel="noopener">${body}</a>`;
     return `<button type="button" class="btn${a.primary ? " go" : ""}${a.off ? " dis" : ""}" data-dact="${a.key}" aria-disabled="${a.off}" title="${esc(title)}" ${!r || DR.loading || DR.sending ? "disabled" : ""}>${body}</button>`;
@@ -114,7 +129,7 @@ export async function copyDraft() {
 export async function runAction(key) {
   const a = draftActions().find((x) => x.key === key); if (!a) return;
   if (a.key === "copy") return copyDraft();
-  if (a.off) { toast(`설정 → 쓰기 액션에서 '${ACTION_KO[a.key]}' 을 허용해야 해.`); return; }
+  if (a.off) { toast(`설정 → 쓰기 액션에서 '${ACTION_KO[a.gate]}' 을 허용해야 해.`); return; }
   if (a.confirm && DR.confirm !== a.key) { DR.confirm = a.key; renderDraft(); $("dm-confirm").querySelector("[data-dconfirm]")?.focus(); return; }
   DR.confirm = null; DR.sending = a.key; DR.error = ""; renderDraft();
   const r = await postJson("/api/send", { draft_id: curDraft()?.id, source: DR.source, ref: DR.ref, text: $("dm-text").value, mode: a.mode }).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
@@ -127,6 +142,7 @@ export async function runAction(key) {
 
 /** Listeners + one-time setup; main.js calls every module's init() once, in the old file's order. */
 export function init() {
+  initActions(); // ⋯ item actions (features/actions.js) — main.js's init list belongs to another module
   $("draft-modal").addEventListener("click", (e) => {
     if (e.target === $("draft-modal") || e.target.closest("[data-mclose]")) return closeDraft();
     const t = e.target.closest("[data-dtab]"); if (t) { DR.tab = t.dataset.dtab; DR.confirm = null; renderDraft(); return; }

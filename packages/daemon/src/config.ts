@@ -122,15 +122,29 @@ export interface NedActions {
   gmail_draft: boolean;
   gmail_send: boolean;
   session_send: boolean;
+  /** Wave 2 (all default off): Jira comment, Jira status transition, GitHub PR review/comment, Calendar RSVP. */
+  jira_comment: boolean;
+  jira_transition: boolean;
+  github_review: boolean;
+  calendar_rsvp: boolean;
 }
-export const DEFAULT_ACTIONS: NedActions = { slack_send: false, gmail_draft: true, gmail_send: false, session_send: true };
+export const DEFAULT_ACTIONS: NedActions = {
+  slack_send: false,
+  gmail_draft: true,
+  gmail_send: false,
+  session_send: true,
+  jira_comment: false,
+  jira_transition: false,
+  github_review: false,
+  calendar_rsvp: false,
+};
 export const DEFAULT_REPLY_TONE = "간결하고 정중한 존댓말, 핵심 먼저";
 
 /** Merge a (partial) actions patch over `base`; only real booleans are taken. */
 export function normalizeActions(raw: unknown, base: NedActions = DEFAULT_ACTIONS): NedActions {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const pick = (k: keyof NedActions) => (typeof r[k] === "boolean" ? (r[k] as boolean) : base[k]);
-  return { slack_send: pick("slack_send"), gmail_draft: pick("gmail_draft"), gmail_send: pick("gmail_send"), session_send: pick("session_send") };
+  return Object.fromEntries((Object.keys(DEFAULT_ACTIONS) as (keyof NedActions)[]).map((k) => [k, pick(k)])) as unknown as NedActions;
 }
 
 /** A non-empty string (trimmed, max 200 chars), else `fallback`. */
