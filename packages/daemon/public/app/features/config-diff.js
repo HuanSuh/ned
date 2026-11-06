@@ -14,7 +14,7 @@ export function diffConfig(saved, now) {
   if (!isPlain(now)) return out;
   const base = isPlain(saved) ? saved : {};
   for (const [k, v] of Object.entries(now)) {
-    if (v === undefined) continue;
+    if (v === undefined || k === "__proto__" || k === "constructor" || k === "prototype") continue;
     if (!(k in base)) { out[k] = v; continue; }
     const b = base[k];
     if (isPlain(b) && isPlain(v)) {
@@ -30,7 +30,7 @@ export function mergePatch(base, patch) {
   if (!isPlain(base) || !isPlain(patch)) return patch === undefined ? base : patch;
   const out = { ...base };
   for (const [k, v] of Object.entries(patch)) {
-    if (v === undefined) continue;
+    if (v === undefined || k === "__proto__" || k === "constructor" || k === "prototype") continue;
     out[k] = isPlain(out[k]) && isPlain(v) ? mergePatch(out[k], v) : v;
   }
   return out;

@@ -195,3 +195,30 @@ describe("backups + restore", () => {
     expect((await request("/api/config/restore", json("POST", {}))).status).toBe(400);
   });
 });
+
+describe("prototype pollution", () => {
+  it('a {"__proto__": …} / constructor PUT is ignored and Object.prototype stays clean', async () => {
+    const body = '{"__proto__":{"polluted":1},"constructor":{"prototype":{"polluted":2}},"notifications":{"__proto__":{"polluted":3}},"heartbeat_minutes":13}';
+    const r = await request("/api/config", { method: "PUT", headers: { "content-type": "application/json" }, body });
+    expect(r.status).toBe(200);
+    const j = await r.json();
+    expect(j.heartbeat_minutes).toBe(13);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(Object.prototype, "polluted")).toBe(false);
+    expect(Object.keys(j)).not.toContain("constructor");
+    expect(YAML.parse(fs.readFileSync(CONFIG_PATH, "utf8"))).not.toHaveProperty("polluted");
+    const m = deepMerge({ a: 1 }, JSON.parse('{"__proto__":{"polluted":4},"prototype":{"x":1}}')) as Record<string, unknown>;
+    expect(Object.getPrototypeOf(m)).toBe(Object.prototype);
+    expect(m).toEqual({ a: 1 });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+});
+
+describe("first save with no config.yaml yet", () => {
+  it("PUT without a prior GET doesn't 409 on the file loadConfig creates", async () => {
+    fs.rmSync(CONFIG_PATH, { force: true });
+    const r = await put({ heartbeat_minutes: 21 });
+    expect(r.status).toBe(200);
+    expect(loadConfig().heartbeat_minutes).toBe(21);
+  });
+});

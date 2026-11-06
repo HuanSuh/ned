@@ -131,8 +131,13 @@ export function startServer(getConfig: () => NedConfig): void {
     // Optimistic concurrency: the page sends the updated_at it rendered from; a save made elsewhere since then
     // (another tab, a hand edit of config.yaml, a daemon upgrade) → 409 with the current config instead of clobbering it.
     if (if_updated_at != null && Number(if_updated_at) !== configUpdatedAt()) return c.json({ error: "conflict", current: configView(loadConfig()) }, 409);
-    const cur = loadConfig();
+    const cur = loadConfig(); // may create config.yaml — so read the token after it
+    const seen = configUpdatedAt();
     const merged = mergeConfigPatch(cur, body);
+    // Check → save runs synchronously (no await), so no other request of this daemon can interleave. An outside
+    // writer (hand edit) landing between the stat above and the write below is caught by this second look; the
+    // remaining window is the few µs inside saveConfig itself — accepted (backups cover it).
+    if (configUpdatedAt() !== seen || (if_updated_at != null && Number(if_updated_at) !== seen)) return c.json({ error: "conflict", current: configView(loadConfig()) }, 409);
     for (const ch of configChanges(cur, merged)) log(`config: ${ch.key} ${logValue(ch.from)} → ${logValue(ch.to)}`);
     saveConfig(merged);
     mirrorToState(merged);

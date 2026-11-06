@@ -540,13 +540,14 @@ export function restoreConfigBackup(name: unknown): NedConfig {
 
 // ---------- PUT /api/config: deep merge + change log ----------
 const isPlain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 /** `patch` over `base`: plain objects merge key by key (recursively), anything else (arrays, null, scalars) replaces. Keys absent from `patch` are kept. */
 export function deepMerge<T>(base: T, patch: unknown): T {
   if (!isPlain(base) || !isPlain(patch)) return (patch === undefined ? base : patch) as T;
   const out: Record<string, unknown> = { ...base };
   for (const [k, v] of Object.entries(patch)) {
-    if (v === undefined) continue;
+    if (v === undefined || UNSAFE_KEYS.has(k)) continue; // a JSON body can carry "__proto__" as an own key
     out[k] = isPlain(out[k]) && isPlain(v) ? deepMerge(out[k], v) : v;
   }
   return out as T;
