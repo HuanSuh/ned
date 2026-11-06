@@ -182,16 +182,84 @@ export function liveChatContext(cfg: NedConfig): string {
   return buildChatContext({ cfg, agenda: readAgenda(), state: readState(), briefings: listBriefings(5), todos: listTodos() });
 }
 
-export function buildChatSystemPrompt(cfg: NedConfig, context: string, now = new Date()): string {
+// ---------- feature guide (docs/FEATURES.md → "요약") ----------
+
+export const FEATURES_PATH = path.resolve(here, "../../../docs/FEATURES.md");
+/** Separate from CHAT_CONTEXT_MAX: the feature summary has its own cap. */
+export const FEATURES_SUMMARY_MAX = 3000;
+
+/**
+ * The body of the first `## 요약` heading (any level, "요약" optionally followed by text like "(…)"), up to the next
+ * heading of the same or a higher level. Trimmed and cut at `max` chars. null when there is no such section / it's empty.
+ */
+export function extractFeaturesSummary(md: string, max = FEATURES_SUMMARY_MAX): string | null {
+  const lines = md.replace(/\r\n?/g, "\n").split("\n");
+  let start = -1;
+  let level = 0;
+  let fence = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(```|~~~)/.test(lines[i])) fence = !fence;
+    if (fence) continue;
+    const m = /^(#{1,6})\s+요약(?:\s|\(|$)/.exec(lines[i]);
+    if (m) {
+      start = i + 1;
+      level = m[1].length;
+      break;
+    }
+  }
+  if (start < 0) return null;
+  let end = lines.length;
+  fence = false;
+  for (let i = start; i < lines.length; i++) {
+    if (/^\s*(```|~~~)/.test(lines[i])) fence = !fence;
+    if (fence) continue;
+    const m = /^(#{1,6})\s/.exec(lines[i]);
+    if (m && m[1].length <= level) {
+      end = i;
+      break;
+    }
+  }
+  const body = lines.slice(start, end).join("\n").trim();
+  if (!body) return null;
+  return body.length > max ? `${body.slice(0, max - 1).trimEnd()}…` : body;
+}
+
+let featuresWarned = "";
+/** The summary from docs/FEATURES.md, or null (missing file / unreadable / no section) — logged once per reason. */
+export function readFeaturesSummary(file = FEATURES_PATH, max = FEATURES_SUMMARY_MAX): string | null {
+  let reason: string;
+  try {
+    const s = extractFeaturesSummary(fs.readFileSync(file, "utf8"), max);
+    if (s) return s;
+    reason = "no 요약 section";
+  } catch (e) {
+    reason = (e as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : `unreadable (${clip(e, 80)})`;
+  }
+  const key = `${file}:${reason}`;
+  if (featuresWarned !== key) {
+    featuresWarned = key;
+    log(`chat: feature guide ${file} ${reason} — "Ned 기능 안내" omitted`);
+  }
+  return null;
+}
+
+/** The "## Ned 기능 안내" block for the system prompt ("" when there is no summary). */
+export function featuresBlock(summary: string | null): string {
+  return summary ? `## Ned 기능 안내 (docs/FEATURES.md 요약)\n\n${summary}` : "";
+}
+
+export function buildChatSystemPrompt(cfg: NedConfig, context: string, now = new Date(), features: string | null = readFeaturesSummary()): string {
   let tpl: string;
   try {
     tpl = fs.readFileSync(PROMPT_PATH, "utf8");
   } catch {
-    tpl = "{{PERSONA}}\n\n너는 Ned 데몬이 모은 맥락을 아는 조력자다. 쓰기 도구는 절대 쓰지 않는다. 짧게, 한국어로.\n\n{{CONTEXT}}";
+    tpl = "{{PERSONA}}\n\n너는 Ned 데몬이 모은 맥락을 아는 조력자다. 쓰기 도구는 절대 쓰지 않는다. 짧게, 한국어로.\n\n{{FEATURES}}\n\n{{CONTEXT}}";
   }
   return tpl
     .replaceAll("{{PERSONA}}", personaPrompt(cfg.persona))
     .replaceAll("{{NOW}}", now.toLocaleString("ko-KR", { dateStyle: "full", timeStyle: "short" }))
+    .replaceAll("{{FEATURES}}", featuresBlock(features))
+    .replace(/\n{3,}/g, "\n\n")
     .replaceAll("{{CONTEXT}}", context);
 }
 

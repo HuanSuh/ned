@@ -1,0 +1,6 @@
+# Ned — 작업 규칙
+
+- **기능 문서 유지**: 기능을 추가/변경하면 `docs/FEATURES.md` 의 해당 항목과 맨 위 "요약" 섹션도 같은 커밋에서 같이 고친다.
+  요약은 Ned 대화창(Ned Net) 시스템 프롬프트에 그대로 들어간다(`packages/daemon/src/chat.ts` `readFeaturesSummary`, 최대 3,000자 — 요약은 2,500자 이내로 유지).
+- 상세 동작·API 는 `packages/daemon/README.md`, 대시보드 구조는 `packages/daemon/public/README.md`.
+- 테스트 `pnpm test`, 빌드 `pnpm -s build`. 테스트는 임시 `NED_HOME` 에서 돈다 — 실제 `~/.ned`·포트 7777 은 건드리지 않는다.
