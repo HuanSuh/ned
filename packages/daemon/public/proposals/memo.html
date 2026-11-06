@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ned · 비서의 메모</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  /* Direction A — "Secretary memo": one calm column, read top to bottom like a note left on the desk. */
+  :root {
+    color-scheme: light dark;
+    --paper: #fbf8f1; --desk: #efe9dc; --ink: #2a2620; --soft: #6f675a; --faint: #a39a8a;
+    --rule: #e4dccb; --accent: #9a3b1f; --check: #2a2620; --warn: #a65d00; --err: #b3261e;
+    --serif: "Noto Serif KR", "AppleMyungjo", "Nanum Myeongjo", Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", "Noto Sans KR", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #1f1d1a; --desk: #161513; --ink: #ebe5d8; --soft: #a69d8d; --faint: #6e665a;
+      --rule: #34302a; --accent: #e08a62; --check: #ebe5d8; --warn: #e0a24a; --err: #ef8a80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--desk); color: var(--ink); font: 16px/1.7 var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration-color: var(--faint); text-underline-offset: 3px; }
+  a:hover { color: var(--accent); text-decoration-color: currentColor; }
+  .sheet {
+    max-width: 680px; margin: 40px auto; padding: 56px 64px 48px; background: var(--paper);
+    border: 1px solid var(--rule); border-radius: 3px; box-shadow: 0 1px 0 var(--rule), 0 12px 30px -18px rgba(60, 40, 10, .25);
+  }
+  .dateline { font-size: 13px; color: var(--soft); letter-spacing: .02em; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .dateline .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #5b8a4b; margin-right: 6px; vertical-align: 1px; }
+  .dateline .dot.off { background: var(--err); }
+  h1 { font: 700 30px/1.35 var(--serif); margin: 18px 0 6px; letter-spacing: -.01em; }
+  .lede { color: var(--soft); margin: 0 0 32px; }
+  h2 { font: 600 15px/1.4 var(--serif); margin: 36px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--rule); display: flex; gap: 8px; align-items: baseline; }
+  h2 .n { font: 13px var(--sans); color: var(--faint); }
+  ul.todo { list-style: none; margin: 0; padding: 0; }
+  ul.todo li { display: grid; grid-template-columns: 26px 1fr; gap: 4px 6px; padding: 10px 0; border-bottom: 1px dotted var(--rule); }
+  ul.todo li:last-child { border-bottom: 0; }
+  ul.todo input { appearance: none; width: 16px; height: 16px; margin: 5px 0 0; border: 1.5px solid var(--soft); border-radius: 3px; cursor: pointer; background: transparent; }
+  ul.todo input:checked { background: var(--check); border-color: var(--check); box-shadow: inset 0 0 0 2px var(--paper); }
+  ul.todo li.gone { opacity: .45; }
+  ul.todo li.gone .t { text-decoration: line-through; }
+  .t { font-weight: 500; }
+  .src { font-size: 12px; color: var(--faint); margin-left: 6px; white-space: nowrap; }
+  .d { grid-column: 2; font-size: 14px; color: var(--soft); }
+  .prose p { margin: 0 0 8px; }
+  .prose .who { font-weight: 600; }
+  .prose .st-waiting { color: var(--warn); font-weight: 600; }
+  .prose .st-error { color: var(--err); font-weight: 600; }
+  .prose .st-done, .prose .st-running { color: var(--soft); }
+  details { border-top: 1px solid var(--rule); }
+  details:last-of-type { border-bottom: 1px solid var(--rule); }
+  summary { cursor: pointer; list-style: none; padding: 12px 0; font: 600 15px var(--serif); display: flex; gap: 8px; align-items: baseline; }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: "＋"; font: 13px var(--sans); color: var(--faint); width: 14px; }
+  details[open] summary::before { content: "－"; }
+  summary .n { font: 13px var(--sans); color: var(--faint); }
+  .fold { padding: 0 0 14px 22px; font-size: 14px; }
+  .fold ul { margin: 0; padding-left: 16px; }
+  .fold li { margin: 4px 0; }
+  .fold .past { display: grid; grid-template-columns: 92px 1fr; gap: 2px 12px; margin: 6px 0; }
+  .fold .past .w { color: var(--faint); font-variant-numeric: tabular-nums; }
+  .fold .past.ok { color: var(--faint); }
+  .fold .tl { display: grid; grid-template-columns: 48px 1fr; gap: 2px 10px; color: var(--soft); }
+  .fold .tl .h { font-variant-numeric: tabular-nums; color: var(--faint); }
+  .quiet { text-align: center; padding: 30px 0 10px; }
+  .quiet .big { font: 700 26px var(--serif); }
+  .quiet p { color: var(--soft); margin: 6px 0 0; }
+  footer { margin-top: 34px; font-size: 12px; color: var(--faint); display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center; }
+  footer button { font: inherit; color: var(--soft); background: none; border: 1px solid var(--rule); border-radius: 999px; padding: 3px 12px; cursor: pointer; }
+  footer button:hover { color: var(--ink); border-color: var(--soft); }
+  footer button:disabled { opacity: .5; cursor: progress; }
+  .sign { font: italic 500 15px var(--serif); color: var(--soft); margin-top: 26px; }
+  @media (max-width: 720px) { .sheet { margin: 0; padding: 32px 20px; border: 0; border-radius: 0; } h1 { font-size: 24px; } }
+</style>
+</head>
+<body>
+<main class="sheet" id="app"></main>
+<script src="fixture.js"></script>
+<script>
+(async () => {
+  "use strict";
+  const N = window.NED, e = N.esc;
+  const d = await N.load();
+  const app = document.getElementById("app");
+
+  function render() {
+    const s = d.state, now = new Date();
+    const wd = ["일", "월", "화", "수", "목", "금", "토"][now.getDay()];
+    const daily = d.briefings.find((b) => b.status === "UPDATE");
+    const att = s.attention;
+    const needSessions = s.sessions.filter((x) => x.status === "waiting" || x.status === "error");
+    const headline = att.length
+      ? (daily?.headline ?? `확인할 것이 ${att.length}건 있습니다`)
+      : "오늘은 조용합니다";
+    const lede = att.length
+      ? `먼저 처리할 것 ${att.length}건${needSessions.length ? `, 그중 에이전트 ${needSessions.length}개가 당신을 기다립니다` : ""}.`
+      : "새로 들어온 일도, 기다리는 에이전트도 없습니다.";
+
+    const todo = att.map((a) => `
+      <li data-id="${e(a.id)}">
+        <input type="checkbox" aria-label="처리함" title="처리함 (닫기)">
+        <div><span class="t">${a.url ? `<a href="${e(a.url)}" target="_blank" rel="noopener">${e(a.title)}</a>` : e(a.title)}</span><span class="src">${N.KIND_ICON[a.kind] ?? ""} ${e(N.KIND_KO[a.kind] ?? a.kind)} · ${N.rel(a.ts)}</span></div>
+        ${a.detail ? `<div class="d">${e(a.detail)}</div>` : ""}
+      </li>`).join("");
+
+    const sessionsProse = s.sessions.map((x) => `<p><span class="who">${e(x.worktree)}</span> — <span class="st-${x.status}">${e(N.STATUS_KO[x.status] ?? x.status)}</span>${x.subagents_active ? ` · 서브에이전트 ${x.subagents_active}` : ""}, ${N.rel(x.last_event_ts)}. ${e(x.last_summary ?? x.last_prompt ?? "")}</p>`).join("");
+
+    const items = (xs) => xs.map((x) => `<li>${N.KIND_ICON[x.kind] ?? ""} ${x.url ? `<a href="${e(x.url)}" target="_blank" rel="noopener">${e(x.title)}</a>` : e(x.title)}${x.detail ? ` <span style="color:var(--soft)">— ${e(x.detail)}</span>` : ""}</li>`).join("");
+    const updates = daily ? daily.updates : [], fyi = daily ? daily.fyi : [];
+    const past = d.briefings.map((b) => `<div class="past ${b.status === "NED_OK" ? "ok" : ""}"><span class="w">${N.dayLabel(b.ts)} ${N.hhmm(b.ts)}</span><span>${b.type === "daily" ? "아침 브리핑" : "점검"} · ${b.status === "NED_OK" ? "변화 없음" : e(b.headline ?? "업데이트")}</span></div>`).join("");
+    const tl = N.timeline(d).slice(0, 14).map((x) => `<span class="h">${N.hhmm(x.ts)}</span><span>${x.brief ? "📝 브리핑" : e(N.EVENT_KO[x.type] ?? x.type)}${x.wt ? ` · ${e(x.wt)}` : ""}${x.msg && !x.brief ? ` — ${e(String(x.msg).slice(0, 70))}` : ""}</span>`).join("");
+    const fold = (title, n, body) => n ? `<details><summary>${title} <span class="n">${n}</span></summary><div class="fold">${body}</div></details>` : "";
+
+    app.innerHTML = `
+      <div class="dateline">
+        <span>${now.getMonth() + 1}월 ${now.getDate()}일 ${wd}요일 · ${N.hhmm(now)}</span>
+        <span><span class="dot ${N.alive(s) ? "" : "off"}"></span>${N.alive(s) ? "지켜보는 중" : "Ned 응답 없음"} · 다음 점검 ${N.rel(s.next_heartbeat_at)}${s.quiet ? " · 조용한 시간" : ""}</span>
+      </div>
+      <h1>${e(headline)}</h1>
+      <p class="lede">${lede}</p>
+      ${att.length ? `<h2>지금 처리할 것 <span class="n">${att.length}</span></h2><ul class="todo">${todo}</ul>` : `<div class="quiet"><div class="big">☕</div><p>다음 점검은 ${N.rel(s.next_heartbeat_at)}입니다.</p></div>`}
+      ${s.sessions.length ? `<h2>에이전트 <span class="n">${s.sessions.length}</span></h2><div class="prose">${sessionsProse}</div>` : ""}
+      <div style="height:22px"></div>
+      ${fold("업데이트", updates.length, `<ul>${items(updates)}</ul>`)}
+      ${fold("참고", fyi.length, `<ul>${items(fyi)}</ul>`)}
+      ${fold("지난 브리핑", d.briefings.length, past)}
+      ${fold("오늘의 흐름", Math.min(14, N.timeline(d).length), `<div class="tl">${tl}</div>`)}
+      <div class="sign">— Ned</div>
+      <footer>
+        <span>${d.live ? "실시간" : "fixture 데이터"} · 마지막 점검 ${N.rel(s.last_heartbeat_at)}</span>
+        <span><button id="hb">지금 다시 보기</button> <button id="daily">아침 메모 새로 쓰기</button></span>
+      </footer>`;
+
+    for (const li of app.querySelectorAll("ul.todo li")) {
+      li.querySelector("input").addEventListener("change", async (ev) => {
+        li.classList.toggle("gone", ev.target.checked);
+        if (ev.target.checked) { await N.dismiss(li.dataset.id); setTimeout(render, 900); }
+      });
+    }
+    for (const [id, daily] of [["hb", false], ["daily", true]]) {
+      const b = app.querySelector("#" + id);
+      b.addEventListener("click", async () => { b.disabled = true; b.textContent = "보는 중… (1~3분)"; await N.heartbeat(daily); render(); });
+    }
+  }
+  render();
+})();
+</script>
+</body>
+</html>

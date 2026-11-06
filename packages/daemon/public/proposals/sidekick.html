@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ned · Sidekick</title>
+<link rel="icon" href="ned-glasses.svg" type="image/svg+xml">
+<style>
+  /* Direction E — "Sidekick": Ned is the guy in the chair. He talks to you in a chat log;
+     his glasses show what he is doing. Comic-panel cards, sticker badges, LED status. */
+  :root {
+    color-scheme: light dark;
+    --bg: #eef0e8; --dots: #d9dccf; --panel: #ffffff; --ink: #1c2430; --dim: #5d6573; --faint: #9aa1ad;
+    --edge: #1c2430; --shadow: #1c2430; --bubble: #ffffff; --me: #fff4c7;
+    --mint: #18a57f; --amber: #e39b0b; --red: #e0453a; --blue: #2f6fe0; --lens: #7fe0c4;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", "Noto Sans KR", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #11151b; --dots: #1b212a; --panel: #181e26; --ink: #e9ecef; --dim: #a1a9b5; --faint: #5f6875;
+      --edge: #3a4554; --shadow: #000000; --bubble: #1e252f; --me: #2c2a1a;
+      --mint: #3ddbb0; --amber: #f5b03a; --red: #ff6b5f; --blue: #6c9cff; --lens: #3ddbb0; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; color: var(--ink); font: 14px/1.55 var(--sans); -webkit-font-smoothing: antialiased;
+    background: var(--bg) radial-gradient(var(--dots) 1px, transparent 1.2px) 0 0 / 16px 16px; }
+  a { color: var(--blue); }
+  .mono { font-family: var(--mono); }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 18px 16px 40px; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
+  /* comic panel */
+  .panel { background: var(--panel); border: 2px solid var(--edge); border-radius: 10px; box-shadow: 4px 4px 0 var(--shadow); }
+  /* header / monitor */
+  header.hq { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; padding: 12px 16px; position: relative; overflow: hidden; }
+  header.hq::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .06;
+    background: repeating-linear-gradient(0deg, var(--ink) 0 1px, transparent 1px 3px); }
+  .mark { width: 64px; height: 40px; flex: none; }
+  .mark .frame { fill: none; stroke: var(--ink); stroke-width: 4; stroke-linecap: round; }
+  .mark .lens { fill: transparent; transition: fill .3s; }
+  .mark .glint { fill: none; stroke: var(--lens); stroke-width: 2.5; stroke-linecap: round; }
+  .mark .sweep { fill: var(--lens); opacity: 0; }
+  .mark .zz { font: 700 10px var(--mono); fill: var(--faint); opacity: 0; }
+  .mark .bang { font: 900 14px var(--sans); fill: var(--amber); opacity: 0; }
+  [data-mood="scanning"] .mark .sweep { opacity: .5; animation: sweep 1.2s ease-in-out infinite; }
+  [data-mood="headsup"] .mark .lens { fill: color-mix(in srgb, var(--amber) 22%, transparent); }
+  [data-mood="headsup"] .mark .glint { stroke: var(--amber); }
+  [data-mood="headsup"] .mark .bang { opacity: 1; animation: bob 1.6s ease-in-out infinite; }
+  [data-mood="quiet"] .mark .glint { stroke: var(--faint); }
+  [data-mood="quiet"] .mark .lens { fill: color-mix(in srgb, var(--blue) 12%, transparent); }
+  [data-mood="offline"] .mark .frame { stroke: var(--faint); }
+  [data-mood="offline"] .mark .glint { opacity: 0; }
+  [data-mood="offline"] .mark .zz { opacity: 1; }
+  @keyframes sweep { 0% { transform: translateX(-22px); } 100% { transform: translateX(46px); } }
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+  @media (prefers-reduced-motion: reduce) { .mark * { animation: none !important; } }
+  .who b { font-size: 18px; letter-spacing: -.01em; }
+  .who .mood { font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+  .leds { display: flex; gap: 14px; margin-left: auto; font: 11px var(--mono); color: var(--dim); flex-wrap: wrap; align-items: center; }
+  .led { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; border: 1px solid color-mix(in srgb, var(--ink) 30%, transparent); background: var(--faint); }
+  .led.g { background: var(--mint); box-shadow: 0 0 6px var(--mint); } .led.a { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+  .led.r { background: var(--red); box-shadow: 0 0 6px var(--red); } .led.b { background: var(--blue); box-shadow: 0 0 6px var(--blue); }
+  .btn { font: 700 12px var(--sans); color: var(--ink); background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; padding: 5px 11px; cursor: pointer; box-shadow: 2px 2px 0 var(--shadow); }
+  .btn:active { transform: translate(2px, 2px); box-shadow: none; }
+  .btn:disabled { opacity: .6; cursor: progress; }
+  .btn.go { background: var(--ink); color: var(--panel); }
+  /* chat log */
+  .log { padding: 14px 16px 18px; display: grid; gap: 12px; }
+  .day { justify-self: center; font: 600 11px var(--mono); color: var(--faint); letter-spacing: .08em; }
+  .msg { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 10px; align-items: start; }
+  .av { width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--edge); background: var(--panel); display: grid; place-items: center; }
+  .av svg { width: 26px; height: auto; }
+  .av .mark .frame { stroke-width: 5; }
+  .bubble { background: var(--bubble); border: 2px solid var(--edge); border-radius: 4px 14px 14px 14px; padding: 9px 13px; position: relative; max-width: 640px; }
+  .bubble .meta { font: 11px var(--mono); color: var(--faint); margin-bottom: 2px; }
+  .bubble p { margin: 0; }
+  .bubble .lead { font-weight: 600; }
+  .cards { display: grid; gap: 8px; margin-top: 8px; }
+  .item { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 2px 8px; align-items: start; border: 1.5px dashed color-mix(in srgb, var(--edge) 55%, transparent); border-radius: 8px; padding: 7px 9px; }
+  .item .ic { font-size: 16px; line-height: 1.3; }
+  .item .t { font-weight: 600; }
+  .item .d { grid-column: 2 / 4; color: var(--dim); font-size: 13px; }
+  .item .x { display: flex; gap: 6px; align-items: center; }
+  .item .x a, .item .x button { font: 700 11px var(--sans); border: 1.5px solid var(--edge); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 2px 8px; cursor: pointer; text-decoration: none; }
+  .sticker { display: inline-block; font: 800 10px var(--mono); letter-spacing: .06em; text-transform: uppercase; padding: 2px 7px; border-radius: 4px; border: 1.5px solid var(--edge); transform: rotate(-2deg); background: var(--me); color: var(--ink); }
+  .sticker.a { background: var(--amber); color: #1c2430; } .sticker.r { background: var(--red); color: #fff; }
+  .sticker.g { background: var(--mint); color: #08241c; } .sticker.b { background: var(--blue); color: #fff; }
+  .fold { margin-top: 6px; } .fold summary { cursor: pointer; color: var(--dim); font-size: 13px; }
+  .fold ul { margin: 6px 0 0; padding-left: 18px; color: var(--dim); }
+  .term { font: 12px/1.6 var(--mono); background: color-mix(in srgb, var(--ink) 6%, transparent); border-radius: 6px; padding: 6px 9px; margin-top: 6px; color: var(--dim); white-space: pre-wrap; word-break: break-word; }
+  .term b { color: var(--ink); font-weight: 600; }
+  .quip { font-style: italic; color: var(--dim); }
+  /* right rail */
+  .rail { display: grid; gap: 18px; }
+  .rail h3 { margin: 0; padding: 8px 12px; border-bottom: 2px solid var(--edge); font: 800 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; display: flex; gap: 8px; }
+  .rail h3 .n { color: var(--faint); margin-left: auto; }
+  .rack { padding: 6px 4px; }
+  .unit { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 0 8px; padding: 6px 8px; align-items: center; border-bottom: 1px dashed color-mix(in srgb, var(--edge) 35%, transparent); }
+  .unit:last-child { border-bottom: 0; }
+  .unit .nm { font: 600 12.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .unit .r { font: 11px var(--mono); color: var(--faint); }
+  .unit .s { grid-column: 2 / 4; font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tape { padding: 8px 12px 12px; display: grid; gap: 4px; }
+  .tape .row { display: flex; gap: 8px; font: 12px var(--mono); color: var(--dim); align-items: baseline; }
+  .tape .row .h { color: var(--faint); }
+  .tape .row.ok { color: var(--faint); }
+  .empty { padding: 12px; color: var(--faint); font-size: 12.5px; }
+  @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; } .leds { display: none; } }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script src="fixture.js"></script>
+<script>
+(async () => {
+  "use strict";
+  const N = window.NED, e = N.esc;
+  const d = await N.load();
+  const app = document.getElementById("app");
+  let busy = false;
+
+  const GLASSES = (cls = "big") => `<svg class="mark ${cls}" viewBox="0 0 64 40" aria-hidden="true">
+    <defs><clipPath id="lc-${cls}"><circle cx="18" cy="22" r="10"/><circle cx="46" cy="22" r="10"/></clipPath></defs>
+    <circle class="lens" cx="18" cy="22" r="10"/><circle class="lens" cx="46" cy="22" r="10"/>
+    <g clip-path="url(#lc-${cls})"><rect class="sweep" x="0" y="8" width="10" height="28" rx="3"/></g>
+    <circle class="frame" cx="18" cy="22" r="10"/><circle class="frame" cx="46" cy="22" r="10"/>
+    <path class="frame" d="M28 21q4-4.5 8 0M8 19 3 14M56 19l5-5"/>
+    <path class="glint" d="M12.5 18.5a6.5 6.5 0 0 1 5-4M40.5 18.5a6.5 6.5 0 0 1 5-4"/>
+    <text class="zz" x="50" y="9">z z</text><text class="bang" x="29" y="12">!</text></svg>`;
+
+  /** Avatar mood from daemon state — the mapping documented in README. */
+  function mood(s) {
+    if (busy) return "scanning";
+    if (!N.alive(s)) return "offline";
+    if (s.attention.length) return "headsup";
+    if (s.quiet) return "quiet";
+    return "idle";
+  }
+  const MOOD_KO = { scanning: "스캔 중", offline: "자리 비움", headsup: "헤이, 이거 봐", quiet: "조용한 시간", idle: "지켜보는 중" };
+
+  const QUIPS = [
+    "새 소식 없음. 모니터만 반짝이고 있어.",
+    "받은편지함 평화로움. 키보드 소리만 들려.",
+    "이상 무. 커피 식기 전에 하던 거 마저 해.",
+    "레이더 깨끗함. 내가 계속 보고 있을게.",
+  ];
+  const quip = (ts) => QUIPS[Math.floor(ts / 600000) % QUIPS.length];
+
+  function greet() {
+    const h = new Date().getHours();
+    return h < 11 ? "좋은 아침." : h < 18 ? "오후 체크인." : "늦게까지 하네.";
+  }
+
+  function itemCard(x, opts = {}) {
+    return `<div class="item" data-id="${e(x.id ?? "")}">
+      <span class="ic">${N.KIND_ICON[x.kind] ?? "·"}</span>
+      <span class="t">${e(x.title)}</span>
+      <span class="x">${x.url ? `<a href="${e(x.url)}" target="_blank" rel="noopener">열기</a>` : ""}${opts.dismiss ? `<button data-dismiss="${e(x.id)}">처리함</button>` : ""}</span>
+      ${x.detail ? `<span class="d">${e(x.detail)}</span>` : ""}</div>`;
+  }
+
+  function bubble(ts, body) {
+    return `<div class="msg"><div class="av">${GLASSES("mini")}</div><div class="bubble"><div class="meta">ned · ${N.hhmm(ts)}</div>${body}</div></div>`;
+  }
+
+  function draw() {
+    const s = d.state, m = mood(s);
+    document.body.dataset.mood = m;
+    const att = s.attention;
+    const sessAtt = att.filter((a) => a.source === "sessions"), sigAtt = att.filter((a) => a.source !== "sessions");
+    const waiting = s.sessions.filter((x) => x.status === "waiting"), errs = s.sessions.filter((x) => x.status === "error");
+    const latest = d.briefings.find((b) => b.status === "UPDATE");
+    const okRun = d.briefings.filter((b) => b.status === "NED_OK");
+
+    const msgs = [];
+    // 1. Opening line: what needs you, in one breath.
+    if (att.length) {
+      const bits = [];
+      if (sessAtt.length) bits.push(`에이전트 ${sessAtt.length}명이 너를 찾아`);
+      if (sigAtt.length) bits.push(`챙길 신호 ${sigAtt.length}건`);
+      msgs.push(bubble(s.updated_at, `<p class="lead">${greet()} ${bits.join(", ")}.</p>${latest?.headline ? `<p style="color:var(--dim)">요약하면: ${e(latest.headline)}</p>` : ""}`));
+    } else {
+      msgs.push(bubble(s.updated_at, `<p class="lead">${greet()} ${e(quip(s.updated_at))}</p><p style="color:var(--dim)">다음 순찰은 ${N.rel(s.next_heartbeat_at)}.</p>`));
+    }
+    // 2. Agents blocked on you.
+    if (sessAtt.length) {
+      msgs.push(bubble(sessAtt[0].ts, `<p>${waiting.length ? `<span class="sticker a">waiting ${waiting.length}</span> ` : ""}${errs.length ? `<span class="sticker r">error ${errs.length}</span> ` : ""}&nbsp;${waiting.length ? `<b>${e(waiting.map((x) => x.worktree).join(", "))}</b> 가 허락을 기다리는 중.` : ""} ${errs.length ? `<b>${e(errs.map((x) => x.worktree).join(", "))}</b> 는 넘어졌어.` : ""}</p>
+        <div class="cards">${sessAtt.map((a) => itemCard(a, { dismiss: true })).join("")}</div>`));
+    }
+    // 3. Work signals that need a decision.
+    if (sigAtt.length) {
+      msgs.push(bubble(sigAtt[0].ts, `<p>업무 쪽에서 네 손이 필요한 거 <b>${sigAtt.length}건</b>.</p><div class="cards">${sigAtt.map((a) => itemCard(a, { dismiss: true })).join("")}</div>`));
+    }
+    // 4. Read-only: updates + fyi folded.
+    if (latest && (latest.updates.length + latest.fyi.length)) {
+      const li = (xs) => xs.map((x) => `<li>${N.KIND_ICON[x.kind] ?? ""} ${x.url ? `<a href="${e(x.url)}" target="_blank" rel="noopener">${e(x.title)}</a>` : e(x.title)}</li>`).join("");
+      msgs.push(bubble(latest.ts, `<p>급하진 않은데 알아두면 좋은 것들.</p>
+        <details class="fold"><summary><span class="sticker b">updates ${latest.updates.length}</span> <span class="sticker">fyi ${latest.fyi.length}</span></summary><ul>${li(latest.updates)}${li(latest.fyi)}</ul></details>`));
+    }
+    // 5. What happened, as a terminal snippet.
+    const tl = N.timeline(d).filter((x) => !x.brief).slice(0, 6);
+    if (tl.length) {
+      msgs.push(bubble(tl[0].ts, `<p>로그 훑어봤어.</p><div class="term">${tl.map((x) => `<b>${N.hhmm(x.ts)}</b> ${e(x.wt)} ${e(N.EVENT_KO[x.type] ?? x.type)}${x.msg ? ` — ${e(String(x.msg).slice(0, 60))}` : ""}`).join("\n")}</div>`));
+    }
+    if (okRun.length) msgs.push(bubble(okRun[0].ts, `<p class="quip"><span class="sticker g">ned_ok ×${okRun.length}</span> &nbsp;그 사이 순찰 ${okRun.length}번, 전부 이상 없었어.</p>`));
+
+    const units = s.sessions.map((x) => {
+      const c = { waiting: "a", error: "r", running: "b", done: "g" }[x.status] ?? "";
+      return `<div class="unit"><span class="led ${c}"></span><span class="nm">${e(x.worktree)}${x.subagents_active ? ` <span style="color:var(--faint)">+${x.subagents_active}</span>` : ""}</span><span class="r">${N.rel(x.last_event_ts)}</span><span class="s">${e(x.last_summary ?? x.last_prompt ?? "")}</span></div>`;
+    }).join("");
+    const tape = d.briefings.slice(0, 8).map((b) => `<div class="row ${b.status === "NED_OK" ? "ok" : ""}"><span class="h">${N.dayLabel(b.ts) === "오늘" ? "" : N.dayLabel(b.ts) + " "}${N.hhmm(b.ts)}</span><span>${b.status === "NED_OK" ? "· 이상 무" : `▲ ${e(b.headline ?? "업데이트")}`}</span></div>`).join("");
+
+    app.innerHTML = `
+      <header class="hq panel">
+        ${GLASSES()}
+        <div class="who"><b>Ned</b><div class="mood">${MOOD_KO[m]}</div></div>
+        <div class="leds">
+          <span><span class="led ${N.alive(s) ? "g" : "r"}"></span>daemon</span>
+          <span><span class="led ${att.length ? "a" : ""}"></span>attn ${att.length}</span>
+          <span><span class="led ${s.quiet ? "b" : ""}"></span>quiet</span>
+          <span>next ${N.rel(s.next_heartbeat_at)}</span>
+        </div>
+        <button class="btn go" id="hb">순찰 돌기</button><button class="btn" id="daily">아침 브리핑</button>
+      </header>
+      <section class="panel"><div class="log"><div class="day">── ${N.dayLabel(Date.now())} ──</div>${msgs.join("")}</div></section>
+      <aside class="rail">
+        <section class="panel"><h3>장비실 · 세션 <span class="n">${s.sessions.length}</span></h3>${units ? `<div class="rack">${units}</div>` : `<div class="empty">출동 중인 에이전트 없음.</div>`}</section>
+        <section class="panel"><h3>순찰 기록 <span class="n">${d.briefings.length}</span></h3>${tape ? `<div class="tape">${tape}</div>` : `<div class="empty">아직 기록 없음.</div>`}</section>
+        <div style="font:11px var(--mono);color:var(--faint);padding:0 4px">${d.live ? "live" : "fixture"} · 마지막 순찰 ${N.rel(s.last_heartbeat_at)}</div>
+      </aside>`;
+
+    for (const b of app.querySelectorAll("[data-dismiss]")) b.onclick = async () => { await N.dismiss(b.dataset.dismiss); draw(); };
+    for (const [id, daily] of [["hb", false], ["daily", true]]) app.querySelector("#" + id).onclick = async () => {
+      busy = true; draw();
+      for (const x of app.querySelectorAll("#hb, #daily")) x.disabled = true;
+      app.querySelector("#" + id).textContent = "스캔 중…";
+      await N.heartbeat(daily); busy = false; draw();
+    };
+  }
+  draw();
+  setInterval(() => { if (!busy) draw(); }, 30000);
+})();
+</script>
+</body>
+</html>
