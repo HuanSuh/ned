@@ -55,7 +55,7 @@
       </div>
       <div class="hgrid" id="hgrid">
         <section class="card" id="cal-card" tabindex="0" aria-label="일정 (←/→ 이동, t 오늘, d/w 일·주)">
-          <div class="hd"><h2>일정</h2><span class="count" id="ag-date"></span><span class="count" id="ag-count"></span><span class="sp"></span>
+          <div class="hd"><h2>일정</h2><span class="count" id="ag-date"></span><span class="count" id="ag-count"></span><span class="srcst" id="st-calendar"></span><span class="sp"></span>
             <div class="calnav" role="toolbar" aria-label="일정 보기">
               <span class="seg"><button type="button" class="btn small" data-cv="day" title="일 (d)">일</button><button type="button" class="btn small" data-cv="week" title="주 (w)">주</button></span>
               <button type="button" class="btn small" data-cn="-1" title="이전 (←)" aria-label="이전">◀</button><button type="button" class="btn small" id="cal-today" data-cn="0" title="오늘 (t)">오늘</button><button type="button" class="btn small" data-cn="1" title="다음 (→)" aria-label="다음">▶</button>
@@ -77,25 +77,27 @@
           </section>
           <div class="sgrid" id="sgrid">
           <section class="card scard g-mail" id="sc-mail">
-            <div class="shw"><button class="sh" type="button" data-card="mail" aria-expanded="false" aria-controls="sl-mail"><span class="ico">📬</span>메일 확인 필요<span class="n" id="n-mail">0</span><span class="chev" aria-hidden="true">▼</span></button><span class="seg vmode" role="group" aria-label="보기"><button type="button" class="btn small" data-vm="mail" data-mode="need">확인 필요</button><button type="button" class="btn small" data-vm="mail" data-mode="all">전체</button></span></div>
+            <div class="shw"><button class="sh" type="button" data-card="mail" aria-expanded="false" aria-controls="sl-mail"><span class="ico">📬</span>메일 확인 필요<span class="n" id="n-mail">0</span><span class="chev" aria-hidden="true">▼</span></button><span class="srcst" id="st-mail"></span><span class="seg vmode" role="group" aria-label="보기"><button type="button" class="btn small" data-vm="mail" data-mode="need">확인 필요</button><button type="button" class="btn small" data-vm="mail" data-mode="all">전체</button></span></div>
             <div class="ss" id="ss-mail"></div>
             <div class="pv" id="pv-mail"></div>
             <div class="sl" id="sl-mail"><div class="gl"><div class="msum" id="mail-sum"></div><div id="g-mail"></div></div></div>
+            <div class="ctxst" id="ctx-mail"></div>
           </section>
           <section class="card scard g-jira" id="sc-jira">
-            <button class="sh" type="button" data-card="jira" aria-expanded="false" aria-controls="sl-jira"><span class="ico">📋</span>JIRA 내 이슈<span class="n" id="n-jira">0</span><span class="chev" aria-hidden="true">▼</span></button>
+            <div class="shw"><button class="sh" type="button" data-card="jira" aria-expanded="false" aria-controls="sl-jira"><span class="ico">📋</span>JIRA 내 이슈<span class="n" id="n-jira">0</span><span class="chev" aria-hidden="true">▼</span></button><span class="srcst" id="st-jira"></span></div>
             <div class="ss" id="ss-jira"></div>
             <div class="pv" id="pv-jira"></div>
             <div class="sl" id="sl-jira"><div class="gl"><div id="g-jira"></div></div></div>
           </section>
           <section class="card scard g-slack" id="sc-slack">
-            <div class="shw"><button class="sh" type="button" data-card="slack" aria-expanded="false" aria-controls="sl-slack"><span class="ico">💬</span>SLACK 답할 것<span class="n" id="n-slack">0</span><span class="chev" aria-hidden="true">▼</span></button><span class="seg vmode" role="group" aria-label="보기"><button type="button" class="btn small" data-vm="slack" data-mode="need">확인 필요</button><button type="button" class="btn small" data-vm="slack" data-mode="all">전체</button></span></div>
+            <div class="shw"><button class="sh" type="button" data-card="slack" aria-expanded="false" aria-controls="sl-slack"><span class="ico">💬</span>SLACK 답할 것<span class="n" id="n-slack">0</span><span class="chev" aria-hidden="true">▼</span></button><span class="srcst" id="st-slack"></span><span class="seg vmode" role="group" aria-label="보기"><button type="button" class="btn small" data-vm="slack" data-mode="need">확인 필요</button><button type="button" class="btn small" data-vm="slack" data-mode="all">전체</button></span></div>
             <div class="ss" id="ss-slack"></div>
             <div class="pv" id="pv-slack"></div>
             <div class="sl" id="sl-slack"><div class="gl"><div class="msum" id="slack-sum"></div><div id="g-slack"></div><div id="slack-watch"></div></div></div>
+            <div class="ctxst" id="ctx-slack"></div>
           </section>
           <section class="card scard g-gh" id="sc-gh">
-            <button class="sh" type="button" data-card="gh" aria-expanded="false" aria-controls="sl-gh"><span class="ico">🐙</span>GITHUB 리뷰 요청<span class="n" id="n-gh">0</span><span class="chev" aria-hidden="true">▼</span></button>
+            <div class="shw"><button class="sh" type="button" data-card="gh" aria-expanded="false" aria-controls="sl-gh"><span class="ico">🐙</span>GITHUB 리뷰 요청<span class="n" id="n-gh">0</span><span class="chev" aria-hidden="true">▼</span></button><span class="srcst" id="st-github"></span></div>
             <div class="ss" id="ss-gh"></div>
             <div class="pv" id="pv-gh"></div>
             <div class="sl" id="sl-gh"><div class="gl"><div id="g-gh"></div></div></div>

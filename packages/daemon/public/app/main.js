@@ -1,5 +1,6 @@
 /* Boot: header, loaders + polling, view routing, keyboard map, window.NED. */
 import { api, postJson } from "./api.js";
+import { agendaActive, followAgenda, init as initAgStatus, loadCosts } from "./features/agstatus.js";
 import { init as initCalendar } from "./features/calendar.js";
 import { init as initCardLayout } from "./features/cardlayout.js";
 import { init as initCards } from "./features/cards.js";
@@ -106,9 +107,10 @@ export async function loadBriefings(render = true) {
   if (render) renderAll();
 }
 export async function loadAgenda(render = true) {
-  try { S.agenda = await api("/api/agenda"); }
+  try { [S.agenda] = await Promise.all([api("/api/agenda"), loadCosts()]); }
   catch (e) { if (e.status !== 404) console.warn("agenda", e.message); if (e.status === 404 || S.agenda === undefined) S.agenda = null; }
   if (render) renderAll();
+  if (agendaActive(S.agenda)) followAgenda(); // a run (scheduled or from 새로고침) is landing source by source
 }
 export async function loadTodos(render = true) {
   try { const t = await api("/api/todos"); S.todos = Array.isArray(t) ? t : []; }
@@ -148,7 +150,7 @@ window.NED = { store, api: { api, postJson }, nav };
 
 // Every module's listeners + one-time setup, in the order the single file ran them — listener order on document
 // matters (e.g. the error popover's Esc stopImmediatePropagation runs before the page keys in boot()).
-for (const init of [initChips, initPopover, initSettings, initCardLayout, initReviewed, initDrafts, initCalendar, initCards, initHome]) init();
+for (const init of [initChips, initPopover, initSettings, initCardLayout, initReviewed, initDrafts, initCalendar, initCards, initAgStatus, initHome]) init();
 boot();
 
 function boot() {

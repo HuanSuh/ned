@@ -110,6 +110,8 @@ function fixture(T0) {
   ];
   const agenda = {
     updated_at: T0 - 15 * MIN, cost_usd: 0.87, calendar_range: { from: day(-1), to: day(13) }, calendar,
+    // jira "running" with no live run → the daemon reports it as error "interrupted" (⚠ on the Jira card)
+    sources_status: Object.fromEntries(["slack", "mail", "calendar", "github"].map((k) => [k, { status: "done", updated_at: T0 - 15 * MIN }]).concat([["jira", { status: "running", updated_at: T0 - 16 * MIN, started_at: T0 - 16 * MIN }]])),
     jira: [
       { key: "MNT-881", title: "정산 배치 실패 알림 누락", status: "In Progress", priority: "High", due: day(-2), url: "https://acme.atlassian.net/browse/MNT-881", updated: iso(at(0, 9)) },
       { key: "NED-12", title: "대시보드 모듈 분리", status: "To Do", priority: "Medium", due: day(0), url: "https://acme.atlassian.net/browse/NED-12", updated: iso(at(-1, 18)) },
@@ -192,6 +194,7 @@ function writeData(home, f) {
   fs.writeFileSync(path.join(home, "agenda.json"), JSON.stringify(f.agenda, null, 2));
   fs.writeFileSync(path.join(home, "todos.json"), JSON.stringify(f.todos, null, 2));
   fs.writeFileSync(path.join(home, "state.json"), JSON.stringify(f.state, null, 2));
+  fs.writeFileSync(path.join(home, "costs.json"), JSON.stringify({ days: { [ymd(new Date())]: { total_usd: 3.42, runs: 9, jobs: { agenda: { usd: 2.1, runs: 3 }, heartbeat: { usd: 1.32, runs: 6 } } } } }, null, 2));
   fs.writeFileSync(path.join(home, "reviewed.json"), JSON.stringify({ "a-jira": f.state.attention.find((a) => a.id === "a-jira").reviewed_at, "jira:NED-15": Date.now() }, null, 2));
 }
 
@@ -418,6 +421,21 @@ async function capture(o) {
     await step("cards-save", () => evalJs(`(() => { document.getElementById("cfg").requestSubmit(); return "ok"; })()`), { wait: 800, until: SAVED });
     await step("cards-home", () => evalJs(`location.hash = "#home"`), { shot: true });
     await step("cards-config", () => evalJs(`fetch("/api/config").then((r) => r.json()).then((c) => JSON.stringify(c.dashboard))`));
+    // Live-run states (a source running, phase 2 progress / budget stop) exist only while the daemon works: a page-side
+    // fetch wrapper merges window.__agMock into the real GET /api/agenda and /api/costs replies, then a poll tick loads them.
+    await evalJs(`(() => { const rf = window.fetch; window.__agMock = null;
+      window.fetch = async (u, o) => { const r = await rf(u, o); const m = window.__agMock, p = String(u);
+        const key = p.startsWith("/api/agenda") && !(o && o.method) ? "agenda" : p.startsWith("/api/costs") ? "costs" : null;
+        if (!m || !key || !m[key] || !r.ok) return r;
+        const j = await r.json(); return new Response(JSON.stringify({ ...j, ...m[key], sources_status: { ...j.sources_status, ...(m[key].sources_status || {}) } }), { status: 200, headers: { "content-type": "application/json" } }); };
+      return "ok"; })()`);
+    const mock = (m) => evalJs(`(() => { window.__agMock = ${JSON.stringify(m)}; __nedTick(); return "ok"; })()`);
+    const running = { status: "running", updated_at: T0, started_at: T0 - 20000 };
+    await step("agenda-running", () => mock({ agenda: { busy: true, sources_status: { slack: running, calendar: running }, context_status: { running: true, pending: 3, done: 2, failed: 0, stopped: null, skipped: [], updated_at: T0, cost_usd: 0.04 } } }),
+      { shot: true, until: "!!document.querySelector('#st-slack .srun') && !!document.querySelector('#st-calendar .srun')" });
+    await step("agenda-budget", () => mock({ agenda: { busy: false, context_status: { running: false, pending: 4, done: 1, failed: 0, stopped: "budget", skipped: [], updated_at: T0, cost_usd: 0.3 } }, costs: { today_usd: 15.37, budget_usd: 15, over_budget: true } }),
+      { shot: true, until: "!!document.querySelector('#ctx-slack [data-ctxforce]') && !document.querySelector('#st-slack .srun')" });
+    await step("agenda-idle", () => mock(null), { wait: 3500, until: "!document.querySelector('#ctx-slack [data-ctxforce]')" });
     fs.writeFileSync(path.join(out, "steps.json"), JSON.stringify(steps, null, 2));
     page.close();
   } finally {

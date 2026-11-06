@@ -159,4 +159,15 @@ details.swatch > summary .chipx { margin-left: 6px; }
 details.tdone summary { cursor: pointer; padding: 5px 10px; font: 600 11px var(--mono); color: var(--faint); list-style: none; }
 details.tdone summary::-webkit-details-marker { display: none; }
 details.tdone summary::before { content: "▸ "; } details.tdone[open] summary::before { content: "▾ "; }
+/* agenda progress (features/agstatus.js): per-source '갱신 중' / ⚠ in card + 일정 headers, 맥락 수집 line, cost */
+.srcst { display: inline-flex; align-items: center; flex: none; }
+.scard > .shw > .srcst:not(:empty) { margin-right: 8px; }
+.srun { display: inline-flex; align-items: center; gap: 5px; font: 11px var(--mono); color: var(--info); white-space: nowrap; }
+.srun .spin { width: 9px; height: 9px; }
+.ctxst { display: flex; align-items: center; gap: 6px; padding: 5px 14px; border-top: 1px dashed var(--line); font: 11px var(--mono); color: var(--faint); flex: none; }
+.ctxst[hidden] { display: none; }
+.ctxst .spin { width: 9px; height: 9px; }
+.ctxst .ctxw { color: var(--amber); }
+.ctxst .btn { margin-left: auto; }
+.hmeta .cost.over { color: var(--amber); font-weight: 600; }
 .hkeys { margin-top: 14px; color: var(--faint); font-size: 11.5px; display: flex; gap: 12px; flex-wrap: wrap; }

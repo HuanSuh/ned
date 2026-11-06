@@ -1,5 +1,6 @@
 /* Home tab: greeting line, todo card (Ned actions + personal todos), agenda refresh. */
 import { api } from "../api.js";
+import { costHtml, followAgenda, loadCosts, renderAgStatus } from "../features/agstatus.js";
 import { meetings, renderAgenda, todayEvents } from "../features/calendar.js";
 import { GH_REASON, MAIL_REASON, PRIO_LED, SLACK_REASON, card, cardMode, collapseDMs, counts, group, moreBadge, packCards, preview, renderSlackWatch, unionAll, watchNeeds } from "../features/cards.js";
 import { draftFor } from "../features/drafts.js";
@@ -176,10 +177,11 @@ export function renderHome() {
   $("say-home").innerHTML = say(`ned · ${hhmm(Date.now())}`, esc(o.lead), esc(o.sub));
   const ag = S.agenda;
   $("ag-meta").innerHTML = ag === null ? errBadge("agenda-conn", { where: "agenda 연결", message: "GET /api/agenda 가 실패했어. daemon 이 꺼졌거나 이 버전에 agenda API 가 없어.", retry: () => loadAgenda() })
-    : ag ? [ag.updated_at ? `<span title="${esc(mdhm(ag.updated_at))}">일정 갱신 ${esc(rel(ag.updated_at))}</span>` : "", ag.cost_usd != null ? `<span>$${Number(ag.cost_usd).toFixed(2)}</span>` : "",
+    : ag ? [ag.updated_at ? `<span title="${esc(mdhm(ag.updated_at))}">일정 갱신 ${esc(rel(ag.updated_at))}</span>` : "", costHtml(ag),
       ag.error ? errBadge("agenda", { where: "일정·이슈 갱신 (agenda 잡)", message: ag.error, at: ag.updated_at || Date.now(), retry: () => refreshAgenda() }) : ""].filter(Boolean).join(" · ") : "";
   renderAgenda();
   renderTodoGroups();
+  renderAgStatus();
   packCards();
   setAgBusy();
 }
@@ -197,8 +199,11 @@ export async function refreshAgenda() {
   setAgBusy(); renderHeader();
   agTick = setInterval(setAgBusy, 1000);
   try {
+    // Returns after phase 1; sources still finish at their own pace (and phase 2 runs on) → follow GET /api/agenda.
     const a = await api("/api/agenda/refresh", { method: "POST" });
-    if (a) S.agenda = a;
+    if (a) S.agenda = { ...S.agenda, ...a };
+    loadCosts();
+    followAgenda();
     toast(a?.error ? `일부는 못 가져왔어 — ${errSummary(a.error)} (⚠ 를 눌러 자세히)` : "일정이랑 이슈 새로 가져왔어.");
   } catch (e) {
     if (e.status === 409) toast("이미 가져오는 중이야. 조금만 기다려.");

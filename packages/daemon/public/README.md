@@ -113,6 +113,15 @@ Slack·메일 항목(소스 카드 행, Ned 액션 아이템, 인박스 상세)�
 
 항목 동작은 한 컴포넌트(`iconBtn`, 24px, 인라인 SVG, `title`/`aria-label` 이 라벨, hover 는 페르소나 포인트색): 초안(연필) · 열기(외부 링크) · 확인(체크) · 닫기(×). 홈 할 일·소스 카드·인박스 목록/상세·세션 레일에서 같은 모양. 체크를 누르거나 그 항목으로 초안을 만들면 확인 완료(`reviewed_at`) — 홈 Ned 액션은 그룹 아래 `확인 완료 N` 접힘 섹션으로, 인박스 '우선' 은 목록 끝 접힘 줄 아래로 간다(흐리게, 체크 켜짐; 다시 누르면 되돌림). 인사말·pill·배지·헤더 attn·탭 제목 카운트는 열린 항목만. 인박스 j/k 는 접힘을 펼쳤을 때만 확인 완료 항목까지 간다.
 
+## agenda 진행 표시 (`app/features/agstatus.js`)
+
+2단계 agenda(daemon README "agenda") 를 소스별로 보여 준다.
+- `GET /api/agenda` 의 `sources_status.<slack|mail|calendar|jira|github>.status`: `running` → 그 카드 헤더(일정은 패널 헤더, `#st-<key>`)에 스피너 + '갱신 중', `error` → ⚠ 배지(`errBadge`, 다시 시도 = 새로고침). `error: "interrupted"` 는 "가져오던 중에 끊겼어(이전 목록 표시 중)" 로 풀어 쓴다.
+- 새로고침(`POST /api/agenda/refresh`)은 1단계가 끝나면 응답하지만 소스마다 끝나는 시점이 달라서, 응답 뒤(그리고 어떤 로드에서든 `busy` 나 `context_status.running` 이 보이면) `busy` 가 false 가 되고 2단계가 쉴 때까지 3초마다 `GET /api/agenda` 를 다시 읽는다 — 카드는 받은 데이터대로 바로 다시 그린다.
+- `context_status`(Slack·메일 공용 큐): 진행 중이면 두 카드 하단(`#ctx-slack`, `#ctx-mail`)에 '맥락 수집 done/(done+pending+failed)', `stopped === "budget"` 이면 '오늘 예산 소진' + `지금 수집`(`POST /api/agenda/context?force=1`, 이후 다시 따라 읽음).
+- 홈 상단 비용: `GET /api/costs` 의 `오늘 $today_usd / $budget_usd`(툴팁에 마지막 agenda 1단계 비용), `over_budget` 이면 경고색. `/api/costs` 가 없는 daemon 이면 예전처럼 `$cost_usd`.
+- `mail.all` / `slack.all` 은 daemon 이 `agenda_all_limit`(기본 20)개까지만 보낸다 — 화면은 받은 만큼 그린다.
+
 ## 오류 표시
 
 에러 문자열은 화면에 그대로 늘어놓지 않는다. `errBadge()` 가 경고색 ⚠ 아이콘만 그리고(`title` = 어디서 + 짧은 요약 — `API Error: 400 {…}` 은 JSON 안의 `message` 를 꺼내 요약), 누르면 팝오버에 전체 메시지 · 발생 시각 · `다시 시도`(해당 잡 재실행) · `로그 복사` · 닫기(Esc/바깥 클릭). 쓰는 곳: 홈 상단 agenda 갱신 실패(다시 시도 = agenda 새로고침), 헤더 daemon 상태(연결 실패 / state.json 이 멈춤 / 대시보드에서 실행한 점검 실패), 답장 초안 모달(초안 생성·전송 실패), 캘린더 범위 조회 실패. 토스트도 짧은 요약만.
