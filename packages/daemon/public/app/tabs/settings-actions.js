@@ -1,0 +1,65 @@
+/* Settings › 쓰기 액션: allowed write actions grouped by source, plus a per-source 답장 말투 (Slack / Gmail / 세션).
+ * Pure HTML builders (no DOM at import) so the layout is unit-tested; settings.js mounts them into #wa-groups.
+ * Toggles keep their old ids (data-act="<key>") so readBody / PUT /api/config are unchanged. */
+import { KIND_ICON } from "../ui/icons.js";
+import { esc } from "../util.js";
+
+/** Fixed order. `src` = config.sources key that dims the group when off (session has none); `tone` = reply_tone_by_source key. */
+export const WA_GROUPS = [
+  { id: "slack", label: "Slack", icon: KIND_ICON.slack, src: "slack", tone: "slack", keys: ["slack_send"] },
+  { id: "gmail", label: "Gmail", icon: KIND_ICON.email, src: "gmail", tone: "email", keys: ["gmail_draft", "gmail_send"] },
+  { id: "session", label: "세션", icon: KIND_ICON.session, src: null, tone: "session", keys: ["session_send"] },
+  { id: "jira", label: "Jira", icon: KIND_ICON.jira, src: "jira", tone: null, keys: ["jira_comment", "jira_transition"] },
+  { id: "github", label: "GitHub", icon: KIND_ICON.github, src: "github", tone: null, keys: ["github_review"] },
+  { id: "calendar", label: "캘린더", icon: KIND_ICON.calendar, src: "calendar", tone: null, keys: ["calendar_rsvp", "calendar_create"] },
+];
+export const TONE_SOURCES = ["slack", "email", "session"];
+
+const ACTION_HINT = {
+  jira_comment: "Jira 항목 ⋯ → 코멘트 초안 → 확인 후 코멘트 등록",
+  jira_transition: "Jira 항목 ⋯ → 상태 변경 (가능한 전환을 먼저 읽어 옴) → 확인 후 전환",
+  github_review: "PR 항목 ⋯ → 리뷰 초안 / 승인 / 변경 요청 / 코멘트 (gh pr review · gh pr comment)",
+  calendar_rsvp: "일정 ⋯ → 수락 / 미정 / 거절",
+  calendar_create: "일정 카드 ＋ / 주 보기 드래그 / 일 보기 빈 시간 클릭 → 새 일정 팝업 → 확인 후 Google Calendar 에 생성",
+};
+
+/** Groups to show: known keys present in defaults/config go to their source; unknown keys land in "기타" so new ones never vanish. */
+export function writeActionGroups(config, defaults) {
+  const present = [...new Set([...Object.keys(defaults || {}), ...Object.keys(config?.actions || {})])];
+  const known = new Set(WA_GROUPS.flatMap((g) => g.keys));
+  const groups = WA_GROUPS.map((g) => ({ ...g, keys: g.keys.filter((k) => present.includes(k)) })).filter((g) => g.keys.length);
+  const other = present.filter((k) => !known.has(k));
+  if (other.length) groups.push({ id: "other", label: "기타", icon: KIND_ICON.other, src: null, tone: null, keys: other });
+  return groups;
+}
+
+const toggle = (k, on, ko) => `<label${ACTION_HINT[k] ? ` title="${esc(ACTION_HINT[k])}"` : ""}><input type="checkbox" data-act="${esc(k)}" ${on ? "checked" : ""}>${esc(ko[k] || k)}</label>`;
+
+/** #wa-groups innerHTML. */
+export function writeActionsHtml(config, defaults, ko) {
+  const acts = { ...(defaults || {}), ...(config?.actions || {}) };
+  const tones = config?.reply_tone_by_source && typeof config.reply_tone_by_source === "object" ? config.reply_tone_by_source : {};
+  return writeActionGroups(config, defaults).map((g) => {
+    const off = !!g.src && config?.sources?.[g.src] === false;
+    const tone = g.tone ? `<div class="watone"><label for="c-tone-${g.tone}">답장 말투</label><input type="text" id="c-tone-${g.tone}" data-tone-src="${g.tone}" placeholder="기본 말투 사용" maxlength="200" value="${esc(tones[g.tone] || "")}"></div>` : "";
+    return `<div class="wagrp${off ? " off" : ""}" data-wagrp="${g.id}"${g.src ? ` data-wasrc="${g.src}"` : ""} role="group" aria-labelledby="wa-h-${g.id}">
+      <div class="wah"><span class="waic" aria-hidden="true">${g.icon}</span><h3 id="wa-h-${g.id}">${esc(g.label)}</h3><span class="offnote"${off ? "" : " hidden"}>소스가 꺼져 있어 — 설정은 그대로 보존돼</span></div>
+      <div class="wab"><div class="toggles">${g.keys.map((k) => toggle(k, acts[k], ko || {})).join("")}</div>${tone}</div></div>`;
+  }).join("");
+}
+
+/** Dim a group whose source is off (values kept, still editable and saved). `isOn(src)` reads the 소스 toggles. */
+export function syncWriteActionGroups(root, isOn) {
+  for (const g of root.querySelectorAll("[data-wasrc]")) {
+    const off = !isOn(g.dataset.wasrc);
+    g.classList.toggle("off", off);
+    g.querySelector(".offnote").hidden = !off;
+  }
+}
+
+/** reply_tone_by_source from the inputs: blank → null (= 기본 말투). */
+export function readToneBySource(root) {
+  const out = { slack: null, email: null, session: null };
+  for (const el of root.querySelectorAll("[data-tone-src]")) out[el.dataset.toneSrc] = el.value.trim().slice(0, 200) || null;
+  return out;
+}

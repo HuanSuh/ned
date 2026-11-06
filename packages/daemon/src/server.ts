@@ -10,7 +10,7 @@ import { AGENDA_SOURCES, agendaBusy, enabledSources, patchAgenda, readAgenda, ru
 import { contextStatus, requestContext } from "./agenda-context.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { PERSONAS, loadConfig, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeDashboard, normalizeNotifications, normalizeReplyTone, normalizePersona, saveConfig, sourceRefreshMinutes, watchChannels, type NedConfig, type PersonaId } from "./config.js";
+import { PERSONAS, loadConfig, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeDashboard, normalizeNotifications, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, saveConfig, sourceRefreshMinutes, watchChannels, type NedConfig, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { checkStatus, dismissAttention, heartbeat, listBriefings, runCheck } from "./heartbeat.js";
@@ -82,7 +82,7 @@ export function startServer(getConfig: () => NedConfig): void {
     const cur = loadConfig();
     // filters is nested: merge it per source so a PUT carrying only filters.slack keeps filters.jira.
     // An unknown persona value keeps the current one.
-    const merged = { ...cur, ...body, persona: PERSONAS.includes(body.persona as PersonaId) ? normalizePersona(body.persona) : cur.persona, notifications: normalizeNotifications(body.notifications, cur.notifications), actions: normalizeActions(body.actions, cur.actions), reply_tone: normalizeReplyTone(body.reply_tone, cur.reply_tone), filters: mergeFilters(cur.filters, body.filters), agenda_source_minutes: normalizeAgendaSourceMinutes(body.agenda_source_minutes, cur.agenda_source_minutes) };
+    const merged = { ...cur, ...body, persona: PERSONAS.includes(body.persona as PersonaId) ? normalizePersona(body.persona) : cur.persona, notifications: normalizeNotifications(body.notifications, cur.notifications), actions: normalizeActions(body.actions, cur.actions), reply_tone: normalizeReplyTone(body.reply_tone, cur.reply_tone), reply_tone_by_source: normalizeReplyToneBySource(body.reply_tone_by_source, cur.reply_tone_by_source), filters: mergeFilters(cur.filters, body.filters), agenda_source_minutes: normalizeAgendaSourceMinutes(body.agenda_source_minutes, cur.agenda_source_minutes) };
     // Re-normalized even without body.dashboard: a 팔로업 channel added / removed in filters adds / drops its `watch:` card.
     merged.dashboard = normalizeDashboard(body.dashboard ?? {}, cur.dashboard, watchChannels(merged.filters));
     saveConfig(merged);

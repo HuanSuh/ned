@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readAgenda, type Agenda, type MailContext, type SlackContext } from "./agenda.js";
 import { extractJson, llmDisabled, runClaude } from "./claude.js";
-import { normalizeReplyTone, type NedConfig } from "./config.js";
+import { normalizeReplyTone, type NedConfig, type ReplyToneSource } from "./config.js";
 import { readRecentEvents, type NedEvent } from "./events.js";
 import { NED_HOME, log, readJson, writeJsonAtomic } from "./paths.js";
 
@@ -410,11 +410,20 @@ function contextExcerpt(fast: AgendaCtx): string {
   return ([...msgs].reverse().find((m) => m.from !== "나") ?? msgs[msgs.length - 1])?.text ?? "";
 }
 
+/**
+ * The voice for this draft: an explicit request tone wins, else the per-source setting
+ * (config.reply_tone_by_source — slack / email / session), else the 기본 말투 (config.reply_tone).
+ */
+export function draftTone(req: Pick<DraftRequest, "source" | "tone">, cfg: Pick<NedConfig, "reply_tone" | "reply_tone_by_source">): string {
+  const per = cfg.reply_tone_by_source?.[req.source as ReplyToneSource];
+  return normalizeReplyTone(req.tone, normalizeReplyTone(per, normalizeReplyTone(cfg.reply_tone)));
+}
+
 /** `fast` (or a session) → no-tool prompt built from context Ned already has. */
 export function buildDraftPrompt(req: DraftRequest, cfg: NedConfig, fast: AgendaCtx | null = null, prefetched?: string): { prompt: string; meta: DraftMeta } {
   const template = fs.readFileSync(path.join(PROMPTS_DIR, "draft.md"), "utf8");
   const s = sourceGuide(req, fast, prefetched);
-  const tone = normalizeReplyTone(req.tone, cfg.reply_tone);
+  const tone = draftTone(req, cfg);
   const prompt = template
     .replace("{{NOW}}", () => new Date().toLocaleString("ko-KR"))
     .replace("{{TOOL_RULES}}", () => (fast ? `${NO_TOOL_RULES}\n${FAST_OUTPUT_RULE}` : req.source === "session" || req.source === "github" ? NO_TOOL_RULES : TOOL_RULES))
@@ -469,7 +478,7 @@ function validate(req: DraftRequest): DraftError | null {
 /** A cached draft set for this exact request (same key, hint, tone, < 1h), or null. */
 function cachedDraft(req: DraftRequest, cfg: NedConfig): DraftResult | null {
   const c = readJson<DraftResult | null>(draftFile(draftIdOf(refKey(req.source, req.ref))), null);
-  const tone = normalizeReplyTone(req.tone, cfg.reply_tone);
+  const tone = draftTone(req, cfg);
   if (c && Date.now() - c.created_at < CACHE_MS && c.hint === (req.hint ?? "") && c.tone === tone && c.drafts.length) return { ...c, mode: c.mode ?? "full", context_age_minutes: c.context_age_minutes ?? null, cached: true }; // pre-fast-path cache files lack mode
   return null;
 }
@@ -485,7 +494,7 @@ export function generateDraft(req: DraftRequest, cfg: NedConfig, opts: { fastOnl
   if (bad) return Promise.reject(bad);
   const key = refKey(req.source, req.ref);
   const id = draftIdOf(key);
-  const tone = normalizeReplyTone(req.tone, cfg.reply_tone);
+  const tone = draftTone(req, cfg);
   const hint = req.hint ?? "";
 
   if (!req.force && !llmDisabled()) {

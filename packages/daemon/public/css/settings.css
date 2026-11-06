@@ -128,3 +128,13 @@
 .clbar .ck { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .clbar .hint { margin: 0; }
 @media (max-width: 760px) { .clay { grid-template-columns: 1fr; } }
+/* 쓰기 액션: 소스별 그룹 (settings-actions.js) */
+.wagroups { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; align-items: start; }
+.wagrp { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); min-width: 0; }
+.wagrp .wah { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.wagrp .wah h3 { margin: 0; font-size: 13px; font-weight: 650; }
+.wagrp .wab { display: flex; flex-direction: column; gap: 8px; }
+.wagrp .watone { display: flex; flex-direction: column; gap: 4px; }
+.wagrp .watone label { font-size: 12px; color: var(--dim); }
+.wagrp .watone input { width: 100%; box-sizing: border-box; }
+.wagrp.off .wab, .wagrp.off .wah h3, .wagrp.off .waic { opacity: .45; filter: grayscale(.4); }
