@@ -517,7 +517,8 @@
   .scard .pv .tt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
   .scard .pv .tt a { color: inherit; }
   .scard .pv .chipx { flex: none; }
-  .scard .sl { border-top: 1px solid var(--line); padding: 6px 10px 10px 12px; max-height: 460px; overflow: auto; }
+  .scard .sl { border-top: 1px solid var(--line); padding: 6px 10px 10px 12px; max-height: 460px; overflow: auto; display: flex; flex-direction: column; }
+  .scard .sl > .gl { flex: 1 0 auto; } /* the colour rule on the left runs to the bottom of the list area */
   .scard .sl .gl { border-left: 2px solid var(--gc); }
   .scard:not(.open) .sl, .scard.open .pv { display: none; }
   @media (prefers-reduced-motion: reduce) { .scard > .sh .chev { transition: none; } }
@@ -569,7 +570,7 @@
     .hgrid.wk .sgrid { --cols: 1; }
     /* the todo column doesn't set the row height (contain: size); its list scrolls inside instead */
     #todo-card { contain: size; min-height: 560px; display: flex; flex-direction: column; }
-    #todo-card > .bd { flex: 1 1 auto; min-height: 0; overflow: auto; }
+    #todo-card > .bd { flex: 1 1 auto; min-height: 0; overflow: hidden; }
     .hgrid > .card:first-child { grid-area: cal; }
     .hcol { display: contents; }
     #todo-card { grid-area: todo; }
@@ -601,6 +602,18 @@
     /* cards: columns at least as tall as the area (last card stretches), the area scrolls when content is taller */
     .sgrid { align-items: flex-start; }
     .scol { min-height: 100%; }
+    /* inner lists fill their card: header / summary auto, the list area takes the rest and scrolls when long */
+    .scard.last { flex: 1 1 0; min-height: 220px; }
+    .scard.last .sl { flex: 1 1 auto; min-height: 0; max-height: none; }
+    .sgrid.measuring .scard .sl { max-height: 460px; }
+    .hgrid > .card { min-height: 0; }
+    #todo-card { display: flex; flex-direction: column; }
+    #todo-card > .bd { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+    /* Ned actions / personal todos share the card by content size (flex-basis auto) and each scrolls inside */
+    #todo-card .tgrp { flex: 1 1 auto; min-height: 96px; display: flex; flex-direction: column; }
+    #todo-card .tgrp[hidden] { display: none; }
+    #todo-card .tgrp > .gh { flex: none; }
+    #todo-card .tgrp > .gl { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
   }
   @media (min-width: 1600px) {
     .hgrid { grid-template-rows: minmax(0, 1fr); }
