@@ -170,6 +170,8 @@ export interface NedActions {
   jira_transition: boolean;
   github_review: boolean;
   calendar_rsvp: boolean;
+  /** New Google Calendar event from the 일정 card (POST /api/calendar/events). Default off. */
+  calendar_create: boolean;
 }
 export const DEFAULT_ACTIONS: NedActions = {
   slack_send: false,
@@ -180,6 +182,7 @@ export const DEFAULT_ACTIONS: NedActions = {
   jira_transition: false,
   github_review: false,
   calendar_rsvp: false,
+  calendar_create: false,
 };
 export const DEFAULT_REPLY_TONE = "간결하고 정중한 존댓말, 핵심 먼저";
 

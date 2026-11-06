@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildClaudeArgs, extractJson, llmDisabled, runClaude, type ClaudeRunOptions } from "./claude.js";
 import type { NedConfig } from "./config.js";
+import { invalidateCalendarRanges } from "./calendar.js";
+import { buildCalendarCreate, eventKey, type CalendarEventInput, type CreatedEvent } from "./calendar-create.js";
 import { REF_FIELDS, githubTarget, jiraTarget, readDraft, sessionEvents, slackTarget, type DraftMeta, type DraftRef, type DraftSource } from "./drafts.js";
 import { NED_HOME, log } from "./paths.js";
 
@@ -23,7 +25,8 @@ export type SendMode =
   | "request_changes"
   | "review_comment"
   /** calendar */
-  | "rsvp";
+  | "rsvp"
+  | "create";
 
 /** Which modes each source takes, and whether `text` is required for it. */
 export const SEND_MODES: Record<SendSource, Partial<Record<SendMode, { text: boolean }>>> = {
@@ -32,7 +35,7 @@ export const SEND_MODES: Record<SendSource, Partial<Record<SendMode, { text: boo
   session: { session: { text: true } },
   jira: { comment: { text: true }, transitions: { text: false }, transition: { text: false } },
   github: { approve: { text: false }, request_changes: { text: true }, review_comment: { text: true }, comment: { text: true } },
-  calendar: { rsvp: { text: false } },
+  calendar: { rsvp: { text: false }, create: { text: false } },
 };
 
 export const RSVP_STATUSES = ["accepted", "declined", "tentative"] as const;
@@ -56,6 +59,8 @@ export interface SendRequest {
   ref: ActionRef;
   text: string;
   mode: SendMode;
+  /** calendar `create` only (POST /api/calendar/events builds it — see calendar-create.ts). */
+  event?: CalendarEventInput;
 }
 
 export interface SendResult {
@@ -67,6 +72,8 @@ export interface SendResult {
   status: 200 | 400 | 403 | 409 | 502;
   /** jira `transitions` (read-only): the issue's available transitions. */
   transitions?: JiraTransition[];
+  /** calendar `create`: the new event's id + htmlLink. */
+  event?: CreatedEvent;
 }
 
 export interface JiraTransition {
@@ -87,6 +94,10 @@ export interface ActionLogEntry {
   result: string;
   /** The exact `claude` argv for connector actions (audit: proves the single-tool allowlist). */
   claude_args?: string[];
+  /** calendar `create`: the event identity (calendar|D/T|start|end|title) — 409 dedupe survives a restart. */
+  event_key?: string;
+  /** calendar `create` ok: the new event. */
+  event?: CreatedEvent;
 }
 
 const MAX_TEXT = 4000;
@@ -185,7 +196,7 @@ export function gateKey(req: Pick<SendRequest, "source" | "mode">): keyof NedCon
     case "github":
       return "github_review";
     case "calendar":
-      return "calendar_rsvp";
+      return req.mode === "create" ? "calendar_create" : "calendar_rsvp";
   }
 }
 function gate(req: SendRequest, cfg: NedConfig): { key: keyof NedConfig["actions"]; on: boolean } {
@@ -203,7 +214,7 @@ export function bashActionRunOptions(rule: string, cfg: NedConfig): ClaudeRunOpt
   return { allowedTools: [rule], tools: ["Bash"], permissionMode: "dontAsk", maxTurns: 3, model: cfg.claude_model, timeoutMs: 2 * 60_000, job: "action" };
 }
 
-type Verify = (text: string) => { ok: boolean; detail: string; transitions?: JiraTransition[] };
+type Verify = (text: string) => { ok: boolean; detail: string; transitions?: JiraTransition[]; event?: CreatedEvent };
 export interface BuiltAction {
   tool: string;
   prompt: string;
@@ -342,6 +353,7 @@ export function buildWave2Action(req: SendRequest, meta: DraftMeta, now = Date.n
     };
   }
 
+  if (req.mode === "create") return buildCalendarCreate(req);
   // calendar rsvp
   const ev = req.ref.event_id;
   const resp = req.ref.response as RsvpStatus | undefined;
@@ -515,10 +527,11 @@ async function sendToSession(req: SendRequest): Promise<{ status: 200 | 400 | 40
 export async function performSend(req: SendRequest, cfg: NedConfig): Promise<SendResult> {
   const logged_at = new Date().toISOString();
   const entry: ActionLogEntry = { ts: logged_at, source: req.source, mode: req.mode, action: "", ref: req.ref, draft_id: req.draft_id, text: req.text.slice(0, 120), ok: false, result: "" };
-  const finish = (status: SendResult["status"], ok: boolean, action: string, detail: string): SendResult => {
-    appendActionLog({ ...entry, action, ok, result: detail });
+  if (req.event) entry.event_key = eventKey(req.event);
+  const finish = (status: SendResult["status"], ok: boolean, action: string, detail: string, event?: CreatedEvent): SendResult => {
+    appendActionLog({ ...entry, action, ok, result: detail, ...(event ? { event } : {}) });
     log(`send: ${req.source}/${req.mode} ${action} → ${ok ? "ok" : action.startsWith("dry_run:") ? "dry-run" : `FAIL(${status})`} ${detail.slice(0, 160)}`);
-    return { ok, action, detail, logged_at, status };
+    return { ok, action, detail, logged_at, status, ...(event ? { event } : {}) };
   };
 
   const g = gate(req, cfg);
@@ -548,9 +561,10 @@ export async function performSend(req: SendRequest, cfg: NedConfig): Promise<Sen
   try {
     const res = await runClaude(built.prompt, opts);
     if (!res.ok) return finish(502, false, built.action, `claude failed: ${(res.error ?? res.text).slice(0, 300)}`);
-    let v: { ok: boolean; detail: string; transitions?: JiraTransition[] } = built.verify ? built.verify(res.text) : verifyActionOutput(req.source as DraftSource, res.text);
+    let v: { ok: boolean; detail: string; transitions?: JiraTransition[]; event?: CreatedEvent } = built.verify ? built.verify(res.text) : verifyActionOutput(req.source as DraftSource, res.text);
     if (v.ok && built.postVerify) v = await built.postVerify();
-    const out = finish(v.ok ? 200 : 502, v.ok, built.action, `${v.detail} ($${res.cost_usd.toFixed(3)})`);
+    if (v.ok && req.event) invalidateCalendarRanges(req.event.start.slice(0, 10), req.event.end.slice(0, 10));
+    const out = finish(v.ok ? 200 : 502, v.ok, built.action, `${v.detail} ($${res.cost_usd.toFixed(3)})`, v.ok ? v.event : undefined);
     return v.transitions ? { ...out, transitions: v.transitions } : out;
   } finally {
     if (built.cleanup) fs.rmSync(built.cleanup, { force: true });
