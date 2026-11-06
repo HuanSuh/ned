@@ -20,6 +20,8 @@ export interface NedConfig {
   claude_max_turns: number;
   /** A session with no events for this many minutes is considered gone. */
   session_stale_minutes: number;
+  /** Minutes between agenda (calendar/jira/github) refreshes for the dashboard HOME tab. */
+  agenda_refresh_minutes: number;
 }
 
 export const DEFAULT_CONFIG: NedConfig = {
@@ -32,6 +34,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   claude_model: null,
   claude_max_turns: 25,
   session_stale_minutes: 180,
+  agenda_refresh_minutes: 60,
 };
 
 export function loadConfig(): NedConfig {

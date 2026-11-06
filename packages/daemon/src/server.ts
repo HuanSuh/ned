@@ -3,11 +3,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
+import { agendaBusy, readAgenda, refreshAgenda } from "./agenda.js";
 import { loadConfig, saveConfig, type NedConfig } from "./config.js";
 import { readRecentEvents } from "./events.js";
 import { dismissAttention, heartbeat, listBriefings } from "./heartbeat.js";
 import { log } from "./paths.js";
 import { readState } from "./state.js";
+import { addTodo, deleteTodo, listTodos, updateTodo } from "./todos.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(here, "../public");
@@ -77,6 +79,35 @@ export function startServer(getConfig: () => NedConfig): void {
     dismissAttention(c.req.param("id"));
     return c.json({ ok: true });
   });
+
+  // HOME tab: agenda (calendar / jira / github), refreshed by a cheap structured claude -p job.
+  app.get("/api/agenda", (c) => c.json({ ...readAgenda(), busy: agendaBusy() }));
+  app.post("/api/agenda/refresh", async (c) => {
+    // Concurrent refreshes share the in-flight run instead of spawning another claude -p.
+    const a = await refreshAgenda(getConfig());
+    return c.json(a);
+  });
+
+  // HOME tab: personal todos.
+  const readBody = async (c: { req: { json: () => Promise<unknown> } }): Promise<Record<string, unknown>> => {
+    try {
+      const b = await c.req.json();
+      return b && typeof b === "object" ? (b as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  };
+  app.get("/api/todos", (c) => c.json(listTodos()));
+  app.post("/api/todos", async (c) => {
+    const t = addTodo(await readBody(c));
+    return t ? c.json(t, 201) : c.json({ error: "title required" }, 400);
+  });
+  app.patch("/api/todos/:id", async (c) => {
+    const t = updateTodo(c.req.param("id"), await readBody(c));
+    if (t === "invalid") return c.json({ error: "title must be non-empty" }, 400);
+    return t ? c.json(t) : c.json({ error: "not found" }, 404);
+  });
+  app.delete("/api/todos/:id", (c) => (deleteTodo(c.req.param("id")) ? c.json({ ok: true }) : c.json({ error: "not found" }, 404)));
 
   // Static files under public/ (proposals, svg mark, ...). Registered last so /api/* wins.
   app.get("/*", (c) => {
