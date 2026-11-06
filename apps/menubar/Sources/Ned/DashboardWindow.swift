@@ -24,10 +24,27 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     private var statusSub: AnyCancellable?
 
     /// The boot screen stays at least this long, even when the daemon answers at once (cache hit ≈ <1 s),
-    /// so it never flashes; then it fades out (0.32 s, BootScreen CSS) into the dashboard.
+    /// so it never flashes; then the outro plays (BootScreen.outroSeconds: ready beat → dissolve into the
+    /// dashboard's background) and the dashboard's content fades in (`revealScript`).
     /// 2.5 s = the mark's draw-in (~2.0 s, BootScreen CSS) plus the first light sweep finishing (~2.5 s).
     static let minBootScreenSeconds: TimeInterval = 2.5
-    static let fadeSeconds: TimeInterval = 0.35
+    static var outroSeconds: TimeInterval {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.3 : BootScreen.outroSeconds
+    }
+
+    /// Injected (document start, main frame) only for the navigation that replaces the boot screen / a reload:
+    /// the dashboard's top-level blocks fade + lift in over its own --bg (body background → canvas, so no flash).
+    /// `backwards` fill = no transform left behind afterwards; the style removes itself after 1.2 s.
+    static let revealScript = """
+    (function () {
+      var s = document.createElement("style");
+      s.textContent = "@keyframes nedReveal { from { opacity: 0; transform: translateY(8px); } }"
+        + " body > * { animation: nedReveal .55s cubic-bezier(.2,.7,.3,1) .05s backwards; }"
+        + " @media (prefers-reduced-motion: reduce) { body > * { animation: none; } }";
+      document.documentElement.appendChild(s);
+      setTimeout(function () { s.remove(); }, 1200);
+    })();
+    """
 
     func show() {
         if window == nil { build() }
@@ -100,8 +117,9 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         }
         bootShownAt = Date()
         let s = Self.bootSnapshot()
-        webView.loadHTMLString(BootScreen.html(theme: Self.theme(), step: s.step, text: s.text, elapsed: s.elapsed, failed: s.failed), baseURL: nil)
-        daemon.note("dashboard window: boot screen (persona \(Self.theme().id.rawValue), step \(s.step) \(s.text))")
+        let theme = Self.theme()
+        webView.loadHTMLString(BootScreen.html(theme: theme, step: s.step, text: s.text, elapsed: s.elapsed, failed: s.failed), baseURL: nil)
+        daemon.note("dashboard window: boot screen (persona \(theme.id.rawValue), greeting \"\(theme.greeting)\", step \(s.step) \(s.text))")
         let gen = bootGen
         // @Published fires in willSet: re-check on the next main-actor turn, when `status` holds the new value.
         statusSub = daemon.$status.sink { [weak self] _ in Task { @MainActor in self?.bootTick(gen) } }
@@ -141,7 +159,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
             if hold > 0 { try? await Task.sleep(nanoseconds: UInt64(hold * 1_000_000_000)) }
             guard let self, gen == self.bootGen, self.finishing, !self.loaded else { return }
             self.runJS("window.nedBootDone && nedBootDone();")
-            try? await Task.sleep(nanoseconds: UInt64(Self.fadeSeconds * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: UInt64(Self.outroSeconds * 1_000_000_000))
             guard gen == self.bootGen, self.finishing, !self.loaded else { return }
             let shown = Date().timeIntervalSince(self.bootShownAt ?? healthyAt)
             self.loadDashboard(reason: String(format: "%@ — boot screen shown %.1fs, switching %.2fs after healthy", via, shown, Date().timeIntervalSince(healthyAt)))
@@ -159,6 +177,9 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         finishing = false
         wlog.info("\(reason, privacy: .public) — loading dashboard")
         DaemonManager.shared.note("dashboard window: \(reason) — loading \(AppConfig.baseURL.absoluteString)/")
+        let ucc = webView.configuration.userContentController
+        ucc.removeAllUserScripts()
+        ucc.addUserScript(WKUserScript(source: Self.revealScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         webView.load(URLRequest(url: AppConfig.baseURL))
         onDashboardLoad?(reason)
     }
@@ -173,7 +194,8 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
     static func theme() -> BootScreen.Theme {
         let p = StateStore.current?.persona ?? PersonaID.ned.persona
-        return BootScreen.Theme(id: p.id, name: p.displayName, accent: p.accentHex)
+        return BootScreen.Theme(id: p.id, name: p.displayName, accent: p.accentHex,
+                                greeting: BootScreen.pickGreeting(p.id), ready: BootScreen.copy(p.id).ready)
     }
 
     // MARK: NSWindowDelegate
@@ -212,6 +234,9 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // The reveal is one-shot (removed after the load, not at commit — that could race its injection):
+        // later navigations inside the dashboard load without it.
+        if loaded { webView.configuration.userContentController.removeAllUserScripts() }
         if loaded { DaemonManager.shared.note("dashboard window: loaded \(webView.url?.absoluteString ?? "?") title=\(webView.title ?? "")") }
     }
 

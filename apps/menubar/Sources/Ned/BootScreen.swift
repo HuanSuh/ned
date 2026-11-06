@@ -7,7 +7,8 @@ import AppKit
 /// - One animation for every mark: strokes draw in (pathLength = 1 + stroke-dashoffset), fills fade in,
 ///   then a soft light band sweeps across the tile. `prefers-reduced-motion`: static mark + step text only.
 /// - Progress is pushed from Swift with `window.nedBoot(step, text, elapsedSeconds, failed)`; `nedBootDone()`
-///   fades the page out right before the dashboard URL is loaded. "다시 시작" posts `restart` to the `ned` handler.
+///   plays the outro (ready beat → dissolve into the dashboard's --bg) before the dashboard URL is loaded.
+/// - A persona greeting (random, not the previous boot's) sits under the name. "다시 시작" posts `restart` to the `ned` handler.
 enum BootScreen {
     static let steps = DaemonManager.BootStage.allCases.map(\.label)
 
@@ -15,26 +16,125 @@ enum BootScreen {
         var id: PersonaID
         var name: String
         var accent: String
+        /// One line from the persona's greeting pool (different from the previous boot's).
+        var greeting: String = ""
+        /// Shown when the boot completes, right before the outro.
+        var ready: String = "준비 완료"
+    }
+
+    // MARK: outro — "ready" beat, then the page dissolves into the dashboard's own background colour
+
+    /// `nedBootDone()` timeline (CSS below): 0 s ready beat (all ✓, mark pulse, ready line) → 0.6 s exit
+    /// (content lifts + fades, a veil fades to the dashboard's `--bg`) → done at ~1.15 s. The dashboard then paints
+    /// on the same colour and its content fades in (DashboardWindowController's reveal script).
+    static let readyBeatSeconds: Double = 0.6
+    static let outroSeconds: Double = 1.15
+
+    /// The dashboard's `--bg` per persona (packages/daemon/public/css/tokens.css), dark / light.
+    static func dashboardBackground(_ id: PersonaID) -> (dark: String, light: String) {
+        switch id {
+        case .ned: return ("#0f1420", "#f6f2ea")
+        case .alfred: return ("#0b0d12", "#f3efe6")
+        case .oracle: return ("#050605", "#edf3ee")
+        case .jarvis: return ("#08101f", "#eef5fb")
+        }
+    }
+
+    // MARK: greetings — persona tone (archetypes only, no quotes); time-of-day lines + any-time lines
+
+    struct Copy {
+        var morning: [String], day: [String], evening: [String], night: [String], any: [String]
+        var ready: String
+    }
+
+    static func copy(_ id: PersonaID) -> Copy {
+        switch id {
+        case .ned: return Copy(
+            morning: ["좋은 아침! 밤새 온 거 먼저 훑어볼게요", "일어나셨어요? 저는 벌써 깼어요", "아침부터 레이더 돌려 놨어요"],
+            day: ["오후도 힘내요, 뒤는 제가 봐요", "점심은 드셨어요? 그동안 정리해 둘게요", "오후 순찰 나갑니다"],
+            evening: ["오늘도 수고 많았어요", "퇴근 전에 한 번만 같이 훑어봐요", "저녁엔 급한 것만 골라 드릴게요"],
+            night: ["늦었어요, 망은 제가 볼게요", "밤샘은 저한테 맡겨요", "이 시간엔 진짜 급한 것만 볼게요"],
+            any: ["오늘도 같이 가요", "레이더 켜는 중이에요", "놓친 거 없나 볼게요", "준비 운동 끝, 출동해요", "오늘은 뭐부터 볼까요?", "다시 왔어요! 금방 돼요"],
+            ready: "다 됐어요, 가요!")
+        case .alfred: return Copy(
+            morning: ["좋은 아침입니다. 밤사이 소식을 정리해 두었습니다", "아침 준비가 끝났습니다", "오늘 하루도 무탈하시길 바랍니다"],
+            day: ["오후 일정을 살펴 두었습니다", "식사는 거르지 않으셨기를 바랍니다", "오후 보고를 준비하겠습니다"],
+            evening: ["오늘도 고생 많으셨습니다", "저녁 시간입니다. 무리하지 마십시오", "남은 일은 간단히 추려 드리겠습니다"],
+            night: ["늦은 시간입니다. 쉬셔도 됩니다", "밤에는 제가 지키고 있겠습니다", "꼭 필요한 것만 말씀드리겠습니다"],
+            any: ["돌아오셨군요. 준비해 두었습니다", "필요하신 것은 이미 정리해 두었습니다", "언제든 분부만 내리십시오", "차 한 잔 곁들이시지요", "모든 것이 제자리에 있습니다"],
+            ready: "준비되었습니다")
+        case .oracle: return Copy(
+            morning: ["오전 교대. 브리핑 준비.", "아침 신호 정리 중.", "일출. 채널 개방."],
+            day: ["주간 감시 지속.", "오후 트래픽 확인 중.", "정오 이후 신호 수집."],
+            evening: ["야간 전환 준비.", "일몰. 감도 조정.", "주간 로그 정리 중."],
+            night: ["야간 감시 중.", "조용한 밤. 귀는 열어 둠.", "심야 채널 유지."],
+            any: ["채널 개방.", "신호 수집 개시.", "전 주파수 스캔 중.", "회선 확보. 대기.", "정보망 연결 중.", "감도 양호."],
+            ready: "연결 완료.")
+        case .jarvis: return Copy(
+            morning: ["좋은 아침입니다. 시스템 온라인", "오늘의 데이터를 불러오고 있습니다", "아침 점검을 시작합니다"],
+            day: ["오후 업무 모니터링을 재개합니다", "실시간 피드를 동기화합니다", "오후 우선순위를 계산 중입니다"],
+            evening: ["저녁 모드로 전환합니다", "오늘의 기록을 정리하고 있습니다", "수고하셨습니다. 마무리를 돕겠습니다"],
+            night: ["야간 대기 모드입니다", "저전력 감시로 전환합니다", "늦은 시간입니다. 필요한 것만 표시하겠습니다"],
+            any: ["시스템을 깨우는 중입니다", "모든 모듈을 점검하고 있습니다", "다시 뵙게 되어 반갑습니다", "데이터 스트림 동기화 중입니다", "인터페이스를 준비하고 있습니다", "오늘도 함께하겠습니다"],
+            ready: "모든 시스템 온라인")
+        }
+    }
+
+    /// Time-of-day lines + any-time lines for `date`.
+    static func greetingPool(_ id: PersonaID, at date: Date = Date()) -> [String] {
+        let c = copy(id)
+        let tod: [String] = switch Calendar.current.component(.hour, from: date) {
+        case 5..<11: c.morning
+        case 11..<18: c.day
+        case 18..<23: c.evening
+        default: c.night
+        }
+        return tod + c.any
+    }
+
+    static let lastGreetingKey = "bootScreen.lastGreeting"
+
+    /// A random greeting that differs from the previous boot's (remembered in `defaults`).
+    static func pickGreeting(_ id: PersonaID, at date: Date = Date(), defaults: UserDefaults = .standard) -> String {
+        let pool = greetingPool(id, at: date)
+        let last = defaults.string(forKey: lastGreetingKey)
+        let g = pool.filter { $0 != last }.randomElement() ?? pool.first ?? ""
+        defaults.set(g, forKey: lastGreetingKey)
+        return g
     }
 
     static func html(theme t: Theme, step: Int, text: String, elapsed: Double, failed: Bool) -> String {
         let web = t.id == .ned ? "<svg class=\"web\" viewBox=\"-500 -500 1000 1000\" preserveAspectRatio=\"xMidYMid slice\" aria-hidden=\"true\">\(webPaths())</svg>" : ""
         let initial = "nedBoot(\(step), \(jsString(text)), \(String(format: "%.1f", elapsed)), \(failed));"
+        let dash = dashboardBackground(t.id)
         return """
         <!doctype html><html lang="ko"><head><meta charset="utf-8"><title>\(t.name)</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-          :root { color-scheme: dark; --accent: \(t.accent); --bg: #0d1016; --fg: #e8e6df; --dim: #8a8f98; --faint: #555b66; --red: #ff5d5d; --ok: #7fe0c4; }
+          :root { color-scheme: dark; --dash: \(dash.dark); --accent: \(t.accent); --bg: #0d1016; --fg: #e8e6df; --dim: #8a8f98; --faint: #555b66; --red: #ff5d5d; --ok: #7fe0c4; }
+          @media (prefers-color-scheme: light) { :root { --dash: \(dash.light); } }
           * { box-sizing: border-box; }
           html, body { height: 100%; margin: 0; }
           body { display: grid; place-items: center; overflow: hidden; font: 13px -apple-system, system-ui, sans-serif; color: var(--fg);
                  background: radial-gradient(60% 50% at 50% 42%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 70%), var(--bg);
-                 transition: opacity .32s ease; }
-          body.out { opacity: 0; }
+                 }
+          .veil { position: fixed; inset: 0; z-index: 5; pointer-events: none; background: var(--dash); opacity: 0; transition: opacity .5s ease .05s; }
+          body.out .veil { opacity: 1; }
           .web { position: fixed; inset: 0; width: 100%; height: 100%; opacity: 0; animation: webin 2.4s ease-out .2s forwards; pointer-events: none; }
           .web path { fill: none; stroke: #fff; stroke-width: 1.1; vector-effect: non-scaling-stroke; }
           @keyframes webin { from { opacity: 0; transform: scale(1.05); } to { opacity: .07; transform: scale(1); } }
-          main { position: relative; display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 24px; text-align: center; }
+          main { position: relative; display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 24px; text-align: center;
+                 transition: opacity .45s ease, transform .55s cubic-bezier(.4,0,.2,1), filter .45s ease; }
+          body.out main { opacity: 0; transform: translateY(-10px) scale(.97); filter: blur(3px); }
+          body.out .web { animation: webout .45s ease forwards; }
+          @keyframes webout { from { opacity: .07; } to { opacity: 0; } }
+          .markbox { position: relative; width: 112px; height: 112px; }
+          .halo { position: absolute; inset: 0; border-radius: 22%; border: 2px solid var(--accent); opacity: 0; pointer-events: none; }
+          body.ready .halo { animation: halo .9s cubic-bezier(.2,.7,.3,1) forwards; }
+          @keyframes halo { from { opacity: .85; transform: scale(1); } to { opacity: 0; transform: scale(1.65); } }
+          body.ready .markw { animation: beat .55s cubic-bezier(.3,1.4,.5,1) both; }
+          body.ready .markw::after { animation: none; opacity: 0; }
+          @keyframes beat { 0% { transform: scale(1); } 40% { transform: scale(1.07); } 100% { transform: scale(1); } }
           .markw { position: relative; width: 112px; height: 112px; border-radius: 22%; overflow: hidden;
                    box-shadow: 0 10px 40px -10px color-mix(in srgb, var(--accent) 55%, transparent);
                    animation: pop .5s cubic-bezier(.2,.9,.3,1.2) both; }
@@ -49,6 +149,10 @@ enum BootScreen {
           @keyframes fade { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: scale(1); } }
           @keyframes sweep { 0% { transform: translateX(-110%); } 45%, 100% { transform: translateX(110%); } }
           h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .02em; color: var(--fg); }
+          .greet { margin: -10px 0 2px; min-height: 1.4em; max-width: 440px; font-size: 14px; color: var(--fg); opacity: 0;
+                   animation: rise .7s ease .85s forwards; }
+          @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: .9; transform: none; } }
+          body.ready .st { color: var(--ok); } body.ready .st b { display: none; }
           ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; text-align: left; min-width: 200px; }
           li { display: flex; align-items: center; gap: 9px; color: var(--faint); transition: color .2s; }
           li .ic { width: 14px; height: 14px; flex: none; display: grid; place-items: center; font-size: 11px; line-height: 1; }
@@ -67,21 +171,25 @@ enum BootScreen {
           button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
           @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after { animation: none !important; transition: none !important; }
-            .d { stroke-dashoffset: 0; } .f { opacity: 1; } .web { opacity: .07; } .markw::after { display: none; }
+            .d { stroke-dashoffset: 0; } .f { opacity: 1; } .web { opacity: .07; } .markw::after { display: none; } .greet { opacity: .9; }
             li.cur .ic::before { border-right-color: var(--accent); }
           }
         </style></head>
         <body>
         \(web)
         <main>
-          <div class="markw" aria-hidden="true">\(markSVG(t.id))</div>
+          <div class="markbox" aria-hidden="true"><div class="halo"></div><div class="markw">\(markSVG(t.id))</div></div>
           <h1>\(t.name)</h1>
+          <p class="greet" id="greet"></p>
           <ol id="steps" aria-live="polite"></ol>
           <div class="st" id="st" role="status"></div>
           <div class="help"><span>로그를 확인한 뒤 다시 시작해 보세요 (메뉴 막대 \(t.name) → 다시 시작, ⌘R 새로고침).</span>
             <button type="button" id="restart">다시 시작</button></div>
         </main>
+        <div class="veil" aria-hidden="true"></div>
         <script>
+          document.getElementById("greet").textContent = \(jsString(t.greeting));
+          const READY = \(jsString(t.ready));
           const STEPS = \(jsArray(steps));
           const list = document.getElementById("steps"), st = document.getElementById("st");
           list.innerHTML = STEPS.map((s) => '<li class="todo"><span class="ic"></span><span></span></li>').join("");
@@ -95,9 +203,12 @@ enum BootScreen {
             const b = document.createElement("b"); b.textContent = Math.floor(elapsed) + "초"; st.appendChild(b);
             document.body.dataset.step = String(step);
           };
+          // Outro (Swift waits BootScreen.outroSeconds): ready beat, then dissolve into the dashboard's --bg.
           window.nedBootDone = function () {
             list.querySelectorAll("li").forEach((li) => { li.className = "done"; });
-            document.body.classList.add("out");
+            st.textContent = READY;
+            document.body.classList.add("ready");
+            setTimeout(() => document.body.classList.add("out"), \(Int(readyBeatSeconds * 1000)));
           };
           document.getElementById("restart").addEventListener("click", () => {
             try { window.webkit.messageHandlers.ned.postMessage("restart"); } catch (e) { console.warn(e); }
@@ -249,11 +360,25 @@ enum BootSelfTest {
         }
         for id in PersonaID.allCases {
             let p = id.persona
-            write("boot-\(id.rawValue).html", BootScreen.html(theme: .init(id: id, name: p.displayName, accent: p.accentHex), step: 0, text: "node·claude 찾는 중…", elapsed: 0.4, failed: false))
+            write("boot-\(id.rawValue).html", BootScreen.html(theme: .init(id: id, name: p.displayName, accent: p.accentHex,
+                                                                          greeting: BootScreen.greetingPool(id).first ?? "", ready: BootScreen.copy(id).ready), step: 0, text: "node·claude 찾는 중…", elapsed: 0.4, failed: false))
         }
         let ned = PersonaID.ned.persona
         write("boot-ned-connect.html", BootScreen.html(theme: .init(id: .ned, name: ned.displayName, accent: ned.accentHex), step: 2, text: "데몬 시작 중… (pid 4242)", elapsed: 3.2, failed: false))
         write("boot-ned-failed.html", BootScreen.html(theme: .init(id: .ned, name: ned.displayName, accent: ned.accentHex), step: 1, text: "데몬 실패: node 를 찾을 수 없음", elapsed: 21.7, failed: true))
+        // Greetings: every persona has a pool; a pick never repeats the previous boot's line.
+        let now = Date()
+        for id in PersonaID.allCases {
+            let pool = BootScreen.greetingPool(id, at: now)
+            var picks: [String] = []
+            for _ in 0..<12 { picks.append(BootScreen.pickGreeting(id, at: now, defaults: d)) }
+            let noRepeat = zip(picks, picks.dropFirst()).allSatisfy { $0 != $1 }
+            check(pool.count >= 6 && picks.allSatisfy(pool.contains) && noRepeat && Set(picks).count >= 3,
+                  "greeting \(id.rawValue): pool \(pool.count), 12 picks → \(Set(picks).count) distinct, no back-to-back repeat: \(picks.prefix(3).joined(separator: " / "))")
+        }
+        let html = BootScreen.html(theme: .init(id: .alfred, name: "Alfred", accent: "#d4af37", greeting: "a\"<b>", ready: "준비되었습니다"), step: 3, text: "", elapsed: 1, failed: false)
+        check(html.contains("--dash: #0b0d12") && html.contains("--dash: #f3efe6") && html.contains(BootScreen.jsString("a\"<b>")),
+              "html carries dashboard --bg (dark/light) + greeting as a JS string")
         check(BootScreen.steps == ["도구 찾는 중", "데몬 시작", "연결 확인", "대시보드 로드"], "steps: \(BootScreen.steps.joined(separator: " → "))")
         let esc = BootScreen.jsString("a\"b</script>\n")
         check(!esc.contains("</") && esc.contains("\\\"") && !esc.contains("\n"), "jsString escapes quote / </ / newline: \(esc)")
@@ -266,7 +391,7 @@ enum BootSelfTest {
 /// `--boot-transition-selftest [--cold]` (temp NED_HOME + NED_PORT, NED_REPO = a checkout with a built daemon,
 /// NED_TOOL_CACHE_SUITE = a throwaway defaults suite): no scene and no menu bar item. Starts the real DaemonManager
 /// and the dashboard controller in a window-less web view, and checks that the dashboard load starts within
-/// 1.5 s of the daemon turning healthy (or of minBootScreenSeconds, when the daemon is faster than that).
+/// outroSeconds + 1 s of the daemon turning healthy (or of minBootScreenSeconds, when the daemon is faster than that).
 /// `--cold` empties the tool cache first (cache-miss start). Exit 0 = PASS. Stops the daemon it spawned.
 @MainActor
 enum BootTransitionSelfTest {
@@ -292,7 +417,7 @@ enum BootTransitionSelfTest {
             let healthy = box.healthyAt ?? now
             let due = max(healthy, t0.addingTimeInterval(DashboardWindowController.minBootScreenSeconds))
             let lag = now.timeIntervalSince(due)
-            let pass = lag <= 1.5
+            let pass = lag <= DashboardWindowController.outroSeconds + 1.0   // outro is intentional; +1 s slack
             out(String(format: "%@ — dashboard load at +%.2fs, %.2fs after healthy, %.2fs after max(healthy, min %.1fs): %@", reason, now.timeIntervalSince(t0), now.timeIntervalSince(healthy), lag, DashboardWindowController.minBootScreenSeconds, pass ? "PASS" : "FAIL"))
             d.stopSync()
             exit(pass ? 0 : 1)
