@@ -99,7 +99,8 @@
 
   /** Settings sections: element id to jump to + search keywords. */
   const SETTINGS = [
-    { id: "persona", title: "페르소나", detail: "말투 · 테마 · 마크 (Ned / Alfred / Oracle / Jarvis)", el: "c-persona", keys: "persona theme 테마 말투 마크 ned alfred oracle jarvis" },
+    // Hidden feature: only the exact `persona` command finds it; picking it unlocks the picker for this session.
+    { id: "persona", title: "persona", detail: "히든 · 페르소나 (말투 · 테마 · 마크) 선택 열기", el: "c-persona", keys: "persona", unlock: "ned:persona-unlock", exact: true },
     { id: "heartbeat", title: "heartbeat 간격", detail: "순찰 주기 (분)", el: "c-hb", keys: "heartbeat 순찰 주기 간격" },
     { id: "signal", title: "신호 조회 최소 간격", detail: "세션 이벤트가 없을 때 업무 신호를 보는 간격", el: "c-sig", keys: "signal 신호 조회" },
     { id: "briefing_time", title: "아침 브리핑 시각", detail: "매일 브리핑 시간", el: "c-bt", keys: "briefing time 브리핑 아침 시각" },
@@ -179,13 +180,13 @@
       out.push({ type: "event", id: `${e.ts}:${e.event}:${e.session_id ?? ""}`, title: msg ? String(msg).replace(/\s+/g, " ").slice(0, 160) : label, detail: [label, wt].filter(Boolean).join(" · "), ts: e.ts, url: null, kind: "event", tab: "timeline", anchor: `day:${localDay(e.ts)}`, body: msg ? String(msg) : "", local: true,
         fields: [[msg, 3], [wt, 2], [label, 1], [e.event, 1], [e.notification_type, 1]] });
     }
-    for (const s of SETTINGS) out.push({ type: "settings", id: s.id, title: s.title, detail: s.detail, ts: null, url: null, kind: "settings", tab: "settings", anchor: `el:${s.el}`, fields: [[s.title, 3], [s.keys, 2], [s.detail, 1]] });
+    for (const s of SETTINGS) out.push({ type: "settings", id: s.id, title: s.title, detail: s.detail, ts: null, url: null, kind: "settings", tab: "settings", anchor: `el:${s.el}`, exact: s.exact ? s.keys : undefined, fields: [[s.title, 3], [s.keys, 2], [s.detail, 1]] });
     return out;
   }
 
   // ---------- recent queries ----------
   function recents() { try { const r = JSON.parse(lsGet(RECENT_KEY) || "[]"); return Array.isArray(r) ? r.filter((x) => typeof x === "string").slice(0, RECENT_MAX) : []; } catch { return []; } }
-  function pushRecent(q) { q = q.trim(); if (!q) return; lsSet(RECENT_KEY, JSON.stringify([q, ...recents().filter((x) => x !== q)].slice(0, RECENT_MAX))); }
+  function pushRecent(q) { q = q.trim(); if (!q || SETTINGS.some((s) => s.exact && norm(q) === s.keys)) return; /* hidden commands leave no trace */ lsSet(RECENT_KEY, JSON.stringify([q, ...recents().filter((x) => x !== q)].slice(0, RECENT_MAX))); }
 
   // ---------- styles ----------
   const css = `
@@ -300,7 +301,10 @@
   // ---------- results ----------
   function localHits(toks) {
     const now = Date.now(), out = [];
-    for (const c of data.cands) { const score = scoreFields(c.fields, toks, c.ts, now); if (score > 0) out.push({ ...c, score }); }
+    for (const c of data.cands) {
+      if (c.exact && toks.join(" ") !== c.exact) continue; // hidden commands: the whole query must be the command
+      const score = scoreFields(c.fields, toks, c.ts, now); if (score > 0) out.push({ ...c, score });
+    }
     return out;
   }
   function merged() {
@@ -558,6 +562,8 @@
       return !!found.hit;
     },
     async settings(h) {
+      const def = SETTINGS.find((s) => s.id === h.id);
+      if (def && def.unlock) window.dispatchEvent(new CustomEvent(def.unlock));
       const el = await until(() => $(h.anchor.slice(3)));
       if (!el) return false;
       flash(el.closest(".f") || el, () => { const x = $(h.anchor.slice(3)); return x && (x.closest(".f") || x); });

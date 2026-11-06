@@ -3,6 +3,7 @@
 import { api } from "../api.js";
 import { readCardLayout, renderCardLayout } from "../features/cardlayout.js";
 import { ACTION_DEFAULTS, ACTION_KO } from "../features/drafts.js";
+import { personaFieldHtml, personaUnlocked, tapTitle, unlockPersona } from "../features/persona-gate.js";
 import { PERSONA_IDS, VOICE, applyPersona, markSvg, persona } from "../features/personas.js";
 import { loadAgenda } from "../main.js";
 import { S } from "../state.js";
@@ -55,7 +56,12 @@ export function addExcl(k, raw) {
   renderExcl();
 }
 
+/** Hidden feature: #f-persona stays empty + hidden until persona-gate unlocks it (title ×5 or ⌘K "persona"). */
 export function renderPersonaPicker(cur) {
+  const field = $("f-persona");
+  if (!personaUnlocked()) { field.hidden = true; field.innerHTML = ""; return; }
+  if (!$("c-persona")) field.innerHTML = personaFieldHtml(true);
+  field.hidden = false;
   const box = $("c-persona");
   if (!box.children.length) {
     box.innerHTML = PERSONA_IDS.map((id) => { const v = VOICE[id]; return `<label class="pcard" data-persona="${id}">
@@ -281,6 +287,10 @@ function initNav() {
 /** Listeners + one-time setup; main.js calls every module's init() once, in the old file's order. */
 export function init() {
   const st = document.createElement("style"); st.textContent = ACTLOG_CSS; document.head.appendChild(st);
+  // Hidden persona picker: title ×5 or the ⌘K palette's `persona` command (search.js dispatches the event).
+  const showPersona = () => renderPersonaPicker(S.config?.persona || persona);
+  $("s-title").addEventListener("click", () => { if (tapTitle()) showPersona(); });
+  window.addEventListener("ned:persona-unlock", () => { if (unlockPersona()) showPersona(); });
   $("cfg").addEventListener("change", (e) => {
     const f = e.target.closest("[data-alf]"); if (!f) return;
     AL[f.dataset.alf] = f.type === "checkbox" ? f.checked : f.value; renderActionLog();

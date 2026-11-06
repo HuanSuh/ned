@@ -418,6 +418,8 @@ async function capture(o) {
     await step("draft-tab2", () => click("#dm-tabs [role=tab]:nth-child(2), #dm-tabs button:nth-child(2)"));
     await step("draft-close", () => key("Escape"));
     await step("settings", () => evalJs(`location.hash = "#settings"`));
+    // Persona picker is hidden: 5 taps on the "설정" title unlock it for the session.
+    await step("persona-unlock", () => evalJs(`(() => { const t = document.getElementById("s-title"); for (let i = 0; i < 5; i++) t.click(); return document.getElementById("f-persona").hidden ? "locked" : "ok"; })()`));
     await step("persona-alfred", () => click('#c-persona input[value="alfred"]'));
     await step("settings-save", () => evalJs(`(() => { document.getElementById("cfg").requestSubmit(); return "ok"; })()`), { wait: 800, shot: true, until: SAVED });
     await step("persona-ned", async () => { await click('#c-persona input[value="ned"]'); return evalJs(`(() => { document.getElementById("cfg").requestSubmit(); return "ok"; })()`); }, { wait: 800, until: SAVED });
