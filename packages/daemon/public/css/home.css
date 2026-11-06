@@ -171,3 +171,35 @@ details.tdone summary::before { content: "▸ "; } details.tdone[open] summary::
 .ctxst .btn { margin-left: auto; }
 .hmeta .cost.over { color: var(--amber); font-weight: 600; }
 .hkeys { margin-top: 14px; color: var(--faint); font-size: 11.5px; display: flex; gap: 12px; flex-wrap: wrap; }
+/* ---------- free grid (≥1100px, features/layout.js): 12 columns × row units (--rowh), every panel placed inline ----------
+   .hcol / .sgrid dissolve so 일정, the source cards and 할 일 are all grid items. Grip (⠿) in each header, resize
+   handles on the right edge and bottom-right corner; hidden while locked (.locked) and in the stacked flow. */
+.lgrip, .lrs { display: none; }
+#hgrid.free { grid-template-columns: repeat(12, minmax(0, 1fr)); grid-template-rows: none; grid-template-areas: none; grid-auto-rows: var(--rowh, 64px); align-content: start; align-items: stretch; flex: 1 1 0; min-height: 0; overflow: auto; position: relative; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
+#hgrid.free .hcol, #hgrid.free .sgrid { display: contents; }
+#hgrid.free .lp { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+#hgrid.free #todo-card { contain: none; min-height: 0; }
+#hgrid.free .scard .sl { flex: 1 1 auto; min-height: 0; max-height: none; }
+#hgrid.free:not(.locked) .lgrip { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 18px; height: 24px; margin: 0 -4px 0 -6px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--faint); cursor: grab; opacity: 0; transition: opacity .12s; touch-action: none; }
+#hgrid.free .scard > .shw > .lgrip { margin: 0 -10px 0 6px; }
+#hgrid.free:not(.locked) .lhd:hover .lgrip, #hgrid.free .lgrip:focus-visible { opacity: 1; }
+#hgrid.free .lgrip:hover { color: var(--fg); background: var(--hover); }
+#hgrid.free .lgrip:focus-visible { outline: 2px solid var(--info); outline-offset: 0; }
+#hgrid.free:not(.locked) .lhd { cursor: grab; }
+#hgrid.free:not(.locked) .lrs { display: block; position: absolute; z-index: 4; touch-action: none; }
+#hgrid.free .lrs-e { top: 14px; bottom: 18px; right: -3px; width: 9px; cursor: ew-resize; }
+#hgrid.free .lrs-se { right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; }
+#hgrid.free .lrs-se::after { content: ""; position: absolute; right: 4px; bottom: 4px; width: 8px; height: 8px; border-right: 2px solid var(--faint); border-bottom: 2px solid var(--faint); border-bottom-right-radius: 3px; opacity: 0; transition: opacity .12s; }
+#hgrid.free .lp:hover > .lrs-se::after, #hgrid.free .lp.lresize > .lrs-se::after { opacity: .8; }
+#hgrid.free .lrs-e:hover, #hgrid.free .lp.lresize > .lrs-e { background: linear-gradient(90deg, transparent 3px, color-mix(in srgb, var(--hero) 60%, transparent) 3px 5px, transparent 5px); }
+#hgrid.free .lp.ldrag { z-index: 30; opacity: .9; box-shadow: 0 14px 36px rgba(0, 0, 0, .35); cursor: grabbing; pointer-events: none; }
+#hgrid.free .lp.lresize { z-index: 30; box-shadow: 0 0 0 2px color-mix(in srgb, var(--hero) 55%, transparent); }
+.lghost { z-index: 0; border: 2px dashed color-mix(in srgb, var(--hero) 70%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--hero) 8%, transparent); pointer-events: none; }
+body.ldragging, body.ldragging * { user-select: none; -webkit-user-select: none; }
+body.lmove, body.lmove * { cursor: grabbing !important; }
+body.lsize, body.lsize * { cursor: nwse-resize !important; }
+#lay-lock { display: inline-flex; align-items: center; padding: 3px 6px; color: var(--faint); }
+#lay-lock[aria-pressed="true"] { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 60%, transparent); }
+#lay-lock[hidden] { display: none; }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { #hgrid.free .lgrip, #hgrid.free .lrs-se::after { transition: none; } }

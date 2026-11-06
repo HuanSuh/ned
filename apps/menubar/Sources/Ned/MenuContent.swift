@@ -19,9 +19,10 @@ struct MenuContent: View {
                 Label("state.json 읽기 실패 (이전 상태 표시 중)", systemImage: "doc.badge.ellipsis")
                     .font(.caption2).foregroundStyle(.secondary).help(e)
             }
-            if !store.state.attention.isEmpty {
+            // Open items only: 확인 완료 (reviewed_at) ones are hidden here and not in the badge.
+            if !store.state.openAttention.isEmpty {
                 section("지금 봐야 할 것") {
-                    ForEach(store.state.attention.prefix(5)) { item in
+                    ForEach(store.state.openAttention.prefix(5)) { item in
                         AttentionRow(item: item) { store.dismiss(item.id) }
                     }
                 }
@@ -34,7 +35,8 @@ struct MenuContent: View {
                 if store.state.sessions.isEmpty {
                     Text("활성 세션 없음").font(.caption).foregroundStyle(.secondary)
                 }
-                ForEach(store.state.sessions.prefix(8)) { s in SessionRow(session: s, live: store.persona.led) }
+                // The user's own sessions first, then (dimmed) Orca workers; recency order within each.
+                ForEach((store.state.sessions.filter { !$0.is_worker } + store.state.sessions.filter(\.is_worker)).prefix(8)) { s in SessionRow(session: s, live: store.persona.led) }
             }
             Divider()
             settings
@@ -70,10 +72,15 @@ struct MenuContent: View {
 
     private var settings: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Toggle("Login Items 에 등록", isOn: Binding(
-                get: { loginItem.enabled },
-                set: { loginItem.set($0) }))
-                .toggleStyle(.checkbox).font(.caption)
+            HStack(spacing: 8) {
+                Toggle("Login Items 에 등록", isOn: Binding(
+                    get: { loginItem.enabled },
+                    set: { loginItem.set($0) }))
+                    .toggleStyle(.checkbox).font(.caption)
+                Text("자동 시작: \(loginItem.statusLabel)")
+                    .font(.caption2).foregroundStyle(loginItem.status == .enabled ? .primary : .secondary)
+                    .help("SMAppService.mainApp.status = \(LoginItem.describe(loginItem.status))")
+            }
             if let m = loginItem.message {
                 Text(m).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
@@ -207,6 +214,12 @@ struct SessionRow: View {
                 HStack(spacing: 6) {
                     Text(session.worktree).font(.callout).fontWeight(.medium)
                     Text(label).font(.caption2).foregroundStyle(.secondary)
+                    if session.is_worker {
+                        Text("워커").font(.caption2).foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.secondary.opacity(0.5), lineWidth: 0.5))
+                            .help("Orca 하위 워크트리 — 알림·확인할 것에서 제외")
+                    }
                     if session.subagents_active > 0 {
                         Text("+\(session.subagents_active)").font(.caption2).foregroundStyle(.secondary)
                     }
@@ -218,6 +231,7 @@ struct SessionRow: View {
             Spacer()
             Text(relative(session.last_event_ts)).font(.caption2).foregroundStyle(.tertiary)
         }
+        .opacity(session.is_worker ? 0.55 : 1)
     }
 
     private var color: Color {
@@ -253,9 +267,30 @@ func relative(_ ms: Double) -> String {
 struct LoginItem {
     var enabled = false
     var message: String? = nil
+    var status: SMAppService.Status = .notRegistered
+
+    /// '켜짐' only when macOS will actually launch Ned at login; awaiting approval is not on yet.
+    var statusLabel: String {
+        switch status {
+        case .enabled: return "켜짐"
+        case .requiresApproval: return "꺼짐 (승인 필요)"
+        default: return "꺼짐"
+        }
+    }
+
+    nonisolated static func describe(_ s: SMAppService.Status) -> String {
+        switch s {
+        case .notRegistered: return "notRegistered"
+        case .enabled: return "enabled"
+        case .requiresApproval: return "requiresApproval"
+        case .notFound: return "notFound"
+        @unknown default: return "unknown(\(s.rawValue))"
+        }
+    }
 
     mutating func refresh() {
         let s = SMAppService.mainApp.status
+        status = s
         enabled = s == .enabled || s == .requiresApproval
         message = s == .requiresApproval ? "시스템 설정 > 일반 > 로그인 항목에서 Ned 를 허용해야 해요" : message
     }

@@ -1,5 +1,6 @@
 /* Home source cards (mail · jira · slack · github): render, shrink/expand, list modes, packing. */
 import { CARD_DOM, dashLayout } from "./cardlayout.js";
+import { applyLayout, cardOrder } from "./layout.js";
 import { draftFor } from "./drafts.js";
 import { isOpenSrc, revCls, srcCheck, srcKey } from "./reviewed.js";
 import { ui } from "../state.js";
@@ -100,7 +101,9 @@ export function renderSlackWatch(watch, needN) {
 export function packCards() {
   const g = $("sgrid");
   const n = Math.min(2, Math.max(1, Number(getComputedStyle(g).getPropertyValue("--cols")) || 1));
-  const { card_order, card_span } = dashLayout();
+  if (applyLayout()) { for (const id of Object.keys(CARD_DOM)) $("sc-" + CARD_DOM[id]).classList.remove("last"); g.style.gridTemplateRows = ""; return; } // ≥1100px: free grid (features/layout.js)
+  // Stacked flow: cards in layout reading order (y, then x), widths from the settings' 1열/2열.
+  const { card_span } = dashLayout(), card_order = cardOrder();
   let rows = 0, used = 0;
   const placed = [];
   for (const id of card_order) {

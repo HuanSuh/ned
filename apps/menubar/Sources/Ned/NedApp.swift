@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ServiceManagement
 
 @main
 struct NedApp: App {
@@ -13,6 +14,16 @@ struct NedApp: App {
     init() {
         // Headless: before any scene, store, daemon or notification center exists.
         if CommandLine.arguments.contains("--notify-selftest") { exit(NotifySelfTest.run()) }
+        // Read-only: print SMAppService.mainApp status (registers nothing) and exit.
+        if CommandLine.arguments.contains("--login-item-status") {
+            let s = SMAppService.mainApp.status
+            let label = s == .enabled ? "켜짐" : (s == .requiresApproval ? "꺼짐 (승인 필요)" : "꺼짐")
+            print("login-item-status: \(LoginItem.describe(s)) (rawValue \(s.rawValue)) — 자동 시작: \(label)")
+            print("bundle: \(Bundle.main.bundlePath) id=\(Bundle.main.bundleIdentifier ?? "nil")")
+            if s == .requiresApproval { print("approve: System Settings > General > Login Items & Extensions (macOS 14: Login Items) → Ned under 'Open at Login' / turn Ned on under 'Allow in the Background'") }
+            fflush(stdout)
+            exit(0)
+        }
     }
 
     var body: some Scene {
@@ -43,6 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // `open Ned.app --args --dashboard` (install.sh first launch) or NED_OPEN_DASHBOARD=1.
             if CommandLine.arguments.contains("--dashboard") || AppConfig.env["NED_OPEN_DASHBOARD"] == "1" {
                 DashboardWindowController.shared.show()
+            }
+            if CommandLine.arguments.contains("--wake-selftest") {
+                Task { await DaemonManager.shared.wakeSelfTest() }
             }
             if CommandLine.arguments.contains("--persona-selftest") {
                 Task { await PersonaSelfTest.run() }

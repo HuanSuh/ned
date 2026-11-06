@@ -58,22 +58,63 @@ export interface NedConfig {
 
 export const DASHBOARD_CARDS = ["slack", "mail", "jira", "github"] as const;
 export type DashboardCard = (typeof DASHBOARD_CARDS)[number];
+/** Home panels on the free grid (≥1100px): 일정, the four source cards, 할 일. */
+export const DASHBOARD_PANELS = ["cal", "slack", "mail", "jira", "github", "todo"] as const;
+export type DashboardPanel = (typeof DASHBOARD_PANELS)[number];
+/** A panel's cell on the 12-column grid: x/w in columns, y/h in row units. */
+export interface PanelRect { x: number; y: number; w: number; h: number }
+export const LAYOUT_COLS = 12;
+/** Smallest size a panel may be resized to (columns × rows). */
+export const PANEL_MIN: Record<DashboardPanel, { w: number; h: number }> = { cal: { w: 2, h: 4 }, todo: { w: 2, h: 3 }, slack: { w: 2, h: 2 }, mail: { w: 2, h: 2 }, jira: { w: 2, h: 2 }, github: { w: 2, h: 2 } };
 export interface NedDashboard {
   card_order: DashboardCard[];
   card_span: Record<DashboardCard, 1 | 2>;
+  /** Free-grid layout (drag / resize on home). null = not set yet: the dashboard derives it once from order/span and saves. */
+  layout: Partial<Record<DashboardPanel, PanelRect>> | null;
+  /** Home layout editing off (no drag / resize). */
+  locked: boolean;
 }
 /** Slack first (most real-time), mail + Jira side by side, then GitHub. */
-export const DEFAULT_DASHBOARD: NedDashboard = { card_order: ["slack", "mail", "jira", "github"], card_span: { slack: 2, mail: 1, jira: 1, github: 2 } };
+export const DEFAULT_DASHBOARD: NedDashboard = { card_order: ["slack", "mail", "jira", "github"], card_span: { slack: 2, mail: 1, jira: 1, github: 2 }, layout: null, locked: false };
+/** What DEFAULT_DASHBOARD's order/span become on the free grid: 일정 3 | cards 6 | 할 일 3, 12 rows tall. */
+export const DEFAULT_LAYOUT: Record<DashboardPanel, PanelRect> = {
+  cal: { x: 0, y: 0, w: 3, h: 12 },
+  slack: { x: 3, y: 0, w: 6, h: 4 },
+  mail: { x: 3, y: 4, w: 3, h: 4 },
+  jira: { x: 6, y: 4, w: 3, h: 4 },
+  github: { x: 3, y: 8, w: 6, h: 4 },
+  todo: { x: 9, y: 0, w: 3, h: 12 },
+};
 
-/** Known card ids only, each once; missing ones keep `base`'s relative order at the end. Spans are 1 | 2, else `base`'s. */
+/** Known panels only, integer cells clamped into the grid (min size per panel, h ≤ 48, y ≤ 500); nothing valid → null. */
+export function normalizeLayout(raw: unknown): NedDashboard["layout"] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const out: Partial<Record<DashboardPanel, PanelRect>> = {};
+  for (const id of DASHBOARD_PANELS) {
+    const v = (raw as Record<string, unknown>)[id] as Partial<Record<keyof PanelRect, unknown>> | undefined;
+    if (!v || typeof v !== "object") continue;
+    const n = (k: keyof PanelRect) => Number(v[k]);
+    if (!(["x", "y", "w", "h"] as const).every((k) => Number.isFinite(n(k)))) continue;
+    const m = PANEL_MIN[id];
+    const w = Math.max(m.w, Math.min(LAYOUT_COLS, Math.trunc(n("w"))));
+    const h = Math.max(m.h, Math.min(48, Math.trunc(n("h"))));
+    out[id] = { x: Math.max(0, Math.min(LAYOUT_COLS - w, Math.trunc(n("x")))), y: Math.max(0, Math.min(500, Math.trunc(n("y")))), w, h };
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/** Known card ids only, each once; missing ones keep `base`'s relative order at the end. Spans are 1 | 2, else `base`'s.
+ * layout: absent keeps `base`'s, null / junk clears it (→ re-derived by the dashboard); locked: boolean, else `base`'s. */
 export function normalizeDashboard(raw: unknown, base: NedDashboard = DEFAULT_DASHBOARD): NedDashboard {
-  const r = (raw && typeof raw === "object" ? raw : {}) as { card_order?: unknown; card_span?: unknown };
+  const r = (raw && typeof raw === "object" ? raw : {}) as { card_order?: unknown; card_span?: unknown; layout?: unknown; locked?: unknown };
   const isCard = (v: unknown): v is DashboardCard => DASHBOARD_CARDS.includes(v as DashboardCard);
   const order = Array.isArray(r.card_order) ? [...new Set(r.card_order.filter(isCard))] : [...base.card_order];
   for (const id of base.card_order) if (!order.includes(id)) order.push(id);
   const spans = (r.card_span && typeof r.card_span === "object" ? r.card_span : {}) as Record<string, unknown>;
   const card_span = Object.fromEntries(DASHBOARD_CARDS.map((id) => [id, Number(spans[id]) === 1 || Number(spans[id]) === 2 ? Number(spans[id]) : base.card_span[id]])) as NedDashboard["card_span"];
-  return { card_order: order, card_span };
+  const layout = r.layout === undefined ? (base.layout ?? null) : normalizeLayout(r.layout);
+  const locked = typeof r.locked === "boolean" ? r.locked : base.locked === true;
+  return { card_order: order, card_span, layout, locked };
 }
 
 export interface NedActions {
@@ -303,12 +344,15 @@ export function saveConfig(cfg: NedConfig): void {
 
 export function inQuietHours(cfg: NedConfig, now = new Date()): boolean {
   if (!cfg.quiet_hours) return false;
-  const toMin = (s: string) => {
-    const [h, m] = s.split(":").map(Number);
+  // Tolerate a hand-edited config: a missing/invalid "HH:MM" disables quiet hours instead of throwing.
+  const toMin = (s: unknown): number | null => {
+    if (typeof s !== "string" || !/^\d{1,2}:\d{2}$/.test(s.trim())) return null;
+    const [h, m] = s.trim().split(":").map(Number);
     return h * 60 + m;
   };
-  const cur = now.getHours() * 60 + now.getMinutes();
   const start = toMin(cfg.quiet_hours.start);
   const end = toMin(cfg.quiet_hours.end);
+  if (start === null || end === null) return false;
+  const cur = now.getHours() * 60 + now.getMinutes();
   return start <= end ? cur >= start && cur < end : cur >= start || cur < end;
 }

@@ -148,7 +148,18 @@ export function requestContext(cfg: NedConfig, srcs: CtxSource[], opts: { force?
     queue.add(s);
     if (opts.force) forced.add(s);
   }
-  if (!running && queue.size) void work();
+  // Fire-and-forget, but never let a background failure become an unhandled rejection that kills the daemon.
+  if (!running && queue.size) {
+    work().catch((e) => {
+      running = false;
+      try {
+        setStatus({ running: false, stopped: "error", updated_at: Date.now() });
+      } catch {
+        /* NED_HOME may be gone (tests) */
+      }
+      log(`agenda-context: background run failed — ${String(e).slice(0, 300)}`);
+    });
+  }
   return contextStatus();
 }
 

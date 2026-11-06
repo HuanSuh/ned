@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import type { NedEvent } from "./events.js";
 import { lastAssistantText } from "./events.js";
@@ -17,9 +18,30 @@ export interface SessionView {
   orca_worktree: string | null;
   /** ts of the latest Notification/StopFailure — keys attention dismissals. */
   alert_ts: number | null;
+  /**
+   * cwd (or the Orca worktree path) is under a worker root (`~/orca/workspaces/`) — an Orca child
+   * worktree, i.e. one of the user's own agent workers. Shown (dimmed) but never an attention item.
+   */
+  is_worker: boolean;
 }
 
 const TERMINAL: SessionStatus[] = ["ended"];
+
+/** Worker roots: `NED_WORKER_ROOTS` (`:`-separated, for tests) or `~/orca/workspaces`. */
+export function workerRoots(): string[] {
+  const env = process.env.NED_WORKER_ROOTS;
+  const roots = env != null ? env.split(":").filter(Boolean) : [path.join(os.homedir(), "orca", "workspaces")];
+  return roots.map((r) => path.resolve(r));
+}
+
+/** True when `cwd` (or the path half of `<id>::<path>`) is strictly inside a worker root. */
+export function isWorkerPath(cwd: string | null | undefined, orca?: string | null, roots = workerRoots()): boolean {
+  const candidates = [cwd, orca?.split("::")[1]].filter((p): p is string => !!p);
+  return candidates.some((p) => {
+    const abs = path.resolve(p);
+    return roots.some((r) => abs.startsWith(r + path.sep));
+  });
+}
 
 /** Orca passes `<worktree-id>::<path>`; use the path's basename when the hook had no cwd. */
 function worktreeName(cwd: string | undefined, orca: string | undefined | null): string {
@@ -47,6 +69,7 @@ export function reduceSessions(events: NedEvent[], staleMinutes: number, now = D
         subagents_active: 0,
         orca_worktree: e.orca_worktree ?? null,
         alert_ts: null,
+        is_worker: false,
       };
       map.set(e.session_id, s);
     }
@@ -96,6 +119,8 @@ export function reduceSessions(events: NedEvent[], staleMinutes: number, now = D
   }
   // staleMinutes <= 0 disables the stale filter.
   const staleMs = staleMinutes > 0 ? staleMinutes * 60_000 : Infinity;
+  const roots = workerRoots();
+  for (const s of map.values()) s.is_worker = isWorkerPath(s.cwd, s.orca_worktree, roots);
   return [...map.values()]
     .filter((s) => !TERMINAL.includes(s.status) && now - s.last_event_ts < staleMs)
     .sort((a, b) => b.last_event_ts - a.last_event_ts);

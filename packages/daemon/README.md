@@ -26,6 +26,22 @@ node dist/cli.js prompt agenda       # dry-run: heartbeat | briefing | agenda �
 새 세션 이벤트도 없고 `signal_check_minutes` 가 지나지 않았으면 LLM 을 부르지 않고 침묵한다.
 `briefing_time` 이 지난 첫 tick 은 `prompts/briefing.md` 로 아침 브리핑을 만든다 (하루 1회).
 
+**heartbeat = agenda 재사용** (`src/heartbeat.ts`, `prompts/heartbeat.md` · `briefing.md`): heartbeat 는 Gmail·Slack·Jira·GitHub·캘린더를
+직접 읽지 않는다. 흐름 — (a) `agenda.json` 이 `signal_check_minutes` 보다 오래됐으면 agenda 1단계(`refreshAgenda`)를 돌리고 기다린다
+(이미 돌고 있으면 그 실행에 합류; 실패하면 이전 목록으로 진행) → (b) 프롬프트 `{{AGENDA}}` 에 agenda 목록을 압축한 텍스트를 넣는다:
+캘린더(heartbeat: 앞으로 2시간 + 응답 안 한 초대 / 아침: 오늘 일정 전체), Slack `items` + 답 안 한 `all` + 팔로업 채널 요약·하이라이트(`[나 필요]`),
+메일 `items` + 안 읽은 수, Jira, GitHub. heartbeat 는 `sent.log` 에 이미 있는 url 의 항목을 미리 뺀다(아침 브리핑은 그대로) →
+(c) `claude -p` 를 커넥터 없이 부른다: `sources.sentry` 가 켜져 있으면 `--tools ToolSearch` + `mcp__Sentry__search_issues`/`get_issue_details` 만,
+`--max-turns 6` (Sentry 는 agenda 가 안 다루는 유일한 소스); 꺼져 있으면 도구 없이 isolated(설정·MCP 생략, 1턴). 모델은 `claude_model`.
+`claude_max_turns` 는 더 이상 heartbeat 에 쓰지 않는다. NED_OK·`sent.log` 중복 억제·알림·attention 은 전과 같다. `{{SESSIONS}}`/`{{EVENTS}}` 는
+`is_worker === true` 인 세션(Orca 워커)을 뺀다(필드가 있을 때). 측정(2026-11-06, Sentry 꺼짐, `claude-fable-5-1`, 신선한 agenda):
+$0.36 · 1턴 · 46초 — 이전(커넥터 직접 조회) $2.09–2.34 · 12–15턴 · 107초–7분.
+로그 한 줄에 `agenda reused (Nm old)` / `refreshed in Ns, $x` / `joined running refresh`, `judge Ns`, `total Ns` 가 찍힌다.
+
+**지금 점검** (`POST /api/check`): agenda 1단계를 **항상** 새로 돌린 뒤 heartbeat(강제). 동시에 여러 번 불러도 한 번만 돈다.
+`GET /api/check` → `{running, phase: "agenda"|"judge"|null, daily, started_at, phase_started_at}` — 스케줄된 heartbeat·아침 브리핑도 같은 상태를 낸다.
+`POST /api/heartbeat` 는 호환용으로 남는다(agenda 는 오래됐을 때만 갱신).
+
 **확인 완료** (`reviewed_at`): attention 항목은 그대로 두고 `~/.ned/reviewed.json`(id → ms, 7일 보관)에 표시만 한다.
 `writeState` 가 매번 `reviewed_at` 을 덧입히므로 refreshSessions / heartbeat 가 attention 을 새로 만들어도 유지되고, 표시 뒤에
 항목이 바뀌면(`ts` 가 더 늦음 — 예: 세션의 새 알림) 다시 열린 상태가 된다. `POST /api/attention/:id/review {reviewed: boolean}`
@@ -128,7 +144,9 @@ heartbeat / briefing 의 `{{FILTERS}}` 에도 팔로업 목록이 붙어 needs_m
 | GET | `/api/events?days=2` | 최근 N일의 훅 이벤트 (오래된 것부터) |
 | GET | `/api/briefings?limit=30` | 브리핑 히스토리 (최신 먼저) |
 | GET / PUT | `/api/config` | `config.yaml` 조회 / 부분 갱신 |
-| POST | `/api/heartbeat?daily=1` | heartbeat 강제 실행 |
+| POST | `/api/heartbeat?daily=1` | heartbeat 강제 실행 (agenda 는 오래됐을 때만 갱신 — 호환용) |
+| POST | `/api/check?daily=1` | 대시보드 '지금 점검': agenda 1단계 새로 고침 → heartbeat. 결과 브리핑(또는 `{status:"skipped"}`) 반환, 동시 호출은 한 실행을 공유 |
+| GET | `/api/check` | 진행 중인 점검 단계 `{running, phase: "agenda"\|"judge"\|null, daily, started_at, phase_started_at}` |
 | POST | `/api/attention/:id/dismiss` | attention 항목 제거. 세션 항목은 `dismissed.json` 에 기억돼 같은 알림으로는 다시 안 뜬다 |
 | GET | `/api/agenda` | `agenda.json` (+ `busy`, `sources_status`, `context_status`). 없으면 빈 배열과 `updated_at: 0`. 실행 중이 아닌데 `running` 으로 남은 소스(데몬이 도중에 죽음)는 `error: "interrupted"` 로 보여 준다 |
 | POST | `/api/agenda/refresh` | 1단계(목록)가 끝나면 반환 (실행 중이면 그 결과를 기다림). 2단계는 백그라운드로 계속 — 응답의 `context_status.running` |
@@ -255,13 +273,26 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
 | `NED_NO_LLM` | (unset) | `1` 이면 heartbeat 가 `claude -p` 를 호출하지 않고 `NED_OK` 를 기록하며, agenda 1단계는 `NED_NO_LLM_AGENDA` 파일(없으면 빈 목록), 2단계는 스텁 맥락을 쓴다 (비용 0, 테스트용) |
 | `NED_NO_LLM_RESULT` | (unset) | `NED_NO_LLM=1` 일 때 heartbeat 가 받을 브리핑 JSON (예: `{"status":"UPDATE","headline":"…","action_items":[…]}`). UPDATE 경로 테스트용 |
 | `NED_NO_LLM_AGENDA` | (unset) | `NED_NO_LLM=1` 일 때 agenda 1단계가 쓸 모델 출력 모양 JSON 파일 경로 (`{"slack":{…},"mail":{…},"calendar":[…],…}`). 소스별 호출은 자기 키만 가져간다 |
-| `NED_NO_LLM_DELAY_MS` | (unset) | `NED_NO_LLM=1` 일 때 agenda 소스별 스텁 호출 지연 (우선순위 n번째 = n×값) 과 2단계 배치 지연 — 순서·진행 상태 테스트용 |
+| `NED_NO_LLM_DELAY_MS` | (unset) | `NED_NO_LLM=1` 일 때 agenda 소스별 스텁 호출 지연 (우선순위 n번째 = n×값) 과 2단계 배치 지연, heartbeat 스텁 판단 단계 지연(1×값) — 순서·진행 상태 테스트용 |
 | `NED_NO_LLM_COST` | (unset) | `NED_NO_LLM=1` 일 때 2단계 스텁 배치 하나의 비용(USD) — `costs.json` 에 기록되어 일일 예산 중단 경로를 테스트할 수 있다 |
 | `NED_SEND_DRY_RUN` | (unset) | `1` 이면 `POST /api/send` 의 커넥터·gh 액션(Slack/Gmail/Jira/GitHub/Calendar)이 `claude` argv·프롬프트만 로그에 남기고 실행하지 않는다 |
 | `NED_NOTIFY` | (unset) | Ned.app 이 데몬을 띄울 때 `app` 으로 설정한다. `config.notify: auto` 이면 이때 osascript 배너를 띄우지 않는다 (알림은 Ned.app 이 `state.json` 을 보고 직접 보낸다) |
 | `NED_CHILD` | — | 데몬이 띄운 `claude -p` 자식에 `1` 로 설정됨 (훅이 자기 자신을 관찰하지 않도록 쓸 수 있음) |
 
 `claude` 바이너리는 `PATH` 에서 찾는다. 보통은 Ned.app 이 데몬을 자식 프로세스로 띄우며 `node`/`claude` 위치를 로그인 셸에서 찾아 `PATH` 에 넣는다 (`apps/menubar/README.md`).
+
+## `claude -p` 빠른 시작 (`config.claude_fast_startup`, 기본 켬)
+
+커넥터를 쓰는 `claude -p` 는 사용자 훅(Stop 훅 하나가 ~10s)·플러그인 때문에 호출마다 ~18-20s 가 고정으로 붙었다. 이제
+`isolated` 가 아닌 모든 호출에 `--settings $NED_HOME/claude-settings.json --disable-slash-commands` 를 붙인다 — 그 파일은
+`{"disableAllHooks": true, "enabledPlugins": {<사용자가 켠 플러그인>: false}}` 이고 `src/claude.ts` 가 `~/.claude/settings*.json` 을
+읽어 내용이 바뀔 때만 다시 쓴다 (`~/.claude` 는 쓰지 않음). 사용자 settings 의 model/effort 와 claude.ai 커넥터·Sentry 는 그대로.
+측정: overhead(총 − API) 18.9s → 3.2s, 실제 캘린더 호출 26.1s → 13.5s — 표와 근거는 `docs/claude-startup.md`.
+
+- 출력 형식은 `--output-format stream-json --verbose` (`result` 줄을 파싱). `allowedTools` 에 `mcp__claude_ai_*` 가 있는 호출이
+  `system/init` 에서 claude.ai 서버를 하나도 못 보면 즉시 kill → 기존 argv 로 재실행하고, 그 데몬 프로세스는 이후 기존 argv 를 쓴다
+  (로그 `fast start-up came up without claude.ai connectors`).
+- 끄기: `config.yaml` 에 `claude_fast_startup: false` (다음 호출부터 적용). 호출별로는 `ClaudeRunOptions.fastStartup`.
 
 ## 알림 (`config.notify`)
 
@@ -309,6 +340,25 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
 `session_stale_minutes` 보다 오래된 세션도 제거된다 (`0` 이면 비활성화).
 `waiting`/`error` 세션은 매 tick `attention` 에 다시 올라온다. 단, 사용자가 dismiss 한 경우
 그 알림(`alert_ts` = 마지막 `Notification`/`StopFailure` 시각)이 바뀌기 전까지는 올리지 않는다.
+
+## Testing (vitest)
+
+```sh
+pnpm test                          # 루트: @ned/daemon 의 vitest 실행 (= pnpm --filter @ned/daemon test)
+pnpm --filter @ned/daemon test:watch
+```
+
+- 위치: `test/*.test.ts`, 설정 `test/vitest.config.ts`, 공통 준비 `test/setup.ts`.
+- 격리: `setup.ts` 가 **테스트 파일마다** 새 임시 `NED_HOME`(`$TMPDIR/ned-test-*`, 끝나면 삭제)을 만들고 `NED_NO_LLM=1`,
+  `NED_SEND_DRY_RUN=1`, `NED_NOTIFY=app`(osascript 배너 없음), `NED_PORT=7791` 을 건다. `paths.ts` 가 import 시점에 `NED_HOME` 을
+  읽으므로 파일 단위 격리(`isolate: true`, forks)가 필요하다. `claude` 는 절대 spawn 되지 않고 `~/.ned` 는 건드리지 않는다.
+- HTTP 라우트(`test/server.test.ts`): `@hono/node-server` 의 `serve` 를 `vi.mock` 으로 바꿔 `startServer` 가 넘기는 Hono `fetch` 를
+  받아 `Request` 를 직접 넣는다 — 포트를 열지 않는다.
+- 다루는 것: sessions 상태 머신 · events(parseLines, lastAssistantText) · claude(extractJson, argv) · notify · config(loadConfig 병합,
+  정규화, quiet hours) · agenda normalize*(calendar/mail/slack context, all⊇items, isEmptyPayload, signature) · heartbeat(sent 키
+  dedupe, NED_NO_LLM 종단) · todos CRUD · search 점수 · drafts fast/full 결정 · `/api/send` 게이팅(403) 외 라우트.
+- 알려진 버그는 `test/BUGS.md` 에 적고 `it.fails` 로 고정한다(버그가 고쳐지면 빨개진다 → `it` 으로 바꾼다).
+- 순수 함수를 테스트하려고 `export` 만 붙인 것: `events.parseLines`, `agenda.normalize`, `heartbeat.sentKeys/markSent/keyOf`.
 
 ## Smoke test (LLM 호출 없이)
 
