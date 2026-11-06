@@ -5,19 +5,19 @@
 import { S, alive, subscribe } from "../state.js";
 import { $, esc, lsGet, lsSet, hhmm, rel } from "../util.js";
 import { MINI, persona } from "./personas.js";
-import { buildFeed, commsVoice, createSseParser, feedHtml, messagesHtml, shellHtml, tickerOf, usd } from "./chat-core.js";
+import { buildFeed, clampSize, commsVoice, createSseParser, feedHtml, helloLine, messagesHtml, readSize, shellHtml, tickerOf, usd } from "./chat-core.js";
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const MOD = MAC ? "⌘" : "Ctrl+";
 const INPUT_MAX = 2000;
-const LS = { open: "ned.comms.open", tab: "ned.comms.tab", pos: "ned.comms.pos", seen: "ned.comms.seen", notes: "ned.comms.notes", chat: "ned.chat.id" };
+const LS = { open: "ned.comms.open", tab: "ned.comms.tab", pos: "ned.comms.pos", size: "ned.comms.size", seen: "ned.comms.seen", notes: "ned.comms.notes", chat: "ned.chat.id" };
 const readJ = (k, d) => { try { const v = JSON.parse(lsGet(k) || "null"); return v ?? d; } catch { return d; } };
 
 const st = {
   open: false, tab: lsGet(LS.tab) === "msgs" ? "msgs" : "chat",
   chatId: lsGet(LS.chat) || null, msgs: [], cost: 0, live: null, running: false, err: "",
   seen: new Set(readJ(LS.seen, [])), seeded: lsGet(LS.seen) != null, notes: readJ(LS.notes, []),
-  feed: [], prevUnread: -1, persona: null, logSig: "",
+  feed: [], prevUnread: -1, persona: null, logSig: "", helloSeed: Date.now(),
 };
 let root, dock, panel, log, q;
 
@@ -59,6 +59,42 @@ function wireDrag() {
   dock.addEventListener("pointercancel", () => { d = null; dock.classList.remove("drag"); });
   dock.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
   window.addEventListener("resize", applyPos);
+}
+
+// ---------- size (resize handles on the panel's free edges: left / top / top-left, mirrored when it opens on the left) ----------
+// The size lives in --cm-w / --cm-h on the root, so the narrow-screen sheet (@media in comms.css) still wins and CSS caps
+// it at viewport − 32 on a window resize. Independent of the dock position (ned.comms.pos): only the panel resizes.
+function setSize(s) {
+  if (s) { root.style.setProperty("--cm-w", `${s.w}px`); root.style.setProperty("--cm-h", `${s.h}px`); }
+  else { root.style.removeProperty("--cm-w"); root.style.removeProperty("--cm-h"); }
+}
+const applySize = () => setSize(readSize(lsGet(LS.size), window.innerWidth, window.innerHeight));
+function wireResize() {
+  let d = null;
+  for (const h of panel.querySelectorAll("[data-rs]")) {
+    h.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault(); e.stopPropagation();
+      const rc = panel.getBoundingClientRect();
+      d = { x: e.clientX, y: e.clientY, w: rc.width, h: rc.height, ax: h.dataset.rs, flip: root.classList.contains("left"), s: null };
+      h.setPointerCapture?.(e.pointerId); root.classList.add("resizing");
+    });
+    h.addEventListener("pointermove", (e) => {
+      if (!d) return;
+      const dx = e.clientX - d.x, dy = e.clientY - d.y;
+      d.s = clampSize({ w: d.ax === "n" ? d.w : d.w + (d.flip ? dx : -dx), h: d.ax === "w" ? d.h : d.h - dy }, window.innerWidth, window.innerHeight);
+      setSize(d.s);
+    });
+    const end = () => {
+      if (!d) return;
+      if (d.s) lsSet(LS.size, JSON.stringify(d.s));
+      d = null; root.classList.remove("resizing");
+    };
+    h.addEventListener("pointerup", end);
+    h.addEventListener("pointercancel", end);
+    h.addEventListener("dblclick", (e) => { e.preventDefault(); try { localStorage.removeItem(LS.size); } catch { /* ignore */ } setSize(null); });
+  }
+  window.addEventListener("resize", applySize);
 }
 
 // ---------- open / close / tabs ----------
@@ -166,7 +202,7 @@ async function stop() {
 }
 function newChat() {
   if (st.running) return;
-  setChat(null); st.msgs = []; st.cost = 0; st.err = ""; render(); q.focus();
+  setChat(null); st.msgs = []; st.cost = 0; st.err = ""; st.helloSeed = Date.now(); render(); q.focus();
 }
 
 // ---------- render ----------
@@ -175,6 +211,7 @@ function relabel() {
   st.persona = persona;
   for (const id of ["cm-mk1", "cm-mk2"]) $(id).innerHTML = MINI;
   $("cm-title").textContent = v.title;
+  $("cm-tag").textContent = v.tag;
   q.placeholder = v.placeholder;
   dock.setAttribute("aria-label", `${v.title} 열기 (${MOD}J)`);
   panel.setAttribute("aria-label", v.title);
@@ -209,10 +246,11 @@ export function render() {
   $("cm-allread").hidden = st.tab !== "msgs" || !unread;
 
   if (st.tab === "chat") {
-    const sig = JSON.stringify([st.msgs.length, st.msgs.at(-1)?.ts, st.live, st.err, st.persona]);
+    const hello = helloLine(persona, new Date().getHours(), st.helloSeed);
+    const sig = JSON.stringify([st.msgs.length, st.msgs.at(-1)?.ts, st.live, st.err, st.persona, hello]);
     if (sig !== st.logSig) {
       st.logSig = sig;
-      log.innerHTML = messagesHtml(st.msgs, v, st.live, (ts) => hhmm(ts)) + (st.err ? `<div class="cm-err">⚠ ${esc(st.err)}</div>` : "");
+      log.innerHTML = messagesHtml(st.msgs, v, st.live, (ts) => hhmm(ts), hello) + (st.err ? `<div class="cm-err">⚠ ${esc(st.err)}</div>` : "");
     }
     const send = $("cm-send");
     send.textContent = st.running ? "중단" : "전송"; send.classList.toggle("go", !st.running); send.classList.toggle("stop", st.running);
@@ -238,7 +276,7 @@ export function init() {
   root.innerHTML = shellHtml(voice(), MINI, MOD);
   document.body.appendChild(root);
   dock = $("cm-dock"); panel = $("cm-panel"); log = $("cm-log"); q = $("cm-q");
-  applyPos(); wireDrag();
+  applyPos(); wireDrag(); applySize(); wireResize();
 
   $("cm-close").addEventListener("click", close);
   $("cm-new").addEventListener("click", newChat);

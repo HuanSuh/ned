@@ -1,7 +1,7 @@
 /** Ned 통신기 (public/app/features/chat-core.js): markdown-lite, feed, ticker and panel HTML snapshots. */
 import { describe, expect, it } from "vitest";
 // @ts-expect-error — plain browser ES module (public/app), no types
-import { COMMS_VOICE, buildFeed, commsVoice, feedHtml, mdLite, messagesHtml, shellHtml, tickerOf } from "../public/app/features/chat-core.js";
+import { COMMS_HELLO, COMMS_SIZE, COMMS_VOICE, buildFeed, helloLine, clampSize, commsVoice, feedHtml, mdLite, messagesHtml, readSize, shellHtml, tickerOf } from "../public/app/features/chat-core.js";
 
 const MARK = "<svg class=\"mark\"></svg>";
 const NOW = Date.UTC(2026, 10, 7, 3, 0, 0);
@@ -57,5 +57,43 @@ describe("panel", () => {
     const alfred = shellHtml(COMMS_VOICE.alfred, MARK, "Ctrl+");
     expect(alfred).toContain('aria-label="인터폰 열기 (Ctrl+J)"');
     expect(alfred).toContain('placeholder="말씀하십시오…"');
+  });
+});
+
+describe("panel size", () => {
+  it("clampSize: min 360×420, max viewport − 32; minimum wins on a tiny viewport", () => {
+    expect(COMMS_SIZE).toMatchObject({ minW: 360, minH: 420, defW: 420, defH: 620 });
+    expect(clampSize({ w: 500, h: 700 }, 1440, 900)).toEqual({ w: 500, h: 700 });
+    expect(clampSize({ w: 100, h: 100 }, 1440, 900)).toEqual({ w: 360, h: 420 });
+    expect(clampSize({ w: 5000, h: 5000 }, 1440, 900)).toEqual({ w: 1408, h: 868 });
+    expect(clampSize({ w: 999, h: 999 }, 300, 300)).toEqual({ w: 360, h: 420 });
+    expect(clampSize({ w: 512.6, h: 600.4 }, 1440, 900)).toEqual({ w: 513, h: 600 });
+  });
+  it("readSize: restores + clamps a saved size; null (= default) for missing / malformed", () => {
+    expect(readSize(JSON.stringify({ w: 640, h: 800 }), 1440, 900)).toEqual({ w: 640, h: 800 });
+    expect(readSize(JSON.stringify({ w: 640, h: 2000 }), 1440, 900)).toEqual({ w: 640, h: 868 });
+    expect(readSize({ w: 10, h: 10 }, 1440, 900)).toEqual({ w: 360, h: 420 });
+    for (const bad of [null, "", "not json", "null", "{}", JSON.stringify({ w: "x", h: 500 }), JSON.stringify({ w: null, h: 500 })]) expect(readSize(bad, 1440, 900)).toBeNull();
+  });
+  it("shell carries the persona tag and the three resize handles", () => {
+    const html = shellHtml(COMMS_VOICE.oracle, MARK);
+    expect(html).toContain('<i class="cm-tag" id="cm-tag">ORACLE · LINK</i>');
+    expect([...html.matchAll(/data-rs="(\w+)"/g)].map((m) => m[1])).toEqual(["w", "n", "nw"]);
+    for (const v of Object.values(COMMS_VOICE)) expect((v as { tag: string }).tag).toMatch(/ · /);
+  });
+});
+
+describe("greeting", () => {
+  it("helloLine: time-of-day bucket per persona, seed varies the line, unknown persona → ned", () => {
+    expect(helloLine("ned", 9, 0)).toBe(COMMS_HELLO.ned[1][0]);
+    expect(helloLine("ned", 9, 1)).toBe(COMMS_HELLO.ned[1][1]);
+    expect(helloLine("alfred", 3, 0)).toBe(COMMS_HELLO.alfred[0][0]);
+    expect(helloLine("oracle", 14, 7)).toBe(COMMS_HELLO.oracle[2][7 % COMMS_HELLO.oracle[2].length]);
+    expect(helloLine("jarvis", 21, 2)).toBe(COMMS_HELLO.jarvis[3][2]);
+    expect(helloLine("nope", 9, 0)).toBe(COMMS_HELLO.ned[1][0]);
+    for (const p of Object.keys(COMMS_VOICE)) expect(COMMS_HELLO[p as keyof typeof COMMS_HELLO].every((b: string[]) => b.length >= 2)).toBe(true);
+  });
+  it("empty chat renders Ned's greeting bubble (escaped) + the hint", () => {
+    expect(messagesHtml([], COMMS_VOICE.ned, null, () => "", "좋은 <아침>!")).toBe('<div class="cm-msg ned hello"><div class="bb"><b class="hi">좋은 &lt;아침&gt;!</b><span class="hint">뭐든 물어봐. 오늘 일정, 답할 거, PR 상태 — 아는 건 바로, 모르는 건 찾아볼게.</span></div></div>');
   });
 });

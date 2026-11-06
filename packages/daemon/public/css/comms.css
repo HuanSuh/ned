@@ -1,65 +1,96 @@
 /* Ned 통신기 (features/comms.js): floating call-indicator dock (collapsed) → 대화 / 메시지 panel (expanded).
  * One structure for every persona; only these --cm-* tokens + the indicator words (chat-core.js COMMS_VOICE) change:
- * ned = web corners, alfred = gold double rule (bell card), oracle = green mono console + scanlines, jarvis = ring glow HUD. */
+ * ned = web corner, alfred = gold double rule, oracle = green mono console + scanlines, jarvis = ring glow HUD.
+ * It is its own surface, not a card: one step off the card tone and accent-tinted (--cm-bg), a 1px accent edge, a deep
+ * drop + accent glow, an accent bar on the header. Decorations never sit behind the mark: they live on the far edges and
+ * are masked out within 1.5× the mark ring's radius (--cm-hx / --cm-hy / --cm-hr); the mark itself sits on a solid disc. */
 .comms {
-  --cm-bg: var(--pane); --cm-edge: var(--edge); --cm-accent: var(--hero); --cm-rx: var(--mint); --cm-radius: 16px;
-  --cm-font: var(--sans); --cm-shadow: 0 14px 40px rgba(0, 0, 0, .38); --cm-glow: color-mix(in srgb, var(--cm-accent) 55%, transparent);
-  --cm-deco: none; --cm-deco-size: 0 0;
+  --cm-accent: var(--hero); --cm-accent-text: var(--hero-text, var(--hero)); --cm-rx: var(--mint); --cm-radius: 16px; --cm-font: var(--sans);
+  --cm-bg: color-mix(in srgb, var(--cm-accent) 7%, var(--raise));
+  --cm-hd-bg: color-mix(in srgb, var(--cm-accent) 11%, transparent);
+  --cm-edge: color-mix(in srgb, var(--cm-accent) 70%, var(--edge));
+  --cm-mark-bg: var(--bg);
+  --cm-glow: color-mix(in srgb, var(--cm-accent) 50%, transparent);
+  --cm-bar: linear-gradient(var(--cm-accent), var(--cm-accent));
+  --cm-drop: 0 22px 60px rgba(0, 0, 0, .62), 0 4px 14px rgba(0, 0, 0, .4);
+  --cm-shadow: var(--cm-drop), 0 0 34px -8px var(--cm-glow);
+  --cm-deco: none; --cm-deco-size: 0 0; --cm-deco-a: 1;
 }
-/* ned: spider-web corners (top-left + bottom-right) in --web */
+@media (prefers-color-scheme: light) {
+  .comms { --cm-drop: 0 22px 54px rgba(20, 24, 40, .26), 0 3px 10px rgba(20, 24, 40, .14); --cm-bg: color-mix(in srgb, var(--cm-accent) 6%, var(--raise)); }
+}
+/* ned: spider-web in the top-right corner (away from the mark), faint; red→blue header bar like the app header */
 [data-persona="ned"] .comms {
-  --cm-deco: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 60' fill='none' stroke='%23c9d4f2' stroke-opacity='.35' stroke-width='1'%3E%3Cpath d='M0 0L60 60M0 0L60 22M0 0L22 60M0 0L60 0M0 0L0 60'/%3E%3Cpath d='M14 0Q12 12 0 14M28 0Q25 25 0 28M44 0Q39 39 0 44'/%3E%3C/svg%3E");
-  --cm-deco-size: 54px 54px;
+  --cm-deco: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 60' fill='none' stroke='%23c9d4f2' stroke-width='1'%3E%3Cg transform='matrix(-1 0 0 1 60 0)'%3E%3Cpath d='M0 0L60 60M0 0L60 22M0 0L22 60M0 0L60 0M0 0L0 60'/%3E%3Cpath d='M14 0Q12 12 0 14M28 0Q25 25 0 28M44 0Q39 39 0 44'/%3E%3C/g%3E%3C/svg%3E");
+  --cm-deco-size: 54px 54px; --cm-deco-a: .22;
+  --cm-bar: linear-gradient(90deg, var(--hero), var(--blue2));
+}
+@media (prefers-color-scheme: light) {
+  [data-persona="ned"] .comms { --cm-deco: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 60' fill='none' stroke='%232a3350' stroke-width='1'%3E%3Cg transform='matrix(-1 0 0 1 60 0)'%3E%3Cpath d='M0 0L60 60M0 0L60 22M0 0L22 60M0 0L60 0M0 0L0 60'/%3E%3Cpath d='M14 0Q12 12 0 14M28 0Q25 25 0 28M44 0Q39 39 0 44'/%3E%3C/g%3E%3C/svg%3E"); --cm-deco-a: .16; }
 }
 [data-persona="alfred"] .comms { --cm-radius: 6px; --cm-font: var(--head); --cm-rx: var(--hero); }
 [data-persona="oracle"] .comms { --cm-radius: 2px; --cm-font: var(--mono); --cm-rx: var(--hero); }
-[data-persona="jarvis"] .comms { --cm-radius: 20px; --cm-rx: var(--hero); --cm-shadow: 0 0 0 1px color-mix(in srgb, var(--hero) 35%, transparent), 0 14px 44px rgba(0, 0, 0, .4), 0 0 28px color-mix(in srgb, var(--hero) 22%, transparent); }
+[data-persona="jarvis"] .comms { --cm-radius: 20px; --cm-rx: var(--hero); --cm-shadow: var(--cm-drop), 0 0 0 1px color-mix(in srgb, var(--hero) 35%, transparent), 0 0 36px -4px var(--cm-glow); }
 
 /* ---------- collapsed: the dock ---------- */
-.cm-dock { position: fixed; z-index: 25; right: 18px; bottom: 18px; display: flex; align-items: center; gap: 10px; width: 272px; max-width: calc(100vw - 16px); padding: 8px 12px 8px 8px;
+.cm-dock { position: fixed; z-index: 25; right: 18px; bottom: 18px; display: flex; align-items: center; gap: 11px; width: 288px; max-width: calc(100vw - 16px); padding: 8px 12px 8px 8px;
+  --cm-hx: 33px; --cm-hy: 50%; --cm-hr: 36px;
   background: var(--cm-bg); border: 1px solid var(--cm-edge); border-radius: var(--cm-radius); box-shadow: var(--cm-shadow); cursor: pointer; user-select: none; touch-action: none; font-family: var(--cm-font); }
-.cm-dock::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: var(--cm-deco) left top / var(--cm-deco-size) no-repeat; }
-.cm-dock:hover { border-color: var(--cm-accent); }
+/* Decoration layer (dock + panel): far corner only, hole around the mark. */
+.cm-dock::before, .cm-panel::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: var(--cm-deco-a);
+  background: var(--cm-deco) right top / var(--cm-deco-size) no-repeat;
+  -webkit-mask: radial-gradient(circle at var(--cm-hx) var(--cm-hy), transparent var(--cm-hr), #000 calc(var(--cm-hr) + 8px));
+  mask: radial-gradient(circle at var(--cm-hx) var(--cm-hy), transparent var(--cm-hr), #000 calc(var(--cm-hr) + 8px)); }
+.cm-dock:hover { border-color: var(--cm-accent); box-shadow: var(--cm-shadow), 0 0 0 1px var(--cm-accent); }
 .cm-dock:focus-visible { outline: 2px solid var(--cm-accent); outline-offset: 2px; }
 .cm-dock.drag { cursor: grabbing; opacity: .92; }
 .comms.open .cm-dock { display: none; }
-.cm-ring { position: relative; flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid var(--cm-edge); background: var(--raise); }
-.cm-ring.sm { width: 30px; height: 30px; }
-.cm-ring .mark { width: 28px; height: 18px; }
-.cm-ring.sm .mark { width: 22px; height: 14px; }
-.cm-led { position: absolute; right: -1px; top: -1px; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--cm-bg); background: var(--faint); }
+/* The mark: solid disc + accent glow ring, always above the decoration layer. */
+.cm-ring { position: relative; z-index: 3; flex: none; display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; border: 1.5px solid var(--cm-accent); background: var(--cm-mark-bg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cm-accent) 22%, transparent), 0 0 16px var(--cm-glow); }
+.cm-ring.sm { width: 34px; height: 34px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--cm-accent) 20%, transparent), 0 0 10px color-mix(in srgb, var(--cm-accent) 35%, transparent); }
+.cm-mk { display: grid; place-items: center; }
+.cm-ring .mark { width: 34px; height: 22px; }
+.cm-ring.sm .mark { width: 25px; height: 16px; }
+.cm-led { position: absolute; right: -1px; top: -1px; width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--cm-bg); background: var(--faint); }
 .comms[data-led="ok"] .cm-led { background: var(--cm-rx); }
 .comms[data-led="rx"] .cm-led { background: var(--amber); box-shadow: 0 0 8px var(--amber); animation: cm-blink 1.4s ease-in-out infinite; }
 .comms[data-led="off"] .cm-led { background: transparent; box-shadow: inset 0 0 0 2px var(--red); }
-.cm-tx { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 1px; }
-.cm-tx b { font: 700 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--cm-accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cm-tx { position: relative; z-index: 1; display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 1px; }
+.cm-tx b { font: 700 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--cm-accent-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cm-tk { font-size: 12.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cm-badge { flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--cm-accent); color: var(--hero-ink, #fff); font: 700 11px/20px var(--mono); text-align: center; }
+.cm-badge { position: relative; z-index: 1; flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--hero-fill, var(--cm-accent)); color: var(--hero-ink, #fff); font: 700 11px/20px var(--mono); text-align: center; }
 /* New arrival: one short glow around the dock + the ring. */
 .cm-dock.ping { animation: cm-ping 1.8s ease-out 1; }
 .cm-dock.ping .cm-ring { animation: cm-ring 1.8s ease-out 1; }
-@keyframes cm-ping { 0% { box-shadow: var(--cm-shadow), 0 0 0 0 var(--cm-glow); } 40% { box-shadow: var(--cm-shadow), 0 0 0 8px transparent, 0 0 24px var(--cm-glow); } 100% { box-shadow: var(--cm-shadow); } }
-@keyframes cm-ring { 0%, 100% { border-color: var(--cm-edge); } 30% { border-color: var(--cm-accent); box-shadow: 0 0 12px var(--cm-glow); } }
+@keyframes cm-ping { 0% { box-shadow: var(--cm-shadow), 0 0 0 0 var(--cm-glow); } 40% { box-shadow: var(--cm-shadow), 0 0 0 8px transparent, 0 0 30px var(--cm-glow); } 100% { box-shadow: var(--cm-shadow); } }
+@keyframes cm-ring { 30% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--cm-accent) 40%, transparent), 0 0 26px var(--cm-glow); } }
 @keyframes cm-blink { 50% { opacity: .35; } }
 
 /* ---------- expanded: the panel (overlay, never pushes the page) ---------- */
-.cm-panel { position: fixed; z-index: 26; right: 16px; bottom: 16px; width: 420px; height: min(620px, calc(100dvh - 32px)); display: flex; flex-direction: column;
+.cm-panel { position: fixed; z-index: 26; right: 16px; bottom: 16px; display: flex; flex-direction: column;
+  width: min(var(--cm-w, 420px), calc(100vw - 32px)); height: min(var(--cm-h, 620px), calc(100dvh - 32px));
+  --cm-hx: 30px; --cm-hy: 32px; --cm-hr: 28px;
   background: var(--cm-bg); border: 1px solid var(--cm-edge); border-radius: var(--cm-radius); box-shadow: var(--cm-shadow); overflow: hidden; font-family: var(--cm-font); animation: cm-open .16s ease-out; }
 .comms.left .cm-panel { right: auto; left: 16px; }
 .cm-panel[hidden] { display: none; }
-.cm-panel::before { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 2; border-radius: inherit;
-  background: var(--cm-deco) left top / var(--cm-deco-size) no-repeat, var(--cm-deco) right bottom / var(--cm-deco-size) no-repeat; }
-[data-persona="ned"] .cm-panel::before { background: var(--cm-deco) left top / var(--cm-deco-size) no-repeat; }
+.cm-panel::before { z-index: 0; }
+.cm-hd, .cm-tabs, .cm-body { position: relative; z-index: 1; }
 [data-persona="alfred"] .cm-panel { outline: 1px solid color-mix(in srgb, var(--hero) 55%, transparent); outline-offset: -5px; }
-[data-persona="oracle"] .cm-panel::before { background: repeating-linear-gradient(0deg, color-mix(in srgb, var(--hero) 5%, transparent) 0 1px, transparent 1px 3px); }
-[data-persona="jarvis"] .cm-ring { box-shadow: 0 0 0 2px color-mix(in srgb, var(--hero) 30%, transparent), 0 0 14px color-mix(in srgb, var(--hero) 35%, transparent); border-color: var(--hero); }
+[data-persona="alfred"] .cm-dock { outline: 1px solid color-mix(in srgb, var(--hero) 45%, transparent); outline-offset: -4px; }
+/* oracle: the scanlines are a CRT glass over everything — except the mark's hole */
+[data-persona="oracle"] .cm-panel::before, [data-persona="oracle"] .cm-dock::before { z-index: 2; opacity: 1; background: repeating-linear-gradient(0deg, color-mix(in srgb, var(--hero) 6%, transparent) 0 1px, transparent 1px 3px); }
+[data-persona="jarvis"] .cm-ring { border-color: var(--hero); box-shadow: 0 0 0 3px color-mix(in srgb, var(--hero) 30%, transparent), 0 0 18px color-mix(in srgb, var(--hero) 45%, transparent); }
 @keyframes cm-open { from { opacity: 0; transform: translateY(10px) scale(.98); } }
-.cm-hd { display: flex; align-items: center; gap: 8px; padding: 9px 10px 9px 12px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--side) 70%, transparent); }
+.cm-hd { display: flex; align-items: center; gap: 9px; padding: 9px 10px 9px 12px; border-bottom: 1px solid color-mix(in srgb, var(--cm-accent) 30%, var(--line));
+  background: var(--cm-bar) left top / 100% 3px no-repeat, var(--cm-hd-bg); }
 .cm-hd .sp, .cm-tabs .sp, .cm-ft .sp { flex: 1; }
-.cm-ti { display: flex; flex-direction: column; min-width: 0; }
+.cm-ti { flex: none; max-width: 60%; display: flex; flex-direction: column; min-width: 0; }
+.cm-ti b { overflow: hidden; text-overflow: ellipsis; }
+.cm-tag { font: normal 700 9.5px/1.25 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--cm-accent-text); white-space: nowrap; }
 .cm-ti b { font-size: 14px; font-weight: var(--head-w, 650); font-family: var(--cm-font); white-space: nowrap; }
 .cm-ti span { font: 600 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
-.cm-cost { font: 11px var(--mono); color: var(--faint); white-space: nowrap; }
+.cm-cost { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 11px var(--mono); color: var(--faint); white-space: nowrap; }
 .cm-cost.over { color: var(--amber); }
 .cm-x { min-width: 28px; justify-content: center; }
 .cm-tabs { display: flex; align-items: center; gap: 2px; padding: 6px 10px 0; border-bottom: 1px solid var(--line); }
@@ -75,6 +106,12 @@
 .cm-empty, .cm-none { margin: auto; max-width: 300px; text-align: center; color: var(--dim); font-size: 13px; line-height: 1.5; padding: 24px 8px; }
 .cm-msg { display: flex; flex-direction: column; max-width: 88%; }
 .cm-msg.me { align-self: flex-end; align-items: flex-end; }
+/* new chat: Ned opens with a greeting bubble (chat-core.js COMMS_HELLO) instead of a centred placeholder */
+.cm-msg.hello { animation: cm-hello .28s ease-out; }
+.cm-msg.hello .bb { display: flex; flex-direction: column; gap: 4px; border-color: color-mix(in srgb, var(--cm-accent) 35%, var(--line)); }
+.cm-msg.hello .hi { font-weight: 600; color: var(--fg); }
+.cm-msg.hello .hint { font-size: 12.5px; color: var(--dim); }
+@keyframes cm-hello { from { opacity: 0; transform: translateY(6px); } }
 .cm-msg .bb { padding: 8px 11px; border-radius: 12px; font-family: var(--sans); font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere; background: var(--bubble); border: 1px solid var(--line); }
 [data-persona="oracle"] .cm-msg .bb { font-family: var(--mono); font-size: 12.5px; }
 .cm-msg.me .bb { background: color-mix(in srgb, var(--cm-accent) 16%, var(--raise)); border-color: color-mix(in srgb, var(--cm-accent) 40%, transparent); }
@@ -87,7 +124,7 @@
 .cm-err { color: var(--red); font-size: 12px; margin-top: 4px; }
 .cm-think { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 12px; margin-top: 4px; }
 .cm-msg.live .bb:has(> .cm-think:first-child) .cm-think { margin-top: 0; }
-.cm-in { border-top: 1px solid var(--line); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; background: color-mix(in srgb, var(--side) 60%, transparent); }
+.cm-in { flex: none; border-top: 1px solid var(--line); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; background: color-mix(in srgb, var(--cm-accent) 5%, transparent); }
 .cm-in textarea { width: 100%; resize: none; min-height: 44px; max-height: 140px; font: 13.5px/1.45 var(--sans); color: var(--fg); background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; }
 .cm-in textarea:focus { outline: none; border-color: var(--cm-accent); }
 .cm-ft { display: flex; align-items: center; gap: 8px; }
@@ -106,11 +143,23 @@
 .cm-it .sb { grid-column: 2 / span 2; font-size: 12px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cm-it .dot { position: absolute; left: 3px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: var(--cm-accent); }
 
+/* resize handles: left edge / top edge / top-left corner (mirrored to the right when the panel opens on the left) */
+.cm-rs { position: absolute; z-index: 4; display: block; font-style: normal; }
+.cm-rs[data-rs="w"] { left: 0; top: 14px; bottom: 14px; width: 7px; cursor: ew-resize; }
+.cm-rs[data-rs="n"] { top: 0; left: 14px; right: 14px; height: 7px; cursor: ns-resize; }
+.cm-rs[data-rs="nw"] { left: 0; top: 0; width: 16px; height: 16px; cursor: nwse-resize; }
+.comms.left .cm-rs[data-rs="w"], .comms.left .cm-rs[data-rs="nw"] { left: auto; right: 0; }
+.comms.left .cm-rs[data-rs="nw"] { cursor: nesw-resize; }
+.cm-rs[data-rs="w"]:hover, .comms.resizing .cm-rs[data-rs="w"]:active { background: linear-gradient(90deg, transparent 2px, color-mix(in srgb, var(--cm-accent) 70%, transparent) 2px 4px, transparent 4px); }
+.cm-rs[data-rs="n"]:hover, .comms.resizing .cm-rs[data-rs="n"]:active { background: linear-gradient(180deg, transparent 2px, color-mix(in srgb, var(--cm-accent) 70%, transparent) 2px 4px, transparent 4px); }
+.comms.resizing .cm-panel { animation: none; user-select: none; }
+
 /* narrow screens: full-width sheet */
 @media (max-width: 560px) {
   .cm-panel, .comms.left .cm-panel { left: 0; right: 0; bottom: 0; width: auto; height: min(620px, 100dvh); border-radius: var(--cm-radius) var(--cm-radius) 0 0; }
+  .cm-rs { display: none; }
   .cm-dock { width: auto; max-width: 240px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .cm-dock.ping, .cm-dock.ping .cm-ring, .comms[data-led="rx"] .cm-led, .cm-panel { animation: none !important; }
+  .cm-dock.ping, .cm-dock.ping .cm-ring, .comms[data-led="rx"] .cm-led, .cm-panel, .cm-msg.hello { animation: none !important; }
 }
