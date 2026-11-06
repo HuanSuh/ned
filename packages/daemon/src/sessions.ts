@@ -15,6 +15,8 @@ export interface SessionView {
   last_summary: string | null;
   subagents_active: number;
   orca_worktree: string | null;
+  /** ts of the latest Notification/StopFailure — keys attention dismissals. */
+  alert_ts: number | null;
 }
 
 const TERMINAL: SessionStatus[] = ["ended"];
@@ -44,6 +46,7 @@ export function reduceSessions(events: NedEvent[], staleMinutes: number, now = D
         last_summary: null,
         subagents_active: 0,
         orca_worktree: e.orca_worktree ?? null,
+        alert_ts: null,
       };
       map.set(e.session_id, s);
     }
@@ -74,6 +77,7 @@ export function reduceSessions(events: NedEvent[], staleMinutes: number, now = D
       case "Notification":
         // permission_prompt / idle_prompt / elicitation → needs the human.
         s.status = "waiting";
+        s.alert_ts = e.ts;
         if (e.message) s.last_summary = String(e.message).slice(0, 240);
         break;
       case "Stop":
@@ -82,6 +86,7 @@ export function reduceSessions(events: NedEvent[], staleMinutes: number, now = D
         break;
       case "StopFailure":
         s.status = "error";
+        s.alert_ts = e.ts;
         s.last_summary = e.message ? String(e.message).slice(0, 240) : s.last_summary;
         break;
       case "SessionEnd":

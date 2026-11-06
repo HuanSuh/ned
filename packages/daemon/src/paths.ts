@@ -10,6 +10,9 @@ export const STATE_PATH = path.join(NED_HOME, "state.json");
 export const CURSOR_PATH = path.join(NED_HOME, "cursor.json");
 export const CONFIG_PATH = path.join(NED_HOME, "config.yaml");
 export const SENT_LOG = path.join(BRIEFINGS_DIR, "sent.log");
+export const AGENDA_PATH = path.join(NED_HOME, "agenda.json");
+export const TODOS_PATH = path.join(NED_HOME, "todos.json");
+export const DISMISSED_PATH = path.join(NED_HOME, "dismissed.json");
 
 /** Local calendar date as YYYY-MM-DD (matches the hook, which uses local time too). */
 export function localDay(d = new Date()): string {

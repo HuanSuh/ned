@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import { refreshAgenda } from "./agenda.js";
 import { loadConfig } from "./config.js";
 import { heartbeat, listBriefings, refreshSessions } from "./heartbeat.js";
 import { EVENTS_DIR, STATE_PATH, ensureDirs, localDay, log } from "./paths.js";
@@ -53,8 +54,21 @@ async function main(): Promise<void> {
           busy = false;
         }
       };
+      // Agenda (dashboard HOME): at start, then every agenda_refresh_minutes. Runs alongside heartbeats;
+      // refreshAgenda() has its own busy guard shared with POST /api/agenda/refresh.
+      const agendaTick = () => {
+        refreshAgenda(loadConfig()).catch((e) => log(`agenda failed: ${String(e)}`));
+      };
+      agendaTick();
+      setInterval(agendaTick, Math.max(1, cfg.agenda_refresh_minutes) * 60_000);
+
       await tick();
       setInterval(tick, cfg.heartbeat_minutes * 60_000);
+      break;
+    }
+    case "agenda": {
+      const a = await refreshAgenda(loadConfig());
+      console.log(JSON.stringify(a, null, 2));
       break;
     }
     case "heartbeat": {
@@ -68,7 +82,7 @@ async function main(): Promise<void> {
       break;
     }
     default:
-      console.log(`usage: ned <run|heartbeat [--daily]|state>`);
+      console.log(`usage: ned <run|heartbeat [--daily]|state|agenda>`);
       process.exit(1);
   }
 }

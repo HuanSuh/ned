@@ -5,7 +5,7 @@ import { extractJson, llmDisabled, noLlmResult, runClaude } from "./claude.js";
 import { inQuietHours, type NedConfig } from "./config.js";
 import { readRecentEvents, readUnprocessedEvents, type NedEvent } from "./events.js";
 import { notify } from "./notify.js";
-import { BRIEFINGS_DIR, SENT_LOG, log, readJson, writeJsonAtomic } from "./paths.js";
+import { BRIEFINGS_DIR, DISMISSED_PATH, SENT_LOG, log, readJson, writeJsonAtomic } from "./paths.js";
 import { reduceSessions } from "./sessions.js";
 import { readState, writeState, type AttentionItem, type Briefing, type BriefingSection } from "./state.js";
 
@@ -55,13 +55,20 @@ function summarizeEvents(events: NedEvent[]): string {
     .join("\n");
 }
 
+/** Dismissed attention ids → the alert they dismissed (`alert_ts`) and when. */
+type Dismissed = Record<string, { alert_ts: number; at: number }>;
+const readDismissed = () => readJson<Dismissed>(DISMISSED_PATH, {});
+
 /** Refresh `state.sessions` from events. Cheap; runs every tick. */
 export function refreshSessions(cfg: NedConfig): void {
   const state = readState();
   const sessions = reduceSessions(readRecentEvents(2), cfg.session_stale_minutes);
-  // Sessions that need the human become attention items (replaced each tick).
+  const dismissed = readDismissed();
+  // Sessions that need the human become attention items (replaced each tick),
+  // unless the user dismissed this same alert (a new Notification/StopFailure brings it back).
   const sessionAttention: AttentionItem[] = sessions
     .filter((s) => s.status === "waiting" || s.status === "error")
+    .filter((s) => dismissed[`session:${s.id}`]?.alert_ts !== s.alert_ts)
     .map((s) => ({
       id: `session:${s.id}`,
       kind: "session",
@@ -181,4 +188,12 @@ export function dismissAttention(id: string): void {
   const s = readState();
   s.attention = s.attention.filter((a) => a.id !== id);
   writeState(s);
+  // Session attention is regenerated every refresh — remember which alert was dismissed.
+  const session = id.startsWith("session:") ? s.sessions.find((x) => `session:${x.id}` === id) : undefined;
+  if (session?.alert_ts != null) {
+    const now = Date.now();
+    const d = Object.fromEntries(Object.entries(readDismissed()).filter(([, v]) => now - v.at < 7 * 24 * 60 * 60_000));
+    d[id] = { alert_ts: session.alert_ts, at: now };
+    writeJsonAtomic(DISMISSED_PATH, d);
+  }
 }
