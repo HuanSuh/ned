@@ -183,7 +183,10 @@
   [hidden] { display: none !important; }
 
   /* ---------- shell ---------- */
-  .shell { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; }
+  /* App root fills the viewport: header at its natural height, the active view takes the rest (views scroll inside). */
+  .shell { display: flex; flex-direction: column; height: 100dvh; min-height: 100dvh; }
+  .shell > header.hq { flex: none; }
+  .shell > main.view { flex: 1 1 auto; }
   header.hq { display: flex; align-items: center; gap: 12px 16px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--side) 72%, transparent); position: relative; flex-wrap: wrap; }
   .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .who .nm { min-width: 92px; }
@@ -329,6 +332,7 @@
 
   /* ---------- timeline + settings views ---------- */
   .page { height: 100%; overflow: auto; }
+  .page, .items, .detail, .rail, .hgrid .card > .bd, .sgrid, .hcol { scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
   /* Page containers use the screen: up to 2560px wide with 24px gutters (32px from 1600px). Density, not font size, changes. */
   .pwrap { max-width: 2560px; margin: 0 auto; padding: 18px 24px 48px; }
   .card { background: var(--pane); border: 1px solid var(--line); border-radius: 10px; }
@@ -344,7 +348,7 @@
   /* source pills (home / inbox) = the timeline chips + a kind icon and a count */
   .chip .pi { margin-right: 4px; }
   .chip .pn { margin-left: 5px; font: 10.5px var(--mono); opacity: .75; }
-  .chip.zero { opacity: .45; } .chip.zero.on { opacity: 1; }
+  .chip.nil { opacity: .45; } .chip.nil.on { opacity: 1; }
   .chips.pills { margin-bottom: 0; }
   .chips.pills > * { flex: none; white-space: nowrap; }
   .list .chips.pills { padding: 8px 12px 6px; border-bottom: 1px solid var(--line); }
@@ -569,6 +573,27 @@
   }
   @media (min-width: 2000px) { .sgrid { --cols: 3; } .hgrid.wk .sgrid { --cols: 2; } }
 
+  /* ---------- fill the viewport height (≥900px): no page scroll on home; each column scrolls inside ---------- */
+  @media (min-width: 900px) {
+    #v-home { overflow: hidden; }
+    #v-home .hwrap { height: 100%; display: flex; flex-direction: column; padding-bottom: 24px; }
+    #v-home .htop { flex: none; }
+    #v-home .hkeys { display: none; }
+    .hgrid { flex: 1 1 auto; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+    .hgrid > .card:first-child { min-height: 0; }
+    .hgrid > .card:first-child > .bd { flex: 1 1 auto; min-height: 0; overflow: auto; }
+    /* two-column layout: the right column (pills, todo, cards) scrolls as one */
+    .hcol { min-height: 0; overflow: auto; }
+    .hcol > .sgrid { flex: 1 0 auto; }
+    /* cards: columns at least as tall as the area (last card stretches), the area scrolls when content is taller */
+    .sgrid { align-items: flex-start; }
+    .scol { min-height: 100%; }
+  }
+  @media (min-width: 1600px) {
+    .hgrid { grid-template-rows: auto minmax(0, 1fr); }
+    .hcol { overflow: visible; }
+    .sgrid { min-height: 0; overflow: auto; }
+  }
   /* ---------- responsive ---------- */
   @media (max-width: 1180px) {
     .inbox, .inbox.rail-off { grid-template-columns: 360px minmax(0, 1fr); }
@@ -785,7 +810,7 @@
     return `<span class="lbl">소스</span><button class="chip${PF[v].size ? "" : " on"}" type="button" data-pf="${v}" data-k="" aria-pressed="${!PF[v].size}">전체</button>` +
       kinds.map((k) => {
         const n = counts[k] || 0, on = PF[v].has(k);
-        return `<button class="chip${on ? " on" : ""}${n ? "" : " zero"}" type="button" data-pf="${v}" data-k="${k}" aria-pressed="${on}" title="${esc(PILL_KO[k])} ${n}건"><span class="pi" aria-hidden="true">${PILL_ICON[k]}</span>${esc(PILL_KO[k])}<span class="pn">${n}</span></button>`;
+        return `<button class="chip${on ? " on" : ""}${n ? "" : " nil"}" type="button" data-pf="${v}" data-k="${k}" aria-pressed="${on}" title="${esc(PILL_KO[k])} ${n}건"><span class="pi" aria-hidden="true">${PILL_ICON[k]}</span>${esc(PILL_KO[k])}<span class="pn">${n}</span></button>`;
       }).join("");
   }
   document.addEventListener("click", (e) => {
@@ -1402,7 +1427,12 @@
   const HOME_POLL_MS = 60 * 1000, MIN_EV_PX = 22; // min block height
   // Timeline px per hour: 52 by default, taller on tall windows (52–72). Width never changes with it.
   let PPH = 52;
-  const fitPPH = () => { PPH = Math.round(Math.min(72, Math.max(52, (window.innerHeight - 320) / 12))); };
+  const fitPPH = () => {
+    // ≥900px the calendar body has a fixed height (viewport fill): fit 08–20 into it; below that, follow the window.
+    const bd = $("agenda"), fixed = window.matchMedia("(min-width: 900px)").matches;
+    const room = fixed && bd ? bd.clientHeight - (ui.cal?.view === "week" ? 76 : 34) : 0;
+    PPH = room > 300 ? Math.floor(Math.min(72, Math.max(40, room / 12))) : Math.round(Math.min(72, Math.max(52, (window.innerHeight - 320) / 12)));
+  };
   const RSVP = { needsAction: ["a", "응답 필요"], tentative: ["", "미정"], declined: ["", "거절"], organizer: ["", "주최"] };
   const GH_REASON = { review_requested: ["rv", "리뷰 요청", "👀"], my_pr_changes_requested: ["over", "변경 요청", "✍️"], my_pr_approved: ["ok", "승인됨", "✅"] };
   const MAIL_REASON = { reply: ["rv", "답장", "↩️"], approval: ["today", "결재", "🖊️"], deadline: ["over", "마감", "⏰"], request: ["", "확인", "📨"] };
