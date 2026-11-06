@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-import { refreshAgenda } from "./agenda.js";
+import { buildPrompt, refreshAgenda } from "./agenda.js";
 import { loadConfig } from "./config.js";
-import { heartbeat, listBriefings, refreshSessions } from "./heartbeat.js";
+import { buildHeartbeatPrompt, heartbeat, listBriefings, refreshSessions } from "./heartbeat.js";
+import { readUnprocessedEvents } from "./events.js";
 import { EVENTS_DIR, STATE_PATH, ensureDirs, localDay, log } from "./paths.js";
 import { startServer } from "./server.js";
 import { readState } from "./state.js";
@@ -71,6 +72,15 @@ async function main(): Promise<void> {
       console.log(JSON.stringify(a, null, 2));
       break;
     }
+    case "prompt": {
+      // Dry run: print the rendered prompt (no claude call, nothing committed).
+      const which = rest[0] ?? "heartbeat";
+      const cfg = loadConfig();
+      if (which === "agenda") console.log(buildPrompt(cfg));
+      else if (which === "heartbeat" || which === "briefing") console.log(buildHeartbeatPrompt(cfg, which === "briefing", readState(), readUnprocessedEvents().events));
+      else throw new Error(`unknown prompt: ${which} (heartbeat | briefing | agenda)`);
+      break;
+    }
     case "heartbeat": {
       const b = await heartbeat(loadConfig(), { force: true, daily: flag("--daily") });
       console.log(JSON.stringify(b, null, 2));
@@ -82,7 +92,7 @@ async function main(): Promise<void> {
       break;
     }
     default:
-      console.log(`usage: ned <run|heartbeat [--daily]|state|agenda>`);
+      console.log(`usage: ned <run|heartbeat [--daily]|state|agenda|prompt <heartbeat|briefing|agenda>>`);
       process.exit(1);
   }
 }

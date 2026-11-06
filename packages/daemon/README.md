@@ -17,18 +17,32 @@ pnpm --filter @ned/daemon build   # tsc → dist/
 node dist/cli.js run                 # 데몬: 대시보드(127.0.0.1:7777) + 이벤트 감시 + heartbeat 스케줄러
 node dist/cli.js heartbeat [--daily] # heartbeat 1회 강제 실행 (claude -p 호출, 결과 JSON 을 stdout 에 출력)
 node dist/cli.js state               # events → sessions 를 다시 계산해 state.json 을 갱신하고 출력
-node dist/cli.js agenda              # agenda 잡 1회 실행 (calendar/jira/github → agenda.json, 결과를 stdout 에 출력)
+node dist/cli.js agenda              # agenda 잡 1회 실행 (calendar/jira/github/gmail/slack → agenda.json, 결과를 stdout 에 출력)
+node dist/cli.js prompt agenda       # dry-run: heartbeat | briefing | agenda 프롬프트를 치환된 그대로 출력 (claude 호출·이벤트 커서 커밋 없음)
 ```
 
 `run` 은 시작 직후 heartbeat 를 한 번 돌린다. 이후 `heartbeat_minutes` 마다 tick 하며,
 새 세션 이벤트도 없고 `signal_check_minutes` 가 지나지 않았으면 LLM 을 부르지 않고 침묵한다.
 `briefing_time` 이 지난 첫 tick 은 `prompts/briefing.md` 로 아침 브리핑을 만든다 (하루 1회).
 
+**페르소나** (`config.persona`: `ned` | `alfred` | `oracle` | `jarvis`, 기본 `ned`; 모르는 값은 PUT 에서 무시, 읽을 때 `ned`):
+기능·데이터는 그대로 두고 말투 + 대시보드 테마 + 마크만 바꾼다. heartbeat.md · briefing.md · agenda.md 의 `{{PERSONA}}` 는
+`prompts/personas/<id>.md`(이름, 말투 규칙 5줄, 헤드라인 예시 3개, NED_OK 멘트 예시 3개, 금지사항)로 치환된다. 상태값
+`NED_OK` / `UPDATE` 와 JSON 키는 페르소나와 무관하게 그대로. `state.json.persona` 에 같은 값을 미러링한다(세션 갱신마다,
+`PUT /api/config` 직후) — 대시보드와 메뉴바 앱이 이걸 읽는다. 캐릭터 이름만 표기하고 로고·실제 대사·이미지는 쓰지 않는다.
+
+**트래킹 제외** (`config.filters`): `slack.exclude_channels`(채널명, `#` 없이) · `jira.exclude_projects`(프로젝트 키, 대문자 영숫자만 —
+JQL 에 그대로 들어가므로 그 밖의 값은 버린다). heartbeat.md · briefing.md · agenda.md 의 `{{FILTERS}}` 가
+`제외 채널: #a, #b / 제외 Jira 프로젝트: KEY1, KEY2 — 이들에 속한 항목은 조회·보고하지 말 것` + Jira JQL 에 넣을
+`AND project NOT IN (...)` + Slack 결과에서 버리라는 지시로 바뀐다(비면 `(없음)`). agenda 는 JQL 에 그 절을 직접 넣고
+(`{{JQL_EXCLUDE}}`), 정규화 단계에서 제외 프로젝트 이슈·제외 채널 Slack 항목을 한 번 더 걸러낸다. `PUT /api/config` 는
+`filters` 를 소스별로 깊게 머지한다 (`filters.slack` 만 보내도 `filters.jira` 유지). API 라우트는 config.yaml 을 매번 새로 읽는다.
+
 **Agenda 잡** (`src/agenda.ts`, `prompts/agenda.md`): 대시보드 HOME 탭용 구조화 데이터. 시작 직후 1회,
 이후 `agenda_refresh_minutes`(기본 60) 마다, 그리고 `POST /api/agenda/refresh` 때 `claude -p` 를 돌린다.
 허용 도구는 `ToolSearch`, Calendar `list_events`/`search_events`, Jira `searchJiraIssuesUsingJql`,
-`Bash(gh search prs:*)`/`Bash(gh pr list:*)`/`Bash(gh api:*)` 뿐이고 `--max-turns 10`. `sources.*` 가 꺼진 블록은
-조회하지 않고 `[]`. 동시에 여러 번 요청돼도 실행 중인 한 번을 공유한다 (busy guard). 모델 출력이 깨지면
+`Bash(gh search prs:*)`/`Bash(gh pr list:*)`/`Bash(gh api:*)`, Gmail `search_threads`, Slack `slack_search_public_and_private`/`slack_read_thread` 뿐이고 `--max-turns 16`. `sources.*` 가 꺼진 블록은
+조회하지 않고 `[]` (mail·slack 은 `null`). 동시에 여러 번 요청돼도 실행 중인 한 번을 공유한다 (busy guard). 모델 출력이 깨지면
 이전 목록을 유지하고 `error` 를 채운다. `NED_NO_LLM=1` 이면 claude 없이 빈 agenda 를 쓴다.
 
 ### HTTP API
@@ -55,13 +69,17 @@ Agenda 응답 형태:
   "updated_at": 0, "cost_usd": 0, "error": "(실패 시에만)",
   "calendar": [{"id":"","title":"","start":"ISO","end":"ISO","all_day":false,"location":"","url":"","meet_url":"","rsvp":"accepted|needsAction|declined|tentative|organizer","attendees":0}],
   "jira":     [{"key":"","title":"","status":"","priority":"","due":"YYYY-MM-DD|null","url":"","updated":"ISO"}],
-  "github":   [{"repo":"owner/name","number":0,"title":"","url":"","author":"","updated":"ISO","reason":"review_requested|my_pr_changes_requested|my_pr_approved"}]
+  "github":   [{"repo":"owner/name","number":0,"title":"","url":"","author":"","updated":"ISO","reason":"review_requested|my_pr_changes_requested|my_pr_approved"}],
+  "mail":     null | {"summary":"한 줄 요약 | \"\"","unread":0,"unread_capped":false,"items":[{"id":"thread id","from":"","subject":"","snippet":"","received":"ISO","url":"","reason":"reply|approval|deadline|request","why":"한 줄"}]},
+  "slack":    null | {"summary":"한 줄 요약 | \"\"","items":[{"channel":"#채널|DM|그룹 DM","from":"","text":"한 줄","url":"permalink","ts":"ISO","reason":"mention|dm|thread"}]}
 }
 ```
 
 - calendar: 오늘(로컬 날짜) 일정, 종일 일정 먼저 그다음 시작 시각 순
 - jira: `assignee = currentUser() AND statusCategory != Done`, 마감 오름차순 → 갱신 내림차순, 최대 25
 - github: 내 리뷰 요청 PR + 변경 요청/승인된 내 열린 PR, 최대 20
+- mail: `unread` 는 최근 2일 안 읽은 받은편지함 스레드 수(최대 50, 50 에 닿으면 `unread_capped: true` → 홈은 "50+통"), `items` 는 최근 3일 중 사람이 보낸 업무 메일로 내 행동이 필요한 것(최대 10, 급한 순). 본문은 열지 않고 검색 결과의 발신자·제목·스니펫만 본다. 읽음 처리 등 쓰기는 하지 않는다. `mail: null` 은 아직 안 가져옴(mail 도입 전 agenda.json) 또는 gmail 소스 꺼짐. `GET /api/agenda`·`POST /api/agenda/refresh` 응답에는 `mail_enabled`(= `sources.gmail`)가 붙고, false 면 홈은 메일 묶음을 숨긴다
+- slack: 최근 24시간, 나를 멘션했거나 DM/스레드에서 질문·요청했고 내가 아직 답하지 않은 것(최대 10, 급한 순). 검색 3번(멘션 `<@me>` / `is:dm` / `is:thread with:<@me>`)과 필요할 때만 `slack_read_thread` 최대 3개. Slack epoch ts 는 ISO 로 바꾼다. 응답에는 `slack_enabled`(= `sources.slack`)가 붙고, false 면 홈은 Slack 카드를 숨긴다
 
 Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` (ms 타임스탬프).
 
@@ -94,13 +112,14 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
 ~/.ned/
   config.yaml            설정 (없으면 기본값으로 생성). heartbeat_minutes, signal_check_minutes,
                          briefing_time, quiet_hours, sources.{gmail,slack,jira,github,sentry,calendar},
+                         persona (ned|alfred|oracle|jarvis), filters.{slack.exclude_channels, jira.exclude_projects} (트래킹 제외, 기본 []),
                          port, claude_model, claude_max_turns, session_stale_minutes, agenda_refresh_minutes, notify
   state.json             menu bar / 대시보드가 읽는 단일 뷰 (sessions, attention, last_briefing, quiet …)
   cursor.json            heartbeat 가 처리한 마지막 이벤트 ts
   events/YYYY-MM-DD.jsonl  훅(packages/hook/ned-hook.sh)이 append 하는 이벤트. 로컬 날짜 기준
   briefings/<iso-ts>.json  heartbeat / daily 브리핑 결과 (status, action_items, updates, fyi, sessions, cost_usd)
   briefings/sent.log     이미 알린 항목 키 (title 또는 url) — 중복 억제
-  agenda.json            HOME 탭 agenda: {updated_at, cost_usd, error?, calendar, jira, github}
+  agenda.json            HOME 탭 agenda: {updated_at, cost_usd, error?, calendar, jira, github, mail, slack}
   todos.json             개인 할 일. 완료 후 7일 지난 항목은 로드할 때 정리된다
   dismissed.json         dismiss 한 세션 attention: {id: {alert_ts, at}} (7일 보관)
   logs/daemon.log        데몬 로그

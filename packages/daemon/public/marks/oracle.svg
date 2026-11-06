@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="mark" viewBox="0 14 64 40" aria-hidden="true">
+  <!-- Oracle: a plain headset (band, ear cups, mic boom). Generic shape, no character art. -->
+  <defs><clipPath id="lc-oracle"><rect x="9" y="32" width="10" height="14" rx="3.5"/><rect x="45" y="32" width="10" height="14" rx="3.5"/></clipPath></defs>
+  <rect class="lens" x="9" y="32" width="10" height="14" rx="3.5"/><rect class="lens" x="45" y="32" width="10" height="14" rx="3.5"/>
+  <g clip-path="url(#lc-oracle)"><rect class="sweep" x="0" y="20" width="10" height="28" rx="3"/></g>
+  <path class="frame" d="M13 33a19 17 0 0 1 38 0"/>
+  <rect class="frame" x="9" y="32" width="10" height="14" rx="3.5"/><rect class="frame" x="45" y="32" width="10" height="14" rx="3.5"/>
+  <path class="frame" d="M50 46q-2 5.5-12 6.5"/>
+  <circle class="glint" cx="35" cy="52.5" r="1.6"/>
+  <path class="glint" d="M12.5 36v6M51.5 36v6"/>
+  <text class="bang" x="29" y="30">!</text>
+  <path class="moon" transform="translate(0 16)" d="M33.5 1.5a6 6 0 1 0 5.5 8.5a4.6 4.6 0 0 1-5.5-8.5z"/>
+</svg>

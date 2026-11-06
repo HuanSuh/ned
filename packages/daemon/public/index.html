@@ -4,29 +4,178 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ned</title>
+<script>try { const p = localStorage.getItem("ned.persona"); if (["ned", "alfred", "oracle", "jarvis"].includes(p)) document.documentElement.dataset.persona = p; } catch {} if (!document.documentElement.dataset.persona) document.documentElement.dataset.persona = "ned";</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;700&family=Share+Tech+Mono&display=swap">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%231c2430'/><g fill='none' stroke='%23f4f1e8' stroke-width='4.5' stroke-linecap='round'><circle cx='20' cy='34' r='10'/><circle cx='44' cy='34' r='10'/><path d='M30 33q2-3.5 4 0'/><path d='M10 31 5 26M54 31l5-5'/></g><path d='M14.5 30.5a6.5 6.5 0 0 1 5-4' stroke='%237fe0c4' stroke-width='2.6' stroke-linecap='round' fill='none'/><path d='M38.5 30.5a6.5 6.5 0 0 1 5-4' stroke='%237fe0c4' stroke-width='2.6' stroke-linecap='round' fill='none'/></svg>">
 <style>
   /* Ned dashboard — inbox/triage body (direction C) wearing the sidekick identity (direction E).
-     Dark first; light via prefers-color-scheme. One accent (mint = Ned's lens glint); colour otherwise means status. */
-  :root {
+     Dark first; light via prefers-color-scheme.
+     Two accents: --hero (red: primary buttons, active tab, now-line, selection) and --info (blue: links, info badges,
+     secondary emphasis). Mint stays Ned's own colour (lens mark, live LED). Status colours are separate:
+     --red is *error* only — deeper than --hero and drawn outlined/dashed so it never reads as the accent. */
+  :root, [data-persona="ned"] {
     color-scheme: dark light;
-    --bg: #101317; --side: #13171c; --pane: #171b21; --raise: #1d232b; --hover: #20262e; --sel: #1d2c2a; --line: #262d36;
-    --fg: #e7eaee; --dim: #9aa3ae; --faint: #5f6875; --edge: #3a4554;
-    --mint: #3ddbb0; --amber: #f5b03a; --red: #ff6b5f; --blue: #6c9cff; --lens: #3ddbb0;
-    --accent: var(--mint); --accent-ink: #062019; --bubble: #1c232c;
+    --bg: #0f1420; --side: #131a2a; --pane: #171f31; --raise: #1d263b; --hover: #232d45; --sel: #2a1d2b; --line: #28324b;
+    --fg: #e8ebf3; --dim: #9ca6bd; --faint: #626d88; --edge: #3b4867;
+    --hero: #e23636; --hero-fill: #d42a2a; --hero-text: #ff6161; --hero-ink: #ffffff; --info: #6b8ff5; --info-ink: #ffffff; --blue2: #1f4fd1;
+    --mint: #5cc4a3; --amber: #f0ad3c; --red: #f08c80; --blue: var(--info); --lens: #5cc4a3;
+    --accent: var(--hero-fill); --accent-ink: #ffffff; --mk-frame: var(--fg); --mk-glint: var(--lens); --mk-fill: transparent; --bubble: #1b2337; --violet: #a991f0;
+    --web: #c9d4f2; --web-a: .04;
     --sans: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", "Noto Sans KR", sans-serif;
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   }
   @media (prefers-color-scheme: light) {
-    :root { --bg: #eef0ea; --side: #f7f8f4; --pane: #ffffff; --raise: #ffffff; --hover: #eceee8; --sel: #dff4ec; --line: #dfe2da;
-      --fg: #1c2430; --dim: #5d6573; --faint: #9aa1ad; --edge: #1c2430;
-      --mint: #138a69; --amber: #b87700; --red: #d23a30; --blue: #2f6fe0; --lens: #18a57f;
-      --accent-ink: #ffffff; --bubble: #f6f7f2; }
+    :root, [data-persona="ned"] { --bg: #f6f2ea; --side: #fbf8f2; --pane: #fffdf9; --raise: #ffffff; --hover: #efe9de; --sel: #fbe7e3; --line: #e5ddcf;
+      --fg: #1c2133; --dim: #5d6376; --faint: #9a9ead; --edge: #1c2133;
+      --hero: #d42a2a; --hero-fill: #d42a2a; --hero-text: #b51f1f; --info: #1f4fd1; --blue2: #1f4fd1;
+      --mint: #2d8a6d; --amber: #a96b00; --red: #8f1d17; --lens: #2f9a79;
+      --bubble: #f8f3ea; --violet: #6a46c4; --web: #2a3350; --web-a: .045; }
   }
+  /* ---------- personas ----------
+     config.persona → <html data-persona>. Same features/data; voice (JS table + prompts/personas/*.md), tokens, fonts,
+     background pattern and mark (marks/<id>.svg) change. Rules are written on [data-persona="…"] (not only :root) so the
+     settings preview cards render each persona in its own colours. Every block re-declares the derived tokens
+     (--accent, --blue …) because a var() reference resolves where it is declared. Character names only — no logos,
+     quotes or likenesses; marks and patterns are plain geometry. */
+  [data-persona] { --head: var(--sans); --head-w: 650; }
+  .card > .hd h2, .nm b, .pcard .pn { font-family: var(--head); font-weight: var(--head-w); }
+
+  /* alfred — near-black + very dark navy, one restrained gold, serif headlines, gothic/art-deco lattice, header spotlight */
+  [data-persona="alfred"] {
+    --bg: #0b0d12; --side: #0e1119; --pane: #12151d; --raise: #171b25; --hover: #1d2230; --sel: #1d1b14; --line: #232938;
+    --fg: #ece6d6; --dim: #a9a291; --faint: #6f6c64; --edge: #3b3a35;
+    --hero: #d4af37; --hero-fill: #d4af37; --hero-text: #d9bf6a; --hero-ink: #14110a; --info: #d9bf6a; --info-ink: #14110a; --blue2: #d4af37;
+    --mint: #8fae99; --amber: #d9a441; --red: #f0907f; --lens: #d4af37; --violet: #b9ae8f;
+    --accent: var(--hero-fill); --accent-ink: var(--hero-ink); --blue: var(--info); --bubble: #151925;
+    --web: #d4af37; --web-a: .035;
+    --mk-frame: #d4af37; --mk-glint: #f3dc8f; --mk-fill: color-mix(in srgb, #d4af37 14%, transparent);
+    --head: "Noto Serif KR", "AppleMyungjo", "Nanum Myeongjo", Georgia, serif; --head-w: 700;
+  }
+  @media (prefers-color-scheme: light) {
+    [data-persona="alfred"] { --bg: #f3efe6; --side: #f9f6ef; --pane: #fffdf8; --raise: #ffffff; --hover: #ebe5d8; --sel: #f3ead2; --line: #e0d8c6;
+      --fg: #1b1a17; --dim: #5f5a50; --faint: #9c968a; --edge: #1b1a17;
+      --hero: #8a6d1e; --hero-fill: #8a6d1e; --hero-text: #7a5f15; --hero-ink: #ffffff; --info: #7a5f15; --info-ink: #ffffff; --blue2: #8a6d1e;
+      --mint: #3f7a55; --amber: #9a6700; --red: #8f1d17; --lens: #8a6d1e; --bubble: #f8f3e8; --web: #5a4610; --web-a: .05;
+      --mk-frame: #8a6d1e; --mk-glint: #b8932f; }
+  }
+
+  /* oracle — black + terminal green, purple secondary, monospace, scanlines + grid, cards as monitor tiles */
+  [data-persona="oracle"] {
+    --bg: #050605; --side: #080c09; --pane: #0a110c; --raise: #0e1811; --hover: #122217; --sel: #102a1a; --line: #183324;
+    --fg: #c9f3d8; --dim: #7fbf98; --faint: #4d7d61; --edge: #2b5b40;
+    --hero: #3ddc84; --hero-fill: #3ddc84; --hero-text: #3ddc84; --hero-ink: #03140a; --info: #a78bfa; --info-ink: #120a26; --blue2: #8b5cf6;
+    --mint: #3ddc84; --amber: #f2b33d; --red: #ff8a7a; --lens: #3ddc84; --violet: #a78bfa;
+    --accent: var(--hero-fill); --accent-ink: var(--hero-ink); --blue: var(--info); --bubble: #0c160f;
+    --web: #3ddc84; --web-a: .035; --scan-a: .22;
+    --mk-frame: #3ddc84; --mk-glint: #a78bfa; --mk-fill: color-mix(in srgb, #3ddc84 12%, transparent);
+    --sans: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace; --head: var(--sans); --head-w: 700;
+  }
+  @media (prefers-color-scheme: light) {
+    [data-persona="oracle"] { --bg: #edf3ee; --side: #f5f9f5; --pane: #fbfdfb; --raise: #ffffff; --hover: #e3ece5; --sel: #dcefe2; --line: #d3e1d6;
+      --fg: #0c2016; --dim: #3f6a52; --faint: #86a493; --edge: #0c2016;
+      --hero: #0d8a4a; --hero-fill: #0d7a42; --hero-text: #0d7a42; --hero-ink: #ffffff; --info: #6d28d9; --info-ink: #ffffff; --blue2: #6d28d9;
+      --mint: #0d8a4a; --amber: #946300; --red: #8f1d17; --lens: #0d8a4a; --bubble: #f2f8f3; --web: #0d5a32; --web-a: .05; --scan-a: .08;
+      --mk-frame: #0d7a42; --mk-glint: #6d28d9; }
+  }
+
+  /* jarvis — dark navy + cyan glow; gold and hot-rod red only as tiny secondary (badges / warnings); HUD rings; thin digital numerals */
+  [data-persona="jarvis"] {
+    --bg: #08101f; --side: #0b1528; --pane: #0f1b33; --raise: #14223d; --hover: #192a4a; --sel: #0f3049; --line: #1d3254;
+    --fg: #e3f1fb; --dim: #94b3cc; --faint: #5b7692; --edge: #2e4c71;
+    --hero: #38bdf8; --hero-fill: #38bdf8; --hero-text: #38bdf8; --hero-ink: #032131; --info: #7dd3fc; --info-ink: #032131; --blue2: #38bdf8;
+    --mint: #5fd4c0; --amber: #f0b429; --red: #ff8f86; --hot: #c0392b; --lens: #38bdf8; --violet: #a7a3ff;
+    --accent: var(--hero-fill); --accent-ink: var(--hero-ink); --blue: var(--info); --bubble: #122140;
+    --web: #7dd3fc; --web-a: .045; --glow: color-mix(in srgb, #38bdf8 45%, transparent);
+    --mk-frame: #38bdf8; --mk-glint: #7dd3fc; --mk-fill: color-mix(in srgb, #38bdf8 10%, transparent);
+    --num: "Share Tech Mono", "SF Mono", ui-monospace, monospace;
+    --head: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Helvetica Neue", sans-serif; --head-w: 300;
+  }
+  @media (prefers-color-scheme: light) {
+    [data-persona="jarvis"] { --bg: #eef5fb; --side: #f6fafd; --pane: #ffffff; --raise: #ffffff; --hover: #e4eef7; --sel: #ddeffa; --line: #d4e3ef;
+      --fg: #0d2236; --dim: #4b6680; --faint: #92a8bb; --edge: #0d2236;
+      --hero: #0284c7; --hero-fill: #0369a1; --hero-text: #0369a1; --hero-ink: #ffffff; --info: #075985; --info-ink: #ffffff; --blue2: #0284c7;
+      --mint: #0f8f7c; --amber: #f0b429; --red: #8f1d17; --hot: #c0392b; --lens: #0284c7; --bubble: #f2f8fd; --web: #0c4a6e; --web-a: .05;
+      --glow: color-mix(in srgb, #0284c7 28%, transparent); --mk-frame: #0369a1; --mk-glint: #0284c7; }
+  }
+
+  /* ---- marks: ned's glints split red / blue; jarvis' core pulses (reduced-motion rule elsewhere stops it) ---- */
+  [data-persona="ned"] .mark .g1 { stroke: var(--hero); }
+  [data-persona="ned"] .mark .g2 { stroke: var(--blue2); }
+  .mark .core { fill: var(--hero); stroke: none; }
+  [data-persona="jarvis"] .mark .core { animation: core 2.6s ease-in-out infinite; transform-origin: 32px 34px; transform-box: view-box; }
+  @keyframes core { 0%, 100% { opacity: .45; transform: scale(.85); } 50% { opacity: 1; transform: scale(1.12); } }
+
+  /* ---- ned: bolder red + blue ---- */
+  :root[data-persona="ned"] header.hq { border-bottom-color: transparent; }
+  :root[data-persona="ned"] header.hq::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; pointer-events: none; background: linear-gradient(90deg, var(--hero), var(--blue2)); }
+  :root[data-persona="ned"] .row.sel { border-left-color: var(--blue2); }
+  :root[data-persona="ned"] .stk.b, :root[data-persona="ned"] .chipx.rv { background: var(--blue2); color: #fff; }
+  :root[data-persona="ned"] .card { position: relative; }
+  :root[data-persona="ned"] .card > .hd { padding-right: 34px; }
+  :root[data-persona="ned"] .card::before { content: ""; position: absolute; top: 0; right: 0; width: 28px; height: 28px; pointer-events: none; border-top-right-radius: 10px; background: var(--fg); opacity: .18;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M40 0L0.0 0.0M40 0L3.0 15.3M40 0L11.7 28.3M40 0L24.7 37.0M40 0L40.0 40.0M28.0 0.0L28.9 4.6L31.5 8.5L35.4 11.1L40.0 12.0M18.0 0.0L19.7 8.4L24.4 15.6L31.6 20.3L40.0 22.0M8.0 0.0L10.4 12.2L17.4 22.6L27.8 29.6L40.0 32.0' fill='none' stroke='%23000' stroke-width='1'/%3E%3C/svg%3E") 0 0 / 28px 28px no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M40 0L0.0 0.0M40 0L3.0 15.3M40 0L11.7 28.3M40 0L24.7 37.0M40 0L40.0 40.0M28.0 0.0L28.9 4.6L31.5 8.5L35.4 11.1L40.0 12.0M18.0 0.0L19.7 8.4L24.4 15.6L31.6 20.3L40.0 22.0M8.0 0.0L10.4 12.2L17.4 22.6L27.8 29.6L40.0 32.0' fill='none' stroke='%23000' stroke-width='1'/%3E%3C/svg%3E") 0 0 / 28px 28px no-repeat; }
+
+  /* ---- alfred: gold top border on cards, spotlight in the header, one accent everywhere ---- */
+  :root[data-persona="alfred"] body::before { -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 80'%3E%3Cg fill='none' stroke='%23000' stroke-width='1'%3E%3Cpath d='M0 80V34C0 18 12 7 24 0C36 7 48 18 48 34V80'/%3E%3Cpath d='M24 0V80'/%3E%3Cpath d='M8 80V40C8 30 15 22 24 17C33 22 40 30 40 40V80'/%3E%3Cpath d='M0 60H8M40 60H48M0 70H8M40 70H48'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 48px 80px repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 80'%3E%3Cg fill='none' stroke='%23000' stroke-width='1'%3E%3Cpath d='M0 80V34C0 18 12 7 24 0C36 7 48 18 48 34V80'/%3E%3Cpath d='M24 0V80'/%3E%3Cpath d='M8 80V40C8 30 15 22 24 17C33 22 40 30 40 40V80'/%3E%3Cpath d='M0 60H8M40 60H48M0 70H8M40 70H48'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 48px 80px repeat; }
+  :root[data-persona="alfred"] .card, :root[data-persona="alfred"] .scard { border-top: 1px solid color-mix(in srgb, var(--hero) 70%, transparent); }
+  :root[data-persona="alfred"] .g-ned, :root[data-persona="alfred"] .g-jira, :root[data-persona="alfred"] .g-gh, :root[data-persona="alfred"] .g-mail, :root[data-persona="alfred"] .g-slack, :root[data-persona="alfred"] .g-me { --gc: color-mix(in srgb, var(--hero) 55%, var(--line)); }
+  :root[data-persona="alfred"] header.hq { background: radial-gradient(60% 260% at 18% -150%, color-mix(in srgb, var(--hero) 22%, transparent), transparent 70%), color-mix(in srgb, var(--side) 82%, transparent); }
+  :root[data-persona="alfred"] .bubble .lead { font-family: var(--head); font-weight: 500; }
+
+  /* ---- oracle: grid + scanlines, monitor-tile cards (bezel + top LED bar), fixed-width 24h numerals ---- */
+  :root[data-persona="oracle"] body::before {
+    -webkit-mask: linear-gradient(#000 1px, transparent 1px) 0 0 / 28px 28px, linear-gradient(90deg, #000 1px, transparent 1px) 0 0 / 28px 28px;
+    mask: linear-gradient(#000 1px, transparent 1px) 0 0 / 28px 28px, linear-gradient(90deg, #000 1px, transparent 1px) 0 0 / 28px 28px; }
+  :root[data-persona="oracle"] body::after { content: ""; position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: var(--scan-a);
+    background: repeating-linear-gradient(0deg, rgba(0, 0, 0, .45) 0 1px, transparent 1px 3px); }
+  :root[data-persona="oracle"] body { font-variant-numeric: tabular-nums; }
+  :root[data-persona="oracle"] .card { position: relative; border-radius: 4px; border-color: #1f3d2b; box-shadow: inset 0 0 0 3px var(--bg), inset 0 0 0 4px #13281c, 0 0 0 1px #050605; }
+  :root[data-persona="oracle"] .card::after { content: ""; position: absolute; top: 5px; left: 14px; width: 64px; height: 2px; border-radius: 1px; pointer-events: none;
+    background: linear-gradient(90deg, var(--hero) 0 26px, transparent 26px 32px, var(--blue2) 32px 46px, transparent 46px 52px, color-mix(in srgb, var(--hero) 40%, transparent) 52px); }
+  :root[data-persona="oracle"] .scard { border-top-width: 1px; }
+
+  /* ---- jarvis: HUD rings, cyan-glow card borders, gold / hot-rod red only on badges & warnings, thin digital numerals ---- */
+  :root[data-persona="jarvis"] body::before {
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 840 840'%3E%3Cg fill='none' stroke='%23000' stroke-width='1.4'%3E%3Ccircle cx='420' cy='420' r='70'/%3E%3Ccircle cx='420' cy='420' r='140' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='200'/%3E%3Ccircle cx='420' cy='420' r='260' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='320'/%3E%3Ccircle cx='420' cy='420' r='380' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='410'/%3E%3Cpath d='M765.0 420.0L781.0 420.0M763.7 450.1L770.7 450.7M759.8 479.9L766.7 481.1M753.2 509.3L760.0 511.1M744.2 538.0L750.8 540.4M732.7 565.8L739.0 568.8M718.8 592.5L732.6 600.5M702.6 617.9L708.3 621.9M684.3 641.8L689.6 646.3M664.0 664.0L668.9 668.9M641.8 684.3L646.3 689.6M617.9 702.6L621.9 708.3M592.5 718.8L600.5 732.6M565.8 732.7L568.8 739.0M538.0 744.2L540.4 750.8M509.3 753.2L511.1 760.0M479.9 759.8L481.1 766.7M450.1 763.7L450.7 770.7M420.0 765.0L420.0 781.0M389.9 763.7L389.3 770.7M360.1 759.8L358.9 766.7M330.7 753.2L328.9 760.0M302.0 744.2L299.6 750.8M274.2 732.7L271.2 739.0M247.5 718.8L239.5 732.6M222.1 702.6L218.1 708.3M198.2 684.3L193.7 689.6M176.0 664.0L171.1 668.9M155.7 641.8L150.4 646.3M137.4 617.9L131.7 621.9M121.2 592.5L107.4 600.5M107.3 565.8L101.0 568.8M95.8 538.0L89.2 540.4M86.8 509.3L80.0 511.1M80.2 479.9L73.3 481.1M76.3 450.1L69.3 450.7M75.0 420.0L59.0 420.0M76.3 389.9L69.3 389.3M80.2 360.1L73.3 358.9M86.8 330.7L80.0 328.9M95.8 302.0L89.2 299.6M107.3 274.2L101.0 271.2M121.2 247.5L107.4 239.5M137.4 222.1L131.7 218.1M155.7 198.2L150.4 193.7M176.0 176.0L171.1 171.1M198.2 155.7L193.7 150.4M222.1 137.4L218.1 131.7M247.5 121.2L239.5 107.4M274.2 107.3L271.2 101.0M302.0 95.8L299.6 89.2M330.7 86.8L328.9 80.0M360.1 80.2L358.9 73.3M389.9 76.3L389.3 69.3M420.0 75.0L420.0 59.0M450.1 76.3L450.7 69.3M479.9 80.2L481.1 73.3M509.3 86.8L511.1 80.0M538.0 95.8L540.4 89.2M565.8 107.3L568.8 101.0M592.5 121.2L600.5 107.4M617.9 137.4L621.9 131.7M641.8 155.7L646.3 150.4M664.0 176.0L668.9 171.1M684.3 198.2L689.6 193.7M702.6 222.1L708.3 218.1M718.8 247.5L732.6 239.5M732.7 274.2L739.0 271.2M744.2 302.0L750.8 299.6M753.2 330.7L760.0 328.9M759.8 360.1L766.7 358.9M763.7 389.9L770.7 389.3M420 0V840M0 420H840'/%3E%3C/g%3E%3C/svg%3E") calc(100% + 380px) -380px / 840px 840px no-repeat, url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 840 840'%3E%3Cg fill='none' stroke='%23000' stroke-width='1.4'%3E%3Ccircle cx='420' cy='420' r='70'/%3E%3Ccircle cx='420' cy='420' r='140' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='200'/%3E%3Ccircle cx='420' cy='420' r='260' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='320'/%3E%3Ccircle cx='420' cy='420' r='380' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='410'/%3E%3Cpath d='M765.0 420.0L781.0 420.0M763.7 450.1L770.7 450.7M759.8 479.9L766.7 481.1M753.2 509.3L760.0 511.1M744.2 538.0L750.8 540.4M732.7 565.8L739.0 568.8M718.8 592.5L732.6 600.5M702.6 617.9L708.3 621.9M684.3 641.8L689.6 646.3M664.0 664.0L668.9 668.9M641.8 684.3L646.3 689.6M617.9 702.6L621.9 708.3M592.5 718.8L600.5 732.6M565.8 732.7L568.8 739.0M538.0 744.2L540.4 750.8M509.3 753.2L511.1 760.0M479.9 759.8L481.1 766.7M450.1 763.7L450.7 770.7M420.0 765.0L420.0 781.0M389.9 763.7L389.3 770.7M360.1 759.8L358.9 766.7M330.7 753.2L328.9 760.0M302.0 744.2L299.6 750.8M274.2 732.7L271.2 739.0M247.5 718.8L239.5 732.6M222.1 702.6L218.1 708.3M198.2 684.3L193.7 689.6M176.0 664.0L171.1 668.9M155.7 641.8L150.4 646.3M137.4 617.9L131.7 621.9M121.2 592.5L107.4 600.5M107.3 565.8L101.0 568.8M95.8 538.0L89.2 540.4M86.8 509.3L80.0 511.1M80.2 479.9L73.3 481.1M76.3 450.1L69.3 450.7M75.0 420.0L59.0 420.0M76.3 389.9L69.3 389.3M80.2 360.1L73.3 358.9M86.8 330.7L80.0 328.9M95.8 302.0L89.2 299.6M107.3 274.2L101.0 271.2M121.2 247.5L107.4 239.5M137.4 222.1L131.7 218.1M155.7 198.2L150.4 193.7M176.0 176.0L171.1 171.1M198.2 155.7L193.7 150.4M222.1 137.4L218.1 131.7M247.5 121.2L239.5 107.4M274.2 107.3L271.2 101.0M302.0 95.8L299.6 89.2M330.7 86.8L328.9 80.0M360.1 80.2L358.9 73.3M389.9 76.3L389.3 69.3M420.0 75.0L420.0 59.0M450.1 76.3L450.7 69.3M479.9 80.2L481.1 73.3M509.3 86.8L511.1 80.0M538.0 95.8L540.4 89.2M565.8 107.3L568.8 101.0M592.5 121.2L600.5 107.4M617.9 137.4L621.9 131.7M641.8 155.7L646.3 150.4M664.0 176.0L668.9 171.1M684.3 198.2L689.6 193.7M702.6 222.1L708.3 218.1M718.8 247.5L732.6 239.5M732.7 274.2L739.0 271.2M744.2 302.0L750.8 299.6M753.2 330.7L760.0 328.9M759.8 360.1L766.7 358.9M763.7 389.9L770.7 389.3M420 0V840M0 420H840'/%3E%3C/g%3E%3C/svg%3E") -460px calc(100% + 460px) / 1000px 1000px no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 840 840'%3E%3Cg fill='none' stroke='%23000' stroke-width='1.4'%3E%3Ccircle cx='420' cy='420' r='70'/%3E%3Ccircle cx='420' cy='420' r='140' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='200'/%3E%3Ccircle cx='420' cy='420' r='260' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='320'/%3E%3Ccircle cx='420' cy='420' r='380' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='410'/%3E%3Cpath d='M765.0 420.0L781.0 420.0M763.7 450.1L770.7 450.7M759.8 479.9L766.7 481.1M753.2 509.3L760.0 511.1M744.2 538.0L750.8 540.4M732.7 565.8L739.0 568.8M718.8 592.5L732.6 600.5M702.6 617.9L708.3 621.9M684.3 641.8L689.6 646.3M664.0 664.0L668.9 668.9M641.8 684.3L646.3 689.6M617.9 702.6L621.9 708.3M592.5 718.8L600.5 732.6M565.8 732.7L568.8 739.0M538.0 744.2L540.4 750.8M509.3 753.2L511.1 760.0M479.9 759.8L481.1 766.7M450.1 763.7L450.7 770.7M420.0 765.0L420.0 781.0M389.9 763.7L389.3 770.7M360.1 759.8L358.9 766.7M330.7 753.2L328.9 760.0M302.0 744.2L299.6 750.8M274.2 732.7L271.2 739.0M247.5 718.8L239.5 732.6M222.1 702.6L218.1 708.3M198.2 684.3L193.7 689.6M176.0 664.0L171.1 668.9M155.7 641.8L150.4 646.3M137.4 617.9L131.7 621.9M121.2 592.5L107.4 600.5M107.3 565.8L101.0 568.8M95.8 538.0L89.2 540.4M86.8 509.3L80.0 511.1M80.2 479.9L73.3 481.1M76.3 450.1L69.3 450.7M75.0 420.0L59.0 420.0M76.3 389.9L69.3 389.3M80.2 360.1L73.3 358.9M86.8 330.7L80.0 328.9M95.8 302.0L89.2 299.6M107.3 274.2L101.0 271.2M121.2 247.5L107.4 239.5M137.4 222.1L131.7 218.1M155.7 198.2L150.4 193.7M176.0 176.0L171.1 171.1M198.2 155.7L193.7 150.4M222.1 137.4L218.1 131.7M247.5 121.2L239.5 107.4M274.2 107.3L271.2 101.0M302.0 95.8L299.6 89.2M330.7 86.8L328.9 80.0M360.1 80.2L358.9 73.3M389.9 76.3L389.3 69.3M420.0 75.0L420.0 59.0M450.1 76.3L450.7 69.3M479.9 80.2L481.1 73.3M509.3 86.8L511.1 80.0M538.0 95.8L540.4 89.2M565.8 107.3L568.8 101.0M592.5 121.2L600.5 107.4M617.9 137.4L621.9 131.7M641.8 155.7L646.3 150.4M664.0 176.0L668.9 171.1M684.3 198.2L689.6 193.7M702.6 222.1L708.3 218.1M718.8 247.5L732.6 239.5M732.7 274.2L739.0 271.2M744.2 302.0L750.8 299.6M753.2 330.7L760.0 328.9M759.8 360.1L766.7 358.9M763.7 389.9L770.7 389.3M420 0V840M0 420H840'/%3E%3C/g%3E%3C/svg%3E") calc(100% + 380px) -380px / 840px 840px no-repeat, url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 840 840'%3E%3Cg fill='none' stroke='%23000' stroke-width='1.4'%3E%3Ccircle cx='420' cy='420' r='70'/%3E%3Ccircle cx='420' cy='420' r='140' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='200'/%3E%3Ccircle cx='420' cy='420' r='260' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='320'/%3E%3Ccircle cx='420' cy='420' r='380' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='410'/%3E%3Cpath d='M765.0 420.0L781.0 420.0M763.7 450.1L770.7 450.7M759.8 479.9L766.7 481.1M753.2 509.3L760.0 511.1M744.2 538.0L750.8 540.4M732.7 565.8L739.0 568.8M718.8 592.5L732.6 600.5M702.6 617.9L708.3 621.9M684.3 641.8L689.6 646.3M664.0 664.0L668.9 668.9M641.8 684.3L646.3 689.6M617.9 702.6L621.9 708.3M592.5 718.8L600.5 732.6M565.8 732.7L568.8 739.0M538.0 744.2L540.4 750.8M509.3 753.2L511.1 760.0M479.9 759.8L481.1 766.7M450.1 763.7L450.7 770.7M420.0 765.0L420.0 781.0M389.9 763.7L389.3 770.7M360.1 759.8L358.9 766.7M330.7 753.2L328.9 760.0M302.0 744.2L299.6 750.8M274.2 732.7L271.2 739.0M247.5 718.8L239.5 732.6M222.1 702.6L218.1 708.3M198.2 684.3L193.7 689.6M176.0 664.0L171.1 668.9M155.7 641.8L150.4 646.3M137.4 617.9L131.7 621.9M121.2 592.5L107.4 600.5M107.3 565.8L101.0 568.8M95.8 538.0L89.2 540.4M86.8 509.3L80.0 511.1M80.2 479.9L73.3 481.1M76.3 450.1L69.3 450.7M75.0 420.0L59.0 420.0M76.3 389.9L69.3 389.3M80.2 360.1L73.3 358.9M86.8 330.7L80.0 328.9M95.8 302.0L89.2 299.6M107.3 274.2L101.0 271.2M121.2 247.5L107.4 239.5M137.4 222.1L131.7 218.1M155.7 198.2L150.4 193.7M176.0 176.0L171.1 171.1M198.2 155.7L193.7 150.4M222.1 137.4L218.1 131.7M247.5 121.2L239.5 107.4M274.2 107.3L271.2 101.0M302.0 95.8L299.6 89.2M330.7 86.8L328.9 80.0M360.1 80.2L358.9 73.3M389.9 76.3L389.3 69.3M420.0 75.0L420.0 59.0M450.1 76.3L450.7 69.3M479.9 80.2L481.1 73.3M509.3 86.8L511.1 80.0M538.0 95.8L540.4 89.2M565.8 107.3L568.8 101.0M592.5 121.2L600.5 107.4M617.9 137.4L621.9 131.7M641.8 155.7L646.3 150.4M664.0 176.0L668.9 171.1M684.3 198.2L689.6 193.7M702.6 222.1L708.3 218.1M718.8 247.5L732.6 239.5M732.7 274.2L739.0 271.2M744.2 302.0L750.8 299.6M753.2 330.7L760.0 328.9M759.8 360.1L766.7 358.9M763.7 389.9L770.7 389.3M420 0V840M0 420H840'/%3E%3C/g%3E%3C/svg%3E") -460px calc(100% + 460px) / 1000px 1000px no-repeat; }
+  :root[data-persona="jarvis"] .btn.go { box-shadow: 0 0 14px var(--glow); }
+  :root[data-persona="jarvis"] nav.views a.on, :root[data-persona="jarvis"] .tab.on { box-shadow: inset 0 -2px 0 var(--hero), 0 4px 12px -6px var(--glow); }
+  :root[data-persona="jarvis"] .nowline { filter: drop-shadow(0 0 4px var(--glow)); }
+  :root[data-persona="jarvis"] .card { border-color: color-mix(in srgb, var(--hero) 28%, var(--line)); box-shadow: 0 0 18px -8px var(--glow), inset 0 0 0 1px color-mix(in srgb, var(--hero) 6%, transparent); }
+  :root[data-persona="jarvis"] .mark.hd { filter: drop-shadow(0 0 5px var(--glow)); }
+  :root[data-persona="jarvis"] .stk.r, :root[data-persona="jarvis"] .chipx.over { background: var(--hot); color: #fff; border: 0; box-shadow: none; }
+  :root[data-persona="jarvis"] .count, :root[data-persona="jarvis"] .n, :root[data-persona="jarvis"] .tm, :root[data-persona="jarvis"] .nowline span,
+  :root[data-persona="jarvis"] .day .hr span, :root[data-persona="jarvis"] .hmeta, :root[data-persona="jarvis"] .leds { font-family: var(--num); font-weight: 400; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+
+
+  /* settings: persona picker */
+  .ppick { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .pcard { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font-family: var(--sans); cursor: pointer; min-width: 0; }
+  .pcard:has(input:checked) { border-color: var(--hero); box-shadow: 0 0 0 1px var(--hero); }
+  .pcard:has(input:focus-visible) { outline: 2px solid var(--info); outline-offset: 2px; }
+  .pcard input { position: absolute; opacity: 0; pointer-events: none; }
+  .pcard .ptop { display: flex; align-items: center; gap: 8px; }
+  .pcard .ptop .mark { width: 44px; height: 28px; flex: none; }
+  .pcard .pn { font-size: 15px; }
+  .pcard .pk { margin-left: auto; font: 10px var(--mono); color: var(--faint); }
+  .pcard .sw { display: flex; gap: 4px; }
+  .pcard .sw i { width: 18px; height: 10px; border-radius: 3px; border: 1px solid var(--line); }
+  .pcard .ph { font-size: 12px; color: var(--fg); background: var(--pane); border: 1px solid var(--line); border-radius: 3px 10px 10px 10px; padding: 6px 9px; line-height: 1.45; }
+  .pcard .pt { font-size: 11px; color: var(--dim); }
+  @media (max-width: 1020px) { .ppick { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 13.5px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
-  a { color: var(--accent); text-decoration: none; }
+  /* Faint geometric web (radial spokes + concentric polygons) over the whole page, fixed so it doesn't move on scroll.
+     Drawn as a mask so its colour follows --web; cards/panels sit on top with opaque backgrounds. Geometry only. */
+  body::before { content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none; background: var(--web); opacity: var(--web-a);
+    --web-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1600 1600'%3E%3Cpath d='M800 800L800 0M800 800L1106 61M800 800L1366 234M800 800L1539 494M800 800L1600 800M800 800L1539 1106M800 800L1366 1366M800 800L1106 1539M800 800L800 1600M800 800L494 1539M800 800L234 1366M800 800L61 1106M800 800L0 800M800 800L61 494M800 800L234 234M800 800L494 61M800.0 766.0L813.0 768.6L824.0 776.0L831.4 787.0L834.0 800.0L831.4 813.0L824.0 824.0L813.0 831.4L800.0 834.0L787.0 831.4L776.0 824.0L768.6 813.0L766.0 800.0L768.6 787.0L776.0 776.0L787.0 768.6ZM800.0 756.5L816.7 759.8L830.8 769.2L840.2 783.3L843.5 800.0L840.2 816.7L830.8 830.8L816.7 840.2L800.0 843.5L783.3 840.2L769.2 830.8L759.8 816.7L756.5 800.0L759.8 783.3L769.2 769.2L783.3 759.8ZM800.0 744.3L821.3 748.5L839.4 760.6L851.5 778.7L855.7 800.0L851.5 821.3L839.4 839.4L821.3 851.5L800.0 855.7L778.7 851.5L760.6 839.4L748.5 821.3L744.3 800.0L748.5 778.7L760.6 760.6L778.7 748.5ZM800.0 728.7L827.3 734.1L850.4 749.6L865.9 772.7L871.3 800.0L865.9 827.3L850.4 850.4L827.3 865.9L800.0 871.3L772.7 865.9L749.6 850.4L734.1 827.3L728.7 800.0L734.1 772.7L749.6 749.6L772.7 734.1ZM800.0 708.7L834.9 715.7L864.5 735.5L884.3 765.1L891.3 800.0L884.3 834.9L864.5 864.5L834.9 884.3L800.0 891.3L765.1 884.3L735.5 864.5L715.7 834.9L708.7 800.0L715.7 765.1L735.5 735.5L765.1 715.7ZM800.0 683.2L844.7 692.1L882.6 717.4L907.9 755.3L916.8 800.0L907.9 844.7L882.6 882.6L844.7 907.9L800.0 916.8L755.3 907.9L717.4 882.6L692.1 844.7L683.2 800.0L692.1 755.3L717.4 717.4L755.3 692.1ZM800.0 650.5L857.2 661.8L905.7 694.3L938.2 742.8L949.5 800.0L938.2 857.2L905.7 905.7L857.2 938.2L800.0 949.5L742.8 938.2L694.3 905.7L661.8 857.2L650.5 800.0L661.8 742.8L694.3 694.3L742.8 661.8ZM800.0 608.6L873.2 623.2L935.3 664.7L976.8 726.8L991.4 800.0L976.8 873.2L935.3 935.3L873.2 976.8L800.0 991.4L726.8 976.8L664.7 935.3L623.2 873.2L608.6 800.0L623.2 726.8L664.7 664.7L726.8 623.2ZM800.0 555.0L893.8 573.7L973.2 626.8L1026.3 706.2L1045.0 800.0L1026.3 893.8L973.2 973.2L893.8 1026.3L800.0 1045.0L706.2 1026.3L626.8 973.2L573.7 893.8L555.0 800.0L573.7 706.2L626.8 626.8L706.2 573.7ZM800.0 486.4L920.0 510.3L1021.7 578.3L1089.7 680.0L1113.6 800.0L1089.7 920.0L1021.7 1021.7L920.0 1089.7L800.0 1113.6L680.0 1089.7L578.3 1021.7L510.3 920.0L486.4 800.0L510.3 680.0L578.3 578.3L680.0 510.3ZM800.0 398.6L953.6 429.2L1083.8 516.2L1170.8 646.4L1201.4 800.0L1170.8 953.6L1083.8 1083.8L953.6 1170.8L800.0 1201.4L646.4 1170.8L516.2 1083.8L429.2 953.6L398.6 800.0L429.2 646.4L516.2 516.2L646.4 429.2ZM800.0 286.2L996.6 325.3L1163.3 436.7L1274.7 603.4L1313.8 800.0L1274.7 996.6L1163.3 1163.3L996.6 1274.7L800.0 1313.8L603.4 1274.7L436.7 1163.3L325.3 996.6L286.2 800.0L325.3 603.4L436.7 436.7L603.4 325.3ZM800.0 142.3L1051.7 192.4L1265.0 335.0L1407.6 548.3L1457.7 800.0L1407.6 1051.7L1265.0 1265.0L1051.7 1407.6L800.0 1457.7L548.3 1407.6L335.0 1265.0L192.4 1051.7L142.3 800.0L192.4 548.3L335.0 335.0L548.3 192.4Z' fill='none' stroke='%23000' stroke-width='1.4'/%3E%3C/svg%3E");
+    -webkit-mask: var(--web-svg) calc(100% + 640px) -640px / 1280px 1280px no-repeat, var(--web-svg) -760px calc(100% + 760px) / 1520px 1520px no-repeat;
+    mask: var(--web-svg) calc(100% + 640px) -640px / 1280px 1280px no-repeat, var(--web-svg) -760px calc(100% + 760px) / 1520px 1520px no-repeat; }
+  .shell { position: relative; z-index: 1; }
+  a { color: var(--info); text-decoration: none; }
   a:hover { text-decoration: underline; }
   button, input, select { font: inherit; color: inherit; }
   kbd { font: 11px var(--mono); background: var(--hover); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--dim); }
@@ -35,8 +184,7 @@
 
   /* ---------- shell ---------- */
   .shell { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; }
-  header.hq { display: flex; align-items: center; gap: 12px 16px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--side); position: relative; flex-wrap: wrap; }
-  header.hq::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .035; background: repeating-linear-gradient(0deg, var(--fg) 0 1px, transparent 1px 3px); }
+  header.hq { display: flex; align-items: center; gap: 12px 16px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--side) 72%, transparent); position: relative; flex-wrap: wrap; }
   .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .who .nm { min-width: 92px; }
   .who .nm b { font-size: 16px; letter-spacing: -.01em; display: block; line-height: 1.1; }
@@ -44,13 +192,13 @@
   nav.views { display: flex; gap: 2px; }
   nav.views a { padding: 4px 10px; border-radius: 6px; color: var(--dim); font-size: 13px; text-decoration: none; }
   nav.views a:hover { background: var(--hover); color: var(--fg); }
-  nav.views a.on { background: var(--hover); color: var(--fg); font-weight: 600; }
+  nav.views a.on { background: var(--hover); color: var(--fg); font-weight: 600; box-shadow: inset 0 -2px 0 var(--hero); }
   .leds { display: flex; gap: 14px; margin-left: auto; font: 11px var(--mono); color: var(--dim); flex-wrap: wrap; align-items: center; }
   .leds > span { white-space: nowrap; }
   .led { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 0; background: var(--faint); opacity: .7; }
   .led.g { background: var(--mint); box-shadow: 0 0 6px var(--mint); opacity: 1; }
   .led.a { background: var(--amber); box-shadow: 0 0 6px var(--amber); opacity: 1; }
-  .led.r { background: var(--red); box-shadow: 0 0 6px var(--red); opacity: 1; }
+  .led.r { background: transparent; box-shadow: inset 0 0 0 2px var(--red); opacity: 1; }
   .led.b { background: var(--blue); box-shadow: 0 0 6px var(--blue); opacity: 1; }
   .acts-top { display: flex; gap: 8px; align-items: center; }
   .btn { font: 600 12.5px var(--sans); border-radius: 7px; padding: 5px 11px; border: 1px solid var(--line); background: var(--raise); color: var(--fg); cursor: pointer; display: inline-flex; gap: 7px; align-items: center; white-space: nowrap; text-decoration: none; }
@@ -65,13 +213,12 @@
   /* ---------- glasses mark (mood) ---------- */
   .mark { display: block; }
   .mark.hd { width: 52px; height: 33px; flex: none; }
-  .mark .frame { fill: none; stroke: var(--fg); stroke-width: 4; stroke-linecap: round; transition: stroke .3s; }
-  .mark .lens { fill: transparent; transition: fill .3s; }
-  .mark .glint { fill: none; stroke: var(--lens); stroke-width: 2.5; stroke-linecap: round; transition: stroke .3s, opacity .3s; }
+  .mark .frame { fill: none; stroke: var(--mk-frame, var(--fg)); stroke-width: 4.5; stroke-linecap: round; transition: stroke .3s; }
+  .mark .lens { fill: var(--mk-fill, transparent); transition: fill .3s; }
+  .mark .glint { fill: none; stroke: var(--mk-glint, var(--lens)); stroke-width: 2.6; stroke-linecap: round; transition: stroke .3s, opacity .3s; }
   .mark .sweep { fill: var(--lens); opacity: 0; }
   .mark .bang { font: 900 14px var(--sans); fill: var(--amber); opacity: 0; }
   .mark .moon { fill: var(--blue); opacity: 0; }
-  .mark .slash { stroke: var(--red); stroke-width: 3.5; stroke-linecap: round; opacity: 0; }
   [data-mood="scanning"] .mark.hd .sweep { opacity: .55; animation: sweep 1.2s ease-in-out infinite; }
   [data-mood="headsup"] .mark.hd .lens { fill: color-mix(in srgb, var(--amber) 22%, transparent); }
   [data-mood="headsup"] .mark.hd .glint { stroke: var(--amber); }
@@ -81,7 +228,6 @@
   [data-mood="quiet"] .mark.hd .moon { opacity: 1; }
   [data-mood="offline"] .mark.hd .frame { stroke: var(--faint); }
   [data-mood="offline"] .mark.hd .glint { opacity: 0; }
-  [data-mood="offline"] .mark.hd .slash { opacity: .9; }
   [data-mood="offline"] .mark.hd { opacity: .7; }
   @keyframes sweep { 0% { transform: translateX(-22px); } 100% { transform: translateX(46px); } }
   @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
@@ -90,9 +236,9 @@
   /* ---------- stickers ---------- */
   .stk { display: inline-block; font: 800 9.5px/1.5 var(--mono); letter-spacing: .06em; text-transform: uppercase; padding: 0 6px; border-radius: 4px; border: 1px solid color-mix(in srgb, var(--fg) 35%, transparent); background: var(--raise); color: var(--dim); white-space: nowrap; transform: rotate(-2deg); vertical-align: 1px; }
   .stk.a { background: var(--amber); color: #1c2430; border-color: transparent; }
-  .stk.r { background: var(--red); color: #fff; border-color: transparent; }
+  .stk.r { background: transparent; color: var(--red); border: 1px dashed var(--red); }
   .stk.g { background: var(--mint); color: #062019; border-color: transparent; }
-  .stk.b { background: var(--blue); color: #fff; border-color: transparent; }
+  .stk.b { background: var(--info); color: var(--info-ink, #fff); border-color: transparent; }
   .stk.flat { transform: none; }
 
   /* ---------- inbox ---------- */
@@ -114,7 +260,7 @@
   .tabs { display: flex; gap: 4px; padding: 0 10px 8px; border-bottom: 1px solid var(--line); }
   .tab { padding: 4px 10px; border-radius: 6px; color: var(--dim); cursor: pointer; font-size: 13px; user-select: none; border: 0; background: none; }
   .tab:hover { background: var(--hover); color: var(--fg); }
-  .tab.on { background: var(--hover); color: var(--fg); font-weight: 600; }
+  .tab.on { background: var(--hover); color: var(--fg); font-weight: 600; box-shadow: inset 0 -2px 0 var(--hero); }
   .tab .n { color: var(--faint); margin-left: 5px; font: 11px var(--mono); }
   .tab.on .n.hot { color: var(--amber); }
   .items { overflow: auto; flex: 1; padding: 4px 0 8px; outline: none; }
@@ -203,7 +349,7 @@
   ul.tl .kind { font-weight: 600; }
   ul.tl .wt { color: var(--dim); font: 12px var(--mono); }
   ul.tl .msg { color: var(--dim); width: 100%; word-break: break-word; }
-  ul.tl li.brief .kind { color: var(--accent); }
+  ul.tl li.brief .kind { color: var(--info); }
   ul.tl li.hot .kind { color: var(--amber); }
   ul.tl li.err .kind { color: var(--red); }
   .form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; }
@@ -214,12 +360,25 @@
   .form .f.full { grid-column: 1 / -1; }
   .form input[type=number], .form input[type=time], .form input[type=text] { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
   .form input[type=number] { width: 100px; } .form input[type=time] { width: 116px; } .form input[type=text] { width: 100%; }
-  .form input:focus, .btn:focus-visible, .tab:focus-visible, .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .form input:focus, .btn:focus-visible, .tab:focus-visible, .chip:focus-visible { outline: 2px solid var(--info); outline-offset: 1px; }
   .form input:disabled { opacity: .5; }
   .toggles { display: flex; flex-wrap: wrap; gap: 8px; }
   .toggles label { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; padding: 4px 10px 4px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); }
   .toggles label:has(input:checked) { border-color: var(--accent); }
   .toggles input { accent-color: var(--mint); margin: 0; }
+  /* tracking exclusions: chip inputs */
+  .excl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+  .chipin { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 38px; padding: 5px 6px 5px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); cursor: text; }
+  .chipin:focus-within { border-color: var(--info); }
+  .chipin .cl { font: 600 11px var(--mono); color: var(--faint); letter-spacing: .04em; margin-right: 2px; }
+  .chipin .chips { display: contents; }
+  .xchip { display: inline-flex; align-items: center; gap: 2px; padding: 1px 2px 1px 9px; border: 1px solid var(--edge); border-radius: 999px; background: var(--raise); font: 12px var(--mono); white-space: nowrap; }
+  .xchip button { appearance: none; border: 0; background: none; color: var(--faint); cursor: pointer; width: 20px; height: 20px; border-radius: 50%; font-size: 11px; line-height: 1; }
+  .xchip button:hover { color: var(--fg); background: var(--hover); }
+  .xchip button:focus-visible { outline: 2px solid var(--info); outline-offset: 0; }
+  .chipin input[type=text] { flex: 1 1 120px; width: auto; min-width: 120px; border: 0; background: transparent; padding: 3px 2px; }
+  .chipin input[type=text]:focus { outline: none; }
+  .excl-msg { font-size: 11.5px; color: var(--amber); min-height: 1em; }
   .ck { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
   .ck input { accent-color: var(--mint); }
   .form-foot { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
@@ -234,7 +393,8 @@
   .htop .bubble .lead { font-size: 14.5px; }
   .hmeta { display: flex; gap: 10px; align-items: center; font: 11px var(--mono); color: var(--faint); flex-wrap: wrap; justify-content: flex-end; padding-top: 4px; }
   .hmeta .err { color: var(--red); }
-  .hgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .hgrid { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .hcol { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
   .hgrid .card > .hd { min-height: 44px; }
   .hgrid .card > .bd { padding: 10px 14px 14px; }
   /* day timeline */
@@ -246,7 +406,7 @@
   .day .hr { position: absolute; left: -46px; right: 0; border-top: 1px solid var(--line); }
   .day .hr span { position: absolute; left: 0; top: -8px; width: 40px; font: 10.5px var(--mono); color: var(--faint); background: var(--pane); }
   .day .hr.half { border-top-style: dashed; opacity: .5; left: 0; }
-  .cev { position: absolute; border-radius: 6px; padding: 3px 7px; overflow: hidden; background: color-mix(in srgb, var(--accent) 13%, var(--pane)); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-left: 3px solid var(--accent); font-size: 12px; line-height: 1.35; min-width: 0; }
+  .cev { position: absolute; border-radius: 6px; padding: 3px 7px; overflow: hidden; background: color-mix(in srgb, var(--info) 13%, var(--pane)); border: 1px solid color-mix(in srgb, var(--info) 35%, transparent); border-left: 3px solid var(--info); font-size: 12px; line-height: 1.35; min-width: 0; }
   .cev .t1 { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
   .cev .tm { font: 10.5px var(--mono); color: var(--dim); white-space: nowrap; flex: none; }
   .cev .tt { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -255,24 +415,50 @@
   .cev .t2 .loc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .cev .t2 > * { flex: none; } .cev .t2 > .loc { flex: 0 1 auto; }
   .cev.past { opacity: .5; }
-  .cev.now { background: color-mix(in srgb, var(--accent) 22%, var(--pane)); box-shadow: 0 0 0 1px var(--accent); }
+  .cev.now { background: color-mix(in srgb, var(--info) 22%, var(--pane)); box-shadow: 0 0 0 1px var(--hero); border-left-color: var(--hero); }
   .cev.ask { border-left-color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, transparent); border-left-color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, var(--pane)); }
   .cev.no { background: transparent; border-style: dashed; border-color: var(--line); border-left-style: solid; border-left-color: var(--faint); opacity: .6; }
   .cev.no .tt { text-decoration: line-through; font-weight: 500; }
   .cev.tiny { padding-top: 1px; padding-bottom: 1px; }
   .cev.tiny .t2 { display: none; }
-  .nowline { position: absolute; left: -6px; right: 0; border-top: 2px solid var(--red); z-index: 3; pointer-events: none; }
-  .nowline::before { content: ""; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
-  .nowline span { position: absolute; left: -46px; top: -9px; font: 700 10.5px var(--mono); color: var(--red); background: var(--pane); padding-right: 2px; }
+  .nowline { position: absolute; left: -6px; right: 0; border-top: 2px solid var(--hero); z-index: 3; pointer-events: none; }
+  .nowline::before { content: ""; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--hero); }
+  .nowline span { position: absolute; left: -46px; top: -9px; font: 700 10.5px var(--mono); color: var(--hero-text, var(--hero)); background: var(--pane); padding-right: 2px; }
   .hzero { padding: 18px 4px 8px; }
   /* todo groups */
   .tgrp + .tgrp { margin-top: 14px; }
   .tgrp > .gh { display: flex; align-items: center; gap: 8px; padding: 6px 2px 6px; border-bottom: 1px solid var(--line); font: 700 11px var(--mono); letter-spacing: .06em; color: var(--dim); }
   .tgrp > .gh .ico { font-size: 13px; letter-spacing: 0; }
-  .tgrp > .gh .n { margin-left: auto; font-weight: 600; color: var(--faint); background: var(--hover); border-radius: 999px; padding: 0 8px; }
-  .tgrp > .gh .n.hot { color: var(--accent-ink); background: var(--amber); }
+  .tgrp > .gh .n, .scard > .sh .n { margin-left: auto; font-weight: 600; color: var(--faint); background: var(--hover); border-radius: 999px; padding: 0 8px; }
+  .tgrp > .gh .n.hot, .scard > .sh .n.hot { color: #1c2133; background: var(--amber); }
   .tgrp .gl { border-left: 2px solid var(--gc, var(--line)); margin-top: 4px; }
-  .tgrp.g-ned { --gc: var(--mint); } .tgrp.g-jira { --gc: var(--blue); } .tgrp.g-gh { --gc: var(--dim); } .tgrp.g-me { --gc: var(--amber); }
+  .g-ned { --gc: var(--mint); } .g-jira { --gc: var(--blue); } .g-gh { --gc: var(--dim); } .g-mail { --gc: var(--violet); } .g-slack { --gc: var(--hero); } .g-me { --gc: var(--amber); }
+  /* source cards (mail · jira · slack · github): shrink (summary + top item) ⇄ expanded (full list) */
+  .sgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+  .scard { border-top: 2px solid var(--gc); overflow: hidden; }
+  .scard > .sh { appearance: none; background: none; border: 0; color: var(--dim); width: 100%; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 14px; cursor: pointer; text-align: left; font: 700 11px var(--mono); letter-spacing: .06em; }
+  .scard > .sh:hover { background: var(--hover); }
+  .scard > .sh:focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
+  .scard > .sh .ico { font-size: 13px; letter-spacing: 0; }
+  .scard > .sh .chev { color: var(--faint); font-size: 10px; transition: transform .15s; }
+  .scard.open > .sh .chev { transform: rotate(180deg); }
+  .scard .ss { padding: 0 14px 10px; font-size: 13px; color: var(--fg); }
+  .scard .ss .u { font: 11px var(--mono); color: var(--faint); }
+  .scard .ss.none { color: var(--faint); font-size: 12px; }
+  .scard .pv { display: flex; align-items: center; gap: 8px; margin: 0 14px 12px; padding: 5px 8px; border-left: 2px solid var(--gc); background: var(--bubble); border-radius: 0 6px 6px 0; min-width: 0; font-size: 12.5px; }
+  .scard .pv:empty { display: none; }
+  .scard .pv .ic { flex: none; font-size: 13px; }
+  .scard .pv .tt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .scard .pv .tt a { color: inherit; }
+  .scard .pv .chipx { flex: none; }
+  .scard .sl { border-top: 1px solid var(--line); padding: 6px 10px 10px 12px; max-height: 460px; overflow: auto; }
+  .scard .sl .gl { border-left: 2px solid var(--gc); }
+  .scard:not(.open) .sl, .scard.open .pv { display: none; }
+  @media (prefers-reduced-motion: reduce) { .scard > .sh .chev { transition: none; } }
+  .msum { display: flex; gap: 6px 10px; align-items: baseline; flex-wrap: wrap; padding: 6px 10px 4px; color: var(--dim); font-size: 12.5px; }
+  .msum:empty { display: none; }
+  .msum .u { font: 11px var(--mono); color: var(--faint); white-space: nowrap; }
+  .ti .from { font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 12em; }
   .ti { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 0 8px; align-items: center; padding: 5px 6px 5px 8px; border-radius: 0 6px 6px 0; min-height: 32px; }
   .ti:hover { background: var(--hover); }
   .ti .ic { text-align: center; font-size: 13px; }
@@ -281,7 +467,7 @@
   .ti .tt a { color: inherit; }
   .ti .sb { display: flex; gap: 4px 8px; align-items: center; flex-wrap: wrap; color: var(--dim); font-size: 11.5px; min-width: 0; }
   .ti .sb .d { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-  .ti .key { font: 600 11.5px var(--mono); color: var(--blue); white-space: nowrap; }
+  .ti .key, .scard .pv .key { font: 600 11.5px var(--mono); color: var(--blue); white-space: nowrap; }
   .ti .ra { display: flex; gap: 4px; align-items: center; }
   .ti .x { opacity: 0; transition: opacity .12s; }
   .ti:hover .x, .ti .x:focus-visible { opacity: 1; }
@@ -289,7 +475,7 @@
   .ti input[type=checkbox] { accent-color: var(--amber); width: 15px; height: 15px; margin: 0; cursor: pointer; }
   .ti.done .tt { color: var(--faint); text-decoration: line-through; font-weight: 400; }
   .chipx { font: 600 10.5px/1.6 var(--mono); padding: 0 6px; border-radius: 4px; background: var(--hover); color: var(--dim); white-space: nowrap; }
-  .chipx.over { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); }
+  .chipx.over { background: transparent; color: var(--red); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 70%, transparent); }
   .chipx.today { background: color-mix(in srgb, var(--amber) 20%, transparent); color: var(--amber); }
   .chipx.rv { background: color-mix(in srgb, var(--blue) 18%, transparent); color: var(--blue); }
   .chipx.ok { background: color-mix(in srgb, var(--mint) 18%, transparent); color: var(--mint); }
@@ -298,7 +484,7 @@
   .tadd input { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; min-width: 0; }
   .tadd input[type=text] { flex: 1; }
   .tadd input[type=date] { width: 132px; color: var(--dim); }
-  .tadd input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+  .tadd input:focus { outline: 2px solid var(--info); outline-offset: 0; }
   details.tdone summary { cursor: pointer; padding: 5px 10px; font: 600 11px var(--mono); color: var(--faint); list-style: none; }
   details.tdone summary::-webkit-details-marker { display: none; }
   details.tdone summary::before { content: "▸ "; } details.tdone[open] summary::before { content: "▾ "; }
@@ -315,7 +501,7 @@
     details.msess { display: block; }
     #rail-toggle { display: none; }
   }
-  @media (max-width: 1020px) { .leds .opt { display: none; } }
+  @media (max-width: 1020px) { .leds .opt { display: none; } .sgrid { grid-template-columns: minmax(0, 1fr); } }
   @media (max-width: 760px) {
     header.hq { padding: 8px 12px; gap: 8px 10px; }
     .who .mood { font-size: 9.5px; }
@@ -332,10 +518,10 @@
     .back { display: inline-flex; }
     .dwrap { padding: 16px 16px 40px; }
     .pwrap { padding: 12px 12px 40px; }
-    .form { grid-template-columns: 1fr; }
+    .form, .excl { grid-template-columns: 1fr; }
     ul.tl li { grid-template-columns: 44px 1fr; }
     .hwrap { padding: 12px 12px 40px; }
-    .hgrid { grid-template-columns: minmax(0, 1fr); }
+    .hgrid, .sgrid { grid-template-columns: minmax(0, 1fr); }
     .htop .say-slot { flex-basis: 100% !important; }
     .hmeta { justify-content: flex-start; padding-top: 0; }
     .hkeys { display: none; }
@@ -346,18 +532,18 @@
 <div class="shell">
   <header class="hq">
     <div class="who">
-      <svg class="mark hd" viewBox="0 0 64 40" aria-hidden="true">
-        <defs><clipPath id="lc-hd"><circle cx="18" cy="22" r="10"/><circle cx="46" cy="22" r="10"/></clipPath></defs>
-        <circle class="lens" cx="18" cy="22" r="10"/><circle class="lens" cx="46" cy="22" r="10"/>
-        <g clip-path="url(#lc-hd)"><rect class="sweep" x="0" y="8" width="10" height="28" rx="3"/></g>
-        <circle class="frame" cx="18" cy="22" r="10"/><circle class="frame" cx="46" cy="22" r="10"/>
-        <path class="frame" d="M28 21q4-4.5 8 0M8 19 3 14M56 19l5-5"/>
-        <path class="glint" d="M12.5 18.5a6.5 6.5 0 0 1 5-4M40.5 18.5a6.5 6.5 0 0 1 5-4"/>
-        <text class="bang" x="29" y="12">!</text>
-        <path class="moon" d="M33.5 1.5a6 6 0 1 0 5.5 8.5a4.6 4.6 0 0 1-5.5-8.5z"/>
-        <path class="slash" d="M6 37 58 5"/>
+      <!-- Glasses geometry = proposals/ned-glasses.svg (lenses, bridge, temples, glints), minus its tile. -->
+      <svg class="mark hd" viewBox="0 14 64 40" aria-hidden="true">
+        <defs><clipPath id="lc-hd"><circle cx="20" cy="34" r="10"/><circle cx="44" cy="34" r="10"/></clipPath></defs>
+        <circle class="lens" cx="20" cy="34" r="10"/><circle class="lens" cx="44" cy="34" r="10"/>
+        <g clip-path="url(#lc-hd)"><rect class="sweep" x="0" y="20" width="10" height="28" rx="3"/></g>
+        <circle class="frame" cx="20" cy="34" r="10"/><circle class="frame" cx="44" cy="34" r="10"/>
+        <path class="frame" d="M30 33q2-3.5 4 0M10 31 5 26M54 31l5-5"/>
+        <path class="glint" d="M14.5 30.5a6.5 6.5 0 0 1 5-4M38.5 30.5a6.5 6.5 0 0 1 5-4"/>
+        <text class="bang" x="29" y="24">!</text>
+        <path class="moon" transform="translate(0 12)" d="M33.5 1.5a6 6 0 1 0 5.5 8.5a4.6 4.6 0 0 1-5.5-8.5z"/>
       </svg>
-      <div class="nm"><b>Ned</b><span class="mood" id="mood">—</span></div>
+      <div class="nm"><b id="pname">Ned</b><span class="mood" id="mood">—</span></div>
     </div>
     <nav class="views" id="views">
       <a href="#home" data-v="home">홈</a>
@@ -376,26 +562,52 @@
     <div class="hwrap">
       <div class="htop">
         <div class="say-slot" id="say-home" style="flex:1 1 420px;min-width:0"></div>
-        <div class="hmeta"><span id="ag-meta"></span><button class="btn small" id="ag-refresh" title="캘린더·Jira·GitHub 다시 가져오기 — 30~90초">새로고침</button></div>
+        <div class="hmeta"><span id="ag-meta"></span><button class="btn small" id="ag-refresh" title="캘린더·Jira·GitHub·메일·Slack 다시 가져오기 — 1~2분">새로고침</button></div>
       </div>
       <div class="hgrid">
         <section class="card">
           <div class="hd"><h2>오늘 일정</h2><span class="count" id="ag-date"></span><span class="sp"></span><span class="count" id="ag-count"></span></div>
           <div class="bd" id="agenda"></div>
         </section>
-        <section class="card">
-          <div class="hd"><h2>할 일</h2><span class="sp"></span><span class="count" id="todo-count"></span></div>
-          <div class="bd">
-            <div class="tgrp g-ned"><div class="gh"><span class="ico">👓</span>NED 액션 아이템<span class="n" id="n-ned">0</span></div><div class="gl" id="g-ned"></div></div>
-            <div class="tgrp g-jira"><div class="gh"><span class="ico">📋</span>JIRA 내 이슈<span class="n" id="n-jira">0</span></div><div class="gl" id="g-jira"></div></div>
-            <div class="tgrp g-gh"><div class="gh"><span class="ico">🐙</span>GITHUB 리뷰 요청<span class="n" id="n-gh">0</span></div><div class="gl" id="g-gh"></div></div>
-            <div class="tgrp g-me"><div class="gh"><span class="ico">✅</span>개인 할 일<span class="n" id="n-me">0</span></div>
-              <div class="gl">
-                <form class="tadd" id="tadd" autocomplete="off"><input type="text" id="tadd-t" placeholder="할 일 추가… (⏎)" aria-label="할 일" maxlength="200"><input type="date" id="tadd-d" aria-label="마감일 (선택)"><button class="btn small" type="submit">추가</button></form>
-                <div id="g-me"></div>
-              </div></div>
+        <div class="hcol">
+          <section class="card" id="todo-card">
+            <div class="hd"><h2>할 일</h2><span class="sp"></span><span class="count" id="todo-count"></span></div>
+            <div class="bd">
+              <div class="tgrp g-ned"><div class="gh"><span class="ico">👓</span>NED 액션 아이템<span class="n" id="n-ned">0</span></div><div class="gl" id="g-ned"></div></div>
+              <div class="tgrp g-me"><div class="gh"><span class="ico">✅</span>개인 할 일<span class="n" id="n-me">0</span></div>
+                <div class="gl">
+                  <form class="tadd" id="tadd" autocomplete="off"><input type="text" id="tadd-t" placeholder="할 일 추가… (⏎)" aria-label="할 일" maxlength="200"><input type="date" id="tadd-d" aria-label="마감일 (선택)"><button class="btn small" type="submit">추가</button></form>
+                  <div id="g-me"></div>
+                </div></div>
+            </div>
+          </section>
+          <div class="sgrid" id="sgrid">
+          <section class="card scard g-mail" id="sc-mail">
+            <button class="sh" type="button" data-card="mail" aria-expanded="false" aria-controls="sl-mail"><span class="ico">📬</span>메일 확인 필요<span class="n" id="n-mail">0</span><span class="chev" aria-hidden="true">▼</span></button>
+            <div class="ss" id="ss-mail"></div>
+            <div class="pv" id="pv-mail"></div>
+            <div class="sl" id="sl-mail"><div class="gl"><div class="msum" id="mail-sum"></div><div id="g-mail"></div></div></div>
+          </section>
+          <section class="card scard g-jira" id="sc-jira">
+            <button class="sh" type="button" data-card="jira" aria-expanded="false" aria-controls="sl-jira"><span class="ico">📋</span>JIRA 내 이슈<span class="n" id="n-jira">0</span><span class="chev" aria-hidden="true">▼</span></button>
+            <div class="ss" id="ss-jira"></div>
+            <div class="pv" id="pv-jira"></div>
+            <div class="sl" id="sl-jira"><div class="gl"><div id="g-jira"></div></div></div>
+          </section>
+          <section class="card scard g-slack" id="sc-slack">
+            <button class="sh" type="button" data-card="slack" aria-expanded="false" aria-controls="sl-slack"><span class="ico">💬</span>SLACK 답할 것<span class="n" id="n-slack">0</span><span class="chev" aria-hidden="true">▼</span></button>
+            <div class="ss" id="ss-slack"></div>
+            <div class="pv" id="pv-slack"></div>
+            <div class="sl" id="sl-slack"><div class="gl"><div class="msum" id="slack-sum"></div><div id="g-slack"></div></div></div>
+          </section>
+          <section class="card scard g-gh" id="sc-gh">
+            <button class="sh" type="button" data-card="gh" aria-expanded="false" aria-controls="sl-gh"><span class="ico">🐙</span>GITHUB 리뷰 요청<span class="n" id="n-gh">0</span><span class="chev" aria-hidden="true">▼</span></button>
+            <div class="ss" id="ss-gh"></div>
+            <div class="pv" id="pv-gh"></div>
+            <div class="sl" id="sl-gh"><div class="gl"><div id="g-gh"></div></div></div>
+          </section>
           </div>
-        </section>
+        </div>
       </div>
       <div class="hkeys"><span><kbd>h</kbd> 홈</span><span><kbd>i</kbd> 인박스</span><span><kbd>r</kbd> 점검</span><span><kbd>n</kbd> 할 일 추가</span></div>
     </div>
@@ -436,12 +648,24 @@
         <div class="bd">
           <form id="cfg" autocomplete="off">
             <div class="form">
+              <div class="f full"><span class="lab" id="pp-lab">페르소나 (말투 · 테마 · 마크)</span>
+                <div class="ppick" id="c-persona" role="radiogroup" aria-labelledby="pp-lab"></div>
+                <span class="hint">기능과 데이터는 그대로고 말투·색·마크만 바뀌어. 저장하면 바로 적용돼.</span></div>
               <div class="f"><label for="c-hb">heartbeat 간격 (분)</label><input id="c-hb" type="number" min="1" step="1" required></div>
               <div class="f"><label for="c-sig">신호 조회 최소 간격 (분)</label><input id="c-sig" type="number" min="1" step="1" required><span class="hint">세션 이벤트가 없을 때 LLM 으로 업무 신호를 보는 최소 간격</span></div>
               <div class="f"><label for="c-bt">아침 브리핑 시각</label><input id="c-bt" type="time" required></div>
               <div class="f"><span class="lab">조용한 시간 (알림 없음)</span>
                 <div class="inl"><label class="ck"><input type="checkbox" id="c-qon"> 사용</label><input type="time" id="c-qs" aria-label="시작"><span style="color:var(--faint)">~</span><input type="time" id="c-qe" aria-label="끝"></div></div>
               <div class="f full"><span class="lab">업무 신호 소스</span><div class="toggles" id="c-sources"></div></div>
+              <div class="f full"><span class="lab">트래킹 제외</span>
+                <span class="hint">여기 넣은 Slack 채널·Jira 프로젝트는 순찰·아침 브리핑·홈 agenda 에서 조회도 보고도 안 해. 엔터(또는 쉼표)로 추가, ✕ 로 빼기. 후보는 지금까지 본 채널·프로젝트에서 골라 줘.</span>
+                <div class="excl">
+                  <div class="chipin" data-xbox="slack"><span class="cl">SLACK 채널</span><span class="chips" id="x-slack"></span><input type="text" id="x-slack-in" data-x="slack" list="dl-slack" placeholder="#채널 ⏎" aria-label="제외할 Slack 채널 추가" autocomplete="off"></div>
+                  <div class="chipin" data-xbox="jira"><span class="cl">JIRA 프로젝트</span><span class="chips" id="x-jira"></span><input type="text" id="x-jira-in" data-x="jira" list="dl-jira" placeholder="KEY ⏎" aria-label="제외할 Jira 프로젝트 키 추가" autocomplete="off"></div>
+                </div>
+                <span class="excl-msg" id="x-msg" role="status"></span>
+                <datalist id="dl-slack"></datalist><datalist id="dl-jira"></datalist>
+              </div>
               <div class="f"><label for="c-model">Claude 모델 (비우면 기본값)</label><input id="c-model" type="text" placeholder="예: claude-sonnet-5-5"></div>
               <div class="f"><label for="c-turns">Claude 최대 턴</label><input id="c-turns" type="number" min="1" step="1" required></div>
             </div>
@@ -512,10 +736,102 @@
   }
 
   /** Small glasses for Ned's avatar (no mood effects; the header mark carries the mood). */
-  const MINI = `<svg class="mark" viewBox="0 0 64 40" aria-hidden="true"><circle class="frame" cx="18" cy="22" r="10"/><circle class="frame" cx="46" cy="22" r="10"/><path class="frame" d="M28 21q4-4.5 8 0M8 19 3 14M56 19l5-5"/><path class="glint" d="M12.5 18.5a6.5 6.5 0 0 1 5-4M40.5 18.5a6.5 6.5 0 0 1 5-4"/></svg>`;
+  // ---------- persona voice (config.persona → state.persona). Tone only: same data, same features. ----------
+  const VOICE = {
+    ned: {
+      name: "Ned", spk: "ned", tagline: "친한 동료 반말 · 딥 네이비 + 빨강/파랑 · 거미줄·웹 코너", sample: "결재 2건이랑 리뷰 1건 기다려. 결재부터 보자.",
+      mood: { scanning: "스캔 중", offline: "자리 비움", headsup: "헤이, 이거 봐", quiet: "조용한 시간", idle: "지켜보는 중" },
+      greet: (h) => (h < 5 ? "늦게까지 하네." : h < 12 ? "좋은 아침." : h < 18 ? "오후 체크인." : "저녁 체크인."),
+      noMeet: "오늘은 회의 없음. 딥워크 데이.", allDone: (n) => `오늘 회의 ${n}개 다 끝났어.`,
+      meet: ({ left, cur, next, first }) => `회의 ${left}개${cur ? `, 지금 '${cur}' 중` : ""}${next ? `, ${first ? "첫" : "다음"} 미팅 ${next}` : ""}.`,
+      count: (label, n, unit) => `${label} ${n}${unit}`, wait: (w) => `${w.join(", ")} 기다려.`,
+      ask: (n) => `응답 안 한 초대 ${n}건`, held: (n) => `내가 챙겨 둔 거 ${n}건`, todo: (n, over) => `네 할 일 ${n}개${over ? ` (마감 지난 거 ${over}개)` : ""}`,
+      noAgenda: "일정은 아직 못 받아 왔어.",
+      okRun: (n, ago) => `✓ NED_OK ×${n} · 마지막 ${ago} — 조용한 순찰은 접어 뒀어`,
+      settings: ["여기서 내 근무 시간이랑 볼 곳을 정해 줘.", "저장하면 다음 순찰부터 적용돼. 쓰기 권한은 어차피 없으니 걱정 마."],
+    },
+    alfred: {
+      name: "Alfred", spk: "alfred", tagline: "정중한 존댓말 집사 · 블랙 + 금색 하나 · 고딕 격자·스포트라이트", sample: "결재 두 건과 리뷰 한 건이 기다리고 있습니다. 결재부터 보시지요.",
+      mood: { scanning: "살피는 중", offline: "자리 비움", headsup: "확인하실 일이 있습니다", quiet: "쉬시는 시간", idle: "대기 중" },
+      greet: (h) => (h < 5 ? "늦은 시간까지 수고가 많으십니다." : h < 12 ? "좋은 아침입니다." : h < 18 ? "오후 보고 올립니다." : "저녁 보고 올립니다."),
+      noMeet: "오늘은 회의가 없습니다. 집중하시기 좋은 날입니다.", allDone: (n) => `오늘 회의 ${n}건은 모두 마치셨습니다.`,
+      meet: ({ left, cur, next, first }) => [`남은 회의 ${left}건`, cur ? `지금 '${cur}' 진행 중` : "", next ? `${first ? "첫" : "다음"} 회의 ${next}` : ""].filter(Boolean).join(", ") + "입니다.",
+      count: (label, n, unit) => `${label} ${n}${unit}`, wait: (w) => `${w.join(", ")}이 기다리고 있습니다.`,
+      ask: (n) => `회신 안 하신 초대 ${n}건`, held: (n) => `제가 챙겨 둔 일 ${n}건`, todo: (n, over) => `할 일 ${n}건${over ? ` (기한 지남 ${over}건)` : ""}`,
+      noAgenda: "일정은 아직 받아 오지 못했습니다.",
+      okRun: (n, ago) => `✓ NED_OK ×${n} · 마지막 ${ago} — 아뢸 일 없는 순찰은 접어 두었습니다`,
+      settings: ["근무 시간과 살필 곳을 정해 주십시오.", "저장하시면 다음 순찰부터 적용됩니다. 쓰기 권한은 없으니 염려 마십시오."],
+    },
+    oracle: {
+      name: "Oracle", spk: "oracle", tagline: "간결한 관제 무전 · 블랙 + 초록/보라 모노 · 모니터 타일", sample: "[오늘] 결재 2 · 리뷰 1 대기. 결재 우선.",
+      mood: { scanning: "스캔", offline: "신호 없음", headsup: "확인 요망", quiet: "무음 시간", idle: "감시 중" },
+      greet: (h) => (h < 5 ? "[야간]" : h < 12 ? "[오전 보고]" : h < 18 ? "[오후 보고]" : "[야간 보고]"),
+      noMeet: "회의 0. 집중 시간 확보.", allDone: (n) => `회의 ${n} 종료.`,
+      meet: ({ left, cur, next, first }) => [`회의 ${left} 남음`, cur ? `진행 중 '${cur}'` : "", next ? `${first ? "첫" : "다음"} ${next}` : ""].filter(Boolean).join(" · ") + ".",
+      count: (label, n) => `${label} ${n}`, wait: (w) => `대기: ${w.join(" · ")}.`,
+      ask: (n) => `RSVP 대기 ${n}`, held: (n) => `보류 항목 ${n}`, todo: (n, over) => `개인 할 일 ${n}${over ? ` (기한 초과 ${over})` : ""}`,
+      noAgenda: "일정 수신 없음.",
+      okRun: (n, ago) => `✓ NED_OK ×${n} · 최종 ${ago} — 특이사항 없음, 접음`,
+      settings: ["근무 시간 · 감시 대상 설정.", "저장 시 다음 순찰부터 적용. 쓰기 권한 없음."],
+    },
+    jarvis: {
+      name: "Jarvis", spk: "jarvis", tagline: "매끄러운 존댓말 + 수치 보고 · 네이비 + 시안 글로우 · HUD", sample: "대기 항목 3건, 그중 결재 2건이 우선입니다. 처리하시면 대기율 0%예요.",
+      mood: { scanning: "분석 중", offline: "연결 끊김", headsup: "확인 필요", quiet: "방해 금지", idle: "모니터링 중" },
+      greet: (h) => (h < 5 ? "늦은 시간이네요." : h < 12 ? "좋은 아침이에요." : h < 18 ? "오후 현황입니다." : "저녁 현황입니다."),
+      noMeet: "오늘 회의 0건, 집중 가능 시간 100%예요.", allDone: (n) => `오늘 회의 ${n}건 모두 완료, 진척률 100%.`,
+      meet: ({ left, cur, next, first }) => [`남은 회의 ${left}건`, cur ? `현재 '${cur}' 진행 중` : "", next ? `${first ? "첫" : "다음"} 회의 ${next}` : ""].filter(Boolean).join(", ") + "이에요.",
+      count: (label, n, unit) => `${label} ${n}${unit}`,
+      wait: (w) => { const total = w.reduce((a, x) => a + (Number(/(\d+)/.exec(x)?.[1]) || 0), 0); return `대기 항목 ${total}건 — ${w.join(", ")}.`; },
+      ask: (n) => `미응답 초대 ${n}건`, held: (n) => `제가 표시해 둔 항목 ${n}건`, todo: (n, over) => `할 일 ${n}건${over ? ` (기한 초과 ${over}건)` : ""}`,
+      noAgenda: "일정 데이터가 아직 없어요.",
+      okRun: (n, ago) => `✓ NED_OK ×${n} · 마지막 ${ago} — 변동 없는 순찰은 접어 뒀어요`,
+      settings: ["근무 시간과 모니터링 범위를 설정해 주세요.", "저장하면 다음 순찰부터 반영돼요. 쓰기 권한은 없으니 안심하세요."],
+    },
+  };
+  const PERSONA_IDS = Object.keys(VOICE);
+  let persona = PERSONA_IDS.includes(document.documentElement.dataset.persona) ? document.documentElement.dataset.persona : "ned";
+  const V = () => VOICE[persona];
+  // Marks live in marks/<id>.svg and are inlined so CSS (mood states, tokens) reaches their parts.
+  const MARK_SRC = {};
+  async function loadMark(id) {
+    if (MARK_SRC[id] === undefined) {
+      try { const r = await fetch(`marks/${id}.svg`); MARK_SRC[id] = r.ok ? await r.text() : ""; } catch { MARK_SRC[id] = ""; }
+    }
+    return MARK_SRC[id];
+  }
+  /** Inline SVG string for a mark: `hd` keeps the mood parts (sweep / ! / moon); the mini copy drops them. */
+  function markSvg(id, hd) {
+    const src = MARK_SRC[id]; if (!src) return "";
+    const svg = new DOMParser().parseFromString(src, "image/svg+xml").documentElement;
+    if (svg.nodeName !== "svg") return "";
+    svg.setAttribute("class", hd ? "mark hd" : "mark");
+    svg.setAttribute("aria-hidden", "true");
+    if (!hd) for (const el of svg.querySelectorAll("defs, .sweep, .bang, .moon, [clip-path]")) el.remove();
+    for (const n of [...svg.childNodes]) if (n.nodeType === 8) n.remove(); // comments
+    return svg.outerHTML;
+  }
+  async function applyPersona(id, { save = true } = {}) {
+    if (!PERSONA_IDS.includes(id)) id = "ned";
+    const changed = id !== persona || !MARK_SRC[id];
+    persona = id;
+    document.documentElement.dataset.persona = id;
+    if (save) lsSet("ned.persona", id);
+    document.title = V().name;
+    $("pname").textContent = V().name;
+    if (!changed) return;
+    await Promise.all(PERSONA_IDS.map(loadMark));
+    const hd = markSvg(id, true);
+    if (hd) { const old = document.querySelector(".who .mark.hd"); if (old) old.outerHTML = hd; }
+    MINI = markSvg(id, false) || MINI;
+    for (const el of document.querySelectorAll("[data-mark]")) el.innerHTML = markSvg(el.dataset.mark, false);
+    renderAll();
+  }
+
+  let MINI = `<svg class="mark" viewBox="0 14 64 40" aria-hidden="true"><circle class="frame" cx="20" cy="34" r="10"/><circle class="frame" cx="44" cy="34" r="10"/><path class="frame" d="M30 33q2-3.5 4 0M10 31 5 26M54 31l5-5"/><path class="glint" d="M14.5 30.5a6.5 6.5 0 0 1 5-4M38.5 30.5a6.5 6.5 0 0 1 5-4"/></svg>`;
   /** Ned speaking: avatar + bubble. `lead` is HTML-escaped by the caller. */
   const say = (meta, leadHtml, subHtml = "") =>
-    `<div class="say"><span class="av">${MINI}</span><div class="bubble">${meta ? `<div class="meta">${meta}</div>` : ""}<p class="lead">${leadHtml}</p>${subHtml ? `<div class="sub">${subHtml}</div>` : ""}</div></div>`;
+    (meta = typeof meta === "string" ? meta.replace(/^ned\b/, V().spk) : meta,
+    `<div class="say"><span class="av">${MINI}</span><div class="bubble">${meta ? `<div class="meta">${meta}</div>` : ""}<p class="lead">${leadHtml}</p>${subHtml ? `<div class="sub">${subHtml}</div>` : ""}</div></div>`);
 
   let toastTimer = 0;
   function toast(msg, ms = 3200) {
@@ -533,7 +849,7 @@
     if (S.state.quiet) return "quiet";
     return "idle";
   }
-  const greet = () => { const h = new Date().getHours(); return h < 5 ? "늦게까지 하네." : h < 12 ? "좋은 아침." : h < 18 ? "오후 체크인." : "저녁 체크인."; };
+  const greet = () => V().greet(new Date().getHours());
   const quip = (ts) => QUIPS[Math.floor((ts || Date.now()) / 600000) % QUIPS.length];
 
   /** The one line Ned opens with — what needs you, in one breath. */
@@ -559,9 +875,9 @@
   function renderHeader() {
     const m = mood(), s = S.state;
     document.body.dataset.mood = m;
-    $("mood").textContent = MOOD_KO[m];
+    $("mood").textContent = V().mood[m] || MOOD_KO[m];
     const n = s?.attention.length ?? 0;
-    document.title = n ? `(${n}) Ned` : "Ned";
+    document.title = n ? `(${n}) ${V().name}` : V().name;
     const up = alive();
     const lb = s?.last_briefing;
     $("leds").innerHTML = `
@@ -572,7 +888,7 @@
       <span>next ${s?.next_heartbeat_at ? rel(s.next_heartbeat_at) : "—"}</span>`;
     const o = opener();
     $("say").innerHTML = say(`ned · ${hhmm(Date.now())}`, esc(o.lead), esc(o.sub));
-    $("say-settings").innerHTML = say("ned", "여기서 내 근무 시간이랑 볼 곳을 정해 줘.", "저장하면 다음 순찰부터 적용돼. 쓰기 권한은 어차피 없으니 걱정 마.");
+    $("say-settings").innerHTML = say("ned", esc(V().settings[0]), esc(V().settings[1]));
   }
 
   function setBusyButtons() {
@@ -671,7 +987,7 @@
       html += rowHtml(it, i);
     });
     if (!list.length) html += `<div class="none">${ui.tab === "priority" ? "결정할 것 없음." : ui.tab === "other" ? "읽을 것 없음." : "아직 순찰 기록이 없어."}</div>`;
-    if (ui.tab !== "history" && m.ok.length) html += `<button class="okrun" id="okrun">✓ NED_OK ×${m.ok.length} · 마지막 ${rel(m.ok[0].ts)} — 조용한 순찰은 접어 뒀어</button>`;
+    if (ui.tab !== "history" && m.ok.length) html += `<button class="okrun" id="okrun">${esc(V().okRun(m.ok.length, rel(m.ok[0].ts)))}</button>`;
     const box = $("items");
     box.innerHTML = html;
     for (const r of box.querySelectorAll(".row")) r.onclick = () => { select(+r.dataset.i); openDetail(); };
@@ -847,8 +1163,81 @@
   }
 
   // ---------- settings ----------
+  // ---------- tracking exclusions (settings) ----------
+  const excl = { slack: [], jira: [] };
+  const normX = {
+    slack: (v) => v.trim().replace(/^#+/, "").replace(/\s+/g, ""),
+    jira: (v) => v.trim().toUpperCase().replace(/-\d*$/, ""), // "MNT-123" → "MNT"
+  };
+  const validX = { slack: (v) => v.length > 0 && v.length <= 80, jira: (v) => /^[A-Z][A-Z0-9_]{0,19}$/.test(v) };
+  const showX = { slack: (v) => `#${v}`, jira: (v) => v };
+  function renderExcl() {
+    for (const k of ["slack", "jira"]) {
+      $("x-" + k).innerHTML = excl[k].map((v, i) => `<span class="xchip">${esc(showX[k](v))}<button type="button" data-xdel="${k}:${i}" aria-label="${esc(showX[k](v))} 빼기" title="빼기">✕</button></span>`).join("");
+    }
+    // Candidates: channels / project keys seen so far in agenda.json and briefings (client-side, no new API).
+    const ch = new Set(), pj = new Set();
+    const ag = S.agenda;
+    for (const x of ag?.slack?.items || []) if (x.channel?.startsWith("#")) ch.add(x.channel.slice(1));
+    for (const j of ag?.jira || []) { const m = /^([A-Z][A-Z0-9_]*)-\d+/.exec(j.key || ""); if (m) pj.add(m[1]); }
+    for (const b of S.briefings || []) for (const it of [...(b.action_items || []), ...(b.updates || []), ...(b.fyi || [])]) {
+      const text = `${it.title || ""} ${it.detail || ""} ${it.url || ""}`;
+      // Korean particles glued to an ASCII name ("#foo으로") aren't part of it; Hangul names ("#cell_수익화랩") are kept.
+      if (it.kind === "slack") for (const m of text.matchAll(/#([\p{L}\p{N}_.-]{2,80})/gu)) ch.add(m[1].replace(/(?<=[A-Za-z0-9_.-])(으로|에서|에게|까지|부터|이랑|랑|로|에|의|은|는|이|가|을|를|와|과|도|만)$/u, ""));
+      if (it.kind === "jira" || /atlassian\.net\/browse\//.test(text)) for (const m of text.matchAll(/\b([A-Z][A-Z0-9_]{1,19})-\d+\b/g)) pj.add(m[1]);
+    }
+    $("dl-slack").innerHTML = [...ch].filter((v) => !excl.slack.includes(v)).sort().map((v) => `<option value="#${esc(v)}">`).join("");
+    $("dl-jira").innerHTML = [...pj].filter((v) => !excl.jira.includes(v)).sort().map((v) => `<option value="${esc(v)}">`).join("");
+  }
+  function addExcl(k, raw) {
+    let added = 0, bad = [];
+    for (const part of String(raw).split(/[,\s]+/)) {
+      if (!part.trim()) continue;
+      const v = normX[k](part);
+      if (!validX[k](v)) { bad.push(part.trim()); continue; }
+      if (!excl[k].includes(v)) { excl[k].push(v); added++; }
+    }
+    $("x-msg").textContent = bad.length ? `${k === "jira" ? "프로젝트 키는 영문 대문자로 시작하는 영숫자만 돼" : "채널 이름이 비었거나 너무 길어"}: ${bad.join(", ")}` : added ? "추가했어. 저장을 눌러야 적용돼." : "";
+    renderExcl();
+  }
+  for (const k of ["slack", "jira"]) {
+    const input = $(`x-${k}-in`);
+    input.addEventListener("keydown", (e) => {
+      if ((e.key === "Enter" || e.key === ",") && !e.isComposing) { e.preventDefault(); if (input.value.trim()) { addExcl(k, input.value); input.value = ""; } }
+      else if (e.key === "Backspace" && !input.value && excl[k].length) { excl[k].pop(); renderExcl(); }
+    });
+    // Picking a datalist option fires "input" with the full value; add it right away.
+    input.addEventListener("input", (e) => { if (e.inputType === "insertReplacementText" || e.inputType == null) { const o = [...$(`dl-${k}`).options].some((x) => x.value === input.value); if (o) { addExcl(k, input.value); input.value = ""; } } });
+  }
+  $("cfg").addEventListener("focusin", (e) => { if (e.target.dataset?.x) renderExcl(); }); // refresh candidates as data arrives
+  $("cfg").addEventListener("click", (e) => {
+    const box = e.target.closest("[data-xbox]");
+    if (box && !e.target.closest("button, input")) $(`x-${box.dataset.xbox}-in`).focus();
+    const b = e.target.closest("[data-xdel]"); if (!b) return;
+    e.preventDefault();
+    const [k, i] = b.dataset.xdel.split(":");
+    excl[k].splice(Number(i), 1); renderExcl(); $(`x-${k}-in`).focus();
+  });
+
+  function renderPersonaPicker(cur) {
+    const box = $("c-persona");
+    if (!box.children.length) {
+      box.innerHTML = PERSONA_IDS.map((id) => { const v = VOICE[id]; return `<label class="pcard" data-persona="${id}">
+        <input type="radio" name="persona" value="${id}">
+        <div class="ptop"><span data-mark="${id}">${markSvg(id, false)}</span><b class="pn">${esc(v.name)}</b><span class="pk">${id}</span></div>
+        <div class="sw" aria-hidden="true"><i style="background:var(--bg)"></i><i style="background:var(--pane)"></i><i style="background:var(--hero)"></i><i style="background:var(--info)"></i><i style="background:var(--mint)"></i></div>
+        <div class="ph">${esc(v.sample)}</div><div class="pt">${esc(v.tagline)}</div></label>`; }).join("");
+    }
+    for (const r of box.querySelectorAll("input[name=persona]")) r.checked = r.value === cur;
+  }
+
   function renderConfig() {
     const c = S.config; if (!c) return;
+    renderPersonaPicker(c.persona || "ned");
+    excl.slack = [...(c.filters?.slack?.exclude_channels || [])];
+    excl.jira = [...(c.filters?.jira?.exclude_projects || [])];
+    $("x-msg").textContent = "";
+    renderExcl();
     $("cfg-port").textContent = c.port ? `port ${c.port}` : "";
     $("c-hb").value = c.heartbeat_minutes ?? "";
     $("c-sig").value = c.signal_check_minutes ?? "";
@@ -876,13 +1265,16 @@
       briefing_time: $("c-bt").value,
       quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
       sources,
+      persona: document.querySelector("#c-persona input[name=persona]:checked")?.value || S.config?.persona || "ned",
+      filters: { slack: { exclude_channels: [...excl.slack] }, jira: { exclude_projects: [...excl.jira] } },
       claude_model: $("c-model").value.trim() || null,
       claude_max_turns: Number($("c-turns").value),
     };
     btn.disabled = true; msg.className = "msg"; msg.textContent = "저장 중…";
     try {
       S.config = await api("/api/config", { method: "PUT", body: JSON.stringify(body) });
-      renderConfig(); msg.className = "msg ok"; msg.textContent = "저장했어. 다음 순찰부터 적용.";
+      await applyPersona(S.config.persona); // look + voice switch now; prompts use it from the next run
+      renderConfig(); msg.className = "msg ok"; msg.textContent = persona === "ned" ? "저장했어. 다음 순찰부터 적용." : persona === "alfred" ? "저장했습니다. 다음 순찰부터 적용됩니다." : persona === "oracle" ? "저장 완료. 다음 순찰부터 적용." : "저장했어요. 다음 순찰부터 반영됩니다.";
     } catch (err) {
       console.warn(err); msg.className = "msg err"; msg.textContent = `저장 실패: ${err.message}`;
     } finally { btn.disabled = false; }
@@ -892,6 +1284,8 @@
   const HOME_POLL_MS = 60 * 1000, PPH = 52, MIN_EV_PX = 22; // timeline: px per hour, min block height
   const RSVP = { needsAction: ["a", "응답 필요"], tentative: ["", "미정"], declined: ["", "거절"], organizer: ["", "주최"] };
   const GH_REASON = { review_requested: ["rv", "리뷰 요청", "👀"], my_pr_changes_requested: ["over", "변경 요청", "✍️"], my_pr_approved: ["ok", "승인됨", "✅"] };
+  const MAIL_REASON = { reply: ["rv", "답장", "↩️"], approval: ["today", "결재", "🖊️"], deadline: ["over", "마감", "⏰"], request: ["", "확인", "📨"] };
+  const SLACK_REASON = { dm: ["today", "DM", "💬"], mention: ["rv", "멘션", "📣"], thread: ["", "스레드", "🧵"] };
   const PRIO_LED = { highest: "r", high: "r", medium: "a" };
   const WEEK = "일월화수목금토";
   const ymdOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -997,6 +1391,26 @@
     $("n-" + id).classList.toggle("hot", !!hot);
     $("g-" + id).innerHTML = rows || `<div class="gnone">${esc(emptyMsg)}</div>`;
   }
+  /** Source card open state: remembered per card (ned.card.<id> = "1"/"0"); default open iff it has items. */
+  const cardKey = (id) => `ned.card.${id}`;
+  function cardOpen(id, n) { const v = lsGet(cardKey(id)); return v === "1" ? true : v === "0" ? false : n > 0; }
+  /** One-line preview of the most urgent item, shown only while the card is shrunk. */
+  const preview = (ic, title, url, chip) => `<span class="ic">${ic}</span><span class="tt">${url ? ext(url, esc(title)) : esc(title)}</span>${chip || ""}`;
+  /** Render a source card: badge + list via group(), then summary line, preview, open/hidden state. */
+  function card(id, { n, hot, rows, empty, sum, pv, hidden }) {
+    const el = $("sc-" + id);
+    el.hidden = !!hidden;
+    if (hidden) return;
+    group(id, n, hot, rows, empty);
+    $("ss-" + id).className = sum ? "ss" : "ss none";
+    $("ss-" + id).innerHTML = sum || esc(empty);
+    $("pv-" + id).innerHTML = n ? pv || "" : "";
+    const open = cardOpen(id, n);
+    el.classList.toggle("open", open);
+    el.querySelector(".sh").setAttribute("aria-expanded", String(open));
+  }
+  const counts = (pairs, sep = ", ") => pairs.filter(([, k]) => k > 0).map(([label, k]) => `${label} ${k}`).join(sep);
+
   function renderTodoGroups() {
     const s = S.state, ag = S.agenda;
     const ned = (s?.attention || []).filter((a) => a.source !== "sessions");
@@ -1007,21 +1421,70 @@
     }).join(""), s ? "내가 챙겨 둔 거 없어." : "불러오는 중…");
 
     const unavailable = ag === null ? "agenda 연결 안 됨." : ag === undefined ? "불러오는 중…" : "";
+    // Gmail/Slack source off → hide the card; mail/slack === null → agenda.json predates the block (not fetched yet).
+    const mailOn = ag?.mail_enabled !== false, mail = mailOn ? ag?.mail : null, mi = mail?.items || [];
+    const unreadN = `${Number(mail?.unread) || 0}${mail?.unread_capped ? "+" : ""}`;
+    $("mail-sum").innerHTML = mail?.summary ? `<span>${esc(mail.summary)}</span>` : "";
+    const mr = (k) => mi.filter((x) => (MAIL_REASON[x.reason] ? x.reason : "request") === k).length;
+    const mailRow = (x) => MAIL_REASON[x.reason] || MAIL_REASON.request;
+    card("mail", {
+      hidden: !mailOn, n: mi.length, hot: mi.some((x) => x.reason === "deadline" || x.reason === "approval"),
+      rows: mi.map((x) => {
+        const u = safeUrl(x.url), r = mailRow(x);
+        return `<div class="ti"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.subject || "(제목 없음)")) : esc(x.subject || "(제목 없음)")}</span>
+          <div class="sb"><span class="from">${esc(x.from)}</span><span class="chipx ${r[0]}">${r[1]}</span>${x.why ? `<span class="d">${esc(x.why)}</span>` : ""}${x.received ? `<span>${rel(toMs(x.received))}</span>` : ""}</div></div>
+          <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
+      }).join(""),
+      empty: unavailable || (mail ? "확인할 메일 없음." : "다음 새로고침 때 메일도 가져올게."),
+      sum: mail ? esc([counts([["결재", mr("approval")], ["마감", mr("deadline")], ["답장", mr("reply")], ["확인", mr("request")]], " · "), `안 읽은 ${unreadN}`].filter(Boolean).join(" · ")) : "",
+      pv: mi[0] && preview(mailRow(mi[0])[2], mi[0].subject || "(제목 없음)", safeUrl(mi[0].url), `<span class="chipx ${mailRow(mi[0])[0]}">${mailRow(mi[0])[1]}</span>`),
+    });
+
     const jira = [...(ag?.jira || [])].sort((a, b) => byDue(a, b) || toMs(b.updated) - toMs(a.updated));
-    group("jira", jira.length, jira.some((j) => (dueInfo(j.due)?.days ?? 1) <= 0), jira.map((j) => {
-      const u = safeUrl(j.url);
-      return `<div class="ti"><span class="ic" title="${esc(j.priority || "")}"><span class="led ${PRIO_LED[String(j.priority || "").toLowerCase()] || ""}" style="margin:0"></span></span><div class="mn"><span class="tt">${u ? ext(u, esc(j.title)) : esc(j.title)}</span>
-        <div class="sb"><span class="key">${esc(j.key)}</span><span class="chipx">${esc(j.status || "—")}</span>${dueChip(j.due)}</div></div>
-        <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
-    }).join(""), unavailable || "배정된 이슈 없음.");
+    const jDays = (j) => dueInfo(j.due)?.days;
+    card("jira", {
+      n: jira.length, hot: jira.some((j) => (jDays(j) ?? 1) <= 0),
+      rows: jira.map((j) => {
+        const u = safeUrl(j.url);
+        return `<div class="ti"><span class="ic" title="${esc(j.priority || "")}"><span class="led ${PRIO_LED[String(j.priority || "").toLowerCase()] || ""}" style="margin:0"></span></span><div class="mn"><span class="tt">${u ? ext(u, esc(j.title)) : esc(j.title)}</span>
+          <div class="sb"><span class="key">${esc(j.key)}</span><span class="chipx">${esc(j.status || "—")}</span>${dueChip(j.due)}</div></div>
+          <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
+      }).join(""),
+      empty: unavailable || "배정된 이슈 없음.",
+      sum: jira.length ? esc(counts([["마감 지난", jira.filter((j) => jDays(j) < 0).length], ["오늘", jira.filter((j) => jDays(j) === 0).length], ["진행 중", jira.filter((j) => /진행|progress/i.test(j.status || "")).length]]).replace(/ (\d+)/g, " $1건") || `열린 이슈 ${jira.length}건`) : "",
+      pv: jira[0] && preview(`<span class="key">${esc(jira[0].key)}</span>`, jira[0].title, safeUrl(jira[0].url), dueChip(jira[0].due) || `<span class="chipx">${esc(jira[0].status || "—")}</span>`),
+    });
+
+    const slackOn = ag?.slack_enabled !== false, slack = slackOn ? ag?.slack : null, si = slack?.items || [];
+    $("slack-sum").innerHTML = slack?.summary ? `<span>${esc(slack.summary)}</span>` : "";
+    const slRow = (x) => SLACK_REASON[x.reason] || SLACK_REASON.thread;
+    card("slack", {
+      hidden: !slackOn, n: si.length, hot: si.some((x) => x.reason === "dm" || x.reason === "mention"),
+      rows: si.map((x) => {
+        const u = safeUrl(x.url), r = slRow(x);
+        return `<div class="ti"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
+          <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span><span class="chipx ${r[0]}">${r[1]}</span>${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div></div>
+          <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
+      }).join(""),
+      empty: unavailable || (slack ? "답할 Slack 없음." : "다음 새로고침 때 Slack 도 가져올게."),
+      sum: si.length ? esc(`${counts([["멘션", si.filter((x) => x.reason === "mention").length], ["DM", si.filter((x) => x.reason === "dm").length], ["스레드", si.filter((x) => x.reason === "thread").length]])} 답 필요`) : "",
+      pv: si[0] && preview(slRow(si[0])[2], si[0].text || "(내용 없음)", safeUrl(si[0].url), `<span class="chipx">${esc(si[0].channel)}</span>`),
+    });
 
     const gh = [...(ag?.github || [])].sort((a, b) => (a.reason === "review_requested" ? 0 : 1) - (b.reason === "review_requested" ? 0 : 1) || toMs(b.updated) - toMs(a.updated));
-    group("gh", gh.length, gh.some((x) => x.reason === "review_requested"), gh.map((x) => {
-      const u = safeUrl(x.url), r = GH_REASON[x.reason] || ["", x.reason || "", "🐙"];
-      return `<div class="ti"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.title)) : esc(x.title)}</span>
-        <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.repo)}#${esc(x.number)}</span><span class="chipx ${r[0]}">${esc(r[1])}</span>${x.author ? `<span>@${esc(x.author)}</span>` : ""}${x.updated ? `<span>${rel(toMs(x.updated))}</span>` : ""}</div></div>
-        <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
-    }).join(""), unavailable || "기다리는 리뷰 없음.");
+    const ghR = (x) => GH_REASON[x.reason] || ["", x.reason || "", "🐙"];
+    card("gh", {
+      n: gh.length, hot: gh.some((x) => x.reason === "review_requested"),
+      rows: gh.map((x) => {
+        const u = safeUrl(x.url), r = ghR(x);
+        return `<div class="ti"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.title)) : esc(x.title)}</span>
+          <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.repo)}#${esc(x.number)}</span><span class="chipx ${r[0]}">${esc(r[1])}</span>${x.author ? `<span>@${esc(x.author)}</span>` : ""}${x.updated ? `<span>${rel(toMs(x.updated))}</span>` : ""}</div></div>
+          <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
+      }).join(""),
+      empty: unavailable || "기다리는 리뷰 없음.",
+      sum: esc(counts(Object.keys(GH_REASON).map((k) => [GH_REASON[k][1], gh.filter((x) => x.reason === k).length]))),
+      pv: gh[0] && preview(ghR(gh[0])[2], gh[0].title, safeUrl(gh[0].url), `<span class="chipx ${ghR(gh[0])[0]}">${esc(ghR(gh[0])[1])}</span>`),
+    });
 
     const todos = S.todos || [];
     const open = todos.filter((t) => !t.done).sort((a, b) => byDue(a, b) || toMs(a.created_at) - toMs(b.created_at));
@@ -1034,7 +1497,7 @@
     if (done.length) rows += `<details class="tdone" ${ui.doneOpen ? "open" : ""}><summary>완료 ${done.length}</summary>${done.map(row).join("")}</details>`;
     group("me", open.length, open.some((t) => (dueInfo(t.due)?.days ?? 1) <= 0), rows, "");
     for (const el of $("tadd").elements) el.disabled = S.todos === null;
-    $("todo-count").textContent = `${ned.length + jira.length + gh.length + open.length}건`;
+    $("todo-count").textContent = `${ned.length + mi.length + jira.length + si.length + gh.length + open.length}건`;
   }
 
   /** Ned's one line for the day, built from agenda + todos + attention. */
@@ -1045,26 +1508,25 @@
     const left = mt.filter((e) => e.en > now), cur = mt.find((e) => e.s <= now && now < e.en), next = mt.find((e) => e.s > now);
     const bits = [];
     if (ag) {
-      if (!mt.length) bits.push("오늘은 회의 없음. 딥워크 데이.");
-      else if (!left.length) bits.push(`오늘 회의 ${mt.length}개 다 끝났어.`);
-      else {
-        let t = `회의 ${left.length}개`;
-        if (cur) t += `, 지금 '${cur.title}' 중`;
-        if (next) t += `, ${next === mt[0] ? "첫" : "다음"} 미팅 ${hhmm(next.s)}`;
-        bits.push(t + ".");
-      }
+      const v = V();
+      if (!mt.length) bits.push(v.noMeet);
+      else if (!left.length) bits.push(v.allDone(mt.length));
+      else bits.push(v.meet({ left: left.length, cur: cur?.title, next: next ? hhmm(next.s) : "", first: next === mt[0] }));
       const jira = ag.jira?.length || 0, rv = (ag.github || []).filter((g) => g.reason === "review_requested").length;
-      const w = [jira ? `Jira ${jira}건` : "", rv ? `리뷰 ${rv}건` : ""].filter(Boolean);
-      if (w.length) bits.push(`${w.join(", ")} 기다려.`);
+      const mails = ag.mail_enabled !== false ? ag.mail?.items?.length || 0 : 0;
+      const slacks = ag.slack_enabled !== false ? ag.slack?.items?.length || 0 : 0;
+      const c = V().count;
+      const w = [jira ? c("Jira", jira, "건") : "", rv ? c("리뷰", rv, "건") : "", mails ? c("메일", mails, "통") : "", slacks ? c("Slack", slacks, "건") : ""].filter(Boolean);
+      if (w.length) bits.push(V().wait(w));
     }
     const sub = [];
     const ned = (S.state?.attention || []).filter((a) => a.source !== "sessions").length;
     const open = (S.todos || []).filter((t) => !t.done), over = open.filter((t) => (dueInfo(t.due)?.days ?? 1) < 0).length;
     const ask = mt.filter((e) => e.rsvp === "needsAction" && e.en > now).length;
-    if (ask) sub.push(`응답 안 한 초대 ${ask}건`);
-    if (ned) sub.push(`내가 챙겨 둔 거 ${ned}건`);
-    if (open.length) sub.push(`네 할 일 ${open.length}개${over ? ` (마감 지난 거 ${over}개)` : ""}`);
-    if (!bits.length) bits.push(ag === null ? "일정은 아직 못 받아 왔어." : "오늘은 회의 없음. 딥워크 데이.");
+    if (ask) sub.push(V().ask(ask));
+    if (ned) sub.push(V().held(ned));
+    if (open.length) sub.push(V().todo(open.length, over));
+    if (!bits.length) bits.push(ag === null ? V().noAgenda : V().noMeet);
     return { lead: `${greet()} ${bits.join(" ")}`, sub: sub.join(" · ") };
   }
 
@@ -1144,7 +1606,14 @@
     t.value = ""; d.value = ""; t.focus();
   });
   $("tadd-t").addEventListener("keydown", (e) => { if (e.key === "Escape") e.target.blur(); });
-  const homeCard = $("g-me").closest(".card");
+  // Source card header (a <button>: click, Enter or Space) toggles shrink ⇄ expanded and remembers it per card.
+  $("sgrid").addEventListener("click", (e) => {
+    const h = e.target.closest(".sh[data-card]"); if (!h) return;
+    const el = h.closest(".scard"), open = !el.classList.contains("open");
+    el.classList.toggle("open", open); h.setAttribute("aria-expanded", String(open));
+    lsSet(cardKey(h.dataset.card), open ? "1" : "0");
+  });
+  const homeCard = $("todo-card");
   homeCard.addEventListener("click", (e) => {
     const dis = e.target.closest("[data-dismiss]"), del = e.target.closest("[data-del]");
     if (dis) dismissAttention(dis.dataset.dismiss);
@@ -1159,6 +1628,7 @@
     try {
       const s = await api("/api/state");
       S.state = s; S.conn = true;
+      if (s.persona && s.persona !== persona) applyPersona(s.persona);
       const bid = s.last_briefing?.id ?? null;
       const tasks = [];
       if (lastUpdated && s.updated_at !== lastUpdated) tasks.push(loadEvents(false));
@@ -1196,6 +1666,7 @@
     if (ui.view === "home") renderHome();
     if (ui.view === "inbox") renderInbox();
     if (ui.view === "timeline") renderTimeline();
+    if (ui.view === "settings" && S.config) renderExcl(); // candidates follow agenda/briefings as they load
   }
 
   // ---------- views + keys ----------
@@ -1246,6 +1717,7 @@
   window.addEventListener("resize", syncRailButton);
 
   setView();
+  applyPersona(persona, { save: false });
   Promise.all([loadBriefings(false), loadEvents(false), loadConfig(), loadAgenda(false), loadTodos(false)]).then(loadState);
   setInterval(() => { if (!document.hidden) { loadAgenda(); loadTodos(); } }, HOME_POLL_MS);
   setInterval(() => { if (!document.hidden) loadState(); }, POLL_MS);
