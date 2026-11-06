@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ned · Ambient</title>
+<style>
+  /* Direction D — "Ambient panel": a narrow always-on window beside the editor.
+     One big "now" card, session pills, a thin thread for history. Empty sections disappear. */
+  :root {
+    color-scheme: light dark;
+    --bg: #f2f2f4; --card: #ffffff; --fg: #18181b; --dim: #6b6b76; --faint: #a6a6b0; --line: #e3e3e8;
+    --now: #fff7e8; --now-line: #f1d9a8; --now-fg: #6b4300;
+    --warn: #d68a00; --err: #d93a3a; --ok: #2f9e55; --run: #3477f5;
+    --sans: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", "Noto Sans KR", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121214; --card: #1b1b1f; --fg: #ededf0; --dim: #9b9ba6; --faint: #5d5d68; --line: #2a2a30;
+      --now: #2a2112; --now-line: #4d3a17; --now-fg: #f2c46b; --warn: #f0a53a; --err: #f26b6b; --ok: #5fcf85; --run: #6b9cff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.45 var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; }
+  .panel { max-width: 420px; margin: 0 auto; padding: 12px; display: grid; gap: 10px; }
+  .hd { display: flex; align-items: center; gap: 8px; padding: 2px 4px; color: var(--dim); font-size: 12px; }
+  .hd b { color: var(--fg); font-size: 14px; }
+  .ring { width: 16px; height: 16px; flex: none; }
+  .ring circle { fill: none; stroke-width: 3; }
+  .ring .bgc { stroke: var(--line); } .ring .fgc { stroke: var(--ok); stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
+  .ring.off .fgc { stroke: var(--err); }
+  .hd .sp { flex: 1; }
+  .hd button { font: inherit; background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 999px; padding: 2px 9px; cursor: pointer; }
+  .hd button:hover { color: var(--fg); } .hd button:disabled { opacity: .5; cursor: progress; }
+  /* now card */
+  .now { background: var(--now); border: 1px solid var(--now-line); border-radius: 14px; padding: 14px 16px 12px; }
+  .now .lbl { font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--now-fg); display: flex; gap: 6px; align-items: center; }
+  .now .lbl .more { margin-left: auto; font-weight: 500; letter-spacing: 0; }
+  .now .tt { font-size: 18px; font-weight: 650; line-height: 1.35; margin: 6px 0 4px; }
+  .now .dt { color: var(--dim); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .now .row { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
+  .now .row .t { color: var(--faint); font-size: 12px; margin-right: auto; }
+  .now button, .now a.b { font: 600 12px var(--sans); border-radius: 8px; padding: 5px 11px; border: 1px solid var(--now-line); background: var(--card); color: var(--fg); cursor: pointer; text-decoration: none; }
+  .now a.b { background: var(--fg); color: var(--card); border-color: var(--fg); }
+  .queue { display: grid; gap: 2px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--now-line); }
+  .queue div { display: flex; gap: 8px; font-size: 12.5px; color: var(--dim); cursor: pointer; padding: 2px 0; }
+  .queue div:hover { color: var(--fg); }
+  .queue span.tt2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .calm { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 16px; text-align: center; }
+  .calm .big { font-size: 22px; } .calm .tt { font-size: 15px; font-weight: 600; margin-top: 4px; } .calm p { color: var(--dim); margin: 4px 0 0; font-size: 12.5px; }
+  /* pills */
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px 3px 8px; font-size: 12px; max-width: 100%; cursor: default; }
+  .pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
+  .pill.waiting i { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 25%, transparent); }
+  .pill.error i { background: var(--err); } .pill.running i { background: var(--run); } .pill.done i { background: var(--ok); }
+  .pill .r { color: var(--faint); }
+  .pill .sub { font-size: 11px; color: var(--dim); }
+  /* thread */
+  .sect { font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--faint); padding: 4px 4px 0; display: flex; }
+  .sect .sp { flex: 1; } .sect a { font-weight: 500; letter-spacing: 0; text-decoration: none; cursor: pointer; }
+  .thread { position: relative; padding: 2px 4px 4px 22px; }
+  .thread::before { content: ""; position: absolute; left: 9px; top: 6px; bottom: 6px; width: 1px; background: var(--line); }
+  .th { position: relative; padding: 4px 0; font-size: 12.5px; }
+  .th::before { content: ""; position: absolute; left: -16px; top: 10px; width: 5px; height: 5px; border-radius: 50%; background: var(--faint); }
+  .th.hot::before { background: var(--warn); width: 7px; height: 7px; left: -17px; top: 9px; }
+  .th.err::before { background: var(--err); width: 7px; height: 7px; left: -17px; top: 9px; }
+  .th.brief::before { background: var(--run); }
+  .th .h { color: var(--faint); font-variant-numeric: tabular-nums; margin-right: 6px; }
+  .th .m { color: var(--dim); }
+  .th.okfold { color: var(--faint); }
+  .brief-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font-size: 12.5px; }
+  .brief-card .hl { font-weight: 600; font-size: 13px; }
+  .brief-card ul { margin: 6px 0 0; padding-left: 16px; color: var(--dim); } .brief-card li { margin: 2px 0; }
+  .ft { text-align: center; color: var(--faint); font-size: 11px; padding: 4px 0 8px; }
+</style>
+</head>
+<body>
+<div class="panel" id="app"></div>
+<script src="fixture.js"></script>
+<script>
+(async () => {
+  "use strict";
+  const N = window.NED, e = N.esc;
+  const d = await N.load();
+  let focus = 0, showAll = false;
+  const app = document.getElementById("app");
+
+  function ring(s) {
+    // Fraction of the heartbeat interval that has passed: a quiet "Ned is breathing" cue.
+    const span = (s.next_heartbeat_at || 0) - (s.last_heartbeat_at || 0);
+    const frac = span > 0 ? Math.min(1, Math.max(0, (Date.now() - s.last_heartbeat_at) / span)) : 0;
+    const c = 2 * Math.PI * 6;
+    return `<svg class="ring ${N.alive(s) ? "" : "off"}" viewBox="0 0 16 16" aria-label="다음 점검까지"><circle class="bgc" cx="8" cy="8" r="6"/><circle class="fgc" cx="8" cy="8" r="6" stroke-dasharray="${(c * frac).toFixed(1)} ${c.toFixed(1)}"/></svg>`;
+  }
+
+  function draw() {
+    const s = d.state, att = s.attention;
+    focus = Math.min(focus, Math.max(0, att.length - 1));
+    const a = att[focus];
+    const nowCard = a ? `
+      <div class="now">
+        <div class="lbl">${N.KIND_ICON[a.kind] ?? ""} 지금 · ${e(N.KIND_KO[a.kind] ?? a.kind)}<span class="more">${att.length > 1 ? `${focus + 1} / ${att.length}` : ""}</span></div>
+        <div class="tt">${e(a.title)}</div>
+        ${a.detail ? `<div class="dt">${e(a.detail)}</div>` : ""}
+        <div class="row"><span class="t">${N.rel(a.ts)}</span>${a.url ? `<a class="b" href="${e(a.url)}" target="_blank" rel="noopener">열기</a>` : ""}<button id="done">완료</button></div>
+        ${att.length > 1 ? `<div class="queue">${att.map((x, i) => i === focus ? "" : `<div data-i="${i}"><span>${N.KIND_ICON[x.kind] ?? "·"}</span><span class="tt2">${e(x.title)}</span></div>`).join("")}</div>` : ""}
+      </div>`
+      : `<div class="calm"><div class="big">🌿</div><div class="tt">조용합니다</div><p>다음 점검 ${N.rel(s.next_heartbeat_at)}${s.quiet ? " · 조용한 시간" : ""}</p></div>`;
+
+    const pills = s.sessions.length ? `<div class="sect">세션</div><div class="pills">${s.sessions.map((x) => `<span class="pill ${x.status}" title="${e((N.STATUS_KO[x.status] ?? x.status) + " · " + (x.last_summary ?? x.last_prompt ?? ""))}"><i></i>${e(x.worktree)}${x.subagents_active ? `<span class="sub">🤖×${x.subagents_active}</span>` : ""}<span class="r">${N.rel(x.last_event_ts).replace(" 전", "")}</span></span>`).join("")}</div>` : "";
+
+    const latest = d.briefings.find((b) => b.status === "UPDATE" && Date.now() - b.ts < 18 * 3600e3);
+    const extra = latest ? [...latest.updates, ...latest.fyi] : [];
+    const brief = extra.length ? `<div class="sect">브리핑 ${N.hhmm(latest.ts)}</div><div class="brief-card"><div class="hl">${e(latest.headline ?? "")}</div><ul>${extra.map((x) => `<li>${N.KIND_ICON[x.kind] ?? ""} ${x.url ? `<a href="${e(x.url)}" target="_blank" rel="noopener">${e(x.title)}</a>` : e(x.title)}</li>`).join("")}</ul></div>` : "";
+
+    // Thread: fold consecutive NED_OK heartbeats into one line, keep the rest terse.
+    const tl = N.timeline(d), out = [];
+    for (const x of tl) {
+      if (x.brief && x.raw.status === "NED_OK") {
+        const prev = out[out.length - 1];
+        if (prev && prev.ok) { prev.n++; continue; }
+        out.push({ ok: true, n: 1, ts: x.ts }); continue;
+      }
+      out.push(x);
+    }
+    const shown = showAll ? out : out.slice(0, 8);
+    const thread = shown.length ? `<div class="sect">흐름<span class="sp"></span>${out.length > 8 ? `<a id="all">${showAll ? "접기" : `전체 ${out.length}`}</a>` : ""}</div><div class="thread">${shown.map((x) => x.ok
+      ? `<div class="th okfold"><span class="h">${N.hhmm(x.ts)}</span>NED_OK${x.n > 1 ? ` ×${x.n}` : ""} · 변화 없음</div>`
+      : `<div class="th ${x.brief ? "brief" : x.type === "Notification" ? "hot" : x.type === "StopFailure" ? "err" : ""}"><span class="h">${N.hhmm(x.ts)}</span>${x.brief ? "브리핑" : e(N.EVENT_KO[x.type] ?? x.type)}${x.wt ? ` <b style="font-weight:500">${e(x.wt)}</b>` : ""}${x.msg && !x.brief ? `<div class="m">${e(String(x.msg).slice(0, 80))}</div>` : x.brief && x.raw.headline ? `<div class="m">${e(x.raw.headline)}</div>` : ""}</div>`).join("")}</div>` : "";
+
+    app.innerHTML = `
+      <div class="hd">${ring(s)}<b>Ned</b><span>${N.alive(s) ? `다음 ${N.rel(s.next_heartbeat_at)}` : "응답 없음"}</span><span class="sp"></span><button id="hb">점검</button></div>
+      ${nowCard}${pills}${brief}${thread}
+      <div class="ft">${d.live ? "실시간" : "fixture"} · 마지막 점검 ${N.rel(s.last_heartbeat_at)}</div>`;
+
+    app.querySelector("#done")?.addEventListener("click", async () => { await N.dismiss(a.id); draw(); });
+    for (const q of app.querySelectorAll(".queue div[data-i]")) q.onclick = () => { focus = +q.dataset.i; draw(); };
+    app.querySelector("#all")?.addEventListener("click", () => { showAll = !showAll; draw(); });
+    const hb = app.querySelector("#hb");
+    hb.onclick = async () => { hb.disabled = true; hb.textContent = "점검 중…"; await N.heartbeat(false); draw(); };
+  }
+  draw();
+  setInterval(draw, 30000);
+})();
+</script>
+</body>
+</html>
