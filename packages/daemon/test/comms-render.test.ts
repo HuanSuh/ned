@@ -1,7 +1,7 @@
 /** Ned 통신기 (public/app/features/chat-core.js): markdown-lite, feed, ticker and panel HTML snapshots. */
 import { describe, expect, it } from "vitest";
 // @ts-expect-error — plain browser ES module (public/app), no types
-import { COMMS_VOICE, buildFeed, commsVoice, feedHtml, mdLite, messagesHtml, shellHtml, tickerOf } from "../public/app/features/chat-core.js";
+import { COMMS_SIZE, COMMS_VOICE, buildFeed, clampSize, commsVoice, feedHtml, mdLite, messagesHtml, readSize, shellHtml, tickerOf } from "../public/app/features/chat-core.js";
 
 const MARK = "<svg class=\"mark\"></svg>";
 const NOW = Date.UTC(2026, 10, 7, 3, 0, 0);
@@ -57,5 +57,28 @@ describe("panel", () => {
     const alfred = shellHtml(COMMS_VOICE.alfred, MARK, "Ctrl+");
     expect(alfred).toContain('aria-label="인터폰 열기 (Ctrl+J)"');
     expect(alfred).toContain('placeholder="말씀하십시오…"');
+  });
+});
+
+describe("panel size", () => {
+  it("clampSize: min 360×420, max viewport − 32; minimum wins on a tiny viewport", () => {
+    expect(COMMS_SIZE).toMatchObject({ minW: 360, minH: 420, defW: 420, defH: 620 });
+    expect(clampSize({ w: 500, h: 700 }, 1440, 900)).toEqual({ w: 500, h: 700 });
+    expect(clampSize({ w: 100, h: 100 }, 1440, 900)).toEqual({ w: 360, h: 420 });
+    expect(clampSize({ w: 5000, h: 5000 }, 1440, 900)).toEqual({ w: 1408, h: 868 });
+    expect(clampSize({ w: 999, h: 999 }, 300, 300)).toEqual({ w: 360, h: 420 });
+    expect(clampSize({ w: 512.6, h: 600.4 }, 1440, 900)).toEqual({ w: 513, h: 600 });
+  });
+  it("readSize: restores + clamps a saved size; null (= default) for missing / malformed", () => {
+    expect(readSize(JSON.stringify({ w: 640, h: 800 }), 1440, 900)).toEqual({ w: 640, h: 800 });
+    expect(readSize(JSON.stringify({ w: 640, h: 2000 }), 1440, 900)).toEqual({ w: 640, h: 868 });
+    expect(readSize({ w: 10, h: 10 }, 1440, 900)).toEqual({ w: 360, h: 420 });
+    for (const bad of [null, "", "not json", "null", "{}", JSON.stringify({ w: "x", h: 500 }), JSON.stringify({ w: null, h: 500 })]) expect(readSize(bad, 1440, 900)).toBeNull();
+  });
+  it("shell carries the persona tag and the three resize handles", () => {
+    const html = shellHtml(COMMS_VOICE.oracle, MARK);
+    expect(html).toContain('<i class="cm-tag" id="cm-tag">ORACLE · LINK</i>');
+    expect([...html.matchAll(/data-rs="(\w+)"/g)].map((m) => m[1])).toEqual(["w", "n", "nw"]);
+    for (const v of Object.values(COMMS_VOICE)) expect((v as { tag: string }).tag).toMatch(/ · /);
   });
 });

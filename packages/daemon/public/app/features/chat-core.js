@@ -4,12 +4,28 @@ import { esc, safeUrl } from "../util.js";
 
 // ---------- persona wording (structure is shared; only words + theme tokens change) ----------
 export const COMMS_VOICE = {
-  ned: { title: "Ned 통신", live: "수신 중", idle: "연결됨", off: "신호 끊김", calling: (n) => `Ned: 새 메시지 ${n}건`, quiet: "새 소식 없음", thinking: "찾아보는 중…", placeholder: "Ned 에게 물어봐…", empty: "뭐든 물어봐. 오늘 일정, 답할 거, PR 상태 — 아는 건 바로, 모르는 건 찾아볼게.", noMsgs: "새로 온 건 없어.", ask: "Ned 에게 묻기" },
-  alfred: { title: "인터폰", live: "호출 중", idle: "대기 중", off: "연결 끊김", calling: (n) => `호출 ${n}건`, quiet: "새 호출 없음", thinking: "알아보는 중입니다…", placeholder: "말씀하십시오…", empty: "무엇이든 여쭈어 주십시오. 일정, 회신할 일, PR 현황을 바로 아뢰겠습니다.", noMsgs: "새로 들어온 소식은 없습니다.", ask: "Alfred 에게 묻기" },
-  oracle: { title: "CLOCKTOWER LINK", live: "RX", idle: "LINK OK", off: "NO SIGNAL", calling: (n) => `신호 ${n}`, quiet: "신호 없음", thinking: "조회 중…", placeholder: "질의 입력 >", empty: "질의 대기. 일정 · 답할 것 · PR 상태 즉시 응답.", noMsgs: "수신 신호 없음.", ask: "Oracle 에게 질의" },
-  jarvis: { title: "Jarvis 링크", live: "수신", idle: "온라인", off: "오프라인", calling: (n) => `알림 ${n}건`, quiet: "새 알림 0건", thinking: "분석 중…", placeholder: "무엇을 확인할까요?", empty: "무엇이든 물어보세요. 일정 · 응답 대기 · PR 현황을 바로 정리해 드릴게요.", noMsgs: "새 알림이 없어요.", ask: "Jarvis 에게 묻기" },
+  ned: { tag: "NED · 통신", title: "Ned 통신", live: "수신 중", idle: "연결됨", off: "신호 끊김", calling: (n) => `Ned: 새 메시지 ${n}건`, quiet: "새 소식 없음", thinking: "찾아보는 중…", placeholder: "Ned 에게 물어봐…", empty: "뭐든 물어봐. 오늘 일정, 답할 거, PR 상태 — 아는 건 바로, 모르는 건 찾아볼게.", noMsgs: "새로 온 건 없어.", ask: "Ned 에게 묻기" },
+  alfred: { tag: "ALFRED · 인터폰", title: "인터폰", live: "호출 중", idle: "대기 중", off: "연결 끊김", calling: (n) => `호출 ${n}건`, quiet: "새 호출 없음", thinking: "알아보는 중입니다…", placeholder: "말씀하십시오…", empty: "무엇이든 여쭈어 주십시오. 일정, 회신할 일, PR 현황을 바로 아뢰겠습니다.", noMsgs: "새로 들어온 소식은 없습니다.", ask: "Alfred 에게 묻기" },
+  oracle: { tag: "ORACLE · LINK", title: "CLOCKTOWER LINK", live: "RX", idle: "LINK OK", off: "NO SIGNAL", calling: (n) => `신호 ${n}`, quiet: "신호 없음", thinking: "조회 중…", placeholder: "질의 입력 >", empty: "질의 대기. 일정 · 답할 것 · PR 상태 즉시 응답.", noMsgs: "수신 신호 없음.", ask: "Oracle 에게 질의" },
+  jarvis: { tag: "JARVIS · 링크", title: "Jarvis 링크", live: "수신", idle: "온라인", off: "오프라인", calling: (n) => `알림 ${n}건`, quiet: "새 알림 0건", thinking: "분석 중…", placeholder: "무엇을 확인할까요?", empty: "무엇이든 물어보세요. 일정 · 응답 대기 · PR 현황을 바로 정리해 드릴게요.", noMsgs: "새 알림이 없어요.", ask: "Jarvis 에게 묻기" },
 };
 export const commsVoice = (p) => COMMS_VOICE[p] || COMMS_VOICE.ned;
+
+// ---------- panel size (resize handles; persisted as ned.comms.size) ----------
+/** Expanded-panel size limits: min 360×420, max viewport − 32 on each axis; default 420×620. */
+export const COMMS_SIZE = { minW: 360, minH: 420, defW: 420, defH: 620, gap: 32 };
+/** Clamp {w,h} to [min, viewport − gap]; when the viewport is smaller than the minimum, the minimum wins (CSS caps it visually). */
+export function clampSize(s, vw, vh) {
+  const { minW, minH, gap } = COMMS_SIZE;
+  const fit = (v, min, vp) => Math.round(Math.max(min, Math.min(Number(v), vp - gap)));
+  return { w: fit(s.w, minW, vw), h: fit(s.h, minH, vh) };
+}
+/** Restore a saved size (localStorage JSON) → clamped {w,h}, or null (= default size) for missing / malformed values. */
+export function readSize(raw, vw, vh) {
+  let v = null; try { v = typeof raw === "string" ? JSON.parse(raw) : raw; } catch { return null; }
+  if (!v || !Number.isFinite(Number(v.w)) || !Number.isFinite(Number(v.h)) || v.w === null || v.h === null) return null;
+  return clampSize(v, vw, vh);
+}
 
 // ---------- SSE ----------
 /**
@@ -140,7 +156,7 @@ export function shellHtml(voice, mark, mod = "⌘") {
   <span class="cm-badge" id="cm-badge" hidden></span>
 </div>
 <section class="cm-panel" id="cm-panel" role="dialog" aria-label="${esc(voice.title)}" hidden>
-  <header class="cm-hd"><span class="cm-ring sm"><span class="cm-mk" id="cm-mk2">${mark}</span></span><span class="cm-ti"><b id="cm-title">${esc(voice.title)}</b><span id="cm-sub"></span></span><span class="sp"></span>
+  <header class="cm-hd"><span class="cm-ring sm"><span class="cm-mk" id="cm-mk2">${mark}</span></span><span class="cm-ti"><i class="cm-tag" id="cm-tag">${esc(voice.tag)}</i><b id="cm-title">${esc(voice.title)}</b><span id="cm-sub"></span></span><span class="sp"></span>
     <span class="cm-cost" id="cm-cost" title="이 대화 비용 · 오늘 claude -p 합계"></span>
     <button type="button" class="btn small" id="cm-new" title="새 대화">새 대화</button>
     <button type="button" class="btn small cm-x" id="cm-close" aria-label="접기" title="접기 (Esc)">▾</button></header>
@@ -151,5 +167,6 @@ export function shellHtml(voice, mark, mod = "⌘") {
       <div class="cm-ft"><span class="cm-hint"><kbd>⏎</kbd> 전송 · <kbd>⇧⏎</kbd> 줄바꿈<span id="cm-len"></span></span><span class="sp"></span><button type="submit" class="btn small go" id="cm-send">전송</button></div></form>
   </div>
   <div class="cm-body" id="cm-msgs" role="tabpanel" aria-labelledby="cm-t-msgs" hidden><div class="cm-feed" id="cm-feed"></div></div>
+  <i class="cm-rs" data-rs="w" aria-hidden="true" title="끌어서 폭 조절 · 더블클릭: 기본 크기"></i><i class="cm-rs" data-rs="n" aria-hidden="true" title="끌어서 높이 조절 · 더블클릭: 기본 크기"></i><i class="cm-rs" data-rs="nw" aria-hidden="true" title="끌어서 크기 조절 · 더블클릭: 기본 크기"></i>
 </section>`;
 }

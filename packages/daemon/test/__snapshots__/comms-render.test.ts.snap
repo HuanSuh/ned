@@ -7,7 +7,7 @@ exports[`panel > shell: dock + panel with 대화 / 메시지 tabs (snapshot) 1`]
   <span class="cm-badge" id="cm-badge" hidden></span>
 </div>
 <section class="cm-panel" id="cm-panel" role="dialog" aria-label="Ned 통신" hidden>
-  <header class="cm-hd"><span class="cm-ring sm"><span class="cm-mk" id="cm-mk2"><svg class="mark"></svg></span></span><span class="cm-ti"><b id="cm-title">Ned 통신</b><span id="cm-sub"></span></span><span class="sp"></span>
+  <header class="cm-hd"><span class="cm-ring sm"><span class="cm-mk" id="cm-mk2"><svg class="mark"></svg></span></span><span class="cm-ti"><i class="cm-tag" id="cm-tag">NED · 통신</i><b id="cm-title">Ned 통신</b><span id="cm-sub"></span></span><span class="sp"></span>
     <span class="cm-cost" id="cm-cost" title="이 대화 비용 · 오늘 claude -p 합계"></span>
     <button type="button" class="btn small" id="cm-new" title="새 대화">새 대화</button>
     <button type="button" class="btn small cm-x" id="cm-close" aria-label="접기" title="접기 (Esc)">▾</button></header>
@@ -18,5 +18,6 @@ exports[`panel > shell: dock + panel with 대화 / 메시지 tabs (snapshot) 1`]
       <div class="cm-ft"><span class="cm-hint"><kbd>⏎</kbd> 전송 · <kbd>⇧⏎</kbd> 줄바꿈<span id="cm-len"></span></span><span class="sp"></span><button type="submit" class="btn small go" id="cm-send">전송</button></div></form>
   </div>
   <div class="cm-body" id="cm-msgs" role="tabpanel" aria-labelledby="cm-t-msgs" hidden><div class="cm-feed" id="cm-feed"></div></div>
+  <i class="cm-rs" data-rs="w" aria-hidden="true" title="끌어서 폭 조절 · 더블클릭: 기본 크기"></i><i class="cm-rs" data-rs="n" aria-hidden="true" title="끌어서 높이 조절 · 더블클릭: 기본 크기"></i><i class="cm-rs" data-rs="nw" aria-hidden="true" title="끌어서 크기 조절 · 더블클릭: 기본 크기"></i>
 </section>"
 `;
