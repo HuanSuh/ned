@@ -791,7 +791,7 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
         turns += res.num_turns;
         payload = res.ok ? parse(res.text) : null;
       }
-      if (!payload) error = res.ok ? `invalid JSON from model: ${res.text.slice(0, 300)}` : (res.error ?? "claude failed").slice(0, 500);
+      if (!payload) error = res.ok ? `invalid JSON from model (${turns} turns, ${res.text.length} chars, tail: …${res.text.slice(-120)})` : (res.error ?? "claude failed").slice(0, 500);
       raw = res.text;
     }
     total += cost;
@@ -800,7 +800,8 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
       // Keep the last good lists so the card doesn't blank out on a transient failure.
       setSourceStatus(c.keys, { status: "error", updated_at: Date.now(), started_at: started, duration_ms: Date.now() - started, cost_usd: cost, error });
       errors.push(`${c.id}: ${error.slice(0, 200)}`);
-      if (raw) try { fs.writeFileSync(AGENDA_RAW_PATH, raw.slice(0, 4000)); } catch { /* ignore */ }
+      // Whole answer (capped at 1 MB), so a cut-off / malformed reply can be inspected after the fact.
+      if (raw) try { fs.writeFileSync(AGENDA_RAW_PATH, raw.slice(0, 1_000_000)); } catch { /* ignore */ }
       log(`agenda[${c.id}]: failed at +${at}s — ${error.slice(0, 300)}`);
       return;
     }

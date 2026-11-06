@@ -176,7 +176,10 @@ interface SpawnResult extends ClaudeRunResult {
 function spawnClaude(prompt: string, args: string[], timeoutMs: number | undefined, guardConnectors: boolean): Promise<SpawnResult> {
   return new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn("claude", args, { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, NED_CHILD: "1" } });
+    // Long list answers (Slack items + all + watch channels) can exceed the CLI's default output cap and come back
+    // cut off mid-JSON; ask for the model's full budget unless the user pinned their own.
+    const env = { CLAUDE_CODE_MAX_OUTPUT_TOKENS: "32000", ...process.env, NED_CHILD: "1" };
+    const child = spawn("claude", args, { stdio: ["pipe", "pipe", "pipe"], env });
     let buf = "";
     let lastText = "";
     let err = "";
@@ -278,5 +281,54 @@ export function extractJson<T>(text: string): T | null {
       /* try next */
     }
   }
+  // Seen live (agenda[slack], 2026-11-06): a long list answer cut off mid-item by the model's output cap. Keep what
+  // arrived instead of dropping the whole source: close the dangling string / arrays / objects and parse again.
+  for (const c of candidates) {
+    const start = c?.indexOf("{") ?? -1;
+    if (!c || start < 0) continue;
+    try {
+      const j = JSON.parse(repairJson(c.slice(start))) as T;
+      if (j && typeof j === "object" && Object.keys(j).length > 0) return j; // a bare `{` repaired to `{}` says nothing
+    } catch {
+      /* try next */
+    }
+  }
   return null;
+}
+
+/**
+ * Best-effort completion of a JSON document that stopped mid-stream: drops the trailing partial token (a bare key,
+ * a key without its value, a half-written number / literal, a dangling comma), closes an open string, then closes
+ * every open array / object. The result may still fail to parse — callers must try/catch.
+ */
+export function repairJson(s: string): string {
+  const closers: string[] = [];
+  let inStr = false;
+  let esc = false;
+  for (const ch of s) {
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{") closers.push("}");
+    else if (ch === "[") closers.push("]");
+    else if (ch === "}" || ch === "]") closers.pop();
+  }
+  let out = s.trimEnd();
+  if (inStr) out += '"';
+  const inObject = closers[closers.length - 1] === "}";
+  const str = '"(?:[^"\\\\]|\\\\.)*"';
+  if (inObject) {
+    // `"key": tru` / `"key":` → drop the pair; `{"key"` / `,"key"` → drop the bare key.
+    out = out.replace(new RegExp(`,?\\s*${str}\\s*:\\s*[A-Za-z0-9.+-]*$`), "");
+    out = out.replace(new RegExp(`([{,])\\s*${str}$`), "$1");
+  } else {
+    // In an array: a half-written number / literal after a comma.
+    out = out.replace(/,\s*[A-Za-z0-9.+-]+$/, "");
+  }
+  out = out.replace(/,\s*$/, "");
+  return out + closers.reverse().join("");
 }

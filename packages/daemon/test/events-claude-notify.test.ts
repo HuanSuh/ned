@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildClaudeArgs, extractJson, llmDisabled, noLlmResult } from "../src/claude.js";
+import { buildClaudeArgs, extractJson, llmDisabled, noLlmResult, repairJson } from "../src/claude.js";
 import { lastAssistantText, parseLines } from "../src/events.js";
 import { notifyBackend } from "../src/notify.js";
 
@@ -69,8 +69,25 @@ describe("claude.extractJson", () => {
   });
   it("returns null for no object / broken JSON", () => {
     expect(extractJson("no json here")).toBeNull();
-    expect(extractJson("{broken")).toBeNull();
     expect(extractJson("} {")).toBeNull();
+    expect(extractJson("{broken")).toBeNull();
+  });
+  it("salvages an answer cut off mid-item (output cap): keeps complete items, drops the dangling one", () => {
+    // Cut inside a string value of the 2nd `all` item — what agenda[slack] hit live.
+    const cut = '{"slack":{"summary":"둘 남았어.","items":[{"from":"a","text":"q?","url":"u1"}],"all":[{"from":"a","text":"q?","url":"u1","answered":false},{"from":"b","text":"half writ';
+    expect(extractJson(cut)).toEqual({ slack: { summary: "둘 남았어.", items: [{ from: "a", text: "q?", url: "u1" }], all: [{ from: "a", text: "q?", url: "u1", answered: false }, { from: "b", text: "half writ" }] } });
+    // Cut right after a key, after a colon, inside a literal, after a comma.
+    expect(extractJson('{"a":[1,2],"b":{"c":true,"d')).toEqual({ a: [1, 2], b: { c: true } });
+    expect(extractJson('{"a":[1,2],"b":{"c":true,"d":')).toEqual({ a: [1, 2], b: { c: true } });
+    expect(extractJson('{"a":[1,2],"b":{"c":true,"d":fal')).toEqual({ a: [1, 2], b: { c: true } });
+    expect(extractJson('{"a":[1,2,')).toEqual({ a: [1, 2] });
+    expect(extractJson('{"a":[1,2,3')).toEqual({ a: [1, 2] });
+    // Escaped quotes inside the open string don't confuse the scanner.
+    expect(extractJson('{"t":"he said \\"hi')).toEqual({ t: 'he said "hi' });
+  });
+  it("repairJson closes strings and brackets in order", () => {
+    expect(repairJson('{"x":[{"y":"z')).toBe('{"x":[{"y":"z"}]}');
+    expect(repairJson('{"x":[{"y":"z"},')).toBe('{"x":[{"y":"z"}]}');
   });
 });
 
