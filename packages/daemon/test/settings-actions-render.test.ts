@@ -11,6 +11,20 @@ const acts = (html: string) => [...html.matchAll(/data-act="([^"]+)"/g)].map((m)
 const groups = (html: string) => [...html.matchAll(/data-wagrp="([^"]+)"/g)].map((m) => m[1]);
 
 describe("쓰기 액션 by source", () => {
+  it("gmail_mark_read renders as a 확인 완료만 / 읽음 표시까지 radio; only the 'on' radio carries data-act", () => {
+    const d = { ...DEFAULTS, gmail_mark_read: false };
+    const ko = { ...KO, gmail_mark_read: "Gmail 읽음 표시" };
+    const html = writeActionsHtml({ sources: SOURCES, actions: d }, d, ko);
+    expect(acts(html)).toContain("gmail_mark_read");
+    expect(html).toContain('role="radiogroup" aria-label="메일 확인 시"');
+    expect(html).toContain('<label><input type="radio" name="wa-gmail_mark_read" value="off" checked>확인 완료만</label>');
+    expect(html).toContain('<label><input type="radio" name="wa-gmail_mark_read" value="on" data-act="gmail_mark_read" >Gmail 읽음 표시까지</label>');
+    const onHtml = writeActionsHtml({ sources: SOURCES, actions: { gmail_mark_read: true } }, d, ko);
+    expect(onHtml).toContain('value="on" data-act="gmail_mark_read" checked>');
+    expect(onHtml).toContain('value="off" >확인 완료만');
+    expect(writeActionGroups({ actions: {} }, d).find((g: { id: string }) => g.id === "gmail").keys).toEqual(["gmail_draft", "gmail_send", "gmail_mark_read"]);
+  });
+
   it("group order and toggle ids are stable", () => {
     const html = writeActionsHtml({ sources: SOURCES, actions: DEFAULTS }, DEFAULTS, KO);
     expect(groups(html)).toEqual(["slack", "gmail", "session", "jira", "github", "calendar"]);

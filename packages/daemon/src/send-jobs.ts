@@ -80,6 +80,17 @@ export function findRecentSent(req: SendRequest, now = Date.now()): { at: string
     const hit = readActionLog(500).find((e) => e.ok && e.event_key === k && now - Date.parse(e.ts) <= ALREADY_SENT_MS);
     return hit ? { at: hit.ts, detail: hit.result } : null;
   }
+  if (req.mode === "mark_read") {
+    // Gmail 읽음 표시: same thread marked read ok within 10 min → don't run claude again.
+    const t = req.ref.thread_id;
+    if (!t) return null;
+    for (const j of jobs.values()) {
+      const r = j.result;
+      if (j.state === "done" && r?.ok && j.req.mode === "mark_read" && j.req.ref.thread_id === t && now - (j.finished_at ?? 0) <= ALREADY_SENT_MS) return { at: r.logged_at, detail: r.detail, job_id: j.id };
+    }
+    const hit = readActionLog(500).find((e) => e.ok && e.mode === "mark_read" && e.ref?.thread_id === t && now - Date.parse(e.ts) <= ALREADY_SENT_MS);
+    return hit ? { at: hit.ts, detail: hit.result } : null;
+  }
   if (!req.draft_id) return null;
   for (const j of jobs.values()) {
     const r = j.result;

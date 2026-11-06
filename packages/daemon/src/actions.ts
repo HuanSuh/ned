@@ -15,6 +15,8 @@ export type SendSource = DraftSource | "calendar";
 export type SendMode =
   | "send"
   | "gmail_draft"
+  /** email: remove the UNREAD label from a thread (확인 완료 + config.actions.gmail_mark_read — see mail-read.ts). */
+  | "mark_read"
   | "session"
   /** jira */
   | "comment"
@@ -31,7 +33,7 @@ export type SendMode =
 /** Which modes each source takes, and whether `text` is required for it. */
 export const SEND_MODES: Record<SendSource, Partial<Record<SendMode, { text: boolean }>>> = {
   slack: { send: { text: true } },
-  email: { gmail_draft: { text: true }, send: { text: true } },
+  email: { gmail_draft: { text: true }, send: { text: true }, mark_read: { text: false } },
   session: { session: { text: true } },
   jira: { comment: { text: true }, transitions: { text: false }, transition: { text: false } },
   github: { approve: { text: false }, request_changes: { text: true }, review_comment: { text: true }, comment: { text: true } },
@@ -104,6 +106,7 @@ const MAX_TEXT = 4000;
 const SLACK_SEND = "mcp__claude_ai_Slack__slack_send_message";
 const GMAIL_DRAFT = "mcp__claude_ai_Gmail__create_draft";
 const GMAIL_REPLY = "mcp__claude_ai_Gmail__reply";
+export const GMAIL_UNLABEL_THREAD = "mcp__claude_ai_Gmail__unlabel_thread";
 const JIRA_COMMENT = "mcp__claude_ai_Atlassian__addCommentToJiraIssue";
 const JIRA_TRANSITIONS = "mcp__claude_ai_Atlassian__getTransitionsForJiraIssue";
 const JIRA_TRANSITION = "mcp__claude_ai_Atlassian__transitionJiraIssue";
@@ -190,7 +193,7 @@ export function gateKey(req: Pick<SendRequest, "source" | "mode">): keyof NedCon
     case "session":
       return "session_send";
     case "email":
-      return req.mode === "gmail_draft" ? "gmail_draft" : "gmail_send";
+      return req.mode === "gmail_draft" ? "gmail_draft" : req.mode === "mark_read" ? "gmail_mark_read" : "gmail_send";
     case "jira":
       return req.mode === "comment" ? "jira_comment" : "jira_transition"; // listing transitions is only for the transition flow
     case "github":
@@ -400,6 +403,7 @@ export function buildActionPrompt(req: SendRequest, meta: DraftMeta): BuiltActio
     };
   }
   // email
+  if (req.mode === "mark_read") return buildMarkRead(req);
   const messageId = req.ref.message_id ?? meta.message_id;
   if (!messageId) return "email target unknown: ref.message_id required (POST /api/draft fills it — pass draft_id)";
   if (req.mode === "gmail_draft") {
@@ -426,6 +430,27 @@ export function buildActionPrompt(req: SendRequest, meta: DraftMeta): BuiltActio
       `body (JSON string): ${body}`,
       `출력은 JSON 하나만: 성공 {"ok":true,"id":"<message id>"} / 실패 {"ok":false,"error":"이유"}`,
     ].join("\n"),
+  };
+}
+
+/** Gmail thread ids: hex (API) or the web UI's `thread-f:<n>` form; nothing that could smuggle text into the prompt. */
+export const GMAIL_THREAD_ID = /^[\w:.-]{1,200}$/;
+
+/** email mark_read: unlabel_thread(threadId, UNREAD) — the one tool, dontAsk, maxTurns 3. Never touches other labels. */
+export function buildMarkRead(req: SendRequest): BuiltAction | string {
+  const tid = req.ref.thread_id;
+  if (!tid || !GMAIL_THREAD_ID.test(tid)) return "ref.thread_id (Gmail thread id) required";
+  return {
+    tool: GMAIL_UNLABEL_THREAD,
+    action: `gmail_mark_read ${tid}`,
+    prompt: [
+      `mark Gmail thread ${tid} as read by removing ONLY its UNREAD label, then report the result.`,
+      `먼저 ToolSearch 로 \`select:${GMAIL_UNLABEL_THREAD}\` 를 로드한 뒤 ${GMAIL_UNLABEL_THREAD} 를 스레드 id \`${tid}\`, 제거할 라벨 ["UNREAD"] 로 한 번 호출한다.`,
+      "규칙: 이 도구 하나만, 한 번만 호출한다. UNREAD 외 다른 라벨·다른 스레드는 건드리지 않는다. 메일 내용 읽기·보내기·삭제 금지. 실패하면 재시도하지 말고 실패를 보고한다.",
+      `출력은 JSON 하나만: 성공 {"ok":true,"id":"${tid}"} / 실패 {"ok":false,"error":"이유"}`,
+    ].join("\n"),
+    opts: (cfg) => ({ ...actionRunOptions(GMAIL_UNLABEL_THREAD, cfg), maxTurns: 3 }),
+    verify: (x) => verifyField(x, "id", nonEmpty, () => `thread ${tid} → read (UNREAD removed)`),
   };
 }
 

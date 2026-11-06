@@ -162,6 +162,14 @@ describe("normalizers", () => {
   it("normalizeActions ignores non-objects", () => {
     expect(normalizeActions("x")).toEqual(DEFAULT_CONFIG.actions);
   });
+  it("normalizeActions: gmail_mark_read defaults off, takes a boolean, keeps base on junk", () => {
+    expect(DEFAULT_CONFIG.actions.gmail_mark_read).toBe(false);
+    expect(normalizeActions({}).gmail_mark_read).toBe(false);
+    const on = normalizeActions({ gmail_mark_read: true });
+    expect(on.gmail_mark_read).toBe(true);
+    expect(normalizeActions({ gmail_mark_read: "yes" }, on).gmail_mark_read).toBe(true);
+    expect(normalizeActions({ gmail_mark_read: false }, on).gmail_mark_read).toBe(false);
+  });
   it("normalizeNotifications truncates threshold", () => {
     expect(normalizeNotifications({ summary_threshold: 4.9 }).summary_threshold).toBe(4);
   });

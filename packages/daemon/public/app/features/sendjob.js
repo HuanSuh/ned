@@ -72,6 +72,11 @@ export async function sendAndWait(body, { onTick, label, endpoint = "/api/send",
   return out;
 }
 
+/** Wait for a job someone else started (e.g. Gmail 읽음 표시 from POST …/review → mark_read.job_id). Same {ok, status, data}. */
+export function waitJob(p, onTick) {
+  return poll({ endpoint: "/api/send", ...p, started_at: p.started_at || new Date().toISOString() }, onTick);
+}
+
 /** Page load: for every job a previous page left pending, find out how it ended (resume polling if still running). */
 export function resumePending(report) {
   const now = Date.now();

@@ -17,7 +17,7 @@ vi.mock("@hono/node-server", () => ({
 const { startServer } = await import("../src/server.js");
 const { loadConfig } = await import("../src/config.js");
 const { CONFIG_PATH } = await import("../src/paths.js");
-const { SENT_ACTIONS_LOG } = await import("../src/actions.js");
+const { SENT_ACTIONS_LOG, readActionLog } = await import("../src/actions.js");
 
 const request = (p: string, init?: RequestInit) => Promise.resolve(captured.fetch!(new Request(`http://ned.test${p}`, init)));
 const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -158,6 +158,37 @@ describe("other routes", () => {
     const r = await request(`/api/attention/${encodeURIComponent("jira:APP-1")}/review`, json("POST", { reviewed: true }));
     expect(r.status).toBe(200);
     expect((await r.json()).reviewed_at).toBeTypeOf("number");
+  });
+
+  it("POST …/review mail: + gmail_mark_read on → background job + optimistic unread; off / un-review → no job", async () => {
+    const { patchAgenda, readAgenda } = await import("../src/agenda.js");
+    const seed = () => patchAgenda((a) => void (a.mail = { summary: "", unread: 3, unread_capped: false, items: [], all: [{ id: "th9", from: "a", subject: "s", ts: "2026-11-06T00:00:00Z", url: "", unread: true }] }));
+    const review = async (reviewed: boolean) => (await request(`/api/attention/${encodeURIComponent("mail:th9")}/review`, json("POST", { reviewed }))).json();
+    fs.rmSync(SENT_ACTIONS_LOG, { force: true });
+
+    setActions({ gmail_mark_read: false });
+    seed();
+    const offR = await review(true);
+    expect(offR.ok).toBe(true);
+    expect(offR.mark_read).toBeUndefined();
+    expect(readAgenda().mail!.unread).toBe(3);
+
+    setActions({ gmail_mark_read: true });
+    seed();
+    const onR = await review(true);
+    expect(onR.reviewed_at).toBeTypeOf("number");
+    expect(onR.mark_read.job_id).toBeTypeOf("string");
+    expect(readAgenda().mail!.all[0].unread).toBe(false);
+    expect(readAgenda().mail!.unread).toBe(2);
+    const done = await waitJob(onR.mark_read.job_id);
+    expect(done.result.action).toBe("dry_run:gmail_mark_read th9"); // NED_NO_LLM / dry run: never a real Gmail write
+    // the 확인 완료 mark survives a failed / dry-run job
+    expect((await (await request("/api/agenda")).json()).reviewed["mail:th9"]).toBeTypeOf("number");
+
+    const unR = await review(false); // 확인 해제: never marks it unread again
+    expect(unR.mark_read).toBeUndefined();
+    expect(readAgenda().mail!.all[0].unread).toBe(false);
+    expect(readActionLog(50).filter((e) => e.mode === "mark_read")).toHaveLength(1);
   });
 
   it("POST /api/draft 400 on bad source", async () => {
