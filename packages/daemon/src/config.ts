@@ -44,6 +44,14 @@ export interface NedConfig {
   draft_fast_model: string | null;
   /** After each agenda run, pre-generate the 'normal' draft (fast path, max 6, sequential) for items that need a reply. */
   drafts_pregenerate: boolean;
+  /** Agenda phase 1: max rows in mail.all[] / slack.all[] (the card's "전체" view). */
+  agenda_all_limit: number;
+  /** Agenda phase 2: reply-needing items per context-collection `claude -p` (narrow tools, ≤6 turns). */
+  agenda_context_batch: number;
+  /** Agenda phase 2 stops (and won't start) once today's total `claude -p` spend (~/.ned/costs.json) reaches this. */
+  agenda_daily_budget_usd: number;
+  /** Model for every agenda `claude -p` (phase-1 per-source lists, phase-2 context batches); null = claude_model. */
+  agenda_light_model: string | null;
 }
 
 export interface NedActions {
@@ -197,7 +205,19 @@ export const DEFAULT_CONFIG: NedConfig = {
   draft_context_max_age_minutes: 180,
   draft_fast_model: "sonnet",
   drafts_pregenerate: false,
+  agenda_all_limit: 20,
+  agenda_context_batch: 5,
+  agenda_daily_budget_usd: 15,
+  agenda_light_model: "sonnet",
 };
+
+/** A finite number within [min, max] (truncated when `int`), else `fallback`. */
+function numIn(v: unknown, min: number, max: number, fallback: number, int = true): number {
+  const n = Number(v);
+  if (v == null || v === "" || !Number.isFinite(n)) return fallback;
+  const c = Math.max(min, Math.min(max, n));
+  return int ? Math.trunc(c) : c;
+}
 
 export function loadConfig(): NedConfig {
   let cfg: NedConfig;
@@ -216,6 +236,10 @@ export function loadConfig(): NedConfig {
       reply_tone: normalizeReplyTone(parsed.reply_tone),
       draft_context_max_age_minutes: Number.isFinite(Number(parsed.draft_context_max_age_minutes)) && Number(parsed.draft_context_max_age_minutes) >= 0 ? Number(parsed.draft_context_max_age_minutes) : DEFAULT_CONFIG.draft_context_max_age_minutes,
       drafts_pregenerate: parsed.drafts_pregenerate === true,
+      agenda_all_limit: numIn(parsed.agenda_all_limit, 1, 50, DEFAULT_CONFIG.agenda_all_limit),
+      agenda_context_batch: numIn(parsed.agenda_context_batch, 1, 10, DEFAULT_CONFIG.agenda_context_batch),
+      agenda_daily_budget_usd: numIn(parsed.agenda_daily_budget_usd, 0, 10_000, DEFAULT_CONFIG.agenda_daily_budget_usd, false),
+      agenda_light_model: parsed.agenda_light_model === null ? null : typeof parsed.agenda_light_model === "string" && parsed.agenda_light_model.trim() ? parsed.agenda_light_model.trim() : DEFAULT_CONFIG.agenda_light_model,
       filters: mergeFilters(normalizeFilters(DEFAULT_CONFIG.filters), parsed.filters),
     };
   }

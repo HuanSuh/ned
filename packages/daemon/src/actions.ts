@@ -98,7 +98,7 @@ function gate(req: SendRequest, cfg: NedConfig): { key: keyof NedConfig["actions
 
 /** Run options for a connector action: dontAsk + ONLY ToolSearch and the one write tool; no other built-ins. */
 export function actionRunOptions(tool: string, cfg: NedConfig): ClaudeRunOptions {
-  return { allowedTools: ["ToolSearch", tool], tools: ["ToolSearch"], permissionMode: "dontAsk", maxTurns: 4, model: cfg.claude_model, timeoutMs: 2 * 60_000 };
+  return { allowedTools: ["ToolSearch", tool], tools: ["ToolSearch"], permissionMode: "dontAsk", maxTurns: 4, model: cfg.claude_model, timeoutMs: 2 * 60_000, job: "action" };
 }
 
 /** The prompt + tool for a Slack / Gmail action, or an error string (missing address). */

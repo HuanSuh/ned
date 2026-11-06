@@ -136,7 +136,7 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
     res = noLlmResult();
   } else {
     log(`heartbeat: asking claude (${opts.daily ? "daily" : "heartbeat"}, ${events.length} new events, signalDue=${signalDue})`);
-    res = await runClaude(prompt, { allowedTools: allowedTools(cfg), maxTurns: cfg.claude_max_turns, model: cfg.claude_model });
+    res = await runClaude(prompt, { allowedTools: allowedTools(cfg), maxTurns: cfg.claude_max_turns, model: cfg.claude_model, job: "heartbeat" });
   }
   const id = new Date().toISOString().replace(/[:.]/g, "-");
 

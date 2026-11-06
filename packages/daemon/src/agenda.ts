@@ -1,13 +1,17 @@
+import { execFile } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { extractJson, llmDisabled, runClaude, type ClaudeRunResult } from "./claude.js";
+import { promisify } from "node:util";
+import { extractJson, llmDisabled, runClaude } from "./claude.js";
 import { filtersPrompt, jqlExclude, watchChannels, type NedConfig } from "./config.js";
 import { personaPrompt } from "./persona.js";
 import { AGENDA_PATH, AGENDA_RAW_PATH, log, readJson, writeJsonAtomic } from "./paths.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PROMPTS_DIR = path.resolve(here, "../../../prompts");
+const execFileP = promisify(execFile);
 
 export type Rsvp = "accepted" | "needsAction" | "declined" | "tentative" | "organizer";
 
@@ -46,7 +50,7 @@ export interface GithubItem {
 
 export type MailReason = "reply" | "approval" | "deadline" | "request";
 
-/** Size limits for agenda-collected draft context (must match prompts/agenda.md). */
+/** Size limits for agenda-collected draft context (must match prompts/agenda-context.md). */
 export const CTX_LIMITS = { slackMessages: 5, slackText: 300, mailBody: 1500, attachments: 10 } as const;
 
 /** Thread excerpt the agenda model already saw, so a reply draft needs no second fetch (drafts.ts fast path). */
@@ -146,6 +150,8 @@ export interface SlackWatchHighlight {
   needs_me: boolean;
   /** One short line: why it matters / why it needs me. */
   reason: string;
+  /** needs_me only: thread excerpt collected by agenda phase 2 (drafts.ts fast path). */
+  context?: SlackContext;
 }
 
 export interface SlackWatchChannel {
@@ -172,15 +178,54 @@ export interface AgendaPayload {
   slack: SlackBlock | null;
 }
 
+export const AGENDA_SOURCES = ["slack", "mail", "calendar", "jira", "github"] as const;
+export type AgendaSourceKey = (typeof AGENDA_SOURCES)[number];
+
+/** Per-source state of the last phase-1 (list) run, so the dashboard can show "갱신 중" per card. */
+export interface SourceStatus {
+  status: "running" | "done" | "error";
+  /** ms epoch of the last change (start, finish or failure). */
+  updated_at: number;
+  started_at?: number;
+  duration_ms?: number;
+  /** Cost of the claude -p call that produced it (calendar/jira share one call; github via gh = 0). */
+  cost_usd?: number;
+  error?: string;
+  /** Cheap hash of the list (agenda phase 2 skips sources whose list didn't change). */
+  signature?: string;
+  /** The list is identical to the previous run's. */
+  unchanged?: boolean;
+}
+
+/** Agenda phase 2 (background reply-context collection) progress. */
+export interface ContextStatus {
+  /** Items still waiting for context in this run. */
+  pending: number;
+  done: number;
+  failed: number;
+  running: boolean;
+  updated_at: number;
+  cost_usd: number;
+  /** "budget": stopped because today's spend hit config.agenda_daily_budget_usd. */
+  stopped: "budget" | null;
+  /** Sources skipped because their list signature equals the one whose context was last completed. */
+  skipped: string[];
+}
+
 export interface Agenda extends AgendaPayload {
   updated_at: number;
   /** Local dates (inclusive) the calendar list covers: yesterday … today+13. Absent in older agenda.json (= today only). */
   calendar_range?: { from: string; to: string };
+  /** Phase-1 cost of the latest run (sum of its per-source calls). */
   cost_usd: number;
   error?: string;
+  sources_status?: Partial<Record<AgendaSourceKey, SourceStatus>>;
+  context_status?: ContextStatus;
+  /** List signatures whose phase-2 context collection completed (skip-unchanged check). */
+  context_sigs?: Partial<Record<"slack" | "mail", string>>;
 }
 
-/** Must match the `unread` search limit in prompts/agenda.md. */
+/** Must match the `unread` search limit in prompts/agenda-lists.md. */
 export const MAIL_UNREAD_CAP = 50;
 const EMPTY: Agenda = { updated_at: 0, cost_usd: 0, calendar: [], jira: [], github: [], mail: null, slack: null };
 const emptyAgenda = (now: number): Agenda => ({ ...EMPTY, updated_at: now, calendar_range: calendarRange(new Date(now)) });
@@ -204,14 +249,19 @@ function readSlack(m: unknown): SlackBlock | null {
   return { summary: str(b.summary), items: Array.isArray(b.items) ? b.items : [], all: Array.isArray(b.all) ? b.all : [], watch: Array.isArray(b.watch) ? b.watch : [] };
 }
 
-/** Read tools for the agenda job only — narrower than the heartbeat's set. */
-function agendaTools(cfg: NedConfig): string[] {
-  const t = ["ToolSearch"];
-  if (cfg.sources.calendar) t.push("mcp__claude_ai_Google_Calendar__list_events", "mcp__claude_ai_Google_Calendar__search_events");
-  if (cfg.sources.jira) t.push("mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql");
-  if (cfg.sources.github) t.push("Bash(gh search prs:*)", "Bash(gh pr list:*)", "Bash(gh api:*)");
-  if (cfg.sources.gmail) t.push("mcp__claude_ai_Gmail__search_threads", "mcp__claude_ai_Gmail__get_thread");
-  if (cfg.sources.slack) t.push("mcp__claude_ai_Slack__slack_search_public_and_private", "mcp__claude_ai_Slack__slack_read_thread");
+/** Connector tools each phase-1 list call may use (loaded via ToolSearch). github is `gh`, not a connector. */
+const LIST_TOOLS: Record<AgendaSourceKey, string[]> = {
+  slack: ["mcp__claude_ai_Slack__slack_search_public_and_private"],
+  mail: ["mcp__claude_ai_Gmail__search_threads"],
+  calendar: ["mcp__claude_ai_Google_Calendar__list_events"],
+  jira: ["mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql"],
+  github: [],
+};
+
+/** `--allowedTools` for one phase-1 call — only that call's sources (narrower than the heartbeat's set). */
+export function listTools(keys: AgendaSourceKey[]): string[] {
+  const t = ["ToolSearch", ...keys.flatMap((k) => LIST_TOOLS[k])];
+  if (keys.includes("github")) t.push("Bash(gh search prs:*)");
   return t;
 }
 
@@ -384,7 +434,7 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
           }))
           .map((x, i) => withCtx(x, normalizeMailContext(arr(m.items)[i]?.context, collectedAt))),
         all: arr(m.all)
-          .slice(0, 50)
+          .slice(0, cfg.agenda_all_limit)
           .map((e) => ({
             id: str(e.id),
             from: str(e.from).slice(0, 80),
@@ -413,7 +463,7 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
             ...(normalizeSlackContext(e.context, collectedAt) ? { context: normalizeSlackContext(e.context, collectedAt) } : {}),
           })),
         all: arr(sl.all)
-          .slice(0, 50)
+          .slice(0, cfg.agenda_all_limit)
           .map((e) => ({
             channel: str(e.channel).slice(0, 80),
             from: str(e.from).slice(0, 80),
@@ -435,13 +485,30 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
   const keepCh = (x: { channel: string }) => !exChannels.has(x.channel.replace(/^#/, "").toLowerCase());
   if (slack) {
     slack.items = collapseDMs(slack.items.filter(keepCh));
-    slack.all = collapseDMs(slack.all.filter(keepCh));
+    slack.all = supersetSlack(slack.items, collapseDMs(slack.all.filter(keepCh)));
     // The prompt lets all[] skip context for rows already in items[]: share it by permalink, both ways.
     const byUrl = new Map<string, SlackContext>();
     for (const x of [...slack.items, ...slack.all]) if (x.context && x.url) byUrl.set(x.url, x.context);
     for (const x of [...slack.items, ...slack.all]) if (!x.context && byUrl.has(x.url)) x.context = byUrl.get(x.url);
   }
+  if (mail) mail.all = supersetMail(mail.items, mail.all);
   return { calendar, jira: jiraKept, github, mail, slack };
+}
+
+const byTsDesc = (a: { ts: string }, b: { ts: string }) => (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0);
+
+/** all[] must contain every items[] row (same permalink = same row): add the missing ones (unanswered), newest first. */
+export function supersetSlack(items: SlackItem[], all: SlackAllItem[]): SlackAllItem[] {
+  const have = new Set(all.map((x) => x.url));
+  const missing = items.filter((x) => x.url && !have.has(x.url)).map((x) => ({ ...x, answered: false }));
+  return missing.length ? [...all, ...missing].sort(byTsDesc) : all;
+}
+
+/** Same for mail: every items[] thread is in all[] (thread id), newest first. Added rows keep unread=false (not known). */
+export function supersetMail(items: MailItem[], all: MailAllItem[]): MailAllItem[] {
+  const have = new Set(all.map((x) => x.id));
+  const missing = items.filter((x) => x.id && !have.has(x.id)).map((x) => ({ id: x.id, from: x.from, subject: x.subject, ts: x.received, url: x.url, unread: false }));
+  return missing.length ? [...all, ...missing].sort(byTsDesc) : all;
 }
 
 /** Coerce model `slack.watch` output: only channels still being followed, max 5 highlights each. */
@@ -463,54 +530,191 @@ function normalizeWatch(raw: unknown, cfg: NedConfig): SlackWatchChannel[] {
           url: str(h.url),
           needs_me: h.needs_me === true,
           reason: str(h.reason).replace(/\s+/g, " ").trim().slice(0, 120),
+          ...(h.context ? { context: normalizeSlackContext(h.context, new Date().toISOString()) } : {}),
         })),
     }));
 }
 
-/** The agenda prompt's watch block ({{SLACK_WATCH}}); "" when Slack is off or nothing is followed. */
-function slackWatchBlock(cfg: NedConfig, since: string): string {
-  const w = cfg.sources.slack ? watchChannels(cfg.filters) : [];
-  if (!w.length) return "";
-  return `
-## 5-1. slack.watch — 팔로업 채널 (멘션이 없어도 본다)
-채널: ${w.map((c) => `#${c}`).join(", ")}
-- 5번 검색과 **같은 턴에** 채널마다 \`slack_search_public_and_private\` 를 한 번씩 병렬로 부른다: \`filters: "in:#<채널>"\`, \`after: "${since}"\`, \`sort: "timestamp"\`, \`limit: 20\`, \`include_bots: false\`, \`response_format: "detailed"\`, \`max_context_length: 200\`. 읽기만. 채널을 찾지 못하면 그 채널은 \`summary: ""\`, \`highlights: []\`.
-- 추가 조회는 하지 않는다 (스레드가 꼭 필요하면 5번의 \`slack_read_thread\` 3개 한도 안에서만).
-- 채널마다 \`slack.watch\` 에 하나씩:
-  - \`summary\`: 지난 24시간 무엇이 정해졌고 무엇을 물었는지 한국어 2~3줄 (줄은 \`\\n\` 으로). 대화가 없거나 잡담뿐이면 \`""\`.
-  - \`highlights\`: 의미 있는 메시지 최대 5개 (결정·질문·요청·마감·장애·공지). 잡담·리액션·봇은 뺀다. 필드: \`from\` 보낸 사람 표시 이름, \`text\` 내용 한 줄 (200자 이내 요약), \`ts\` ISO-8601, \`url\` permalink 그대로, \`needs_me\`, \`reason\` 왜 중요한지 / 왜 내가 봐야 하는지 한국어 한 줄 (25자 안팎).
-  - \`needs_me: true\` 는 **나(\`<ME>\`)를 향한 것으로 보이는 질문·요청, 내 일에 영향을 주는 결정, 마감이 걸린 것**만. 내가 이미 답했거나 다른 사람이 처리했으면 false. needs_me 인 것을 먼저 둔다.
-- 위 "트래킹 제외" 채널은 팔로업 목록에 있어도 조회하지 않는다.
-- 출력 스키마의 \`slack\` 객체에 이 키를 더한다: \`"watch":[{"channel":"#채널","summary":"","highlights":[{"from":"","text":"","ts":"ISO","url":"","needs_me":false,"reason":""}]}]\`
-`;
+/** Keep the `<!--@name-->…<!--@/name-->` sections in `keep`, drop the rest (prompts/agenda-lists.md). */
+export function pickSections(text: string, keep: Set<string>): string {
+  return text.replace(/<!--@([a-z]+)-->\n?([\s\S]*?)<!--@\/\1-->\n?/g, (_m, name: string, body: string) => (keep.has(name) ? body : ""));
 }
 
-export function buildPrompt(cfg: NedConfig, now = new Date()): string {
+/** Phase-1 prompt for one call covering `keys` (prompts/agenda-lists.md: lists only, no per-item context). */
+export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = new Date()): string {
   const cr = calendarRange(now), cb = rangeBounds(cr.from, cr.to);
-  const off = (on: boolean) => (on ? "ON" : "OFF — 조회하지 말고 빈 배열 []");
-  return fs
-    .readFileSync(path.join(PROMPTS_DIR, "agenda.md"), "utf8")
+  const watch = keys.includes("slack") ? watchChannels(cfg.filters) : [];
+  const keep = new Set<string>(keys);
+  if (keys.includes("slack") || keys.includes("mail")) keep.add("voice");
+  if (watch.length) keep.add("watch");
+  const select = `select:${keys.flatMap((k) => LIST_TOOLS[k]).join(",")}`;
+  const since = String(Math.floor(now.getTime() / 1000) - 24 * 3600);
+  return pickSections(fs.readFileSync(path.join(PROMPTS_DIR, "agenda-lists.md"), "utf8"), keep)
     .replaceAll("{{NOW}}", isoLocal(now))
     .replaceAll("{{TZ}}", Intl.DateTimeFormat().resolvedOptions().timeZone)
+    .replaceAll("{{TOOL_SELECT}}", select)
     .replaceAll("{{CAL_FROM}}", cr.from)
     .replaceAll("{{CAL_TO}}", cr.to)
     .replaceAll("{{CAL_START}}", cb.start)
     .replaceAll("{{CAL_END}}", cb.end)
-    .replaceAll("{{CALENDAR}}", off(cfg.sources.calendar))
-    .replaceAll("{{JIRA}}", off(cfg.sources.jira))
-    .replaceAll("{{GITHUB}}", off(cfg.sources.github))
-    .replaceAll("{{GMAIL}}", off(cfg.sources.gmail))
-    .replaceAll("{{SLACK}}", off(cfg.sources.slack))
+    .replaceAll("{{ALL_LIMIT}}", String(cfg.agenda_all_limit))
+    .replaceAll("{{WATCH_CHANNELS}}", watch.map((c) => `#${c}`).join(", "))
+    .replaceAll("{{WATCH_KEY}}", watch.length ? ',"watch":[{"channel":"#채널","summary":"","highlights":[{"from":"","text":"","ts":"ISO","url":"","needs_me":false,"reason":""}]}]' : "")
     .replaceAll("{{PERSONA}}", () => personaPrompt(cfg.persona))
     .replaceAll("{{FILTERS}}", () => filtersPrompt(cfg.filters))
     .replaceAll("{{JQL_EXCLUDE}}", () => (jqlExclude(cfg.filters) ? ` ${jqlExclude(cfg.filters)}` : ""))
-    .replaceAll("{{SLACK_WATCH}}", () => slackWatchBlock(cfg, String(Math.floor(now.getTime() / 1000) - 24 * 3600)))
-    .replaceAll("{{SLACK_SINCE}}", String(Math.floor(now.getTime() / 1000) - 24 * 3600));
+    .replaceAll("{{SLACK_SINCE}}", since);
+}
+
+/** `ned prompt agenda`: every phase-1 prompt this config would send, in start order. */
+export function buildPrompt(cfg: NedConfig, now = new Date()): string {
+  return listCalls(cfg, false)
+    .map((c) => `===== ${c.id} (${c.keys.join("+")}, model ${c.model ?? "default"}, maxTurns ${c.maxTurns}) =====\n${buildListsPrompt(cfg, c.keys, now)}`)
+    .join("\n\n");
+}
+
+interface ListCall {
+  id: "slack" | "mail" | "jira" | "calendar";
+  keys: AgendaSourceKey[];
+  model: string | null;
+  maxTurns: number;
+}
+
+/**
+ * Phase-1 calls in priority order: Slack first, then mail, then jira (+github when `gh` isn't usable) and calendar on the
+ * light model. All run in parallel; each merges its own keys into agenda.json the moment it finishes. Calendar is its own
+ * call because its 2-week list is the biggest output (~9K tokens, ~60-90s): measured, jira alone lands in ~30s instead.
+ */
+function listCalls(cfg: NedConfig, githubDirect: boolean): ListCall[] {
+  const out: ListCall[] = [];
+  const light = cfg.agenda_light_model ?? cfg.claude_model;
+  // Measured: slack/mail on sonnet take the same wall time as the default model at ~half the cost ($0.38 vs $0.79, $0.24 vs $0.50).
+  if (cfg.sources.slack) out.push({ id: "slack", keys: ["slack"], model: light, maxTurns: 6 });
+  if (cfg.sources.gmail) out.push({ id: "mail", keys: ["mail"], model: light, maxTurns: 6 });
+  const jira: AgendaSourceKey[] = [];
+  if (cfg.sources.jira) jira.push("jira");
+  if (cfg.sources.github && !githubDirect) jira.push("github");
+  if (jira.length) out.push({ id: "jira", keys: jira, model: light, maxTurns: 6 });
+  if (cfg.sources.calendar) out.push({ id: "calendar", keys: ["calendar"], model: light, maxTurns: 6 });
+  return out;
 }
 
 /** True when no enabled source returned a single item (mail/slack summaries don't count). */
 export function isEmptyPayload(p: AgendaPayload): boolean {
   return !p.calendar.length && !p.jira.length && !p.github.length && !p.mail?.items.length && !p.mail?.all.length && !p.slack?.items.length && !p.slack?.all.length;
+}
+
+/** True when none of `keys` returned an item. */
+function emptyFor(p: AgendaPayload, keys: AgendaSourceKey[]): boolean {
+  return keys.every((k) => (k === "mail" ? !p.mail?.items.length && !p.mail?.all.length : k === "slack" ? !p.slack?.items.length && !p.slack?.all.length : !p[k].length));
+}
+
+/**
+ * Cheap per-source list signature. Slack: which messages need me (items + watch needs_me); mail: which threads need me
+ * (id + last message time + reason); calendar/jira/github: the whole list. Equal signature → phase 2 has nothing new to read.
+ */
+export function sourceSignature(k: AgendaSourceKey, p: Partial<AgendaPayload>): string {
+  // Sorted ids only: the model's ordering and timestamp formatting vary run to run, the set of things needing me doesn't.
+  // (A new message in a Slack conversation is a new permalink; a new mail reply is caught by carryContexts' time check.)
+  const sorted = (xs: string[]) => [...new Set(xs)].sort();
+  let basis: unknown;
+  if (k === "slack") basis = p.slack ? sorted([...p.slack.items.map((x) => x.url), ...p.slack.watch.flatMap((w) => w.highlights.filter((h) => h.needs_me).map((h) => `w:${h.url}`))]) : null;
+  else if (k === "mail") basis = p.mail ? sorted(p.mail.items.filter((x) => x.reason !== "deadline").map((x) => x.id)) : null;
+  else if (k === "calendar") basis = sorted((p.calendar ?? []).map((e) => `${e.id}|${Date.parse(e.start) || e.start}|${e.rsvp}`));
+  else if (k === "jira") basis = sorted((p.jira ?? []).map((j) => `${j.key}|${j.status}|${j.due}`));
+  else basis = sorted((p.github ?? []).map((g) => `${g.url}|${g.reason}`));
+  return crypto.createHash("sha1").update(JSON.stringify(basis)).digest("hex").slice(0, 12);
+}
+
+/** Read-modify-write agenda.json in one synchronous step (no interleaving inside this process), atomically. */
+export function patchAgenda(fn: (a: Agenda) => void): Agenda {
+  const a = readAgenda();
+  fn(a);
+  writeJsonAtomic(AGENDA_PATH, a);
+  return a;
+}
+
+/**
+ * Keep phase-2 context across list refreshes, keyed by stable ids: Slack by permalink (a new message = a new permalink),
+ * mail by thread id only while its last-message time is unchanged (a new reply makes the excerpt stale).
+ */
+function carryContexts(prev: Agenda, next: AgendaPayload, keys: AgendaSourceKey[]): void {
+  if (keys.includes("slack") && next.slack && prev.slack) {
+    const byUrl = new Map<string, SlackContext>();
+    for (const x of [...prev.slack.items, ...prev.slack.all, ...prev.slack.watch.flatMap((w) => w.highlights)]) if (x.context && x.url) byUrl.set(x.url, x.context);
+    for (const x of [...next.slack.items, ...next.slack.all, ...next.slack.watch.flatMap((w) => w.highlights)]) if (!x.context && byUrl.has(x.url)) x.context = byUrl.get(x.url);
+  }
+  if (keys.includes("mail") && next.mail && prev.mail) {
+    const byId = new Map(prev.mail.items.filter((x) => x.context).map((x) => [x.id, x]));
+    for (const x of next.mail.items) {
+      const p = byId.get(x.id);
+      // Still valid if it was read after the thread's latest message (formatting of `received` varies between runs).
+      const latest = Date.parse(x.received), read = p?.context ? Date.parse(p.context.collected_at) : NaN;
+      if (!x.context && p?.context && (p.received === x.received || (Number.isFinite(latest) && read >= latest))) x.context = p.context;
+    }
+  }
+}
+
+function setSourceStatus(keys: AgendaSourceKey[], s: SourceStatus): void {
+  patchAgenda((a) => {
+    a.sources_status ??= {};
+    for (const k of keys) a.sources_status[k] = { ...a.sources_status[k], ...s, ...(s.error ? {} : { error: undefined }) };
+  });
+}
+
+/** Merge one finished call's keys into agenda.json (item-level context carry-over) and mark them done. */
+function mergeSources(payload: AgendaPayload, keys: AgendaSourceKey[], meta: { started: number; cost: number; now: number }): Agenda {
+  return patchAgenda((a) => {
+    carryContexts(a, payload, keys);
+    a.sources_status ??= {};
+    for (const k of keys) {
+      const sig = sourceSignature(k, payload);
+      const prevSig = a.sources_status[k]?.signature;
+      (a as unknown as Record<string, unknown>)[k] = payload[k];
+      a.sources_status[k] = { status: "done", updated_at: Date.now(), started_at: meta.started, duration_ms: Date.now() - meta.started, cost_usd: meta.cost, signature: sig, unchanged: sig === prevSig };
+    }
+    if (keys.includes("calendar")) a.calendar_range = calendarRange(new Date(meta.now));
+    a.updated_at = Date.now();
+  });
+}
+
+/** github without an LLM: the three `gh search prs` queries in parallel. null when gh is missing / unauthenticated / failing. */
+export async function fetchGithubDirect(): Promise<GithubItem[] | null> {
+  const fields = "repository,number,title,url,author,updatedAt";
+  const q: [GithubItem["reason"], string[]][] = [
+    ["review_requested", ["--review-requested=@me"]],
+    ["my_pr_changes_requested", ["--author=@me", "--review=changes_requested"]],
+    ["my_pr_approved", ["--author=@me", "--review=approved"]],
+  ];
+  try {
+    const lists = await Promise.all(
+      q.map(([, args]) =>
+        execFileP("gh", ["search", "prs", ...args, "--state=open", "--json", fields, "--limit", "20"], { timeout: 30_000, env: { ...process.env, GH_PROMPT_DISABLED: "1" } }).then((r) => JSON.parse(r.stdout) as Record<string, any>[]),
+      ),
+    );
+    const seen = new Set<string>();
+    const out: GithubItem[] = [];
+    lists.forEach((list, i) => {
+      for (const e of list) {
+        if (!e?.url || seen.has(e.url)) continue;
+        seen.add(e.url);
+        out.push({ repo: str(e.repository?.nameWithOwner), number: Number(e.number) || 0, title: str(e.title), url: str(e.url), author: str(e.author?.login), updated: str(e.updatedAt), reason: q[i][0] });
+      }
+    });
+    return out.slice(0, 20);
+  } catch (e) {
+    log(`agenda[github]: gh failed — falling back to claude (${String(e).slice(0, 200)})`);
+    return null;
+  }
+}
+
+/** NED_NO_LLM: the fixture (NED_NO_LLM_AGENDA = path to a raw model-shaped JSON) or {}; optional per-call delay. */
+async function stubList(keys: AgendaSourceKey[], order: number): Promise<{ raw: Record<string, unknown>; cost: number }> {
+  const delay = Number(process.env.NED_NO_LLM_DELAY_MS) || 0;
+  if (delay) await new Promise((r) => setTimeout(r, delay * (order + 1)));
+  const file = process.env.NED_NO_LLM_AGENDA;
+  const fx = file ? readJson<Record<string, unknown>>(file, {}) : {};
+  return { raw: Object.fromEntries(keys.map((k) => [k, fx[k]])), cost: 0 };
 }
 
 let inflight: Promise<Agenda> | null = null;
@@ -534,69 +738,118 @@ export function refreshAgenda(cfg: NedConfig): Promise<Agenda> {
 
 async function doRefresh(cfg: NedConfig): Promise<Agenda> {
   const now = Date.now();
-  if (llmDisabled()) {
-    log("agenda: NED_NO_LLM=1 — skipping claude, writing empty agenda");
-    const a = emptyAgenda(now);
-    writeJsonAtomic(AGENDA_PATH, a);
-    return a;
-  }
+  if (llmDisabled()) log(`agenda: NED_NO_LLM=1 — stub lists${process.env.NED_NO_LLM_AGENDA ? ` from ${process.env.NED_NO_LLM_AGENDA}` : " (empty)"}`);
   if (!cfg.sources.calendar && !cfg.sources.jira && !cfg.sources.github && !cfg.sources.gmail && !cfg.sources.slack) {
     const a = emptyAgenda(now);
     writeJsonAtomic(AGENDA_PATH, a);
     return a;
   }
 
-  log(`agenda: asking claude${filtersPrompt(cfg.filters) !== "(없음)" ? ` (filters — ${filtersPrompt(cfg.filters).split("\n")[0]})` : ""}`);
-  // 22 = the old 20 + one turn for the parallel get_thread reads that fill mail item context.
-  // +2 when following Slack channels (filters.slack.watch_channels): the per-channel searches share the Slack turn.
-  // The full payload is ~16K output tokens; a healthy run takes ~5 min, so a 5 min timeout was cutting it off.
-  const maxTurns = 22 + (cfg.sources.slack && watchChannels(cfg.filters).length ? 2 : 0);
-  const run = () => runClaude(buildPrompt(cfg), { allowedTools: agendaTools(cfg), maxTurns, model: cfg.claude_model, timeoutMs: 8 * 60_000 });
-  const parse = (r: ClaudeRunResult): AgendaPayload | null => {
-    const j = r.ok ? extractJson<Partial<Record<keyof AgendaPayload, unknown>>>(r.text) : null;
-    return j ? normalize(j, cfg, new Date(now).toISOString()) : null;
-  };
-  let res = await run();
-  let payload = parse(res);
-  if (payload && isEmptyPayload(payload)) {
-    // Seen live: the claude.ai connectors hadn't attached yet when ToolSearch ran (daemon start, alongside a
-    // heartbeat), so every source came back []. One delayed retry usually finds them connected.
-    log(`agenda: empty result on first try ($${res.cost_usd.toFixed(2)}, ${res.num_turns} turns) — retrying once in 30s`);
-    await new Promise((r) => setTimeout(r, 30_000));
-    const firstCost = res.cost_usd;
-    res = await run();
-    res = { ...res, cost_usd: firstCost + res.cost_usd };
-    payload = parse(res);
-  }
-  const parsed = payload;
-  let agenda: Agenda;
-  if (payload && !isEmptyPayload(payload)) {
-    agenda = { updated_at: Date.now(), cost_usd: res.cost_usd, calendar_range: calendarRange(new Date(now)), ...payload };
-  } else if (payload) {
-    // Every source came back empty — far likelier a model/tool hiccup than a truly empty fortnight.
-    // Keep the last good lists, flag it, and keep the raw reply so the cause is inspectable.
-    const prev = readAgenda();
-    agenda = { ...prev, updated_at: Date.now(), cost_usd: res.cost_usd, error: "empty result" };
-    try {
-      fs.writeFileSync(AGENDA_RAW_PATH, res.text.slice(0, 4000));
-    } catch {
-      /* ignore */
+  if (filtersPrompt(cfg.filters) !== "(없음)") log(`agenda: filters — ${filtersPrompt(cfg.filters).split("\n")[0]}`);
+  const t0 = Date.now();
+  const stub = llmDisabled();
+  const errors: string[] = [];
+  let total = 0;
+  const finished: string[] = [];
+
+  // Mark everything enabled as running up front so every card shows "갱신 중" immediately.
+  const enabled = AGENDA_SOURCES.filter((k) => (k === "mail" ? cfg.sources.gmail : cfg.sources[k]));
+  setSourceStatus(enabled, { status: "running", updated_at: Date.now(), started_at: t0 });
+
+  const runCall = async (c: ListCall, order: number): Promise<void> => {
+    const started = Date.now();
+    const parse = (text: string): AgendaPayload | null => {
+      const j = extractJson<Partial<Record<keyof AgendaPayload, unknown>>>(text);
+      return j ? normalize(j, cfg, new Date(now).toISOString()) : null;
+    };
+    let payload: AgendaPayload | null = null, cost = 0, turns = 0, error = "", raw = "";
+    if (stub) {
+      const s = await stubList(c.keys, order);
+      payload = normalize(s.raw, cfg, new Date(now).toISOString());
+    } else {
+      const run = () =>
+        runClaude(buildListsPrompt(cfg, c.keys, new Date(now)), {
+          allowedTools: listTools(c.keys),
+          tools: c.keys.includes("github") ? ["ToolSearch", "Bash"] : ["ToolSearch"],
+          maxTurns: c.maxTurns,
+          model: c.model,
+          timeoutMs: 4 * 60_000,
+          job: "agenda",
+        });
+      let res = await run();
+      cost = res.cost_usd;
+      turns = res.num_turns;
+      payload = res.ok ? parse(res.text) : null;
+      if (payload && emptyFor(payload, c.keys)) {
+        // Seen live: the claude.ai connectors hadn't attached yet when ToolSearch ran (daemon start), so the
+        // call came back []. One delayed retry usually finds them; a second empty answer is taken as real.
+        log(`agenda[${c.id}]: empty on first try ($${cost.toFixed(2)}, ${turns} turns) — retrying once in 20s`);
+        try { fs.writeFileSync(AGENDA_RAW_PATH, res.text.slice(0, 4000)); } catch { /* ignore */ }
+        await new Promise((r) => setTimeout(r, 20_000));
+        res = await run();
+        cost += res.cost_usd;
+        turns += res.num_turns;
+        payload = res.ok ? parse(res.text) : null;
+      }
+      if (!payload) error = res.ok ? `invalid JSON from model: ${res.text.slice(0, 300)}` : (res.error ?? "claude failed").slice(0, 500);
+      raw = res.text;
     }
-    log(`agenda: empty result — kept previous lists; raw (${res.text.length} chars) → ${AGENDA_RAW_PATH}: ${res.text.slice(0, 300).replace(/\s+/g, " ")}`);
-  } else {
-    // Keep the last good lists so the dashboard doesn't blank out on a transient failure.
-    const prev = readAgenda();
-    const error = res.ok ? `invalid JSON from model: ${res.text.slice(0, 300)}` : (res.error ?? "claude failed").slice(0, 500);
-    agenda = { ...prev, updated_at: Date.now(), cost_usd: res.cost_usd, error };
-    log(`agenda: failed — ${error.slice(0, 300)}`);
-  }
-  writeJsonAtomic(AGENDA_PATH, agenda);
-  if (parsed && cfg.drafts_pregenerate) {
-    // Background, after the agenda is on disk; drafts.ts imports agenda.ts, so load it lazily.
-    import("./drafts.js").then((m) => m.pregenerateDrafts(agenda, cfg)).catch((e) => log(`pregenerate: failed ${String(e)}`));
-  }
-  const ctxN = (agenda.slack?.items.filter((x) => x.context).length ?? 0) + (agenda.mail?.items.filter((x) => x.context).length ?? 0);
-  log(`agenda: ${ctxN} items with draft context`);
-  log(`agenda: ${agenda.calendar.length} events / ${agenda.jira.length} jira / ${agenda.github.length} prs / ${agenda.mail?.items.length ?? "-"} mails / ${agenda.slack?.items.length ?? "-"} slack${agenda.slack?.watch.length ? ` + ${agenda.slack.watch.length} watched (${agenda.slack.watch.reduce((n, w) => n + w.highlights.filter((h) => h.needs_me).length, 0)} needs_me)` : ""} ($${res.cost_usd.toFixed(2)}, ${res.num_turns} turns, ${Math.round(res.duration_ms / 1000)}s)`);
+    total += cost;
+    const at = Math.round((Date.now() - t0) / 1000);
+    if (!payload) {
+      // Keep the last good lists so the card doesn't blank out on a transient failure.
+      setSourceStatus(c.keys, { status: "error", updated_at: Date.now(), started_at: started, duration_ms: Date.now() - started, cost_usd: cost, error });
+      errors.push(`${c.id}: ${error.slice(0, 200)}`);
+      if (raw) try { fs.writeFileSync(AGENDA_RAW_PATH, raw.slice(0, 4000)); } catch { /* ignore */ }
+      log(`agenda[${c.id}]: failed at +${at}s — ${error.slice(0, 300)}`);
+      return;
+    }
+    const a = mergeSources(payload, c.keys, { started, cost, now });
+    finished.push(`${c.id}+${at}s`);
+    const unchanged = c.keys.filter((k) => a.sources_status?.[k]?.unchanged);
+    log(`agenda[${c.id}]: ${describe(a, c.keys)} — $${cost.toFixed(2)}, ${turns} turns, ${Math.round((Date.now() - started) / 1000)}s, merged at +${at}s${unchanged.length ? ` (unchanged: ${unchanged.join(",")})` : ""}`);
+    if (c.keys.includes("slack") || c.keys.includes("mail")) {
+      // Phase 2 for this source starts now, in the background (Slack queued first). Lazy import: agenda-context imports this module.
+      const srcs = c.keys.filter((k): k is "slack" | "mail" => k === "slack" || k === "mail");
+      import("./agenda-context.js").then((m) => m.requestContext(cfg, srcs)).catch((e) => log(`agenda-context: failed to start ${String(e)}`));
+    }
+  };
+
+  // github: straight from `gh` (no LLM) while the claude calls start; only if gh fails does it join the light call.
+  const ghP: Promise<GithubItem[] | null> = cfg.sources.github && !stub ? fetchGithubDirect() : Promise.resolve(null);
+  const calls = listCalls(cfg, cfg.sources.github && !stub); // optimistic: assume gh works
+  const jobs: Promise<void>[] = [];
+  // Start order = priority (slack, mail, calendar); the jira call waits for gh's answer (~1s) to know whether to carry github.
+  calls.filter((c) => c.id !== "jira").forEach((c, i) => jobs.push(runCall(c, i)));
+  jobs.push(
+    (async () => {
+      const gh = await ghP;
+      if (gh) {
+        mergeSources({ ...emptyAgenda(now), github: gh }, ["github"], { started: t0, cost: 0, now });
+        finished.push(`github+${Math.round((Date.now() - t0) / 1000)}s`);
+        log(`agenda[github]: ${gh.length} prs via gh (no LLM), merged at +${Math.round((Date.now() - t0) / 1000)}s`);
+      }
+      const jira = listCalls(cfg, !!gh).find((c) => c.id === "jira");
+      if (jira) await runCall(jira, 2);
+    })(),
+  );
+  await Promise.all(jobs);
+
+  const agenda = patchAgenda((a) => {
+    a.cost_usd = Math.round(total * 10000) / 10000;
+    a.error = errors.length ? errors.join(" | ") : undefined;
+    a.updated_at = Date.now();
+  });
+  log(`agenda: phase 1 done in ${Math.round((Date.now() - t0) / 1000)}s, $${total.toFixed(2)} — order ${finished.join(", ")}${errors.length ? ` — errors: ${errors.join(" | ").slice(0, 300)}` : ""}`);
   return agenda;
+}
+
+function describe(a: Agenda, keys: AgendaSourceKey[]): string {
+  return keys
+    .map((k) => {
+      if (k === "slack") return `slack ${a.slack?.items.length ?? 0} items / ${a.slack?.all.length ?? 0} all${a.slack?.watch.length ? ` / ${a.slack.watch.length} watched (${a.slack.watch.reduce((n, w) => n + w.highlights.filter((h) => h.needs_me).length, 0)} needs_me)` : ""}`;
+      if (k === "mail") return `mail ${a.mail?.items.length ?? 0} items / ${a.mail?.all.length ?? 0} all / ${a.mail?.unread ?? 0} unread`;
+      return `${a[k].length} ${k}`;
+    })
+    .join(", ");
 }

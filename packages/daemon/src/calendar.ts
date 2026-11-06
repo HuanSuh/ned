@@ -70,7 +70,7 @@ async function doFetch(cfg: NedConfig, from: string, to: string): Promise<Calend
     .replaceAll("{{START}}", start)
     .replaceAll("{{END}}", end);
   log(`calendar ${from}..${to}: asking claude`);
-  const res = await runClaude(prompt, { allowedTools: ["ToolSearch", "mcp__claude_ai_Google_Calendar__list_events"], maxTurns: 6, model: cfg.claude_model, timeoutMs: 3 * 60_000 });
+  const res = await runClaude(prompt, { allowedTools: ["ToolSearch", "mcp__claude_ai_Google_Calendar__list_events"], maxTurns: 6, model: cfg.claude_model, timeoutMs: 3 * 60_000, job: "calendar" });
   const parsed = res.ok ? extractJson<{ calendar?: unknown }>(res.text) : null;
   if (!parsed) {
     const error = res.ok ? `invalid JSON from model: ${res.text.slice(0, 200)}` : (res.error ?? "claude failed").slice(0, 300);
