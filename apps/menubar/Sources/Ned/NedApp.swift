@@ -10,6 +10,11 @@ struct NedApp: App {
     /// In-memory on purpose: persisting it would keep the item hidden on every later launch.
     @State private var inserted = true
 
+    init() {
+        // Headless: before any scene, store, daemon or notification center exists.
+        if CommandLine.arguments.contains("--notify-selftest") { exit(NotifySelfTest.run()) }
+    }
+
     var body: some Scene {
         MenuBarExtra(isInserted: $inserted) {
             MenuContent(store: store, daemon: DaemonManager.shared)
