@@ -285,7 +285,7 @@
   details.msess[open] .rack { max-height: 40vh; overflow: auto; }
 
   .detail { background: var(--pane); overflow: auto; min-height: 0; }
-  .dwrap { max-width: 760px; padding: 24px 32px 48px; }
+  .dwrap { max-width: calc(72ch + 64px); padding: 24px 32px 48px; }
   .back { display: none; margin-bottom: 12px; }
   .crumb { color: var(--faint); font-size: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .detail h2 { font-size: 20px; line-height: 1.35; margin: 10px 0 8px; font-weight: 650; letter-spacing: -.01em; word-break: break-word; }
@@ -329,7 +329,8 @@
 
   /* ---------- timeline + settings views ---------- */
   .page { height: 100%; overflow: auto; }
-  .pwrap { max-width: 920px; margin: 0 auto; padding: 18px 20px 48px; }
+  /* Page containers use the screen: up to 2560px wide with 24px gutters (32px from 1600px). Density, not font size, changes. */
+  .pwrap { max-width: 2560px; margin: 0 auto; padding: 18px 24px 48px; }
   .card { background: var(--pane); border: 1px solid var(--line); border-radius: 10px; }
   .card > .hd { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
   .card > .hd h2 { font-size: 15px; margin: 0; font-weight: 650; }
@@ -387,13 +388,13 @@
   .pwrap .say-slot { margin-bottom: 14px; }
 
   /* ---------- home ---------- */
-  .hwrap { max-width: 1240px; margin: 0 auto; padding: 16px 20px 48px; }
+  .hwrap { max-width: 2560px; margin: 0 auto; padding: 16px 24px 48px; }
   .htop { display: flex; gap: 10px 16px; align-items: flex-start; margin-bottom: 14px; flex-wrap: wrap; }
   .htop .say { flex: 1 1 420px; }
   .htop .bubble .lead { font-size: 14.5px; }
   .hmeta { display: flex; gap: 10px; align-items: center; font: 11px var(--mono); color: var(--faint); flex-wrap: wrap; justify-content: flex-end; padding-top: 4px; }
   .hmeta .err { color: var(--red); }
-  .hgrid { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .hgrid { display: grid; grid-template-columns: clamp(360px, 26vw, 440px) minmax(0, 1fr); gap: 16px; align-items: start; }
   .hcol { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
   .hgrid .card > .hd { min-height: 44px; }
   .hgrid .card > .bd { padding: 10px 14px 14px; }
@@ -494,6 +495,27 @@
   .toast.show { opacity: 1; }
   .toast svg { width: 24px; flex: none; }
 
+  /* ---------- wide screens ---------- */
+  @media (min-width: 1600px) {
+    .hwrap, .pwrap { padding-left: 32px; padding-right: 32px; }
+    /* home: 3 columns — timeline | source cards | Ned actions + personal todos (.hcol dissolves into the grid) */
+    .hgrid { grid-template-columns: clamp(360px, 22vw, 440px) minmax(0, 1fr) clamp(360px, 24vw, 520px); grid-template-areas: "cal cards todo"; }
+    .hgrid > .card:first-child { grid-area: cal; }
+    .hcol { display: contents; }
+    #todo-card { grid-area: todo; }
+    .sgrid { grid-area: cards; }
+    /* inbox: wider list, readable detail */
+    .inbox { grid-template-columns: 480px minmax(0, 1fr) 300px; }
+    .inbox.rail-off { grid-template-columns: 480px minmax(0, 1fr) 0; }
+  }
+  @media (min-width: 1800px) {
+    /* the session rail is always open here */
+    .inbox, .inbox.rail-off { grid-template-columns: 480px minmax(0, 1fr) 320px; }
+    .inbox.rail-off .rail { display: block; }
+    #rail-toggle { display: none; }
+  }
+  @media (min-width: 2000px) { .sgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
   /* ---------- responsive ---------- */
   @media (max-width: 1180px) {
     .inbox, .inbox.rail-off { grid-template-columns: 360px minmax(0, 1fr); }
@@ -501,7 +523,9 @@
     details.msess { display: block; }
     #rail-toggle { display: none; }
   }
-  @media (max-width: 1020px) { .leds .opt { display: none; } .sgrid { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 1100px) { .sgrid { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 1020px) { .leds .opt { display: none; } }
+  @media (max-width: 899px) { .hgrid { grid-template-columns: minmax(0, 1fr); } }
   @media (max-width: 760px) {
     header.hq { padding: 8px 12px; gap: 8px 10px; }
     .who .mood { font-size: 9.5px; }
@@ -1121,7 +1145,7 @@
     if (ui.railOff && ui.view === "inbox") {
       if (!b) { b = document.createElement("button"); b.id = "rail-open"; b.className = "btn small"; b.onclick = () => setRail(false); $("leds").after(b); }
       b.textContent = `세션 ${S.state?.sessions.length ?? 0}`;
-      b.hidden = window.matchMedia("(max-width: 1180px)").matches;
+      b.hidden = window.matchMedia("(max-width: 1180px), (min-width: 1800px)").matches;
     } else if (b) b.remove();
   }
 
@@ -1281,7 +1305,10 @@
   });
 
   // ---------- home ----------
-  const HOME_POLL_MS = 60 * 1000, PPH = 52, MIN_EV_PX = 22; // timeline: px per hour, min block height
+  const HOME_POLL_MS = 60 * 1000, MIN_EV_PX = 22; // min block height
+  // Timeline px per hour: 52 by default, taller on tall windows (52–72). Width never changes with it.
+  let PPH = 52;
+  const fitPPH = () => { PPH = Math.round(Math.min(72, Math.max(52, (window.innerHeight - 320) / 12))); };
   const RSVP = { needsAction: ["a", "응답 필요"], tentative: ["", "미정"], declined: ["", "거절"], organizer: ["", "주최"] };
   const GH_REASON = { review_requested: ["rv", "리뷰 요청", "👀"], my_pr_changes_requested: ["over", "변경 요청", "✍️"], my_pr_approved: ["ok", "승인됨", "✅"] };
   const MAIL_REASON = { reply: ["rv", "답장", "↩️"], approval: ["today", "결재", "🖊️"], deadline: ["over", "마감", "⏰"], request: ["", "확인", "📨"] };
@@ -1342,6 +1369,7 @@
   const meetings = (timed) => timed.filter((e) => e.rsvp !== "declined");
 
   function renderAgenda() {
+    fitPPH();
     const box = $("agenda"), now = Date.now(), dn = new Date();
     $("ag-date").textContent = `${dn.getMonth() + 1}월 ${dn.getDate()}일 (${WEEK[dn.getDay()]})`;
     if (S.agenda === undefined) { box.innerHTML = `<div class="gnone">불러오는 중…</div>`; $("ag-count").textContent = ""; return; }
@@ -1714,7 +1742,11 @@
   $("btn-daily").addEventListener("click", () => runHeartbeat(true));
   for (const b of document.querySelectorAll("[data-refresh]")) b.addEventListener("click", () => (b.dataset.refresh === "events" ? Promise.all([loadEvents(), loadBriefings()]) : loadConfig()));
   if (ui.railOff) $("inbox").classList.add("rail-off");
-  window.addEventListener("resize", syncRailButton);
+  let resizeT = 0;
+  window.addEventListener("resize", () => {
+    syncRailButton();
+    clearTimeout(resizeT); resizeT = setTimeout(() => { if (ui.view === "home") renderAgenda(); }, 150); // timeline height follows the window
+  });
 
   setView();
   applyPersona(persona, { save: false });

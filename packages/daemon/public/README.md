@@ -32,3 +32,11 @@ daemon 을 `NED_HOME=/some/fixture` 로 띄우거나, 같은 라우트를 흉내
 - 마크: `marks/<id>.svg` 를 받아 인라인으로 넣는다(클래스 `lens/frame/glint/sweep/bang/moon` 로 기존 상태 연출 유지, jarvis 는 `.core` 가 2.6초 주기로 맥동 — `prefers-reduced-motion` 이면 멈춤).
 - 문구: 헤더 이름·탭 제목·말풍선 발화자·상태 문구·홈 인사말·NED_OK 접힘 줄·설정 안내가 JS 의 `VOICE` 표를 따른다. 그 밖의 빈 상태 문구 등은 아직 Ned 기본 말투.
 - Google Fonts 에서 Noto Serif KR(alfred)·Share Tech Mono(jarvis)를 불러온다. 오프라인이면 시스템 세리프/모노로 떨어진다.
+
+## 넓은 화면 레이아웃
+
+폰트 크기는 그대로, 밀도만 폭에 맞춘다. 페이지 컨테이너(`.hwrap` 홈, `.pwrap` 타임라인·설정)는 최대 2560px, 좌우 24px(≥1600 에서 32px).
+- 홈: <900 1열 · 900~1600 2열(일정 | 할 일 + 소스 카드, 카드는 ≤1100 에서 1열) · ≥1600 3열(일정 | 소스 카드 2열 | Ned 액션 + 개인 할 일 — `.hcol` 이 `display: contents` 로 풀려 grid-area 로 배치) · ≥2000 소스 카드 3열.
+- 일정 타임라인: 폭은 `clamp(360px, 22~26vw, 440px)` 로 고정, 시간당 높이(PPH)만 창 높이에 따라 52~72px.
+- 인박스: 목록 390px, ≥1600 480px. 상세 본문 max 72ch. 세션 레일은 ≥1800 에서 항상 펼침(접기 버튼 숨김, `ned.railOff` 무시).
+- 설정 폼은 2열 그리드(≤760 에서 1열).
