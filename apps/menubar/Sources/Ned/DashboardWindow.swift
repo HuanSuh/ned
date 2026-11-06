@@ -14,6 +14,14 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     private var webView: WKWebView!
     private var waitTimer: Timer?
     private var loaded = false
+    /// When the boot screen went up (nil = not showing it).
+    private var bootShownAt: Date?
+    private var finishing = false
+
+    /// The boot screen stays at least this long, even when the daemon answers at once (cache hit ≈ <1 s),
+    /// so it never flashes; then it fades out (0.32 s, BootScreen CSS) into the dashboard.
+    static let minBootScreenSeconds: TimeInterval = 1.5
+    static let fadeSeconds: TimeInterval = 0.35
 
     func show() {
         if window == nil { build() }
@@ -26,6 +34,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     private func build() {
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .default()
+        cfg.userContentController.add(BootMessageHandler(), name: "ned")
         webView = WKWebView(frame: .zero, configuration: cfg)
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -51,23 +60,66 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         waitForDaemon()
     }
 
+    /// Daemon already healthy → load the dashboard straight away (no boot animation). Otherwise put up the boot
+    /// screen, push progress into it every 0.5 s via `nedBoot(...)`, and once `/api/state` answers (and the screen
+    /// has been up ≥ minBootScreenSeconds) fade it out and load the dashboard.
     private func waitForDaemon() {
         waitTimer?.invalidate()
-        webView.loadHTMLString(Self.placeholder, baseURL: nil)
+        finishing = false
+        let daemon = DaemonManager.shared
+        if daemon.isHealthy {
+            bootShownAt = nil
+            loadDashboard(reason: "daemon already healthy — no boot screen")
+            return
+        }
+        bootShownAt = Date()
+        let s = Self.bootSnapshot()
+        webView.loadHTMLString(BootScreen.html(theme: Self.theme(), step: s.step, text: s.text, elapsed: s.elapsed, failed: s.failed), baseURL: nil)
+        daemon.note("dashboard window: boot screen (persona \(Self.theme().id.rawValue), step \(s.step) \(s.text))")
         let poll: () -> Void = { [weak self] in
             _ = Task { @MainActor in
-                guard let self, !self.loaded else { return }
-                if await DaemonManager.probe(timeout: 1) != nil {
-                    self.waitTimer?.invalidate()
-                    self.loaded = true
-                    wlog.info("daemon answered — loading dashboard")
-                    DaemonManager.shared.note("dashboard window: loading \(AppConfig.baseURL.absoluteString)/")
-                    self.webView.load(URLRequest(url: AppConfig.baseURL))
+                guard let self, !self.loaded, !self.finishing else { return }
+                let s = Self.bootSnapshot()
+                _ = try? await self.webView.evaluateJavaScript(BootScreen.update(step: s.step, text: s.text, elapsed: s.elapsed, failed: s.failed))
+                guard !s.failed, await DaemonManager.probe(timeout: 1) != nil, !self.loaded, !self.finishing else { return }
+                self.finishing = true
+                self.waitTimer?.invalidate()
+                let last = BootScreen.update(step: DaemonManager.BootStage.dashboard.rawValue, text: "대시보드 불러오는 중…", elapsed: DaemonManager.shared.bootElapsed, failed: false)
+                _ = try? await self.webView.evaluateJavaScript(last)
+                let shown = Date().timeIntervalSince(self.bootShownAt ?? Date())
+                if shown < Self.minBootScreenSeconds {
+                    try? await Task.sleep(nanoseconds: UInt64((Self.minBootScreenSeconds - shown) * 1_000_000_000))
                 }
+                _ = try? await self.webView.evaluateJavaScript("window.nedBootDone && nedBootDone();")
+                try? await Task.sleep(nanoseconds: UInt64(Self.fadeSeconds * 1_000_000_000))
+                guard self.finishing, !self.loaded else { return }
+                self.loadDashboard(reason: String(format: "daemon answered — boot screen shown %.1fs", Date().timeIntervalSince(self.bootShownAt ?? Date())))
             }
         }
         poll()
-        waitTimer = Timer.scheduledTimer(withTimeInterval: 0.7, repeats: true) { _ in poll() }
+        waitTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in poll() }
+    }
+
+    private func loadDashboard(reason: String) {
+        waitTimer?.invalidate()
+        loaded = true
+        finishing = false
+        wlog.info("\(reason, privacy: .public) — loading dashboard")
+        DaemonManager.shared.note("dashboard window: \(reason) — loading \(AppConfig.baseURL.absoluteString)/")
+        webView.load(URLRequest(url: AppConfig.baseURL))
+    }
+
+    /// What the boot screen shows for the daemon's current state.
+    static func bootSnapshot() -> (step: Int, text: String, elapsed: Double, failed: Bool) {
+        let d = DaemonManager.shared
+        if case .failed = d.status { return (d.bootStage.rawValue, d.statusLine, d.bootElapsed, true) }
+        let step = d.isHealthy ? DaemonManager.BootStage.dashboard.rawValue : d.bootStage.rawValue
+        return (step, d.statusLine, d.bootElapsed, false)
+    }
+
+    static func theme() -> BootScreen.Theme {
+        let p = StateStore.current?.persona ?? PersonaID.ned.persona
+        return BootScreen.Theme(id: p.id, name: p.displayName, accent: p.accentHex)
     }
 
     // MARK: NSWindowDelegate
@@ -116,18 +168,18 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { reload() }
+}
 
-    private static let placeholder = """
-    <!doctype html><meta charset="utf-8"><title>Ned</title>
-    <style>
-      :root { color-scheme: light dark; }
-      body { margin:0; height:100vh; display:grid; place-items:center;
-             font: 14px -apple-system, system-ui; color: #8a8f98; background: Canvas; }
-      .d { text-align:center } .s { font-size: 28px; animation: p 1.2s ease-in-out infinite; }
-      @keyframes p { 50% { opacity: .35 } }
-    </style>
-    <div class="d"><div class="s">👓</div><p>daemon starting…</p></div>
-    """
+/// Boot screen "다시 시작" button → DaemonManager.restart(). Only the local boot page can post (the dashboard never does).
+private final class BootMessageHandler: NSObject, WKScriptMessageHandler {
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        // The boot page is loadHTMLString(baseURL: nil) → about:blank; ignore anything posted from the dashboard (http).
+        guard message.body as? String == "restart", message.frameInfo.request.url?.scheme != "http" else { return }
+        MainActor.assumeIsolated {
+            DaemonManager.shared.note("boot screen: 다시 시작 clicked")
+            DaemonManager.shared.restart()
+        }
+    }
 }
 
 /// Adds the shortcuts a menu bar app lacks (no main menu): ⌘W close, ⌘R reload, edit keys.

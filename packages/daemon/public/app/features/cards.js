@@ -24,17 +24,22 @@ export function cardOpen(id, n) { const v = lsGet(cardKey(id)); return v === "1"
 /** One-line preview of the most urgent item, shown only while the card is shrunk. */
 export const preview = (ic, title, url, chip) => `<span class="ic">${ic}</span><span class="tt">${url ? ext(url, esc(title)) : esc(title)}</span>${chip || ""}`;
 /** Render a source card: badge + list via group(), then summary line, preview, open/hidden state. */
-export function card(id, { n, hot, rows, empty, sum, pv, hidden, mode, allRows, allEmpty }) {
+/** Placeholder body while a source has never landed (first load: agenda not read yet, or its source still running
+ *  with no data) — three grey lines with a soft shimmer. The header's '갱신 중' spinner (agstatus.js) stays as is. */
+export const SKELETON = `<div class="skel" role="status" aria-label="불러오는 중"><i></i><i></i><i></i></div>`;
+export function card(id, { n, hot, rows, empty, sum, pv, hidden, mode, allRows, allEmpty, loading }) {
   const el = $("sc-" + id);
   for (const b of el.querySelectorAll("[data-mode]")) b.setAttribute("aria-pressed", String(b.dataset.mode === (mode || "need")));
   if (mode === "all") { rows = allRows; empty = allEmpty; }
   el.hidden = !!hidden || !srcOn(CARD_KIND[id]); // source switched off (home pills only filter the 할 일 card)
   if (el.hidden) return;
-  group(id, n, hot, rows, empty);
+  const skel = !!loading && !n && !rows;
+  el.classList.toggle("loading", skel);
+  group(id, n, hot, skel ? SKELETON : rows, empty);
   $("ss-" + id).className = sum ? "ss" : "ss none";
-  $("ss-" + id).innerHTML = sum || esc(empty);
+  $("ss-" + id).innerHTML = sum || esc(skel ? "불러오는 중…" : empty);
   $("pv-" + id).innerHTML = n ? pv || "" : "";
-  const open = cardOpen(id, n);
+  const open = skel && lsGet(cardKey(id)) == null ? true : cardOpen(id, n); // default-open while the skeleton shows
   el.classList.toggle("open", open);
   el.querySelector(".sh").setAttribute("aria-expanded", String(open));
 }

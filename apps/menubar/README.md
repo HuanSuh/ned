@@ -89,6 +89,24 @@ Launch args: `--dashboard` opens the window at launch (`NED_OPEN_DASHBOARD=1` do
 `--wake-selftest` fakes a wedged-after-sleep daemon (SIGSTOP on the child) and runs the wake check (see Sleep / wake below).
 `--notify-selftest` runs synthetic state.json through the notification planner and the badge / open-item /
 `is_worker` decoding, prints the results and exits non-zero on failure (headless).
+`--boot-selftest` (headless, stdout) checks the node/claude tool cache (cold miss → cached, warm hit, broken
+cache → miss; own defaults suite, the app's cache is untouched) and writes the boot screen HTML per persona to
+`$NED_BOOT_HTML_OUT` (default `$TMPDIR/ned-boot-selftest`) for a headless render check.
+
+## Start-up (tool cache + boot screen)
+
+- **Tool cache**: the last node/claude that worked are kept in user defaults (`toolCache.node` / `toolCache.claude` /
+  `toolCache.version`). If the cached node still passes `node --version` (≥ 18, 3 s timeout) it is used at once
+  (`resolved … (cache hit, node v22, 0.1s)` in the log) and the slow `zsh -lic` / `zsh -lc` search runs in the
+  background; a different result only updates the cache (applies from the next restart). No/broken cache → the
+  full search as before. A fresh child is probed every 0.4 s until healthy (not only on the 5 s tick).
+- **Boot screen** (dashboard window, `Sources/Ned/BootScreen.swift`): the persona's mark draws in, light sweeps
+  across it, Ned gets a faint web; steps 도구 찾는 중 → 데몬 시작 → 연결 확인 → 대시보드 로드 + status line + elapsed,
+  pushed every 0.5 s via `nedBoot(step, text, elapsed, failed)`. Shown at least 1.5 s
+  (`DashboardWindowController.minBootScreenSeconds`), then fades into the dashboard; skipped when the daemon is
+  already healthy as the window opens. `.failed` → red step + 다시 시작 button. Reduced motion → static mark.
+- **Menu**: while `.checking` / `.starting` the daemon line becomes a spinner + `시작 중 n/4 · <step>`; `.failed`
+  shows a prominent 다시 시작. The menu bar label is unchanged (one Image + one Text).
 
 ## Menu bar badge and attention
 

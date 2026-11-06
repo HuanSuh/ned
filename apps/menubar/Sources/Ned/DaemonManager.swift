@@ -22,8 +22,30 @@ final class DaemonManager: ObservableObject {
         case failed(String)
     }
 
+    /// Start-up progress for the boot screen (dashboard window) and the menu: 도구 찾는 중 → 데몬 시작 → 연결 확인 → 대시보드 로드.
+    enum BootStage: Int, CaseIterable, Sendable {
+        case tools, spawn, connect, dashboard
+        var label: String {
+            switch self {
+            case .tools: return "도구 찾는 중"
+            case .spawn: return "데몬 시작"
+            case .connect: return "연결 확인"
+            case .dashboard: return "대시보드 로드"
+            }
+        }
+    }
+
     @Published private(set) var status: Status = .checking
     @Published private(set) var repoPath: String?
+    @Published private(set) var bootStage: BootStage = .tools
+    /// While ToolResolver runs (the slow part of a cold start).
+    @Published private(set) var resolvingTools = false
+    /// Start of the current boot (app launch / restart) — the boot screen's elapsed seconds.
+    private(set) var bootStartedAt = Date()
+    var bootElapsed: Double { Date().timeIntervalSince(bootStartedAt) }
+    var isBooting: Bool {
+        switch status { case .checking, .starting: return true; default: return false }
+    }
 
     private var process: Process?
     private var logFD: Int32 = -1
@@ -42,7 +64,7 @@ final class DaemonManager: ObservableObject {
 
     var statusLine: String {
         switch status {
-        case .checking: return "데몬 확인 중…"
+        case .checking: return resolvingTools ? "node·claude 찾는 중…" : "데몬 확인 중…"
         case .starting(let pid): return "데몬 시작 중… (pid \(pid))"
         case .running(let pid): return "데몬 실행 중 (pid \(pid))"
         case .external(let pid): return "외부 데몬 사용 중" + (pid.map { " (pid \($0))" } ?? "") + " — external"
@@ -81,7 +103,7 @@ final class DaemonManager: ObservableObject {
                 if Task.isCancelled || self.stopping { return }
                 if await Self.probe(timeout: 2) != nil {
                     self.note("wake: daemon healthy (probe \(i)/\(attempts))")
-                    if case .starting(let pid) = self.status { self.status = .running(pid: pid) }
+                    if case .starting(let pid) = self.status { self.markHealthy(pid) }
                     return
                 }
             }
@@ -157,6 +179,7 @@ final class DaemonManager: ObservableObject {
         }
         process = nil
         status = .checking
+        bootStartedAt = Date()
         Task { await adoptOrSpawn() }
     }
 
@@ -181,9 +204,11 @@ final class DaemonManager: ObservableObject {
 
     private func adoptOrSpawn() async {
         repoPath = Self.resolveRepo()
+        bootStage = .tools
         if let pid = await Self.probe(timeout: 2) {
             if process == nil {
                 status = .external(pid: pid)
+                bootStage = .dashboard
                 note("healthy daemon already on :\(AppConfig.port) (pid \(pid.map(String.init) ?? "?")) — adopting, not spawning")
                 return
             }
@@ -207,8 +232,14 @@ final class DaemonManager: ObservableObject {
             fail("\(cli) 없음 — 저장소에서 pnpm -r build 필요")
             return
         }
-        let tools = await Task.detached { ToolResolver.resolve() }.value
-        note("resolved node=\(tools.node ?? "nil") claude=\(tools.claude ?? "nil") (\(tools.source))")
+        bootStage = .tools
+        resolvingTools = true
+        let (tools, hit, secs) = await Task.detached { ToolResolver.resolveCached(.standard) }.value
+        resolvingTools = false
+        note("resolved node=\(tools.node ?? "nil") claude=\(tools.claude ?? "nil") (\(tools.source), \(String(format: "%.1f", secs))s)")
+        if hit { refreshToolCacheInBackground() }
+        guard !stopping else { return }
+        bootStage = .spawn
         guard let node = tools.node else {
             fail("node 를 찾을 수 없음")
             return
@@ -249,6 +280,8 @@ final class DaemonManager: ObservableObject {
         }
         process = p
         status = .starting(pid: p.processIdentifier)
+        bootStage = .connect
+        watchUntilHealthy(pid: p.processIdentifier)
         note("spawned daemon pid \(p.processIdentifier): \(node) \(cli) run (PATH=\(env["PATH"] ?? ""), NED_NO_LLM=\(env["NED_NO_LLM"] ?? "unset"), NED_NOTIFY=\(env["NED_NOTIFY"] ?? "unset"))")
     }
 
@@ -266,17 +299,56 @@ final class DaemonManager: ObservableObject {
         let delay = min(pow(2, Double(exits.count - 1)), 30)
         note("restarting in \(Int(delay))s (\(exits.count)/\(maxRestarts) in 10 min)")
         status = .checking
+        bootStartedAt = Date()
         let w = DispatchWorkItem { [weak self] in Task { @MainActor in await self?.adoptOrSpawn() } }
         pendingRestart = w
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: w)
     }
 
+    /// The 5 s health tick alone added up to 5 s to every start; probe a fresh child every 0.4 s (≤ 60 s) instead.
+    private func watchUntilHealthy(pid: Int32) {
+        Task { @MainActor [weak self] in
+            for _ in 0..<150 {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard let self, self.status == .starting(pid: pid) else { return }
+                if await Self.probe(timeout: 1) != nil, self.status == .starting(pid: pid) { self.markHealthy(pid); return }
+            }
+        }
+    }
+
+    private func markHealthy(_ pid: Int32) {
+        status = .running(pid: pid)
+        bootStage = .dashboard
+        note("daemon pid \(pid) healthy on :\(AppConfig.port) (\(String(format: "%.1f", bootElapsed))s after boot start)")
+    }
+
+    /// After a cache hit: run the full (slow) search off the main thread; if it picks other paths (a newer node or
+    /// claude), only the cache is updated — the running daemon keeps its tools until the next restart.
+    private func refreshToolCacheInBackground() {
+        Task.detached(priority: .utility) {
+            let t0 = Date()
+            let full = ToolResolver.resolve()
+            let secs = Date().timeIntervalSince(t0)
+            await MainActor.run {
+                guard full.node != nil else { DaemonManager.shared.note("tool cache refresh: full search found no node (\(String(format: "%.1f", secs))s) — cache kept"); return }
+                if ToolResolver.Cache.matches(full, .standard) {
+                    ToolResolver.Cache.save(full, .standard)
+                    DaemonManager.shared.note("tool cache refresh: unchanged (\(full.source), \(String(format: "%.1f", secs))s)")
+                } else {
+                    let d = UserDefaults.standard
+                    let old = "node=\(d.string(forKey: ToolResolver.Cache.nodeKey) ?? "nil") claude=\(d.string(forKey: ToolResolver.Cache.claudeKey) ?? "nil")"
+                    ToolResolver.Cache.save(full, d)
+                    DaemonManager.shared.note("tool cache refresh: updated \(old) → node=\(full.node ?? "nil") claude=\(full.claude ?? "nil") (\(full.source), \(String(format: "%.1f", secs))s) — applies from the next restart")
+                }
+            }
+        }
+    }
+
     private func tick() async {
         switch status {
         case .starting(let pid):
-            if await Self.probe(timeout: 2) != nil {
-                status = .running(pid: pid)
-                note("daemon pid \(pid) healthy on :\(AppConfig.port)")
+            if await Self.probe(timeout: 2) != nil, status == .starting(pid: pid) {
+                markHealthy(pid)
             }
         case .external:
             if let pid = await Self.probe(timeout: 2) {
@@ -344,6 +416,48 @@ final class DaemonManager: ObservableObject {
 enum ToolResolver {
     struct Result: Sendable { var node: String?; var claude: String?; var source: String }
     static let minNodeMajor = 18
+
+    // MARK: last-good cache (UserDefaults toolCache.node / .claude / .version)
+
+    /// The slow search (`zsh -lic` / `zsh -lc`, 8 s timeout each) took 15–21 s per launch. The last paths that
+    /// worked are kept here; a launch whose cached node still runs `--version` (≥ 18, 3 s timeout) uses them at once.
+    enum Cache {
+        static let nodeKey = "toolCache.node", claudeKey = "toolCache.claude", versionKey = "toolCache.version"
+
+        /// Cached tools if still usable: node executable + `node --version` major ≥ 18; a cached claude must
+        /// still be executable (a cache saved without claude stays without one). `nil` = miss.
+        static func load(_ d: UserDefaults) -> Result? {
+            guard let node = d.string(forKey: nodeKey), FileManager.default.isExecutableFile(atPath: node) else { return nil }
+            let claude = d.string(forKey: claudeKey)
+            if let c = claude, !FileManager.default.isExecutableFile(atPath: c) { return nil }
+            guard let major = nodeMajor(node), major >= minNodeMajor else { return nil }
+            return Result(node: node, claude: claude, source: "cache hit, node v\(major)" + (claude == nil ? ", claude none" : ""))
+        }
+
+        static func save(_ r: Result, _ d: UserDefaults) {
+            guard let node = r.node else { return }
+            d.set(node, forKey: nodeKey)
+            if let c = r.claude { d.set(c, forKey: claudeKey) } else { d.removeObject(forKey: claudeKey) }
+            d.set(r.source, forKey: versionKey)
+        }
+
+        static func matches(_ r: Result, _ d: UserDefaults) -> Bool {
+            d.string(forKey: nodeKey) == r.node && d.string(forKey: claudeKey) == r.claude
+        }
+
+        static func clear(_ d: UserDefaults) { for k in [nodeKey, claudeKey, versionKey] { d.removeObject(forKey: k) } }
+    }
+
+    /// Cache first, else the full search (and the result is cached). `hit` tells the caller to refresh the cache
+    /// in the background with `resolve()` so a newer node/claude is picked up from the next restart on.
+    static func resolveCached(_ d: UserDefaults) -> (result: Result, hit: Bool, seconds: Double) {
+        let t0 = Date()
+        if let r = Cache.load(d) { return (r, true, Date().timeIntervalSince(t0)) }
+        var r = resolve()
+        if r.node != nil { Cache.save(r, d) }
+        r.source = "cache miss — " + r.source
+        return (r, false, Date().timeIntervalSince(t0))
+    }
 
     static func resolve() -> Result {
         var nodes: [(String, String)] = [], claudes: [(String, String)] = []
