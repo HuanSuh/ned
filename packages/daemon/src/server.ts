@@ -11,7 +11,7 @@ import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./dr
 import { readRecentEvents } from "./events.js";
 import { dismissAttention, heartbeat, listBriefings } from "./heartbeat.js";
 import { log } from "./paths.js";
-import { readState, setReviewed, writeState } from "./state.js";
+import { SOURCE_KEY, readSourceReviewed, readState, setReviewed, writeState } from "./state.js";
 import { registerSearch } from "./search.js";
 import { addTodo, deleteTodo, listTodos, updateTodo } from "./todos.js";
 
@@ -99,7 +99,8 @@ export function startServer(getConfig: () => NedConfig): void {
     const id = c.req.param("id");
     let reviewed = true;
     try { const b = (await c.req.json()) as { reviewed?: unknown }; if (typeof b?.reviewed === "boolean") reviewed = b.reviewed; } catch { /* no body = mark */ }
-    if (!readState().attention.some((a) => a.id === id)) return c.json({ error: "not found" }, 404);
+    // Source items (mail: / slack: / jira: / github:) have no attention entry; their key is stable across agenda runs.
+    if (!SOURCE_KEY.test(id) && !readState().attention.some((a) => a.id === id)) return c.json({ error: "not found" }, 404);
     const at = setReviewed(id, reviewed);
     return c.json({ ok: true, id, reviewed_at: at, attention_open_count: readState().attention_open_count });
   });
@@ -122,6 +123,7 @@ export function startServer(getConfig: () => NedConfig): void {
       mail: sources.gmail ? a.mail : null,
       slack: sources.slack ? a.slack : null,
       busy: agendaBusy(),
+      reviewed: readSourceReviewed(), // 확인 완료 marks for mail / slack / jira / github items (key → ms)
       mail_enabled: sources.gmail,
       slack_enabled: sources.slack,
       sources,
