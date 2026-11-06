@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -15,8 +16,8 @@ const PROMPTS_DIR = path.resolve(here, "../../../prompts");
 export const DRAFTS_DIR = path.join(NED_HOME, "drafts");
 const CACHE_MS = 60 * 60_000;
 
-export type DraftSource = "slack" | "email" | "session";
-export const DRAFT_SOURCES: DraftSource[] = ["slack", "email", "session"];
+export type DraftSource = "slack" | "email" | "session" | "jira" | "github";
+export const DRAFT_SOURCES: DraftSource[] = ["slack", "email", "session", "jira", "github"];
 export const DRAFT_LABELS = ["짧게", "보통", "정중하게"] as const;
 export type DraftLabel = (typeof DRAFT_LABELS)[number];
 
@@ -30,7 +31,14 @@ export interface DraftRef {
   session_id?: string;
   title?: string;
   text?: string;
+  /** jira: issue key (`ABC-123`); the site comes from `url` (`https://<site>.atlassian.net/browse/ABC-123`). */
+  key?: string;
+  /** github: `owner/name` + PR number (string), or a PR `url`. */
+  repo?: string;
+  number?: string;
 }
+
+export const REF_FIELDS = ["url", "channel", "ts", "thread_ts", "thread_id", "message_id", "session_id", "title", "text", "key", "repo", "number"] as const;
 
 export interface DraftRequest {
   source: DraftSource;
@@ -53,6 +61,12 @@ export interface DraftMeta {
   subject?: string;
   /** session */
   session_id?: string;
+  /** jira: issue key + cloudId (site host, e.g. `acme.atlassian.net`) */
+  issue_key?: string;
+  cloud_id?: string;
+  /** github */
+  repo?: string;
+  number?: string;
 }
 
 /** `fast` = no-tool run on context Ned already has (agenda excerpt / local transcript); `full` = claude reads the thread with tools. */
@@ -88,11 +102,11 @@ const str = (v: unknown, max = 2000): string | undefined => (typeof v === "strin
 /** Coerce a request body into a DraftRequest, or throw DraftError(400). */
 export function parseDraftRequest(body: Record<string, unknown>): DraftRequest {
   const source = body.source as DraftSource;
-  if (!DRAFT_SOURCES.includes(source)) throw new DraftError("source must be slack | email | session", 400);
+  if (!DRAFT_SOURCES.includes(source)) throw new DraftError(`source must be ${DRAFT_SOURCES.join(" | ")}`, 400);
   const r = (body.ref && typeof body.ref === "object" ? body.ref : {}) as Record<string, unknown>;
   const ref: DraftRef = {};
-  for (const k of ["url", "channel", "ts", "thread_ts", "thread_id", "message_id", "session_id", "title", "text"] as const) {
-    const v = str(r[k], k === "text" ? 2000 : 500);
+  for (const k of REF_FIELDS) {
+    const v = str(typeof r[k] === "number" ? String(r[k]) : r[k], k === "text" ? 2000 : 500);
     if (v) ref[k] = v;
   }
   return { source, ref, hint: str(body.hint, 500), tone: str(body.tone, 200), force: body.force === true };
@@ -114,6 +128,50 @@ export function parseSlackUrl(url: string | undefined): { channel?: string; ts?:
 export function slackTarget(ref: DraftRef): { channel_id?: string; ts?: string; thread_ts?: string } {
   const u = parseSlackUrl(ref.url);
   return { channel_id: ref.channel && /^[A-Z0-9]+$/.test(ref.channel) ? ref.channel : u.channel, ts: ref.ts ?? u.ts, thread_ts: ref.thread_ts ?? u.thread_ts };
+}
+
+/** Jira addressing: issue key (ref.key, else the `/browse/KEY` in the URL) + cloudId = the site host from the URL. */
+export function jiraTarget(ref: DraftRef): { key?: string; cloud_id?: string } {
+  const m = (ref.url ?? "").match(/^https:\/\/([a-z0-9-]+\.atlassian\.net)\/browse\/([A-Z][A-Z0-9_]*-\d+)/i);
+  const key = ref.key && /^[A-Z][A-Z0-9_]*-\d+$/i.test(ref.key) ? ref.key.toUpperCase() : m?.[2]?.toUpperCase();
+  return { key, cloud_id: m?.[1]?.toLowerCase() };
+}
+
+/** GitHub PR addressing: ref.repo + ref.number, else parsed from `https://github.com/<owner>/<repo>/pull/<n>`. */
+export function githubTarget(ref: DraftRef): { repo?: string; number?: string } {
+  const m = (ref.url ?? "").match(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/);
+  const repo = ref.repo && /^[\w.-]+\/[\w.-]+$/.test(ref.repo) ? ref.repo : m?.[1];
+  const number = ref.number && /^\d+$/.test(ref.number) ? ref.number : m?.[2];
+  return { repo, number };
+}
+
+/** Read-only PR context for a review draft: `gh pr view --json` (title/body/files ±) + the head of `gh pr diff`. */
+export function githubContext(repo: string, number: string): Promise<string> {
+  const gh = (args: string[]) =>
+    new Promise<string>((resolve) => execFile("gh", args, { timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }, (err, out, se) => resolve(err ? `(gh ${args.slice(0, 2).join(" ")} 실패: ${(se || err.message).slice(0, 200)})` : out)));
+  return Promise.all([
+    gh(["pr", "view", number, "--repo", repo, "--json", "title,body,author,state,baseRefName,headRefName,additions,deletions,changedFiles,files,reviewDecision"]),
+    gh(["pr", "diff", number, "--repo", repo]),
+  ]).then(([view, diff]) => {
+    let head = view.slice(0, 3000);
+    try {
+      const j = JSON.parse(view) as { title: string; body: string; author?: { login: string }; state: string; baseRefName: string; headRefName: string; additions: number; deletions: number; changedFiles: number; reviewDecision: string; files?: { path: string; additions: number; deletions: number }[] };
+      const stat = (j.files ?? []).slice(0, 40).map((f) => ` ${f.path} | +${f.additions} -${f.deletions}`);
+      head = [
+        `PR: ${repo}#${number} — ${j.title}`,
+        `작성자: @${j.author?.login ?? "?"} · ${j.headRefName} → ${j.baseRefName} · ${j.state} · reviewDecision=${j.reviewDecision || "-"}`,
+        `변경 (diff --stat): ${j.changedFiles} files, +${j.additions} -${j.deletions}`,
+        ...stat,
+        (j.files?.length ?? 0) > 40 ? ` … 외 ${(j.files?.length ?? 0) - 40}개` : "",
+        "설명:",
+        (j.body || "(없음)").slice(0, 2500),
+      ].filter(Boolean).join("\n");
+    } catch {
+      /* gh failed: keep its message */
+    }
+    const d = diff.length > 6000 ? diff.slice(0, 6000) + "\n… (diff 잘림)" : diff;
+    return `${head}\n\ndiff (앞부분):\n${d}`;
+  });
 }
 
 /** Latest hook events of one session (any of the last 7 days), oldest first. */
@@ -163,6 +221,8 @@ export function refKey(source: DraftSource, ref: DraftRef): string {
     return `slack:${t.channel_id ?? ""}:${t.thread_ts ?? ""}:${t.ts ?? ""}:${t.channel_id ? "" : ref.url ?? ref.text ?? ""}`;
   }
   if (source === "email") return `email:${ref.thread_id ?? ""}:${ref.message_id ?? ""}:${ref.thread_id || ref.message_id ? "" : ref.url ?? ref.text ?? ""}`;
+  if (source === "jira") return `jira:${jiraTarget(ref).key ?? ""}`;
+  if (source === "github") { const g = githubTarget(ref); return `github:${g.repo ?? ""}#${g.number ?? ""}`; }
   const evs = ref.session_id ? sessionEvents(ref.session_id) : [];
   return `session:${ref.session_id ?? ""}:${evs.length ? evs[evs.length - 1].ts : 0}`;
 }
@@ -181,7 +241,8 @@ export function readDraft(idOrDraftId: string): DraftResult | null {
 export function draftTools(source: DraftSource): string[] {
   if (source === "slack") return ["ToolSearch", "mcp__claude_ai_Slack__slack_read_thread", "mcp__claude_ai_Slack__slack_read_channel"];
   if (source === "email") return ["ToolSearch", "mcp__claude_ai_Gmail__get_thread", "mcp__claude_ai_Gmail__search_threads"];
-  return [];
+  if (source === "jira") return ["ToolSearch", "mcp__claude_ai_Atlassian__getJiraIssue"];
+  return []; // session / github: context is inlined (transcript tail / gh read-only output)
 }
 
 /** Agenda-collected context for a Slack / mail ref, with its age in minutes. */
@@ -235,7 +296,7 @@ function formatContext(c: AgendaCtx): string {
     .join("\n");
 }
 
-function sourceGuide(req: DraftRequest, fast: AgendaCtx | null = null): { guide: string; ref: string; context: string; meta: DraftMeta } {
+function sourceGuide(req: DraftRequest, fast: AgendaCtx | null = null, prefetched?: string): { guide: string; ref: string; context: string; meta: DraftMeta } {
   const { ref } = req;
   if (fast) {
     const preview = [ref.title && `제목: ${ref.title}`, ref.text && `미리보기: ${ref.text}`].filter(Boolean).join("\n");
@@ -289,6 +350,26 @@ function sourceGuide(req: DraftRequest, fast: AgendaCtx | null = null): { guide:
     ].join("\n");
     return { guide, ref: JSON.stringify({ url: ref.url, thread_id: ref.thread_id, message_id: ref.message_id }), context: preview, meta: { thread_id: ref.thread_id, message_id: ref.message_id } };
   }
+  if (req.source === "jira") {
+    const t = jiraTarget(ref);
+    const guide = [
+      "Jira 이슈에 사용자가 남길 **코멘트** 초안.",
+      `- \`mcp__claude_ai_Atlassian__getJiraIssue\` 로 cloudId=\`${t.cloud_id ?? "(URL 없음)"}\`, issueIdOrKey=\`${t.key}\`, fields=["summary","description","status","assignee","reporter","comment"], responseContentFormat="markdown" 로 1회 읽는다.`,
+      "- 최근 코멘트에서 사용자에게 온 질문·요청이 있으면 그에 대한 답을, 없으면 진행 상황 공유(무엇을 했고 다음에 무엇을 할지)를 쓴다.",
+      "- 코멘트는 평문. 다른 사람 언급이 필요하면 이름만 쓴다(멘션 문법 금지). `reply_meta` 는 빈 문자열로 둔다.",
+    ].join("\n");
+    return { guide, ref: JSON.stringify({ url: ref.url, ...t }), context: preview, meta: { issue_key: t.key, cloud_id: t.cloud_id } };
+  }
+  if (req.source === "github") {
+    const g = githubTarget(ref);
+    const guide = [
+      "GitHub Pull Request 에 사용자가 남길 **리뷰 코멘트** 초안 (승인/변경 요청 여부는 사용자가 따로 고른다).",
+      "- 도구는 없다. 아래 PR 설명과 변경 파일 목록(diff --stat), diff 앞부분만 보고 쓴다. 보지 못한 코드에 대해 단정하지 않는다.",
+      "- 구체적으로: 확인한 점, 질문, 개선 제안을 파일명과 함께 짧게. `짧게` 는 한 줄 총평, `정중하게` 는 감사 + 항목별 코멘트.",
+      "- GitHub 마크다운의 `코드` 표기와 목록(-)은 써도 된다. `reply_meta` 는 빈 문자열로 둔다.",
+    ].join("\n");
+    return { guide, ref: JSON.stringify({ url: ref.url, ...g }), context: `${prefetched ?? "(PR 정보를 못 읽음)"}\n\n(목록 미리보기)\n${preview}`, meta: { repo: g.repo, number: g.number } };
+  }
   // session: no tools — the transcript tail is inlined.
   const evs = ref.session_id ? sessionEvents(ref.session_id) : [];
   const transcript = [...evs].reverse().find((e) => e.transcript_path)?.transcript_path;
@@ -328,13 +409,13 @@ function contextExcerpt(fast: AgendaCtx): string {
 }
 
 /** `fast` (or a session) → no-tool prompt built from context Ned already has. */
-export function buildDraftPrompt(req: DraftRequest, cfg: NedConfig, fast: AgendaCtx | null = null): { prompt: string; meta: DraftMeta } {
+export function buildDraftPrompt(req: DraftRequest, cfg: NedConfig, fast: AgendaCtx | null = null, prefetched?: string): { prompt: string; meta: DraftMeta } {
   const template = fs.readFileSync(path.join(PROMPTS_DIR, "draft.md"), "utf8");
-  const s = sourceGuide(req, fast);
+  const s = sourceGuide(req, fast, prefetched);
   const tone = normalizeReplyTone(req.tone, cfg.reply_tone);
   const prompt = template
     .replace("{{NOW}}", () => new Date().toLocaleString("ko-KR"))
-    .replace("{{TOOL_RULES}}", () => (fast ? `${NO_TOOL_RULES}\n${FAST_OUTPUT_RULE}` : req.source === "session" ? NO_TOOL_RULES : TOOL_RULES))
+    .replace("{{TOOL_RULES}}", () => (fast ? `${NO_TOOL_RULES}\n${FAST_OUTPUT_RULE}` : req.source === "session" || req.source === "github" ? NO_TOOL_RULES : TOOL_RULES))
     .replace("{{TONE}}", () => tone)
     .replace("{{HINT}}", () => req.hint ?? "(없음)")
     .replace("{{SOURCE_GUIDE}}", () => s.guide)
@@ -372,6 +453,14 @@ function validate(req: DraftRequest): DraftError | null {
   if (req.source === "session" && !req.ref.session_id) return new DraftError("ref.session_id required", 400);
   if (req.source === "slack" && !slackTarget(req.ref).channel_id && !req.ref.text) return new DraftError("ref.url / ref.channel or ref.text required", 400);
   if (req.source === "email" && !req.ref.thread_id && !req.ref.message_id && !req.ref.text && !req.ref.title) return new DraftError("ref.thread_id or ref.title / ref.text required", 400);
+  if (req.source === "jira") {
+    const t = jiraTarget(req.ref);
+    if (!t.key || !t.cloud_id) return new DraftError("ref.url (https://<site>.atlassian.net/browse/KEY-1) required", 400);
+  }
+  if (req.source === "github") {
+    const g = githubTarget(req.ref);
+    if (!g.repo || !g.number) return new DraftError("ref.repo + ref.number or a PR ref.url required", 400);
+  }
   return null;
 }
 
@@ -411,10 +500,13 @@ export function generateDraft(req: DraftRequest, cfg: NedConfig, opts: { fastOnl
 }
 
 async function runDraft(req: DraftRequest, cfg: NedConfig, id: string, tone: string, hint: string, fast: AgendaCtx | null, fallback = true): Promise<DraftResult> {
-  const noTools = !!fast || req.source === "session";
+  const noTools = !!fast || req.source === "session" || req.source === "github";
   const mode: DraftMode = noTools ? "fast" : "full";
-  const context_age_minutes = fast ? fast.age : req.source === "session" ? 0 : null;
-  const { prompt, meta } = buildDraftPrompt(req, cfg, fast);
+  const context_age_minutes = fast ? fast.age : req.source === "session" || req.source === "github" ? 0 : null;
+  // github: Ned itself reads the PR read-only (gh pr view --json / gh pr diff) and inlines it; the model gets no tools.
+  const g = req.source === "github" ? githubTarget(req.ref) : null;
+  const prefetched = g?.repo && g.number && !llmDisabled() ? await githubContext(g.repo, g.number) : undefined;
+  const { prompt, meta } = buildDraftPrompt(req, cfg, fast, prefetched);
   if (llmDisabled()) {
     log(`draft: NED_NO_LLM=1 — stub for ${req.source} ${id} (${mode})`);
     const excerpt = fast ? contextExcerpt(fast) : req.ref.text ?? req.ref.title ?? "";

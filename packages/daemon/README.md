@@ -3,7 +3,7 @@
 Ned 의 코어 데몬. Claude Code 훅이 남긴 세션 이벤트를 집계하고, 주기적으로 `claude -p` 를 호출해
 업무 신호(Gmail/Slack/Jira/Sentry/GitHub/Google Calendar, claude.ai 커넥터 경유)를 브리핑으로 정리하며,
 menu bar 앱과 로컬 대시보드가 읽는 `state.json` 을 유지한다. 읽기 전용: 어떤 쓰기 액션도 하지 않는다 — 단 하나의 예외는
-사용자가 켠 경우의 `POST /api/send` (아래 "답장 초안 · 보내기").
+사용자가 켠 경우의 `POST /api/send` (아래 "답장 초안 · 보내기" — Slack/Gmail/세션, Jira 코멘트·상태 변경, GitHub 리뷰·코멘트, 캘린더 참석 응답).
 
 ## Build
 
@@ -138,7 +138,7 @@ heartbeat / briefing 의 `{{FILTERS}}` 에도 팔로업 목록이 붙어 needs_m
 | POST | `/api/todos` | `{title, due?, note?}` → 생성된 항목 (201). title 이 비면 400 |
 | PATCH | `/api/todos/:id` | `{title?, done?, due?, note?}` 부분 갱신. 없으면 404 |
 | DELETE | `/api/todos/:id` | 삭제. 없으면 404 |
-| POST | `/api/draft` | 답장 초안 3개 (Slack / 메일 / 에이전트 세션). 읽기 전용 `claude -p`. 아래 참고 |
+| POST | `/api/draft` | 답장·코멘트 초안 3개 (Slack / 메일 / 에이전트 세션 / Jira 코멘트 / GitHub 리뷰). 읽기 전용 `claude -p`. 아래 참고 |
 | GET | `/api/draft/status` | 초안 미리 생성 마지막 실행 `{ pregenerated, skipped_cached, failed, cost_usd, last_run_ts, running }` |
 | POST | `/api/send` | 초안 보내기 — `config.actions` 로 켠 것만. 꺼져 있으면 403 |
 | GET | `/api/actions` | `sent-actions.log` 최근 50건 (최신 먼저) |
@@ -171,8 +171,9 @@ Agenda 응답 형태:
 
 ```jsonc
 // 요청
-{ "source": "slack" | "email" | "session",
-  "ref": { "url?": "", "channel?": "C…", "ts?": "", "thread_ts?": "", "thread_id?": "", "message_id?": "", "session_id?": "", "title?": "", "text?": "" },
+{ "source": "slack" | "email" | "session" | "jira" | "github",
+  "ref": { "url?": "", "channel?": "C…", "ts?": "", "thread_ts?": "", "thread_id?": "", "message_id?": "", "session_id?": "", "title?": "", "text?": "",
+           "key?": "ABC-123", "repo?": "owner/name", "number?": "92" },
   "hint?": "내일 오전 가능하다고", "tone?": "반말", "force?": false }
 // 응답 200
 { "id": "16hex", "source": "slack",
@@ -185,6 +186,12 @@ Agenda 응답 형태:
 
 - 필요한 ref: slack 은 `url`(permalink — channel/ts/thread_ts 를 파싱) 또는 `channel`(+`ts`/`thread_ts`), 없으면 `text` 만으로 씀.
   email 은 `thread_id`(agenda `mail.items[].id`) 권장, 없으면 `title`/`text` 로 1회 검색. session 은 `session_id` 필수.
+  jira 는 `url`(`https://<site>.atlassian.net/browse/KEY-1` — 사이트 호스트가 cloudId) 필수(+`key`). github 는 `repo`+`number` 또는 PR `url`.
+- **jira** (코멘트 초안, full 경로): plan 모드 + `--tools ToolSearch` + `mcp__claude_ai_Atlassian__getJiraIssue` 하나만(summary·description·status·comment).
+  최근 코멘트의 질문이 있으면 답, 없으면 진행 상황 공유. `meta: {issue_key, cloud_id}`.
+- **github** (리뷰 코멘트 초안, fast 경로·도구 없음): Ned 가 직접 읽기 전용 `gh pr view <n> --repo <r> --json title,body,author,…,files`
+  (= 파일별 ±, `gh pr diff` 에는 `--stat` 플래그가 없어 이걸로 대신)와 `gh pr diff` 앞 6000자를 프롬프트에 넣는다. `meta: {repo, number}`.
+  승인/변경 요청 여부는 초안이 아니라 보내기 단계에서 사용자가 고른다.
 - 응답에 `mode: "fast" | "full"` 와 `context_age_minutes` 가 붙는다.
   - **fast** (목표 ≤10s): ref 가 agenda 항목(slack `items`/`all` 은 permalink 또는 channel+ts, mail `items` 는 thread id)과 맞고 그 항목의
     `context` 가 `config.draft_context_max_age_minutes`(기본 180) 안이면, 그 맥락만으로 프롬프트를 만들고
@@ -215,13 +222,27 @@ Agenda 응답 형태:
 | email | `gmail_draft` | `gmail_draft` (true) | 같은 패턴, 도구는 `mcp__claude_ai_Gmail__create_draft` 하나 (`replyToMessageId` = message_id, `to`/`subject` = draft meta). 보내지 않고 Gmail 임시보관함에 회신 초안만 만든다. `{"ok":true,"id":…}` 여야 성공 |
 | email | `send` | `gmail_send` (false) | 같은 패턴, 도구는 `mcp__claude_ai_Gmail__reply` 하나 (`messageId`, replyAll 없음) |
 | session | `session` | `session_send` (true — 로컬·되돌릴 수 있음) | 세션 이벤트의 `orca_pane`(`<tabId>:<leafId>`)/`orca_tab` → `orca terminal list --json` 의 `leafId`/`tabId` 로 핸들을 찾아 `orca terminal send --terminal <handle> --text <text> --enter`. 이벤트에 Orca 정보가 없거나 터미널이 닫혔으면 409 |
+| jira | `comment` | `jira_comment` (false) | 같은 패턴, 도구는 `mcp__claude_ai_Atlassian__addCommentToJiraIssue` 하나 (cloudId = URL 의 사이트 호스트, `contentFormat: markdown`, 새 코멘트만). `{"ok":true,"id":…}` 여야 성공 |
+| jira | `transitions` | `jira_transition` (false) | **읽기만**: 도구는 `getTransitionsForJiraIssue` 하나. 응답에 `transitions: [{id, name, to?}]` — 대시보드가 이 목록을 먼저 보여 준다. 로그에도 남는다(mode `transitions`) |
+| jira | `transition` | `jira_transition` (false) | 도구는 `transitionJiraIssue` 하나, `ref.transition_id`(숫자, 위 목록의 id) 필수, `ref.transition_name` 은 로그용. 모델이 같은 id 로 `{"ok":true,"id":"<id>"}` 를 돌려줘야 성공 |
+| github | `approve` · `request_changes` · `review_comment` | `github_review` (false) | `claude -p --permission-mode dontAsk --tools Bash --allowedTools "Bash(gh pr review:*)" --max-turns 3`. Ned 가 명령(`gh pr review <n> --repo <r> --approve\|--request-changes\|--comment [--body-file <파일>]`)을 직접 만들고, 본문은 `~/.ned/tmp/gh-body-*.md`(0600, 실행 뒤 삭제)로 넘겨 모델이 셸 인용을 하지 않는다. `approve` 만 본문 생략 가능. `gh pr review` 는 TTY 가 아니면 아무것도 출력하지 않으므로, 성공 판정은 실행 뒤 Ned 가 읽기 전용 `gh pr view --json reviews` + `gh api user` 로 **내 리뷰가 그 상태로 방금 달렸는지** 확인한다 |
+| github | `comment` | `github_review` (false) | 같은 패턴, 허용은 `Bash(gh pr comment:*)` 하나 (`gh pr comment <n> --repo <r> --body-file <파일>`). 출력에 `github.com/<r>/pull/<n>#issuecomment-…` 가 있어야 성공 |
+| calendar | `rsvp` | `calendar_rsvp` (false) | 도구는 `mcp__claude_ai_Google_Calendar__respond_to_event` 하나. `ref.event_id`(+`calendar_id`), `ref.response` = `accepted\|declined\|tentative`, `text` 는 선택(responseComment). `{"ok":true,"status":"<response>"}` 여야 성공 |
+
+- Slack 반응(이모지 reaction)은 **없음**: claude.ai Slack 커넥터에 reaction 도구가 없다(send/schedule/draft/canvas/읽기만). 도구가 생기면 같은 패턴으로 추가.
+- `text` 필수: slack·email·session·jira `comment`·github `request_changes`/`review_comment`/`comment`. 그 밖(`approve`, `transition(s)`, `rsvp`)은 선택.
 
 - email 은 `message_id` 가 필요하다(ref 또는 `draft_id` 의 meta). 없으면 400 — 보내기 단계에서는 읽기 도구를 허용하지 않는다.
 - 텍스트는 JSON 문자열로 프롬프트에 넣고 "글자 하나 바꾸지 말고 그대로, 도구 한 번만" 지시. 최대 4000자.
 - 모든 시도(거절·실패·dry-run 포함)는 `~/.ned/sent-actions.log` 에 JSONL 한 줄:
   `{ts, source, mode, action, ref, draft_id, text(앞 120자), ok, result, claude_args?}` — `claude_args` 는 실제 spawn 한 argv.
-- `NED_NO_LLM=1` 또는 `NED_SEND_DRY_RUN=1` 이면 Slack/Gmail 은 argv 와 프롬프트를 로그에 남기고 실행하지 않는다
-  (`ok:false`, `action: "dry_run:…"`). 세션 보내기는 로컬이라 그대로 실행한다.
+- `NED_NO_LLM=1` 또는 `NED_SEND_DRY_RUN=1` 이면 커넥터·gh 액션(Slack/Gmail/Jira/GitHub/Calendar)은 argv 와 프롬프트를 로그에 남기고 실행하지 않는다
+  (`ok:false`, `action: "dry_run:…"`, gh 본문 파일도 만들지 않음). 세션 보내기는 로컬이라 그대로 실행한다. `NED_NO_LLM=1` 의 jira `transitions` 는
+  화면 테스트용 `(stub)` 전환 2개를 돌려준다.
+- 대시보드: Jira·GitHub·캘린더 항목의 **⋯ 메뉴**(`public/app/features/actions.js`) — Jira: 코멘트 초안 쓰기… / 상태 변경…(전환 목록을 먼저 읽음),
+  GitHub: 리뷰 초안 쓰기…(팝업에서 리뷰 코멘트·변경 요청·승인+코멘트·PR 코멘트) / 바로 승인, 캘린더: 수락·미정·거절(주최한 일정엔 없음).
+  꺼진 스위치는 '꺼짐' 으로 비활성, 쓰기는 모두 메뉴/팝업 안에서 한 번 더 확인. 설정 → 쓰기 액션 아래 **오늘 한 액션** 표(`GET /api/actions` 를 오늘·소스·결과로 거름).
+- `actions.ts` 의 `queryActionLog({since, source, result}, limit)` 는 서버 쪽 필터용으로 준비돼 있다(`GET /api/actions` 는 아직 최근 50건 그대로).
 
 Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` (ms 타임스탬프).
 
@@ -236,7 +257,7 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
 | `NED_NO_LLM_AGENDA` | (unset) | `NED_NO_LLM=1` 일 때 agenda 1단계가 쓸 모델 출력 모양 JSON 파일 경로 (`{"slack":{…},"mail":{…},"calendar":[…],…}`). 소스별 호출은 자기 키만 가져간다 |
 | `NED_NO_LLM_DELAY_MS` | (unset) | `NED_NO_LLM=1` 일 때 agenda 소스별 스텁 호출 지연 (우선순위 n번째 = n×값) 과 2단계 배치 지연 — 순서·진행 상태 테스트용 |
 | `NED_NO_LLM_COST` | (unset) | `NED_NO_LLM=1` 일 때 2단계 스텁 배치 하나의 비용(USD) — `costs.json` 에 기록되어 일일 예산 중단 경로를 테스트할 수 있다 |
-| `NED_SEND_DRY_RUN` | (unset) | `1` 이면 `POST /api/send` 의 Slack/Gmail 액션이 `claude` argv·프롬프트만 로그에 남기고 실행하지 않는다 |
+| `NED_SEND_DRY_RUN` | (unset) | `1` 이면 `POST /api/send` 의 커넥터·gh 액션(Slack/Gmail/Jira/GitHub/Calendar)이 `claude` argv·프롬프트만 로그에 남기고 실행하지 않는다 |
 | `NED_NOTIFY` | (unset) | Ned.app 이 데몬을 띄울 때 `app` 으로 설정한다. `config.notify: auto` 이면 이때 osascript 배너를 띄우지 않는다 (알림은 Ned.app 이 `state.json` 을 보고 직접 보낸다) |
 | `NED_CHILD` | — | 데몬이 띄운 `claude -p` 자식에 `1` 로 설정됨 (훅이 자기 자신을 관찰하지 않도록 쓸 수 있음) |
 
@@ -260,7 +281,8 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
                          briefing_time, quiet_hours, sources.{gmail,slack,jira,github,sentry,calendar},
                          persona (ned|alfred|oracle|jarvis), filters.{slack.exclude_channels, slack.watch_channels, jira.exclude_projects} (트래킹 제외 / 팔로업 채널, 기본 []),
                          port, claude_model, claude_max_turns, session_stale_minutes, agenda_refresh_minutes, notify,
-                         actions.{slack_send=false, gmail_draft=true, gmail_send=false, session_send=true} (POST /api/send 허용),
+                         actions.{slack_send=false, gmail_draft=true, gmail_send=false, session_send=true,
+                                  jira_comment=false, jira_transition=false, github_review=false, calendar_rsvp=false} (POST /api/send 허용),
                          reply_tone (답장 초안 말투, 기본 "간결하고 정중한 존댓말, 핵심 먼저"),
                          draft_context_max_age_minutes=180 (agenda 맥락 → fast 초안), draft_fast_model="sonnet", drafts_pregenerate=false,
                          agenda_all_limit=20 (mail/slack all[] 상한), agenda_context_batch=5 (2단계 배치 크기),
