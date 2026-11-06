@@ -262,7 +262,8 @@ non-template image: the symbol plus a count capsule in the accent color.
 
 - **Menu**: the header name and color, the quiet line, a time-of-day greeting when nothing
   needs attention, the LED and button tint, and a `페르소나: <name>` pop-up next to
-  "저장소 위치…". Picking a persona there switches the UI right away and sends
+  "저장소 위치…" — **hidden feature**: the pop-up only shows when you open the dropdown with
+  ⌥ (option) held (otherwise edit `persona:` in config.yaml). Picking a persona there switches the UI right away and sends
   `PUT /api/config {"persona":"<id>"}`. If the PUT fails, the UI goes back to the previous
   persona.
 - **Notifications**: the briefing title is the persona name, the persona name is the subtitle

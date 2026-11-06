@@ -15,6 +15,7 @@ import {
   normalizeDashboard,
   normalizeFilters,
   normalizeNotifications,
+  normalizePersona,
   saveConfig,
   watchChannels,
   type NedConfig,
@@ -75,6 +76,18 @@ describe("loadConfig", () => {
     expect(loadConfig().persona).toBe("ned");
     fs.writeFileSync(CONFIG_PATH, "");
     expect(loadConfig().sources).toEqual(DEFAULT_CONFIG.sources);
+  });
+
+  it("persona (hidden feature): default ned, invalid → ned, an existing non-ned choice is kept", () => {
+    expect(DEFAULT_CONFIG.persona).toBe("ned");
+    for (const bad of [undefined, null, "", 3, "NED", ["alfred"]]) expect(normalizePersona(bad)).toBe("ned");
+    write({ heartbeat_minutes: 5 }); // no persona key
+    expect(loadConfig().persona).toBe("ned");
+    write({ persona: "alfred" });
+    expect(loadConfig().persona).toBe("alfred");
+    saveConfig({ ...loadConfig(), heartbeat_minutes: 7 }); // unrelated save doesn't reset it
+    expect(YAML.parse(fs.readFileSync(CONFIG_PATH, "utf8")).persona).toBe("alfred");
+    expect(loadConfig().persona).toBe("alfred");
   });
 
   it("saveConfig keeps the on-disk port while NED_PORT overrides", () => {
