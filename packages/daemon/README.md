@@ -32,7 +32,7 @@ osascript 폴백도 같은 규칙: 꺼져 있으면 안 보냄, 켜진 kind 의 
 브리핑은 `briefing`, 조용한 시간엔 skip(안 보냄)/silent(소리 없이), `sound` 면 소리.
 
 **메일·Slack 전체 목록**: agenda 출력의 `mail.all[]`(최근 2일 안 읽은 메일 전부 최대 50: id, from, subject, ts, url, unread)과
-`slack.all[]`(최근 24h 나를 멘션·DM 한 것 전부 최대 50: channel, from, text, url, ts, reason, answered). 선별(`items`)과 같은
+`slack.all[]`(최근 24h 나를 멘션·DM 한 것 전부 최대 50: channel, from, text, url, ts, reason, answered). Slack DM 은 같은 대화(permalink 의 채널 ID, 없으면 channel+보낸 사람)당 최신 1건만 남기고 답 안 한 개수를 `count` 에 — 프롬프트가 그렇게 만들고, 정규화(`collapseDMs`)와 대시보드가 한 번 더 묶는다. 멘션·스레드는 그대로. 선별(`items`)과 같은
 검색 결과로 같은 턴에 만든다(`--max-turns 20`). 실측: 메일 35 · Slack 22, $1.97 / 258s.
 
 **캘린더 범위**: agenda 잡은 캘린더를 오늘이 아니라 로컬 날짜 **어제 ~ +13일**(2주)로 받아 `agenda.json` 에

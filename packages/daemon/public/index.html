@@ -504,6 +504,7 @@
   /* "전체" view: items that also need me get a bar in the accent colour; answered Slack messages fade */
   .ti.need { box-shadow: inset 3px 0 0 var(--hero); }
   .ti.answered { opacity: .6; }
+  .chipx.more { background: color-mix(in srgb, var(--info) 18%, transparent); color: var(--info); }
   .scard > .sh:focus-visible, .scard > .shw > .sh:focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
   .scard .sh .ico { font-size: 13px; letter-spacing: 0; }
   .scard .sh .chev { color: var(--faint); font-size: 10px; transition: transform .15s; }
@@ -1728,6 +1729,19 @@
     el.classList.toggle("open", open);
     el.querySelector(".sh").setAttribute("aria-expanded", String(open));
   }
+  /** One row per Slack DM conversation (latest; count summed) — a safety net over the agenda prompt's rule. Mentions / threads untouched.
+   *  Conversation = the channel id in the permalink (D…/G…), else channel + sender ("DM" alone would merge different people). */
+  const slackConv = (x) => /\/archives\/([A-Z0-9]+)\//.exec(x.url || "")?.[1] || `${x.channel}|${x.from}`;
+  function collapseDMs(list) {
+    const best = new Map(), total = new Map();
+    for (const x of list) if (x.reason === "dm") {
+      const k = slackConv(x), cur = best.get(k);
+      total.set(k, (total.get(k) || 0) + Math.max(1, Number(x.count) || 1));
+      if (!cur || toMs(x.ts) > toMs(cur.ts)) best.set(k, x);
+    }
+    return list.filter((x) => x.reason !== "dm" || best.get(slackConv(x)) === x).map((x) => (x.reason === "dm" && total.get(slackConv(x)) > 1 ? { ...x, count: total.get(slackConv(x)) } : x));
+  }
+  const moreBadge = (x) => (x.count > 1 ? `<span class="chipx more" title="이 대화에서 답 안 한 메시지 ${x.count}건">+${x.count - 1}</span>` : "");
   /** Mail / Slack card list mode: "need" (the picked items) or "all" (everything recent), per card in localStorage. */
   const cardMode = (id) => (lsGet(`ned.cardmode.${id}`) === "all" ? "all" : "need");
   const counts = (pairs, sep = ", ") => pairs.filter(([, k]) => k > 0).map(([label, k]) => `${label} ${k}`).join(sep);
@@ -1784,14 +1798,14 @@
       pv: jira[0] && preview(`<span class="key">${esc(jira[0].key)}</span>`, jira[0].title, safeUrl(jira[0].url), dueChip(jira[0].due) || `<span class="chipx">${esc(jira[0].status || "—")}</span>`),
     });
 
-    const slackOn = srcOn("slack") && ag?.slack_enabled !== false, slack = slackOn ? ag?.slack : null, si = slack?.items || [];
+    const slackOn = srcOn("slack") && ag?.slack_enabled !== false, slack = slackOn ? ag?.slack : null, si = collapseDMs(slack?.items || []);
     $("slack-sum").innerHTML = slack?.summary ? `<span>${esc(slack.summary)}</span>` : "";
     const slRow = (x) => SLACK_REASON[x.reason] || SLACK_REASON.thread;
     const slackNeed = new Set(si.map((x) => x.url).filter(Boolean));
-    const slackAllRows = (slack?.all || []).map((x) => {
+    const slackAllRows = collapseDMs(slack?.all || []).map((x) => {
       const u = safeUrl(x.url), r = slRow(x), need = slackNeed.has(x.url);
       return `<div class="ti${need ? " need" : ""}${x.answered && !need ? " answered" : ""}"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
-        <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span>${need ? `<span class="chipx today">답 필요</span>` : x.answered ? `<span class="chipx ok">답함</span>` : `<span class="chipx ${r[0]}">${r[1]}</span>`}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div></div>
+        <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span>${need ? `<span class="chipx today">답 필요</span>` : x.answered ? `<span class="chipx ok">답함</span>` : `<span class="chipx ${r[0]}">${r[1]}</span>`}${moreBadge(x)}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div></div>
         <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
     }).join("");
     card("slack", {
@@ -1800,7 +1814,7 @@
       rows: si.map((x) => {
         const u = safeUrl(x.url), r = slRow(x);
         return `<div class="ti"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
-          <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span><span class="chipx ${r[0]}">${r[1]}</span>${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div></div>
+          <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span><span class="chipx ${r[0]}">${r[1]}</span>${moreBadge(x)}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div></div>
           <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
       }).join(""),
       empty: unavailable || (slack ? "답할 Slack 없음." : "다음 새로고침 때 Slack 도 가져올게."),
@@ -1856,7 +1870,7 @@
       else bits.push(v.meet({ left: left.length, cur: cur?.title, next: next ? hhmm(next.s) : "", first: next === mt[0] }));
       const jira = srcOn("jira") ? ag.jira?.length || 0 : 0, rv = srcOn("github") ? (ag.github || []).filter((g) => g.reason === "review_requested").length : 0;
       const mails = srcOn("email") && ag.mail_enabled !== false ? ag.mail?.items?.length || 0 : 0;
-      const slacks = srcOn("slack") && ag.slack_enabled !== false ? ag.slack?.items?.length || 0 : 0;
+      const slacks = srcOn("slack") && ag.slack_enabled !== false ? collapseDMs(ag.slack?.items || []).length : 0; // one per DM conversation, like the card
       const c = V().count;
       const w = [jira ? c("Jira", jira, "건") : "", rv ? c("리뷰", rv, "건") : "", mails ? c("메일", mails, "통") : "", slacks ? c("Slack", slacks, "건") : ""].filter(Boolean);
       if (w.length) bits.push(V().wait(w));
