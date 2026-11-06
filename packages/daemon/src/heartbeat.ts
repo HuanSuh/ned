@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { extractJson, runClaude } from "./claude.js";
+import { extractJson, llmDisabled, noLlmResult, runClaude } from "./claude.js";
 import { inQuietHours, type NedConfig } from "./config.js";
 import { readRecentEvents, readUnprocessedEvents, type NedEvent } from "./events.js";
 import { notify } from "./notify.js";
@@ -20,6 +20,7 @@ function allowedTools(cfg: NedConfig): string[] {
   if (cfg.sources.jira) t.push("mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql", "mcp__claude_ai_Atlassian__getJiraIssue");
   if (cfg.sources.sentry) t.push("mcp__Sentry__search_issues", "mcp__Sentry__get_issue_details");
   if (cfg.sources.github) t.push("Bash(gh pr list:*)", "Bash(gh search prs:*)", "Bash(gh api:*)");
+  if (cfg.sources.calendar) t.push("mcp__claude_ai_Google_Calendar__list_events", "mcp__claude_ai_Google_Calendar__search_events");
   return t;
 }
 
@@ -105,8 +106,14 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
     .replace("{{EVENTS}}", summarizeEvents(events))
     .replace("{{ALREADY_SENT}}", [...sent].slice(-60).join("\n") || "(없음)");
 
-  log(`heartbeat: asking claude (${opts.daily ? "daily" : "heartbeat"}, ${events.length} new events, signalDue=${signalDue})`);
-  const res = await runClaude(prompt, { allowedTools: allowedTools(cfg), maxTurns: cfg.claude_max_turns, model: cfg.claude_model });
+  let res;
+  if (llmDisabled()) {
+    log(`heartbeat: NED_NO_LLM=1 — skipping claude, recording NED_OK`);
+    res = noLlmResult();
+  } else {
+    log(`heartbeat: asking claude (${opts.daily ? "daily" : "heartbeat"}, ${events.length} new events, signalDue=${signalDue})`);
+    res = await runClaude(prompt, { allowedTools: allowedTools(cfg), maxTurns: cfg.claude_max_turns, model: cfg.claude_model });
+  }
   const id = new Date().toISOString().replace(/[:.]/g, "-");
 
   const parsed = res.ok ? extractJson<LlmBriefing>(res.text) : null;

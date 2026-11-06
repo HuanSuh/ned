@@ -18,6 +18,7 @@
 4. **Jira**: 나에게 새로 할당되었거나 상태가 바뀐 이슈 (`assignee = currentUser() AND updated >= -1d`).
 5. **Sentry**: 최근 24시간 신규(new) 또는 급증(regression) 이슈. 상위 3개까지.
 6. **GitHub**: 내 리뷰가 요청된 PR, 내 PR 에 새 리뷰/코멘트 (`gh search prs --review-requested=@me --state=open`, `gh pr list --author=@me`).
+7. **Google Calendar**: 앞으로 2시간 내 시작하는 일정(참석자·링크), 오늘 새로 추가/변경/취소된 초대, 응답 안 한 초대(needsAction). 임박 일정은 `action_items`, 나머지는 `updates`/`fyi`. 조회만 하고 응답(RSVP)·수정은 하지 않는다.
 
 ## 입력
 
@@ -35,7 +36,7 @@
 {
   "status": "NED_OK" | "UPDATE",
   "headline": "한 줄 요약 (UPDATE 일 때, 알림 배너용, 60자 이내)",
-  "action_items": [ { "kind": "session|email|slack|jira|github|sentry", "title": "내가 해야 할 일 한 줄", "detail": "맥락 1~2문장", "url": "링크(있으면)" } ],
+  "action_items": [ { "kind": "session|email|slack|jira|github|sentry|calendar", "title": "내가 해야 할 일 한 줄", "detail": "맥락 1~2문장", "url": "링크(있으면)" } ],
   "updates":      [ { "kind": "...", "title": "알아두면 좋은 변화", "detail": "...", "url": "..." } ],
   "fyi":          [ { "kind": "...", "title": "참고", "url": "..." } ],
   "sessions":     [ { "kind": "session", "title": "워크트리: 상태 한 줄", "detail": "무엇을 했고 다음 결정은 무엇인지" } ]

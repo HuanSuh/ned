@@ -10,6 +10,16 @@ export interface ClaudeRunResult {
   error?: string;
 }
 
+/** `NED_NO_LLM=1` makes heartbeats skip `claude -p` entirely (tests, dry runs). */
+export function llmDisabled(): boolean {
+  return process.env.NED_NO_LLM === "1";
+}
+
+/** What a heartbeat sees when the LLM is disabled: a clean NED_OK with zero cost. */
+export function noLlmResult(): ClaudeRunResult {
+  return { ok: true, text: '{"status":"NED_OK"}', cost_usd: 0, num_turns: 0, duration_ms: 0 };
+}
+
 /**
  * Run `claude -p` headless with a prompt. Read-only by construction:
  * plan permission mode + an explicit allow-list of read tools.

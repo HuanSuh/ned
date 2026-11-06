@@ -15,7 +15,11 @@ const PUBLIC_DIR = path.resolve(here, "../public");
 export function startServer(getConfig: () => NedConfig): void {
   const app = new Hono();
 
-  app.get("/", (c) => c.html(fs.readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8")));
+  app.get("/", (c) => {
+    const index = path.join(PUBLIC_DIR, "index.html");
+    if (fs.existsSync(index)) return c.html(fs.readFileSync(index, "utf8"));
+    return c.html("<!doctype html><title>Ned</title><p>Ned daemon is running. API: /api/state, /api/events, /api/briefings, /api/config</p>");
+  });
   app.get("/api/state", (c) => c.json(readState()));
   app.get("/api/events", (c) => c.json(readRecentEvents(Number(c.req.query("days") ?? 2))));
   app.get("/api/briefings", (c) => c.json(listBriefings(Number(c.req.query("limit") ?? 30))));

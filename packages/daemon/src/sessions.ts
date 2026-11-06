@@ -19,17 +19,24 @@ export interface SessionView {
 
 const TERMINAL: SessionStatus[] = ["ended"];
 
+/** Orca passes `<worktree-id>::<path>`; use the path's basename when the hook had no cwd. */
+function worktreeName(cwd: string | undefined, orca: string | undefined | null): string {
+  if (cwd) return path.basename(cwd);
+  const p = orca?.split("::")[1];
+  return p ? path.basename(p) : "?";
+}
+
 /** Reduce raw hook events into per-session views (state machine). */
 export function reduceSessions(events: NedEvent[], staleMinutes: number, now = Date.now()): SessionView[] {
   const map = new Map<string, SessionView>();
   for (const e of events) {
-    if (!e.session_id) continue;
+    if (!e.session_id || typeof e.ts !== "number") continue;
     let s = map.get(e.session_id);
     if (!s) {
       s = {
         id: e.session_id,
         cwd: e.cwd ?? "",
-        worktree: e.cwd ? path.basename(e.cwd) : "?",
+        worktree: worktreeName(e.cwd, e.orca_worktree),
         status: "running",
         since: e.ts,
         last_event_ts: e.ts,
@@ -40,12 +47,15 @@ export function reduceSessions(events: NedEvent[], staleMinutes: number, now = D
       };
       map.set(e.session_id, s);
     }
-    s.last_event_ts = e.ts;
+    s.last_event_ts = Math.max(s.last_event_ts, e.ts);
     if (e.cwd) {
       s.cwd = e.cwd;
       s.worktree = path.basename(e.cwd);
     }
-    if (e.orca_worktree) s.orca_worktree = e.orca_worktree;
+    if (e.orca_worktree) {
+      s.orca_worktree = e.orca_worktree;
+      if (!e.cwd && !s.cwd) s.worktree = worktreeName(undefined, e.orca_worktree);
+    }
 
     switch (e.event) {
       case "SessionStart":
@@ -79,7 +89,8 @@ export function reduceSessions(events: NedEvent[], staleMinutes: number, now = D
         break;
     }
   }
-  const staleMs = staleMinutes * 60_000;
+  // staleMinutes <= 0 disables the stale filter.
+  const staleMs = staleMinutes > 0 ? staleMinutes * 60_000 : Infinity;
   return [...map.values()]
     .filter((s) => !TERMINAL.includes(s.status) && now - s.last_event_ts < staleMs)
     .sort((a, b) => b.last_event_ts - a.last_event_ts);

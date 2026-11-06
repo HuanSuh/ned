@@ -16,7 +16,8 @@
 3. **Jira**: 내게 할당된 진행 중 이슈, 오늘/이번 주 마감, 어제 상태 변경.
 4. **Sentry**: 어제 신규/급증 이슈 상위 3개.
 5. **GitHub**: 내 리뷰 요청 PR, 내 PR 의 리뷰 상태.
-6. **어제 에이전트 세션 회고**: 아래 이벤트에서 어제 어떤 워크트리에서 무엇을 했는지 2~3줄.
+6. **Google Calendar — 오늘 일정**: 시간순 전체 (제목·시간·장소/링크), 겹치는 일정과 응답 안 한 초대 표시. `updates` 에 `kind: "calendar"` 로 넣고, 오늘 첫 미팅과 RSVP 가 필요한 초대는 `action_items` 에도 넣는다. 조회만 한다.
+7. **어제 에이전트 세션 회고**: 아래 이벤트에서 어제 어떤 워크트리에서 무엇을 했는지 2~3줄.
 
 ## 입력
 
@@ -34,7 +35,7 @@
 {
   "status": "UPDATE",
   "headline": "오늘의 한 줄 (예: 결재 2건, 리뷰 1건, Sentry 급증 1건)",
-  "action_items": [ { "kind": "email|slack|jira|github|sentry|session", "title": "오늘 해야 할 일", "detail": "맥락·마감", "url": "..." } ],
+  "action_items": [ { "kind": "email|slack|jira|github|sentry|calendar|session", "title": "오늘 해야 할 일", "detail": "맥락·마감", "url": "..." } ],
   "updates":      [ { "kind": "...", "title": "어제 있었던 변화", "detail": "...", "url": "..." } ],
   "fyi":          [ { "kind": "...", "title": "참고", "url": "..." } ],
   "sessions":     [ { "kind": "session", "title": "어제 세션 회고", "detail": "..." } ]

@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import { loadConfig } from "./config.js";
 import { heartbeat, refreshSessions } from "./heartbeat.js";
-import { EVENTS_DIR, STATE_PATH, ensureDirs, log } from "./paths.js";
+import { EVENTS_DIR, STATE_PATH, ensureDirs, localDay, log } from "./paths.js";
 import { startServer } from "./server.js";
 import { readState } from "./state.js";
 
@@ -30,13 +30,15 @@ async function main(): Promise<void> {
       });
 
       let busy = false;
-      let lastDaily = "";
+      // Don't repeat today's daily briefing after a restart.
+      const lb = readState().last_briefing;
+      let lastDaily = lb?.type === "daily" && localDay(new Date(lb.ts)) === localDay() ? localDay() : "";
       const tick = async () => {
         if (busy) return;
         busy = true;
         try {
           cfg = loadConfig();
-          const today = new Date().toISOString().slice(0, 10);
+          const today = localDay();
           const hhmm = new Date().toTimeString().slice(0, 5);
           const dailyDue = lastDaily !== today && hhmm >= cfg.briefing_time;
           if (dailyDue) lastDaily = today;
