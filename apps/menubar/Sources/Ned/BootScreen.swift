@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// The dashboard window's boot screen (shown until the daemon answers `/api/state`).
 ///
@@ -260,5 +260,52 @@ enum BootSelfTest {
         print("boot-selftest: \(failures == 0 ? "ALL PASS" : "\(failures) FAILED") — html in \(out)")
         fflush(stdout)
         return failures == 0 ? 0 : 1
+    }
+}
+
+/// `--boot-transition-selftest [--cold]` (temp NED_HOME + NED_PORT, NED_REPO = a checkout with a built daemon,
+/// NED_TOOL_CACHE_SUITE = a throwaway defaults suite): no scene and no menu bar item. Starts the real DaemonManager
+/// and the dashboard controller in a window-less web view, and checks that the dashboard load starts within
+/// 1.5 s of the daemon turning healthy (or of the 1.5 s minimum, when the daemon is faster than that).
+/// `--cold` empties the tool cache first (cache-miss start). Exit 0 = PASS. Stops the daemon it spawned.
+@MainActor
+enum BootTransitionSelfTest {
+    final class Box { var healthyAt: Date?; var sub: Any? }
+
+    static func run() -> Never {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.prohibited)
+        if CommandLine.arguments.contains("--cold") {
+            if let s = AppConfig.env["NED_TOOL_CACHE_SUITE"] { AppConfig.toolCacheDefaults.removePersistentDomain(forName: s) }
+            else { print("boot-transition: --cold needs NED_TOOL_CACHE_SUITE (refusing to clear the app's cache)"); exit(2) }
+        }
+        let d = DaemonManager.shared
+        let t0 = Date(), box = Box()
+        func out(_ m: String) { print("boot-transition: " + m); fflush(stdout); d.note("boot-transition selftest: " + m) }
+        box.sub = d.$status.sink { _ in
+            Task { @MainActor in
+                if d.isHealthy, box.healthyAt == nil { box.healthyAt = Date(); out(String(format: "daemon healthy at +%.2fs (%@)", Date().timeIntervalSince(t0), d.statusLine)) }
+            }
+        }
+        DashboardWindowController.shared.onDashboardLoad = { reason in
+            let now = Date()
+            let healthy = box.healthyAt ?? now
+            let due = max(healthy, t0.addingTimeInterval(DashboardWindowController.minBootScreenSeconds))
+            let lag = now.timeIntervalSince(due)
+            let pass = lag <= 1.5
+            out(String(format: "%@ — dashboard load at +%.2fs, %.2fs after healthy, %.2fs after max(healthy, min %.1fs): %@", reason, now.timeIntervalSince(t0), now.timeIntervalSince(healthy), lag, DashboardWindowController.minBootScreenSeconds, pass ? "PASS" : "FAIL"))
+            d.stopSync()
+            exit(pass ? 0 : 1)
+        }
+        d.start()
+        DashboardWindowController.shared.startHeadless()
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 90_000_000_000)
+            out("FAIL — no dashboard load within 90 s (\(d.statusLine))")
+            d.stopSync()
+            exit(1)
+        }
+        app.run()
+        exit(1)
     }
 }

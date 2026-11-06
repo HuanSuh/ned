@@ -23,6 +23,8 @@ struct NedApp: App {
         if CommandLine.arguments.contains("--notify-selftest") { exit(NotifySelfTest.run()) }
         // Headless: tool cache + boot screen HTML (own defaults suite, writes only to $TMPDIR / NED_BOOT_HTML_OUT).
         if CommandLine.arguments.contains("--boot-selftest") { exit(BootSelfTest.run()) }
+        // Headless boot screen → dashboard timing (real daemon on a temp NED_HOME/NED_PORT; no scene, no menu bar item).
+        if CommandLine.arguments.contains("--boot-transition-selftest") { MainActor.assumeIsolated { BootTransitionSelfTest.run() } }
         // Read-only: print SMAppService.mainApp status (registers nothing) and exit.
         if CommandLine.arguments.contains("--login-item-status") {
             let s = SMAppService.mainApp.status

@@ -234,7 +234,7 @@ final class DaemonManager: ObservableObject {
         }
         bootStage = .tools
         resolvingTools = true
-        let (tools, hit, secs) = await Task.detached { ToolResolver.resolveCached(.standard) }.value
+        let (tools, hit, secs) = await Task.detached { ToolResolver.resolveCached(AppConfig.toolCacheDefaults) }.value
         resolvingTools = false
         note("resolved node=\(tools.node ?? "nil") claude=\(tools.claude ?? "nil") (\(tools.source), \(String(format: "%.1f", secs))s)")
         if hit { refreshToolCacheInBackground() }
@@ -331,11 +331,11 @@ final class DaemonManager: ObservableObject {
             let secs = Date().timeIntervalSince(t0)
             await MainActor.run {
                 guard full.node != nil else { DaemonManager.shared.note("tool cache refresh: full search found no node (\(String(format: "%.1f", secs))s) — cache kept"); return }
-                if ToolResolver.Cache.matches(full, .standard) {
-                    ToolResolver.Cache.save(full, .standard)
+                let d = AppConfig.toolCacheDefaults
+                if ToolResolver.Cache.matches(full, d) {
+                    ToolResolver.Cache.save(full, d)
                     DaemonManager.shared.note("tool cache refresh: unchanged (\(full.source), \(String(format: "%.1f", secs))s)")
                 } else {
-                    let d = UserDefaults.standard
                     let old = "node=\(d.string(forKey: ToolResolver.Cache.nodeKey) ?? "nil") claude=\(d.string(forKey: ToolResolver.Cache.claudeKey) ?? "nil")"
                     ToolResolver.Cache.save(full, d)
                     DaemonManager.shared.note("tool cache refresh: updated \(old) → node=\(full.node ?? "nil") claude=\(full.claude ?? "nil") (\(full.source), \(String(format: "%.1f", secs))s) — applies from the next restart")
@@ -398,6 +398,8 @@ final class DaemonManager: ObservableObject {
     static func resolveRepo() -> String? {
         let fm = FileManager.default
         let isRepo = { (p: String) in fm.fileExists(atPath: p + "/packages/daemon/package.json") }
+        // Tests: run a built checkout's daemon from a dev bundle elsewhere (e.g. a worktree without dist/).
+        if let r = AppConfig.env["NED_REPO"], isRepo(r) { return r }
         var url = Bundle.main.bundleURL
         while url.path != "/" {
             url.deleteLastPathComponent()
