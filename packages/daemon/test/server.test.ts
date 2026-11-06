@@ -141,6 +141,15 @@ describe("other routes", () => {
     expect(r.filters.slack.exclude_channels).toEqual(["rand"]);
   });
 
+  it("PUT /api/config: dashboard.theme saves, survives a partial dashboard PUT, junk → system", async () => {
+    const a = await (await request("/api/config", json("PUT", { dashboard: { theme: "light" } }))).json();
+    expect(a.dashboard.theme).toBe("light");
+    const b = await (await request("/api/config", json("PUT", { dashboard: { locked: true } }))).json();
+    expect(b.dashboard.theme).toBe("light");
+    expect((await (await request("/api/config")).json()).dashboard.theme).toBe("light");
+    const c = await (await request("/api/config", json("PUT", { dashboard: { theme: "neon", locked: false } }))).json();
+    expect(c.dashboard.theme).toBe("system");
+  });
   it("PUT /api/config: following / unfollowing a channel adds / drops its watch: card even without a dashboard patch", async () => {
     fs.writeFileSync(CONFIG_PATH, YAML.stringify({ notify: "off" }));
     const a = await (await request("/api/config", json("PUT", { filters: { slack: { watch_channels: ["#release"] } } }))).json();

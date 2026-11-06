@@ -1,7 +1,8 @@
 /* Theme + persona tokens (ned / alfred / oracle / jarvis), persona textures, mark colours, background pattern and timeline-list styles that live with them.
  * Split from the old single-file index.html; link order in index.html is the cascade order. */
 /* Ned dashboard — inbox/triage body (direction C) wearing the sidekick identity (direction E).
-   Dark first; light via prefers-color-scheme.
+   Dark first; light via <html data-theme> (config.dashboard.theme: "light" forces it, "dark" blocks it,
+   "system" / absent follows prefers-color-scheme). Light rules use :where() so they keep the old specificity (0,1,0).
    Two accents: --hero (red: primary buttons, active tab, now-line, selection) and --info (blue: links, info badges,
    secondary emphasis). Mint stays Ned's own colour (lens mark, live LED). Status colours are separate:
    --red is *error* only — deeper than --hero and drawn outlined/dashed so it never reads as the accent. */
@@ -16,8 +17,17 @@
   --sans: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", "Noto Sans KR", sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
 }
+/* forced theme → scrollbars / form controls follow (the base "dark light" lets the UA pick by OS) */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+/* light: forced by <html data-theme="light"> or, unless data-theme="dark", by the OS (same declarations twice) */
+:root:where([data-theme="light"]), :where([data-theme="light"]) [data-persona="ned"], [data-persona="ned"]:where(:root[data-theme="light"]) { --bg: #f6f2ea; --side: #fbf8f2; --pane: #fffdf9; --raise: #ffffff; --hover: #efe9de; --sel: #fbe7e3; --line: #e5ddcf;
+    --fg: #1c2133; --dim: #5d6376; --faint: #9a9ead; --edge: #1c2133;
+    --hero: #d42a2a; --hero-fill: #d42a2a; --hero-text: #b51f1f; --info: #1f4fd1; --blue2: #1f4fd1;
+    --mint: #2d8a6d; --amber: #a96b00; --red: #8f1d17; --lens: #2f9a79;
+    --bubble: #f8f3ea; --violet: #6a46c4; --web: #2a3350; --web-a: .045; }
 @media (prefers-color-scheme: light) {
-  :root, [data-persona="ned"] { --bg: #f6f2ea; --side: #fbf8f2; --pane: #fffdf9; --raise: #ffffff; --hover: #efe9de; --sel: #fbe7e3; --line: #e5ddcf;
+  :root:where(:not([data-theme="dark"])), :where(:root:not([data-theme="dark"])) [data-persona="ned"], [data-persona="ned"]:where(:root:not([data-theme="dark"])) { --bg: #f6f2ea; --side: #fbf8f2; --pane: #fffdf9; --raise: #ffffff; --hover: #efe9de; --sel: #fbe7e3; --line: #e5ddcf;
     --fg: #1c2133; --dim: #5d6376; --faint: #9a9ead; --edge: #1c2133;
     --hero: #d42a2a; --hero-fill: #d42a2a; --hero-text: #b51f1f; --info: #1f4fd1; --blue2: #1f4fd1;
     --mint: #2d8a6d; --amber: #a96b00; --red: #8f1d17; --lens: #2f9a79;
@@ -43,8 +53,14 @@
   --mk-frame: #d4af37; --mk-glint: #f3dc8f; --mk-fill: color-mix(in srgb, #d4af37 14%, transparent);
   --head: "Noto Serif KR", "AppleMyungjo", "Nanum Myeongjo", Georgia, serif; --head-w: 700;
 }
+/* light: forced by <html data-theme="light"> or, unless data-theme="dark", by the OS (same declarations twice) */
+:where([data-theme="light"]) [data-persona="alfred"], [data-persona="alfred"]:where(:root[data-theme="light"]) { --bg: #f3efe6; --side: #f9f6ef; --pane: #fffdf8; --raise: #ffffff; --hover: #ebe5d8; --sel: #f3ead2; --line: #e0d8c6;
+    --fg: #1b1a17; --dim: #5f5a50; --faint: #9c968a; --edge: #1b1a17;
+    --hero: #8a6d1e; --hero-fill: #8a6d1e; --hero-text: #7a5f15; --hero-ink: #ffffff; --info: #7a5f15; --info-ink: #ffffff; --blue2: #8a6d1e;
+    --mint: #3f7a55; --amber: #9a6700; --red: #8f1d17; --lens: #8a6d1e; --bubble: #f8f3e8; --web: #5a4610; --web-a: .05;
+    --mk-frame: #8a6d1e; --mk-glint: #b8932f; }
 @media (prefers-color-scheme: light) {
-  [data-persona="alfred"] { --bg: #f3efe6; --side: #f9f6ef; --pane: #fffdf8; --raise: #ffffff; --hover: #ebe5d8; --sel: #f3ead2; --line: #e0d8c6;
+  :where(:root:not([data-theme="dark"])) [data-persona="alfred"], [data-persona="alfred"]:where(:root:not([data-theme="dark"])) { --bg: #f3efe6; --side: #f9f6ef; --pane: #fffdf8; --raise: #ffffff; --hover: #ebe5d8; --sel: #f3ead2; --line: #e0d8c6;
     --fg: #1b1a17; --dim: #5f5a50; --faint: #9c968a; --edge: #1b1a17;
     --hero: #8a6d1e; --hero-fill: #8a6d1e; --hero-text: #7a5f15; --hero-ink: #ffffff; --info: #7a5f15; --info-ink: #ffffff; --blue2: #8a6d1e;
     --mint: #3f7a55; --amber: #9a6700; --red: #8f1d17; --lens: #8a6d1e; --bubble: #f8f3e8; --web: #5a4610; --web-a: .05;
@@ -62,8 +78,14 @@
   --mk-frame: #3ddc84; --mk-glint: #a78bfa; --mk-fill: color-mix(in srgb, #3ddc84 12%, transparent);
   --sans: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace; --head: var(--sans); --head-w: 700;
 }
+/* light: forced by <html data-theme="light"> or, unless data-theme="dark", by the OS (same declarations twice) */
+:where([data-theme="light"]) [data-persona="oracle"], [data-persona="oracle"]:where(:root[data-theme="light"]) { --bg: #edf3ee; --side: #f5f9f5; --pane: #fbfdfb; --raise: #ffffff; --hover: #e3ece5; --sel: #dcefe2; --line: #d3e1d6;
+    --fg: #0c2016; --dim: #3f6a52; --faint: #86a493; --edge: #0c2016;
+    --hero: #0d8a4a; --hero-fill: #0d7a42; --hero-text: #0d7a42; --hero-ink: #ffffff; --info: #6d28d9; --info-ink: #ffffff; --blue2: #6d28d9;
+    --mint: #0d8a4a; --amber: #946300; --red: #8f1d17; --lens: #0d8a4a; --bubble: #f2f8f3; --web: #0d5a32; --web-a: .05; --scan-a: .08;
+    --mk-frame: #0d7a42; --mk-glint: #6d28d9; }
 @media (prefers-color-scheme: light) {
-  [data-persona="oracle"] { --bg: #edf3ee; --side: #f5f9f5; --pane: #fbfdfb; --raise: #ffffff; --hover: #e3ece5; --sel: #dcefe2; --line: #d3e1d6;
+  :where(:root:not([data-theme="dark"])) [data-persona="oracle"], [data-persona="oracle"]:where(:root:not([data-theme="dark"])) { --bg: #edf3ee; --side: #f5f9f5; --pane: #fbfdfb; --raise: #ffffff; --hover: #e3ece5; --sel: #dcefe2; --line: #d3e1d6;
     --fg: #0c2016; --dim: #3f6a52; --faint: #86a493; --edge: #0c2016;
     --hero: #0d8a4a; --hero-fill: #0d7a42; --hero-text: #0d7a42; --hero-ink: #ffffff; --info: #6d28d9; --info-ink: #ffffff; --blue2: #6d28d9;
     --mint: #0d8a4a; --amber: #946300; --red: #8f1d17; --lens: #0d8a4a; --bubble: #f2f8f3; --web: #0d5a32; --web-a: .05; --scan-a: .08;
@@ -82,8 +104,14 @@
   --num: "Share Tech Mono", "SF Mono", ui-monospace, monospace;
   --head: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Helvetica Neue", sans-serif; --head-w: 300;
 }
+/* light: forced by <html data-theme="light"> or, unless data-theme="dark", by the OS (same declarations twice) */
+:where([data-theme="light"]) [data-persona="jarvis"], [data-persona="jarvis"]:where(:root[data-theme="light"]) { --bg: #eef5fb; --side: #f6fafd; --pane: #ffffff; --raise: #ffffff; --hover: #e4eef7; --sel: #ddeffa; --line: #d4e3ef;
+    --fg: #0d2236; --dim: #4b6680; --faint: #92a8bb; --edge: #0d2236;
+    --hero: #0284c7; --hero-fill: #0369a1; --hero-text: #0369a1; --hero-ink: #ffffff; --info: #075985; --info-ink: #ffffff; --blue2: #0284c7;
+    --mint: #0f8f7c; --amber: #f0b429; --red: #8f1d17; --hot: #c0392b; --lens: #0284c7; --bubble: #f2f8fd; --web: #0c4a6e; --web-a: .05;
+    --glow: color-mix(in srgb, #0284c7 28%, transparent); --mk-frame: #0369a1; --mk-glint: #0284c7; }
 @media (prefers-color-scheme: light) {
-  [data-persona="jarvis"] { --bg: #eef5fb; --side: #f6fafd; --pane: #ffffff; --raise: #ffffff; --hover: #e4eef7; --sel: #ddeffa; --line: #d4e3ef;
+  :where(:root:not([data-theme="dark"])) [data-persona="jarvis"], [data-persona="jarvis"]:where(:root:not([data-theme="dark"])) { --bg: #eef5fb; --side: #f6fafd; --pane: #ffffff; --raise: #ffffff; --hover: #e4eef7; --sel: #ddeffa; --line: #d4e3ef;
     --fg: #0d2236; --dim: #4b6680; --faint: #92a8bb; --edge: #0d2236;
     --hero: #0284c7; --hero-fill: #0369a1; --hero-text: #0369a1; --hero-ink: #ffffff; --info: #075985; --info-ink: #ffffff; --blue2: #0284c7;
     --mint: #0f8f7c; --amber: #f0b429; --red: #8f1d17; --hot: #c0392b; --lens: #0284c7; --bubble: #f2f8fd; --web: #0c4a6e; --web-a: .05;

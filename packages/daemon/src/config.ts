@@ -90,9 +90,15 @@ export interface NedDashboard {
   locked: boolean;
   /** 팔로업 channels as their own home cards (true) or folded into the Slack card (false). */
   watch_cards: boolean;
+  /** Dashboard colour theme → <html data-theme>: "system" follows the OS (prefers-color-scheme), light / dark force it. */
+  theme: DashboardTheme;
 }
+export const DASHBOARD_THEMES = ["system", "light", "dark"] as const;
+export type DashboardTheme = (typeof DASHBOARD_THEMES)[number];
+/** "system" | "light" | "dark"; anything else → "system". */
+export const normalizeTheme = (v: unknown): DashboardTheme => (DASHBOARD_THEMES.includes(v as DashboardTheme) ? (v as DashboardTheme) : "system");
 /** Slack first (most real-time), mail + Jira side by side, then GitHub. */
-export const DEFAULT_DASHBOARD: NedDashboard = { card_order: ["slack", "mail", "jira", "github"], card_span: { slack: 2, mail: 1, jira: 1, github: 2 }, layout: null, locked: false, watch_cards: true };
+export const DEFAULT_DASHBOARD: NedDashboard = { card_order: ["slack", "mail", "jira", "github"], card_span: { slack: 2, mail: 1, jira: 1, github: 2 }, layout: null, locked: false, watch_cards: true, theme: "system" };
 export const watchCardId = (channel: string): WatchCardId => `${WATCH_PREFIX}${channel}`;
 /** What DEFAULT_DASHBOARD's order/span become on the free grid: 일정 3 | cards 6 | 할 일 3, 12 rows tall. */
 export const DEFAULT_LAYOUT: Record<DashboardPanel, PanelRect> = {
@@ -140,9 +146,10 @@ export function normalizeLayout(raw: unknown, watch: readonly string[] = []): Ne
  * (`watch`, = watchChannels(filters)) that has no `watch:<ch>` id yet. `watch:` ids for channels not in `watch` are dropped
  * (also from `base`, so removing a channel in settings removes its card). Spans are 1 | 2, else `base`'s (watch cards: 1).
  * layout: absent keeps `base`'s, null / junk clears it (→ re-derived by the dashboard); locked / watch_cards: boolean, else `base`'s.
+ * theme: absent keeps `base`'s (partial PUTs such as the home lock don't reset it); any other value → "system".
  */
 export function normalizeDashboard(raw: unknown, base: NedDashboard = DEFAULT_DASHBOARD, watch: readonly string[] = []): NedDashboard {
-  const r = (raw && typeof raw === "object" ? raw : {}) as { card_order?: unknown; card_span?: unknown; layout?: unknown; locked?: unknown; watch_cards?: unknown };
+  const r = (raw && typeof raw === "object" ? raw : {}) as { card_order?: unknown; card_span?: unknown; layout?: unknown; locked?: unknown; watch_cards?: unknown; theme?: unknown };
   const isCard = (v: unknown): v is DashboardCard => DASHBOARD_CARDS.includes(v as DashboardCard);
   const cardId = (v: unknown): DashboardCardId | null => (isCard(v) ? v : watchIdIn(v, watch));
   const ids = (xs: readonly unknown[]) => [...new Set(xs.map(cardId).filter((x): x is DashboardCardId => x !== null))];
@@ -161,7 +168,8 @@ export function normalizeDashboard(raw: unknown, base: NedDashboard = DEFAULT_DA
   const layout = r.layout === undefined ? normalizeLayout(base.layout, watch) : normalizeLayout(r.layout, watch);
   const locked = typeof r.locked === "boolean" ? r.locked : base.locked === true;
   const watch_cards = typeof r.watch_cards === "boolean" ? r.watch_cards : base.watch_cards !== false;
-  return { card_order: order, card_span, layout, locked, watch_cards };
+  const theme = normalizeTheme(r.theme === undefined ? base.theme : r.theme);
+  return { card_order: order, card_span, layout, locked, watch_cards, theme };
 }
 
 export interface NedActions {

@@ -2,7 +2,7 @@
 
 daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙하는 로컬 대시보드. `index.html` 은 껍데기(head·헤더·탭 컨테이너)이고
 화면 로직은 `app/**` 의 ES 모듈, 스타일은 `css/*.css` — 아래 **모듈 맵**.
-빌드 단계·프레임워크·CDN 의존성 없음 (오프라인 동작). 시스템 폰트, `prefers-color-scheme` 라이트/다크.
+빌드 단계·프레임워크·CDN 의존성 없음 (오프라인 동작). 시스템 폰트, 라이트/다크 테마 — 설정 → 외형 → 테마(`config.dashboard.theme`: system 은 `prefers-color-scheme`, light/dark 는 `<html data-theme>` 로 강제).
 
 ## 모듈 맵
 

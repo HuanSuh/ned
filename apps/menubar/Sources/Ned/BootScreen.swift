@@ -20,6 +20,42 @@ enum BootScreen {
         var greeting: String = ""
         /// Shown when the boot completes, right before the outro.
         var ready: String = "준비 완료"
+        /// config.yaml `dashboard.theme` ("system" | "light" | "dark", see `configTheme`). "light" turns the boot screen
+        /// light; "dark" keeps it dark and pins the outro veil to the dark --bg; "system" = dark screen, veil follows the OS.
+        var appearance: String = "system"
+    }
+
+    /// `dashboard.theme` from `<home>/config.yaml` (written by the daemon's YAML.stringify: block mapping, 2-space
+    /// indent). A tiny line scan, not a YAML parser: the first-level `theme:` key under the top-level `dashboard:` block.
+    /// Missing file / key / unknown value → "system" (same rule as normalizeTheme in packages/daemon/src/config.ts).
+    static func configTheme(home: String = AppConfig.home) -> String {
+        guard let text = try? String(contentsOfFile: home + "/config.yaml", encoding: .utf8) else { return "system" }
+        return themeFromYAML(text)
+    }
+
+    static func themeFromYAML(_ text: String) -> String {
+        var inDash = false
+        var indent: Int?
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(raw)
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            let lead = line.prefix { $0 == " " }.count
+            if lead == 0 { inDash = trimmed.hasPrefix("dashboard:"); indent = nil; continue }
+            guard inDash else { continue }
+            if indent == nil { indent = lead }
+            guard lead == indent, trimmed.hasPrefix("theme:") else { continue }
+            var v = trimmed.dropFirst("theme:".count).trimmingCharacters(in: .whitespaces)
+            if let hash = v.range(of: " #") { v = String(v[..<hash.lowerBound]).trimmingCharacters(in: .whitespaces) }
+            v = v.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            return ["system", "light", "dark"].contains(v) ? v : "system"
+        }
+        return "system"
+    }
+
+    /// Boot screen colours on a light dashboard theme: the persona's light --bg + the dashboard's light text tones.
+    static func lightRootCSS(dash: String, accent: String) -> String {
+        ":root { color-scheme: light; --dash: \(dash); --accent: \(accent); --bg: \(dash); --fg: #1c2133; --dim: #5d6376; --faint: #9a9ead; --red: #c0392b; --ok: #2d8a6d; --web-stroke: #1c2133; }"
     }
 
     // MARK: outro — "ready" beat, then the page dissolves into the dashboard's own background colour
@@ -107,12 +143,14 @@ enum BootScreen {
         let web = t.id == .ned ? "<svg class=\"web\" viewBox=\"-500 -500 1000 1000\" preserveAspectRatio=\"xMidYMid slice\" aria-hidden=\"true\">\(webPaths())</svg>" : ""
         let initial = "nedBoot(\(step), \(jsString(text)), \(String(format: "%.1f", elapsed)), \(failed));"
         let dash = dashboardBackground(t.id)
+        let rootCSS = t.appearance == "light" ? lightRootCSS(dash: dash.light, accent: t.accent)
+            : ":root { color-scheme: dark; --dash: \(dash.dark); --accent: \(t.accent); --bg: #0d1016; --fg: #e8e6df; --dim: #8a8f98; --faint: #555b66; --red: #ff5d5d; --ok: #7fe0c4; --web-stroke: #fff; }"
+            + (t.appearance == "dark" ? "" : "\n          @media (prefers-color-scheme: light) { :root { --dash: \(dash.light); } }")
         return """
         <!doctype html><html lang="ko"><head><meta charset="utf-8"><title>\(t.name)</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-          :root { color-scheme: dark; --dash: \(dash.dark); --accent: \(t.accent); --bg: #0d1016; --fg: #e8e6df; --dim: #8a8f98; --faint: #555b66; --red: #ff5d5d; --ok: #7fe0c4; }
-          @media (prefers-color-scheme: light) { :root { --dash: \(dash.light); } }
+          \(rootCSS)
           * { box-sizing: border-box; }
           html, body { height: 100%; margin: 0; }
           body { display: grid; place-items: center; overflow: hidden; font: 13px -apple-system, system-ui, sans-serif; color: var(--fg);
@@ -121,7 +159,7 @@ enum BootScreen {
           .veil { position: fixed; inset: 0; z-index: 5; pointer-events: none; background: var(--dash); opacity: 0; transition: opacity .5s ease .05s; }
           body.out .veil { opacity: 1; }
           .web { position: fixed; inset: 0; width: 100%; height: 100%; opacity: 0; animation: webin 2.4s ease-out .2s forwards; pointer-events: none; }
-          .web path { fill: none; stroke: #fff; stroke-width: 1.1; vector-effect: non-scaling-stroke; }
+          .web path { fill: none; stroke: var(--web-stroke); stroke-width: 1.1; vector-effect: non-scaling-stroke; }
           @keyframes webin { from { opacity: 0; transform: scale(1.05); } to { opacity: .07; transform: scale(1); } }
           main { position: relative; display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 24px; text-align: center;
                  transition: opacity .45s ease, transform .55s cubic-bezier(.4,0,.2,1), filter .45s ease; }
@@ -400,6 +438,16 @@ enum BootSelfTest {
         let html = BootScreen.html(theme: .init(id: .alfred, name: "Alfred", accent: "#d4af37", greeting: "a\"<b>", ready: "준비되었습니다"), step: 3, text: "", elapsed: 1, failed: false)
         check(html.contains("--dash: #0b0d12") && html.contains("--dash: #f3efe6") && html.contains(BootScreen.jsString("a\"<b>")),
               "html carries dashboard --bg (dark/light) + greeting as a JS string")
+        let light = BootScreen.html(theme: .init(id: .ned, name: "Ned", accent: "#e23636", appearance: "light"), step: 0, text: "", elapsed: 0, failed: false)
+        let dark = BootScreen.html(theme: .init(id: .ned, name: "Ned", accent: "#e23636", appearance: "dark"), step: 0, text: "", elapsed: 0, failed: false)
+        check(light.contains("color-scheme: light; --dash: #f6f2ea") && light.contains("--bg: #f6f2ea") && !light.contains("prefers-color-scheme: light")
+              && dark.contains("--dash: #0f1420") && !dark.contains("--dash: #f6f2ea") && html.contains("prefers-color-scheme: light"),
+              "theme: light → light boot colours; dark → veil pinned dark; system → veil follows the OS")
+        let yaml = "port: 7777\ndashboard:\n  card_order:\n    - slack\n  card_span:\n    theme: dark\n  layout: null\n  theme: light # forced\nfilters:\n  theme: dark\n"
+        check(BootScreen.themeFromYAML(yaml) == "light" && BootScreen.themeFromYAML("dashboard:\n  theme: \"dark\"\n") == "dark"
+              && BootScreen.themeFromYAML("dashboard:\n  theme: neon\n") == "system" && BootScreen.themeFromYAML("filters:\n  theme: dark\n") == "system"
+              && BootScreen.themeFromYAML("") == "system",
+              "config.yaml dashboard.theme scan: first-level key only, junk → system")
         check(BootScreen.steps == ["도구 찾는 중", "데몬 시작", "연결 확인", "대시보드 로드"], "steps: \(BootScreen.steps.joined(separator: " → "))")
         let esc = BootScreen.jsString("a\"b</script>\n")
         check(!esc.contains("</") && esc.contains("\\\"") && !esc.contains("\n"), "jsString escapes quote / </ / newline: \(esc)")

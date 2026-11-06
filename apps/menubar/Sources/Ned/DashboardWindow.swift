@@ -119,7 +119,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         let s = Self.bootSnapshot()
         let theme = Self.theme()
         webView.loadHTMLString(BootScreen.html(theme: theme, step: s.step, text: s.text, elapsed: s.elapsed, failed: s.failed), baseURL: nil)
-        daemon.note("dashboard window: boot screen (persona \(theme.id.rawValue), greeting \"\(theme.greeting)\", step \(s.step) \(s.text))")
+        daemon.note("dashboard window: boot screen (persona \(theme.id.rawValue), theme \(theme.appearance), greeting \"\(theme.greeting)\", step \(s.step) \(s.text))")
         let gen = bootGen
         // @Published fires in willSet: re-check on the next main-actor turn, when `status` holds the new value.
         statusSub = daemon.$status.sink { [weak self] _ in Task { @MainActor in self?.bootTick(gen) } }
@@ -195,7 +195,8 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     static func theme() -> BootScreen.Theme {
         let p = StateStore.current?.persona ?? PersonaID.ned.persona
         return BootScreen.Theme(id: p.id, name: p.displayName, accent: p.accentHex,
-                                greeting: BootScreen.pickGreeting(p.id), ready: BootScreen.copy(p.id).ready)
+                                greeting: BootScreen.pickGreeting(p.id), ready: BootScreen.copy(p.id).ready,
+                                appearance: BootScreen.configTheme())
     }
 
     // MARK: NSWindowDelegate

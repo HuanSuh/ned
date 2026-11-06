@@ -16,6 +16,7 @@ import {
   normalizeFilters,
   normalizeNotifications,
   normalizePersona,
+  normalizeTheme,
   saveConfig,
   watchChannels,
   type NedConfig,
@@ -149,6 +150,25 @@ describe("normalizers", () => {
     expect(normalizeDashboard({}).watch_cards).toBe(true);
     // no watch list given → no watch ids at all
     expect(normalizeDashboard({ card_order: ["watch:release"] }).card_order).toEqual(["slack", "mail", "jira", "github"]);
+  });
+  it("normalizeTheme / normalizeDashboard.theme: system | light | dark, junk → system, absent keeps base's", () => {
+    expect(DEFAULT_DASHBOARD.theme).toBe("system");
+    expect(["system", "light", "dark", "Light", "", null, undefined, 1, {}].map(normalizeTheme)).toEqual(["system", "light", "dark", "system", "system", "system", "system", "system", "system"]);
+    expect(normalizeDashboard({}).theme).toBe("system");
+    expect(normalizeDashboard({ theme: "light" }).theme).toBe("light");
+    expect(normalizeDashboard({ theme: "neon" }).theme).toBe("system");
+    const dark = normalizeDashboard({ theme: "dark" });
+    expect(normalizeDashboard({ locked: true }, dark).theme).toBe("dark"); // home lock / layout saves don't reset it
+    expect(normalizeDashboard({ theme: "system" }, dark).theme).toBe("system");
+    expect(normalizeDashboard({ theme: null }, dark).theme).toBe("system");
+  });
+  it("loadConfig: dashboard.theme from config.yaml, junk → system, missing → system", () => {
+    write({ dashboard: { theme: "light" } });
+    expect(loadConfig().dashboard.theme).toBe("light");
+    write({ dashboard: { theme: "sepia" } });
+    expect(loadConfig().dashboard.theme).toBe("system");
+    write({ dashboard: { locked: true } });
+    expect(loadConfig().dashboard.theme).toBe("system");
   });
   it("loadConfig keeps watch:<ch> only for followed, non-excluded channels", () => {
     write({
