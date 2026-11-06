@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import { loadConfig } from "./config.js";
-import { heartbeat, refreshSessions } from "./heartbeat.js";
+import { heartbeat, listBriefings, refreshSessions } from "./heartbeat.js";
 import { EVENTS_DIR, STATE_PATH, ensureDirs, localDay, log } from "./paths.js";
 import { startServer } from "./server.js";
 import { readState } from "./state.js";
@@ -30,9 +30,10 @@ async function main(): Promise<void> {
       });
 
       let busy = false;
-      // Don't repeat today's daily briefing after a restart.
-      const lb = readState().last_briefing;
-      let lastDaily = lb?.type === "daily" && localDay(new Date(lb.ts)) === localDay() ? localDay() : "";
+      // Don't repeat today's daily briefing after a restart: look at the briefing files,
+      // not state.last_briefing (a later heartbeat overwrites that).
+      const hadDailyToday = listBriefings(50).some((b) => b.type === "daily" && localDay(new Date(b.ts)) === localDay());
+      let lastDaily = hadDailyToday ? localDay() : "";
       const tick = async () => {
         if (busy) return;
         busy = true;
