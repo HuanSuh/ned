@@ -146,6 +146,17 @@ describe("feature guide (docs/FEATURES.md 요약) in the system prompt", () => {
     expect(chat.extractFeaturesSummary(long, 100)!.length).toBe(100);
   });
 
+  it("clamps at a line boundary: over 3,000 chars the last kept line is whole", () => {
+    const lines = Array.from({ length: 80 }, (_, i) => `- 항목 ${String(i).padStart(2, "0")}: ${"설명".repeat(20)} 끝`);
+    const s = chat.extractFeaturesSummary(`## 요약\n${lines.join("\n")}\n## 상세\n`)!;
+    expect(lines.join("\n").length).toBeGreaterThan(3000);
+    expect(s.length).toBeLessThanOrEqual(3000);
+    expect(s.endsWith("끝…")).toBe(true);
+    const kept = s.slice(0, -1).split("\n");
+    expect(kept.every((l, i) => l === lines[i])).toBe(true);
+    expect(kept.length).toBeLessThan(lines.length);
+  });
+
   it("missing file / no section → null; the prompt drops only that section", () => {
     const dir = fs.mkdtempSync(path.join(process.env.NED_HOME!, "feat-"));
     expect(chat.readFeaturesSummary(path.join(dir, "nope.md"))).toBeNull();

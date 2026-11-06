@@ -221,7 +221,10 @@ export function extractFeaturesSummary(md: string, max = FEATURES_SUMMARY_MAX): 
   }
   const body = lines.slice(start, end).join("\n").trim();
   if (!body) return null;
-  return body.length > max ? `${body.slice(0, max - 1).trimEnd()}…` : body;
+  if (body.length <= max) return body;
+  // Cut at a line boundary so the last line survives whole; one long line falls back to a char cut. ≤ max incl. "…".
+  const cut = body.lastIndexOf("\n", max - 1);
+  return `${(cut > 0 ? body.slice(0, cut) : body.slice(0, max - 1)).trimEnd()}…`;
 }
 
 let featuresWarned = "";
