@@ -31,6 +31,10 @@ node dist/cli.js prompt agenda       # dry-run: heartbeat | briefing | agenda �
 항목이 바뀌면(`ts` 가 더 늦음 — 예: 세션의 새 알림) 다시 열린 상태가 된다. `POST /api/attention/:id/review {reviewed: boolean}`
 (본문 없으면 표시, 없는 id 는 404) → `{ok, id, reviewed_at, attention_open_count}`. `state.json.attention_open_count` 는
 확인 완료를 뺀 개수(메뉴바 배지용). 대시보드는 초안 생성(`POST /api/draft`) 성공 후 그 항목에 이 API 를 부른다.
+attention id 가 없는 소스 항목도 같은 저장소·엔드포인트를 쓴다 — 키는 네임스페이스로: `mail:<thread id>`,
+`slack:<채널 id>:<ts>`(permalink 에서; 못 뽑으면 링크), `jira:<KEY>`, `github:<repo>#<n>` (id 는 URL 인코딩, 없는 attention 이어도
+이 형식이면 받는다). 30일 보관. `GET /api/agenda` 의 `reviewed` 에 이 키들만 실어 보내고, agenda 가 같은 항목을 다시 가져와도
+키가 같아 유지된다(항목이 표시 뒤에 갱신되면 — received / ts / updated 가 더 늦으면 — 다시 열림).
 
 **알림 설정** (`config.notifications`): `{enabled, kinds:{session,email,slack,jira,github,sentry,calendar}, briefing,
 summary_threshold (기본 3), quiet_delivery: skip|silent (기본 skip), sound}`. 읽을 때·`PUT /api/config` 모두 깊게 머지하고

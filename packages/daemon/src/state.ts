@@ -71,7 +71,12 @@ export function readState(): NedState {
   });
 }
 
-/** Attention id → reviewed at (ms). */
+/** Review keys for source items that have no attention id: mail:<thread>, slack:<channel>:<ts>, jira:<KEY>, github:<repo>#<n>. */
+export const SOURCE_KEY = /^(mail|slack|jira|github):[^\s]{1,200}$/;
+/** Source-item review marks only (for the dashboard). */
+export const readSourceReviewed = (): Reviewed => Object.fromEntries(Object.entries(readReviewed()).filter(([k]) => SOURCE_KEY.test(k)));
+
+/** Attention id (or a SOURCE_KEY) → reviewed at (ms). */
 export type Reviewed = Record<string, number>;
 export const readReviewed = (): Reviewed => readJson<Reviewed>(REVIEWED_PATH, {});
 
@@ -80,7 +85,9 @@ export const readReviewed = (): Reviewed => readJson<Reviewed>(REVIEWED_PATH, {}
  * Returns the item's new reviewed_at (or null).
  */
 export function setReviewed(id: string, reviewed: boolean, now = Date.now()): number | null {
-  const r = Object.fromEntries(Object.entries(readReviewed()).filter(([, at]) => now - at < 7 * 24 * 60 * 60_000));
+  // attention marks live 7 days; source-item marks (mail: / slack: / jira: / github:) 30 days — Jira issues etc. stay around.
+  const keep = (k: string) => (SOURCE_KEY.test(k) ? 30 : 7) * 24 * 60 * 60_000;
+  const r = Object.fromEntries(Object.entries(readReviewed()).filter(([k, at]) => now - at < keep(k)));
   if (reviewed) r[id] = now; else delete r[id];
   writeJsonAtomic(REVIEWED_PATH, r);
   writeState(readState());
