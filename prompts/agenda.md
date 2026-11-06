@@ -74,5 +74,6 @@
 - `items`(선별)와 `all`(전체)은 같은 검색 결과로 **같은 턴에** 만든다. 추가 조회를 하지 않는다.
 - `summary`: Slack 상태를 위 말투로 한국어 한 문장 (40자 안팎, Ned 라면 예: `멘션 3개 중 답할 건 2개, DM 하나는 오늘 안에.`). 볼 게 없으면 `""`.
 
+{{SLACK_WATCH}}
 ## 출력 스키마 (이 키만, 이 형태 그대로)
 {"calendar":[{"id":"","title":"","start":"ISO","end":"ISO","all_day":false,"location":"","url":"","meet_url":"","rsvp":"accepted|needsAction|declined|tentative|organizer","attendees":0}],"jira":[{"key":"","title":"","status":"","priority":"","due":"YYYY-MM-DD|null","url":"","updated":"ISO"}],"github":[{"repo":"owner/name","number":0,"title":"","url":"","author":"","updated":"ISO","reason":"review_requested|my_pr_changes_requested|my_pr_approved"}],"mail":{"summary":"","unread":0,"items":[{"id":"","from":"","subject":"","snippet":"","received":"ISO","url":"","reason":"reply|approval|deadline|request","why":""}],"all":[{"id":"","from":"","subject":"","ts":"ISO","url":"","unread":true}]},"slack":{"summary":"","items":[{"channel":"#채널|DM|그룹 DM","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread","count":1}],"all":[{"channel":"","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread","answered":false,"count":1}]}}

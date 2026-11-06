@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractJson, llmDisabled, runClaude } from "./claude.js";
-import { filtersPrompt, jqlExclude, type NedConfig } from "./config.js";
+import { filtersPrompt, jqlExclude, watchChannels, type NedConfig } from "./config.js";
 import { personaPrompt } from "./persona.js";
 import { AGENDA_PATH, log, readJson, writeJsonAtomic } from "./paths.js";
 
@@ -104,6 +104,30 @@ export interface SlackBlock {
   items: SlackItem[];
   /** Every mention / DM to me in the last 24h, newest first (max 50) — the card's "전체" view. */
   all: SlackAllItem[];
+  /** Followed channels (filters.slack.watch_channels): last 24h per channel, read without needing a mention. [] when none. */
+  watch: SlackWatchChannel[];
+}
+
+export interface SlackWatchHighlight {
+  from: string;
+  /** ≤200 chars. */
+  text: string;
+  /** ISO-8601. */
+  ts: string;
+  url: string;
+  /** A question/request plausibly aimed at me, a decision affecting my work, or a deadline. */
+  needs_me: boolean;
+  /** One short line: why it matters / why it needs me. */
+  reason: string;
+}
+
+export interface SlackWatchChannel {
+  /** "#channel". */
+  channel: string;
+  /** 2–3 lines: what was decided / asked; "" when the channel was quiet. */
+  summary: string;
+  /** Max 5. */
+  highlights: SlackWatchHighlight[];
 }
 
 export interface SlackAllItem extends SlackItem {
@@ -150,7 +174,7 @@ function readMail(m: unknown): MailBlock | null {
 function readSlack(m: unknown): SlackBlock | null {
   if (!m || typeof m !== "object") return null;
   const b = m as Partial<SlackBlock>;
-  return { summary: str(b.summary), items: Array.isArray(b.items) ? b.items : [], all: Array.isArray(b.all) ? b.all : [] };
+  return { summary: str(b.summary), items: Array.isArray(b.items) ? b.items : [], all: Array.isArray(b.all) ? b.all : [], watch: Array.isArray(b.watch) ? b.watch : [] };
 }
 
 /** Read tools for the agenda job only — narrower than the heartbeat's set. */
@@ -337,6 +361,7 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
             answered: e.answered === true,
             ...(Number(e.count) > 1 ? { count: Math.min(99, Math.trunc(Number(e.count))) } : {}),
           })),
+        watch: normalizeWatch(sl.watch, cfg),
       }
     : null;
   // Belt and braces for tracking exclusions: drop anything the model let through.
@@ -346,6 +371,47 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
   const keepCh = (x: { channel: string }) => !exChannels.has(x.channel.replace(/^#/, "").toLowerCase());
   if (slack) { slack.items = collapseDMs(slack.items.filter(keepCh)); slack.all = collapseDMs(slack.all.filter(keepCh)); }
   return { calendar, jira: jiraKept, github, mail, slack };
+}
+
+/** Coerce model `slack.watch` output: only channels still being followed, max 5 highlights each. */
+function normalizeWatch(raw: unknown, cfg: NedConfig): SlackWatchChannel[] {
+  const want = new Map(watchChannels(cfg.filters).map((c) => [c.toLowerCase(), c]));
+  const seen = new Set<string>();
+  return arr(raw)
+    .map((w) => ({ w, key: str(w.channel).trim().replace(/^#+/, "").toLowerCase() }))
+    .filter(({ key }) => want.has(key) && !seen.has(key) && seen.add(key))
+    .map(({ w, key }) => ({
+      channel: `#${want.get(key)}`,
+      summary: str(w.summary).trim().slice(0, 400),
+      highlights: arr(w.highlights)
+        .slice(0, 5)
+        .map((h) => ({
+          from: str(h.from).slice(0, 80),
+          text: str(h.text).replace(/\s+/g, " ").trim().slice(0, 200),
+          ts: slackTs(h.ts),
+          url: str(h.url),
+          needs_me: h.needs_me === true,
+          reason: str(h.reason).replace(/\s+/g, " ").trim().slice(0, 120),
+        })),
+    }));
+}
+
+/** The agenda prompt's watch block ({{SLACK_WATCH}}); "" when Slack is off or nothing is followed. */
+function slackWatchBlock(cfg: NedConfig, since: string): string {
+  const w = cfg.sources.slack ? watchChannels(cfg.filters) : [];
+  if (!w.length) return "";
+  return `
+## 5-1. slack.watch — 팔로업 채널 (멘션이 없어도 본다)
+채널: ${w.map((c) => `#${c}`).join(", ")}
+- 5번 검색과 **같은 턴에** 채널마다 \`slack_search_public_and_private\` 를 한 번씩 병렬로 부른다: \`filters: "in:#<채널>"\`, \`after: "${since}"\`, \`sort: "timestamp"\`, \`limit: 20\`, \`include_bots: false\`, \`response_format: "detailed"\`, \`max_context_length: 200\`. 읽기만. 채널을 찾지 못하면 그 채널은 \`summary: ""\`, \`highlights: []\`.
+- 추가 조회는 하지 않는다 (스레드가 꼭 필요하면 5번의 \`slack_read_thread\` 3개 한도 안에서만).
+- 채널마다 \`slack.watch\` 에 하나씩:
+  - \`summary\`: 지난 24시간 무엇이 정해졌고 무엇을 물었는지 한국어 2~3줄 (줄은 \`\\n\` 으로). 대화가 없거나 잡담뿐이면 \`""\`.
+  - \`highlights\`: 의미 있는 메시지 최대 5개 (결정·질문·요청·마감·장애·공지). 잡담·리액션·봇은 뺀다. 필드: \`from\` 보낸 사람 표시 이름, \`text\` 내용 한 줄 (200자 이내 요약), \`ts\` ISO-8601, \`url\` permalink 그대로, \`needs_me\`, \`reason\` 왜 중요한지 / 왜 내가 봐야 하는지 한국어 한 줄 (25자 안팎).
+  - \`needs_me: true\` 는 **나(\`<ME>\`)를 향한 것으로 보이는 질문·요청, 내 일에 영향을 주는 결정, 마감이 걸린 것**만. 내가 이미 답했거나 다른 사람이 처리했으면 false. needs_me 인 것을 먼저 둔다.
+- 위 "트래킹 제외" 채널은 팔로업 목록에 있어도 조회하지 않는다.
+- 출력 스키마의 \`slack\` 객체에 이 키를 더한다: \`"watch":[{"channel":"#채널","summary":"","highlights":[{"from":"","text":"","ts":"ISO","url":"","needs_me":false,"reason":""}]}]\`
+`;
 }
 
 export function buildPrompt(cfg: NedConfig, now = new Date()): string {
@@ -367,6 +433,7 @@ export function buildPrompt(cfg: NedConfig, now = new Date()): string {
     .replaceAll("{{PERSONA}}", () => personaPrompt(cfg.persona))
     .replaceAll("{{FILTERS}}", () => filtersPrompt(cfg.filters))
     .replaceAll("{{JQL_EXCLUDE}}", () => (jqlExclude(cfg.filters) ? ` ${jqlExclude(cfg.filters)}` : ""))
+    .replaceAll("{{SLACK_WATCH}}", () => slackWatchBlock(cfg, String(Math.floor(now.getTime() / 1000) - 24 * 3600)))
     .replaceAll("{{SLACK_SINCE}}", String(Math.floor(now.getTime() / 1000) - 24 * 3600));
 }
 
@@ -404,7 +471,7 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
   }
 
   log(`agenda: asking claude${filtersPrompt(cfg.filters) !== "(없음)" ? ` (filters — ${filtersPrompt(cfg.filters).split("\n")[0]})` : ""}`);
-  const res = await runClaude(buildPrompt(cfg), { allowedTools: agendaTools(cfg), maxTurns: 20, model: cfg.claude_model, timeoutMs: 5 * 60_000 });
+  const res = await runClaude(buildPrompt(cfg), { allowedTools: agendaTools(cfg), maxTurns: 20 + (cfg.sources.slack && watchChannels(cfg.filters).length ? 2 : 0), model: cfg.claude_model, timeoutMs: 5 * 60_000 });
   const parsed = res.ok ? extractJson<Partial<Record<keyof AgendaPayload, unknown>>>(res.text) : null;
   let agenda: Agenda;
   if (parsed) {
@@ -417,6 +484,6 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
     log(`agenda: failed — ${error.slice(0, 300)}`);
   }
   writeJsonAtomic(AGENDA_PATH, agenda);
-  log(`agenda: ${agenda.calendar.length} events / ${agenda.jira.length} jira / ${agenda.github.length} prs / ${agenda.mail?.items.length ?? "-"} mails / ${agenda.slack?.items.length ?? "-"} slack ($${res.cost_usd.toFixed(2)}, ${res.num_turns} turns, ${Math.round(res.duration_ms / 1000)}s)`);
+  log(`agenda: ${agenda.calendar.length} events / ${agenda.jira.length} jira / ${agenda.github.length} prs / ${agenda.mail?.items.length ?? "-"} mails / ${agenda.slack?.items.length ?? "-"} slack${agenda.slack?.watch.length ? ` + ${agenda.slack.watch.length} watched (${agenda.slack.watch.reduce((n, w) => n + w.highlights.filter((h) => h.needs_me).length, 0)} needs_me)` : ""} ($${res.cost_usd.toFixed(2)}, ${res.num_turns} turns, ${Math.round(res.duration_ms / 1000)}s)`);
   return agenda;
 }

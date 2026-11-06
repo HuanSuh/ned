@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractJson, llmDisabled, noLlmResult, runClaude } from "./claude.js";
-import { filtersPrompt, inQuietHours, type NedConfig, type NotifyKind } from "./config.js";
+import { filtersPrompt, inQuietHours, watchPrompt, type NedConfig, type NotifyKind } from "./config.js";
 import { personaPrompt } from "./persona.js";
 import { readRecentEvents, readUnprocessedEvents, type NedEvent } from "./events.js";
 import { notify } from "./notify.js";
@@ -102,7 +102,10 @@ export function buildHeartbeatPrompt(cfg: NedConfig, daily: boolean, state: Stat
     .replace("{{NOW}}", () => new Date().toLocaleString("ko-KR"))
     .replace("{{SOURCES}}", () => Object.entries(cfg.sources).filter(([, v]) => v).map(([k]) => k).join(", "))
     .replace("{{PERSONA}}", () => personaPrompt(cfg.persona))
-    .replace("{{FILTERS}}", () => filtersPrompt(cfg.filters))
+    .replace("{{FILTERS}}", () => {
+      const f = filtersPrompt(cfg.filters), w = cfg.sources.slack ? watchPrompt(cfg.filters) : "";
+      return w ? (f === "(없음)" ? `\n${w}` : `${f}\n${w}`) : f;
+    })
     .replace("{{SESSIONS}}", () => (state.sessions.length ? state.sessions.map((s) => `- [${s.status}] ${s.worktree} — ${s.last_summary ?? s.last_prompt ?? ""}`).join("\n") : "(활성 세션 없음)"))
     .replace("{{EVENTS}}", () => summarizeEvents(events))
     .replace("{{ALREADY_SENT}}", () => [...sent].slice(-60).join("\n") || "(없음)");

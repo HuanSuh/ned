@@ -21,6 +21,7 @@
 1. **에이전트 세션**: 아래 세션/이벤트에서 사용자가 결정·확인해야 할 것(입력 대기, 오류, 중요한 완료)을 한 줄로.
 2. **Gmail**: `is:unread newer_than:1d` 중 사람이 보낸 업무 메일, 결재·요청·마감이 있는 것. 뉴스레터·알림성 메일은 무시.
 3. **Slack**: 최근 24시간 내 나를 멘션했거나 DM 으로 질문·요청한 것. 답이 필요한 것만.
+   - 위 "트래킹 제외" 에 **팔로업 채널**이 있으면 그 채널도 본다: 나에게 필요한 것(질문·요청·내 일에 영향 주는 결정·마감)은 `action_items`, 채널에서 정해진 것은 `updates`.
 4. **Jira**: 나에게 새로 할당되었거나 상태가 바뀐 이슈 (`assignee = currentUser() AND updated >= -1d`).
 5. **Sentry**: 최근 24시간 신규(new) 또는 급증(regression) 이슈. 상위 3개까지.
 6. **GitHub**: 내 리뷰가 요청된 PR, 내 PR 에 새 리뷰/코멘트 (`gh search prs --review-requested=@me --state=open`, `gh pr list --author=@me`).
