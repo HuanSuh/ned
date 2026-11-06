@@ -40,6 +40,8 @@ export interface NedConfig {
   actions: NedActions;
   /** Voice for reply drafts (POST /api/draft) — the USER's own voice, not the persona's. */
   reply_tone: string;
+  /** Per-source reply voice (Slack / 메일 / 세션); null = reply_tone (the 기본 말투). */
+  reply_tone_by_source: ReplyToneBySource;
   /** Agenda-collected Slack/mail context younger than this feeds the no-tool fast draft path; older → full (tool) path. */
   draft_context_max_age_minutes: number;
   /** Model for no-tool (fast) drafts, run with `--effort low`. Default "sonnet" (≈9s vs ≈12-15s on the default model); null = claude_model. */
@@ -193,6 +195,22 @@ export function normalizeActions(raw: unknown, base: NedActions = DEFAULT_ACTION
 /** A non-empty string (trimmed, max 200 chars), else `fallback`. */
 export function normalizeReplyTone(v: unknown, fallback = DEFAULT_REPLY_TONE): string {
   return typeof v === "string" && v.trim() ? v.trim().slice(0, 200) : fallback;
+}
+
+export const REPLY_TONE_SOURCES = ["slack", "email", "session"] as const;
+export type ReplyToneSource = (typeof REPLY_TONE_SOURCES)[number];
+export type ReplyToneBySource = Record<ReplyToneSource, string | null>;
+export const DEFAULT_REPLY_TONE_BY_SOURCE: ReplyToneBySource = { slack: null, email: null, session: null };
+
+/** Merge a (partial) per-source tone patch over `base`: strings are trimmed (max 200), blank / null → null; absent keys keep `base`. */
+export function normalizeReplyToneBySource(raw: unknown, base: ReplyToneBySource = DEFAULT_REPLY_TONE_BY_SOURCE): ReplyToneBySource {
+  const r = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const one = (k: ReplyToneSource): string | null => {
+    if (!(k in r)) return base[k] ?? null;
+    const v = r[k];
+    return typeof v === "string" && v.trim() ? v.trim().slice(0, 200) : null;
+  };
+  return { slack: one("slack"), email: one("email"), session: one("session") };
 }
 
 export const PERSONAS = ["ned", "alfred", "oracle", "jarvis"] as const;
@@ -365,6 +383,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   notifications: DEFAULT_NOTIFICATIONS,
   actions: DEFAULT_ACTIONS,
   reply_tone: DEFAULT_REPLY_TONE,
+  reply_tone_by_source: DEFAULT_REPLY_TONE_BY_SOURCE,
   draft_context_max_age_minutes: 180,
   draft_fast_model: "sonnet",
   drafts_pregenerate: false,
@@ -400,6 +419,7 @@ export function loadConfig(): NedConfig {
       notifications: normalizeNotifications(parsed.notifications),
       actions: normalizeActions(parsed.actions),
       reply_tone: normalizeReplyTone(parsed.reply_tone),
+      reply_tone_by_source: normalizeReplyToneBySource(parsed.reply_tone_by_source),
       draft_context_max_age_minutes: Number.isFinite(Number(parsed.draft_context_max_age_minutes)) && Number(parsed.draft_context_max_age_minutes) >= 0 ? Number(parsed.draft_context_max_age_minutes) : DEFAULT_CONFIG.draft_context_max_age_minutes,
       drafts_pregenerate: parsed.drafts_pregenerate === true,
       dashboard: normalizeDashboard(parsed.dashboard, DEFAULT_DASHBOARD, watchChannels(filters)),

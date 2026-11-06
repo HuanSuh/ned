@@ -236,7 +236,7 @@ Agenda 응답 형태:
 - 미리 생성(선택): `config.drafts_pregenerate: true`(기본 false)면 agenda 실행 뒤 백그라운드에서 답장이 필요한 항목(slack `items` +
   mail `items` 중 reason `reply|approval|request`, 맥락이 신선한 것)을 순서대로 최대 6개 fast 경로로 생성해 캐시한다(모달이 바로 열림).
   `GET /api/draft/status` → `{ pregenerated, skipped_cached, failed, cost_usd, last_run_ts, running }` (마지막 실행 기준, 로그에 총 비용).
-- 초안은 **사용자 본인 목소리**: `{{PERSONA}}` 를 쓰지 않고 `tone` → `config.reply_tone`(기본 `간결하고 정중한 존댓말, 핵심 먼저`)을 따른다.
+- 초안은 **사용자 본인 목소리**: `{{PERSONA}}` 를 쓰지 않고 요청 `tone` → `config.reply_tone_by_source[source]`(slack/email/session, null 이면 건너뜀) → `config.reply_tone`(기본 말투, 기본 `간결하고 정중한 존댓말, 핵심 먼저`) 순으로 고른다 (`draftTone`). 대시보드는 `tone` 을 보내지 않고 서버가 정한다.
 - 캐시: `~/.ned/drafts/<id>.json`, id = sha1(source + ref 키) 앞 16자. 1시간 안이고 hint·tone 이 같으면 `cached: true` 로 그대로
   (session 은 마지막 이벤트 ts 도 키에 들어가 세션이 진행되면 새로 쓴다). `force: true` 면 무시. 같은 키 동시 요청은 실행 하나를 공유.
 - `meta` 는 보내기에 쓸 주소: slack 은 channel_id/thread_ts, email 은 모델이 스레드에서 찾은 `message_id`(답장할 마지막 메시지)·
@@ -326,7 +326,7 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
                          port, claude_model, claude_max_turns, session_stale_minutes, agenda_refresh_minutes, notify,
                          actions.{slack_send=false, gmail_draft=true, gmail_send=false, session_send=true,
                                   jira_comment=false, jira_transition=false, github_review=false, calendar_rsvp=false} (POST /api/send 허용),
-                         reply_tone (답장 초안 말투, 기본 "간결하고 정중한 존댓말, 핵심 먼저"),
+                         reply_tone (답장 초안 말투, 기본 "간결하고 정중한 존댓말, 핵심 먼저"), reply_tone_by_source ({slack,email,session}: 소스별 말투, null = reply_tone),
                          draft_context_max_age_minutes=180 (agenda 맥락 → fast 초안), draft_fast_model="sonnet", drafts_pregenerate=false,
                          agenda_all_limit=20 (mail/slack all[] 상한), agenda_context_batch=5 (2단계 배치 크기),
                          agenda_daily_budget_usd=15 (2단계 일일 예산), agenda_light_model="sonnet" (agenda 전 호출 모델, null = claude_model)

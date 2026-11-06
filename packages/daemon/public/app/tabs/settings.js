@@ -3,6 +3,7 @@
 import { api } from "../api.js";
 import { readCardLayout, renderCardLayout } from "../features/cardlayout.js";
 import { ACTION_DEFAULTS, ACTION_KO } from "../features/drafts.js";
+import { readToneBySource, syncWriteActionGroups, writeActionsHtml } from "./settings-actions.js";
 import { PERSONA_IDS, VOICE, applyPersona, markSvg, persona } from "../features/personas.js";
 import { loadAgenda } from "../main.js";
 import { S } from "../state.js";
@@ -132,12 +133,11 @@ export const readNotifications = () => ({
 });
 
 // ---------- 쓰기 액션: hints + '오늘 한 액션' (GET /api/actions, filtered here) ----------
-const ACTION_HINT = {
-  jira_comment: "Jira 항목 ⋯ → 코멘트 초안 → 확인 후 코멘트 등록",
-  jira_transition: "Jira 항목 ⋯ → 상태 변경 (가능한 전환을 먼저 읽어 옴) → 확인 후 전환",
-  github_review: "PR 항목 ⋯ → 리뷰 초안 / 승인 / 변경 요청 / 코멘트 (gh pr review · gh pr comment)",
-  calendar_rsvp: "일정 ⋯ → 수락 / 미정 / 거절",
-};
+// 소스별 그룹 + 소스별 답장 말투: settings-actions.js (#wa-groups).
+export function renderWriteActions(c) {
+  $("wa-groups").innerHTML = writeActionsHtml(c, ACTION_DEFAULTS, ACTION_KO); // dims from c.sources; re-synced once 소스 toggles render
+}
+export const syncWriteActions = () => syncWriteActionGroups($("wa-groups"), (k) => document.querySelector(`[data-src="${k}"]`)?.checked !== false);
 const SRC_KO = { slack: "Slack", email: "메일", session: "세션", jira: "Jira", github: "GitHub", calendar: "캘린더" };
 const OUTCOME_KO = { ok: ["성공", "ok"], refused: ["거절(꺼짐)", ""], dry_run: ["dry-run", ""], failed: ["실패", "today"] };
 export const outcomeOf = (e) => (e.ok ? "ok" : e.action === "refused" ? "refused" : String(e.action || "").startsWith("dry_run:") ? "dry_run" : "failed");
@@ -150,7 +150,7 @@ export async function loadActionLog() {
 export function renderActionLog() {
   let box = $("c-actlog");
   if (!box) {
-    $("c-actions").insertAdjacentHTML("afterend", `<div class="actlog" id="c-actlog" role="region" aria-label="오늘 한 액션"></div>`);
+    $("wa-groups").insertAdjacentHTML("afterend", `<div class="actlog" id="c-actlog" role="region" aria-label="오늘 한 액션"></div>`);
     box = $("c-actlog");
   }
   const today = localYmd(Date.now());
@@ -183,8 +183,7 @@ const ACTLOG_CSS = `.actlog { margin-top: 10px; padding: 10px; border: 1px solid
 export function renderConfig() {
   const c = S.config; if (!c) return;
   renderNotifications(c.notifications);
-  const acts = { ...ACTION_DEFAULTS, ...(c.actions || {}) };
-  $("c-actions").innerHTML = Object.keys(ACTION_DEFAULTS).map((k) => `<label${ACTION_HINT[k] ? ` title="${esc(ACTION_HINT[k])}"` : ""}><input type="checkbox" data-act="${k}" ${acts[k] ? "checked" : ""}>${esc(ACTION_KO[k])}</label>`).join("");
+  renderWriteActions(c);
   renderActionLog(); loadActionLog();
   $("c-tone").value = c.reply_tone || "";
   renderPersonaPicker(c.persona || "ned");
@@ -207,7 +206,7 @@ export function renderConfig() {
   // Toggles come from config.sources keys, so new sources appear without touching this page.
   const keys = Object.keys(c.sources || {});
   $("c-sources").innerHTML = keys.length ? keys.map((k) => `<label><input type="checkbox" data-src="${esc(k)}" ${c.sources[k] ? "checked" : ""}>${esc(SOURCE_LABEL[k] || k)}</label>`).join("") : `<span class="hint">소스 없음</span>`;
-  syncSourceGroups();
+  syncSourceGroups(); syncWriteActions();
   $("c-model").value = c.claude_model ?? "";
   $("c-turns").value = c.claude_max_turns ?? "";
   $("c-budget").value = c.agenda_daily_budget_usd ?? "";
@@ -234,6 +233,7 @@ export function readBody() {
     notifications: readNotifications(),
     actions: Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])),
     reply_tone: $("c-tone").value.trim(),
+    reply_tone_by_source: readToneBySource($("wa-groups")),
     claude_model: $("c-model").value.trim() || null,
     claude_max_turns: Number($("c-turns").value),
     agenda_daily_budget_usd: Number($("c-budget").value),
@@ -308,6 +308,7 @@ export function init() {
   $("c-qon").addEventListener("change", syncNotifyEnabled);
   $("c-agmin").addEventListener("input", syncIntervalPlaceholders);
   $("c-sources").addEventListener("change", (e) => { if (e.target.dataset?.src) syncSourceGroups(); });
+  $("c-sources").addEventListener("change", (e) => { if (e.target.dataset?.src) syncWriteActions(); });
   // Any edit anywhere (typing, toggles, chip add/remove, ↑/↓ in 홈 카드 배치) → re-check the dirty mark after handlers ran.
   const later = () => queueMicrotask(syncDirty);
   for (const ev of ["input", "change", "click", "keydown"]) $("cfg").addEventListener(ev, later);

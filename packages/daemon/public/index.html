@@ -255,9 +255,9 @@
             <div class="bd">
               <p class="sdesc" id="s-actions-d">'답장 초안' 팝업에서 쓸 수 있는 실제 쓰기 동작. 꺼 둔 건 버튼이 비활성으로 보이고, 보내는 동작은 늘 대상을 한 번 더 확인해.</p>
               <div class="form">
-                <div class="f full"><span class="lab" id="wa-lab">허용할 동작</span>
-                  <div class="toggles" id="c-actions" role="group" aria-labelledby="wa-lab"></div></div>
-                <div class="f full"><label for="c-tone">답장 말투</label><input type="text" id="c-tone" placeholder="예: 간결하고 정중하게, 존댓말, 이모지 없이" maxlength="200" style="max-width:460px"></div>
+                <div class="f full"><label for="c-tone">기본 말투</label><input type="text" id="c-tone" placeholder="예: 간결하고 정중하게, 존댓말, 이모지 없이" maxlength="200" style="max-width:460px" aria-describedby="c-tone-h"><span class="hint" id="c-tone-h">답장 초안의 말투. Slack · Gmail · 세션 그룹의 '답장 말투'를 비워 두면 이걸 써.</span></div>
+                <div class="f full"><span class="lab" id="wa-lab">허용할 동작 (소스별)</span>
+                  <div class="wagroups" id="wa-groups" role="group" aria-labelledby="wa-lab"></div></div>
               </div>
             </div>
           </section>

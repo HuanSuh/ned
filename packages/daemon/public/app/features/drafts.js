@@ -49,7 +49,7 @@ export function closeDraft() {
 }
 export async function requestDraft(hint) {
   DR.loading = true; DR.error = ""; DR.confirm = null; S.drafting = true; renderHeader(); renderDraft();
-  const r = await postJson("/api/draft", clean({ source: DR.source, ref: DR.ref, hint: hint || undefined, tone: S.config?.reply_tone || undefined })).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
+  const r = await postJson("/api/draft", clean({ source: DR.source, ref: DR.ref, hint: hint || undefined })).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
   if (!DR.open) { S.drafting = false; renderHeader(); return; }
   if (r.ok && r.data) {
     DR.resp = r.data; DR.tab = (r.data.drafts?.[1] || r.data.drafts?.[0])?.id ?? null; DR.edits = {};
