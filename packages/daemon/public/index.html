@@ -140,73 +140,147 @@
   <main class="view page" id="v-settings" hidden>
     <div class="pwrap">
       <div class="say-slot" id="say-settings"></div>
-      <section class="card">
-        <div class="hd"><h2>설정</h2><span class="count mono" id="cfg-port"></span><span class="sp"></span><button class="btn small" data-refresh="config">다시 불러오기</button></div>
-        <div class="bd">
-          <form id="cfg" autocomplete="off">
-            <div class="form">
-              <div class="f full"><span class="lab" id="pp-lab">페르소나 (말투 · 테마 · 마크)</span>
-                <div class="ppick" id="c-persona" role="radiogroup" aria-labelledby="pp-lab"></div>
-                <span class="hint">기능과 데이터는 그대로고 말투·색·마크만 바뀌어. 저장하면 바로 적용돼.</span></div>
-              <div class="f full"><span class="lab" id="cl-lab">홈 카드 배치</span>
-                <span class="hint">넓은 화면(1100px 이상)에선 홈에서 패널 머리(⠿)를 끌어 옮기고, 오른쪽 끝·모서리를 끌어 크기를 바꿔 — 놓으면 바로 저장돼. 여기 순서(↑/↓)·폭(1열/2열)을 바꿔 저장하면 그 순서로 배치를 다시 짜. 좁은 화면에선 모두 한 줄씩(배치의 위→아래 순서).</span>
-                <div class="clbar" id="c-cards-bar"></div>
-                <div class="clay"><div class="cllist" id="c-cards" role="list" aria-labelledby="cl-lab"></div><div class="clprev" id="c-cards-prev" aria-hidden="true"></div></div></div>
-              <div class="f"><label for="c-hb">heartbeat 간격 (분)</label><input id="c-hb" type="number" min="1" step="1" required></div>
-              <div class="f"><label for="c-sig">신호 조회 최소 간격 (분)</label><input id="c-sig" type="number" min="1" step="1" required><span class="hint">세션 이벤트가 없을 때 LLM 으로 업무 신호를 보는 최소 간격</span></div>
-              <div class="f"><label for="c-bt">아침 브리핑 시각</label><input id="c-bt" type="time" required></div>
-              <div class="f"><span class="lab">조용한 시간 (알림 없음)</span>
-                <div class="inl"><label class="ck"><input type="checkbox" id="c-qon"> 사용</label><input type="time" id="c-qs" aria-label="시작"><span style="color:var(--faint)">~</span><input type="time" id="c-qe" aria-label="끝"></div></div>
-              <div class="f full"><span class="lab">업무 신호 소스</span><div class="toggles" id="c-sources"></div></div>
-              <div class="f full"><span class="lab">트래킹 제외</span>
-                <span class="hint">여기 넣은 Slack 채널·Jira 프로젝트는 순찰·아침 브리핑·홈 agenda 에서 조회도 보고도 안 해. 엔터(또는 쉼표)로 추가, ✕ 로 빼기. 후보는 지금까지 본 채널·프로젝트에서 골라 줘.</span>
-                <div class="excl">
-                  <div class="chipin" data-xbox="slack"><span class="cl">SLACK 채널</span><span class="chips" id="x-slack"></span><input type="text" id="x-slack-in" data-x="slack" list="dl-slack" placeholder="#채널 ⏎" aria-label="제외할 Slack 채널 추가" autocomplete="off"></div>
-                  <div class="chipin" data-xbox="jira"><span class="cl">JIRA 프로젝트</span><span class="chips" id="x-jira"></span><input type="text" id="x-jira-in" data-x="jira" list="dl-jira" placeholder="KEY ⏎" aria-label="제외할 Jira 프로젝트 키 추가" autocomplete="off"></div>
-                </div>
-                <span class="excl-msg" id="x-msg" role="status"></span>
-                <datalist id="dl-slack"></datalist><datalist id="dl-jira"></datalist>
+      <div class="stop"><b class="stitle">설정</b><span class="count mono" id="cfg-port"></span><span class="sp"></span><button class="btn small" data-refresh="config">다시 불러오기</button></div>
+      <div class="slay">
+        <nav class="snav" id="s-nav" aria-label="설정 섹션">
+          <a href="#settings" data-sjump="s-look">외형</a>
+          <a href="#settings" data-sjump="s-sources">소스</a>
+          <a href="#settings" data-sjump="s-notify">알림</a>
+          <a href="#settings" data-sjump="s-patrol">순찰 주기</a>
+          <a href="#settings" data-sjump="s-actions">쓰기 액션</a>
+          <a href="#settings" data-sjump="s-claude">Claude</a>
+        </nav>
+        <form id="cfg" class="sbody" autocomplete="off">
+          <!-- 1. 외형 -->
+          <section class="card ssec" id="s-look" aria-labelledby="s-look-h" aria-describedby="s-look-d">
+            <div class="hd"><h2 id="s-look-h" tabindex="-1">외형</h2></div>
+            <div class="bd">
+              <p class="sdesc" id="s-look-d">Ned 의 말투·색·마크와 홈 화면 카드 배치.</p>
+              <div class="form">
+                <div class="f full"><span class="lab" id="pp-lab">페르소나 (말투 · 테마 · 마크)</span>
+                  <div class="ppick" id="c-persona" role="radiogroup" aria-labelledby="pp-lab"></div>
+                  <span class="hint">기능과 데이터는 그대로고 말투·색·마크만 바뀌어. 저장하면 바로 적용돼.</span></div>
+                <div class="f full"><span class="lab" id="cl-lab">홈 카드 배치</span>
+                  <span class="hint">넓은 화면에선 홈에서 패널 머리(⠿)·모서리를 끌어 옮기고 크기를 바꿔 — 놓으면 바로 저장돼.<br>여기서 순서(↑/↓)·폭(1열/2열)을 바꿔 저장하면 그 순서로 다시 짜. 좁은 화면에선 위→아래 한 줄씩.</span>
+                  <div class="clbar" id="c-cards-bar"></div>
+                  <div class="clay"><div class="cllist" id="c-cards" role="list" aria-labelledby="cl-lab"></div><div class="clprev" id="c-cards-prev" aria-hidden="true"></div></div></div>
               </div>
-              <div class="f full"><span class="lab">팔로업 채널</span>
-                <span class="hint">멘션이 없어도 따라가 볼 Slack 채널. 홈 agenda 가 채널별 24시간 요약·하이라이트를 만들고, 순찰은 나한테 필요한 건 할 일로, 정해진 건 업데이트로 올려. 트래킹 제외에 있는 채널은 건너뛰어.</span>
-                <div class="excl">
-                  <div class="chipin" data-xbox="watch"><span class="cl">SLACK 채널</span><span class="chips" id="x-watch"></span><input type="text" id="x-watch-in" data-x="watch" list="dl-watch" placeholder="#채널 ⏎" aria-label="팔로업할 Slack 채널 추가" autocomplete="off"></div>
-                </div>
-                <span class="excl-msg" id="w-msg" role="status"></span>
-                <datalist id="dl-watch"></datalist>
-              </div>
-              <div class="f full"><span class="lab">답 필요 해제 이모지</span>
-                <span class="hint">멘션·DM·참여 스레드에서 내 답글이 보이거나, 내가 여기 있는 이모지로 리액션한 메시지는 '확인 필요'에서 빠지고 답한 것으로 쳐. 쉼표(또는 엔터)로 추가, ✕ 로 빼기. 이모지 하나마다 Slack 검색이 하나 늘어서 최대 8개, 다 빼면 리액션은 안 봐.</span>
-                <div class="excl">
-                  <div class="chipin" data-xbox="ack"><span class="cl">SLACK 이모지</span><span class="chips" id="x-ack"></span><input type="text" id="x-ack-in" data-x="ack" list="dl-ack" placeholder=":white_check_mark:, :eyes: ⏎" aria-label="답 필요 해제 이모지 추가" autocomplete="off"></div>
-                </div>
-                <span class="excl-msg" id="a-msg" role="status"></span>
-                <datalist id="dl-ack"></datalist>
-              </div>
-              <div class="f full"><span class="lab" id="wa-lab">쓰기 액션</span>
-                <span class="hint">'답장 초안' 팝업에서 쓸 수 있는 실제 쓰기 동작. 꺼 둔 건 버튼이 비활성으로 보이고, 보내는 동작은 늘 대상을 한 번 더 확인해.</span>
-                <div class="toggles" id="c-actions" role="group" aria-labelledby="wa-lab"></div>
-                <div class="inl"><label for="c-tone">답장 말투</label><input type="text" id="c-tone" placeholder="예: 간결하고 정중하게, 존댓말, 이모지 없이" maxlength="200" style="max-width:460px"></div>
-              </div>
-              <div class="f full"><span class="lab" id="n-lab">알림</span>
-                <span class="hint">Ned.app 배너와 데몬의 osascript 폴백이 모두 이 설정을 따라.</span>
-                <div class="ntf" role="group" aria-labelledby="n-lab">
-                  <label class="ck"><input type="checkbox" id="n-on"> 알림 켜기</label>
-                  <div class="toggles ngrid" id="n-kinds" aria-label="알림 받을 소스"></div>
-                  <div class="inl"><label class="ck"><input type="checkbox" id="n-brief"> 아침 브리핑 알림</label><label class="ck"><input type="checkbox" id="n-sound"> 소리</label></div>
-                  <div class="inl"><label for="n-th">묶음 기준</label><input type="number" id="n-th" min="0" max="50" step="1"><span class="hint">개를 넘으면 하나로 묶어서 알림</span></div>
-                  <div class="inl" role="radiogroup" aria-label="조용한 시간에는"><span class="hint" style="color:var(--dim)">조용한 시간에는</span>
-                    <label class="ck"><input type="radio" name="n-quiet" value="skip"> 보내지 않음</label><label class="ck"><input type="radio" name="n-quiet" value="silent"> 소리 없이 보냄</label></div>
-                </div>
-              </div>
-              <div class="f"><label for="c-model">Claude 모델 (비우면 기본값)</label><input id="c-model" type="text" placeholder="예: claude-sonnet-5-5"></div>
-              <div class="f"><label for="c-turns">Claude 최대 턴</label><input id="c-turns" type="number" min="1" step="1" required></div>
-              <div class="f"><label for="c-budget">하루 사용 상한 ($ 환산)</label><input id="c-budget" type="number" min="0" step="1" required><div class="hint">자동 점검·agenda·맥락 수집은 오늘 사용량이 이 값에 닿으면 멈춤. 버튼으로 직접 실행하는 건 제외. 구독 계정이면 실제 청구가 아니라 사용량 환산값.</div></div>
             </div>
-            <div class="form-foot"><button type="submit" class="btn go" id="c-save">저장</button><span class="msg" id="c-msg"></span></div>
-          </form>
-        </div>
-      </section>
+          </section>
+
+          <!-- 2. 소스 -->
+          <section class="card ssec" id="s-sources" aria-labelledby="s-sources-h" aria-describedby="s-sources-d">
+            <div class="hd"><h2 id="s-sources-h" tabindex="-1">소스</h2></div>
+            <div class="bd">
+              <p class="sdesc" id="s-sources-d">순찰·아침 브리핑·홈 agenda 가 읽는 업무 신호. 끈 소스는 조회도 보고도 안 해.</p>
+              <div class="toggles" id="c-sources" role="group" aria-label="업무 신호 소스"></div>
+              <div class="sgrp" data-srcgrp="slack" role="group" aria-labelledby="g-slack-h" aria-describedby="g-slack-d">
+                <div class="sgh"><h3 id="g-slack-h">Slack</h3><span class="offnote" hidden>Slack 소스가 꺼져 있어 — 값은 그대로 보존돼</span></div>
+                <p class="hint" id="g-slack-d">엔터(또는 쉼표)로 추가, ✕ 로 빼기. 후보는 지금까지 본 채널에서 골라 줘.</p>
+                <div class="sgb excl x3">
+                  <div class="xitem"><span class="lab" id="xw-lab">팔로업 채널</span>
+                    <div class="chipin" data-xbox="watch"><span class="cl">SLACK 채널</span><span class="chips" id="x-watch"></span><input type="text" id="x-watch-in" data-x="watch" list="dl-watch" placeholder="#채널 ⏎" aria-label="팔로업할 Slack 채널 추가" aria-describedby="xw-hint" autocomplete="off"></div>
+                    <span class="hint" id="xw-hint">멘션이 없어도 따라가 볼 채널. 홈에 채널별 24시간 요약을, 순찰은 할 일·업데이트를 올려.</span>
+                    <span class="excl-msg" id="w-msg" role="status"></span></div>
+                  <div class="xitem"><span class="lab" id="xs-lab">트래킹 제외 채널</span>
+                    <div class="chipin" data-xbox="slack"><span class="cl">SLACK 채널</span><span class="chips" id="x-slack"></span><input type="text" id="x-slack-in" data-x="slack" list="dl-slack" placeholder="#채널 ⏎" aria-label="제외할 Slack 채널 추가" aria-describedby="xs-hint" autocomplete="off"></div>
+                    <span class="hint" id="xs-hint">순찰·브리핑·홈 agenda 에서 조회도 보고도 안 해. 팔로업 채널보다 우선.</span>
+                    <span class="excl-msg" id="x-msg" role="status"></span></div>
+                  <div class="xitem"><span class="lab" id="xa-lab">답 필요 해제 이모지</span>
+                    <div class="chipin" data-xbox="ack"><span class="cl">SLACK 이모지</span><span class="chips" id="x-ack"></span><input type="text" id="x-ack-in" data-x="ack" list="dl-ack" placeholder=":white_check_mark:, :eyes: ⏎" aria-label="답 필요 해제 이모지 추가" aria-describedby="xa-hint" autocomplete="off"></div>
+                    <span class="hint" id="xa-hint">내 답글이 있거나 이 이모지로 리액션한 메시지는 '확인 필요'에서 빠져. 최대 8개, 다 빼면 리액션은 안 봐.</span>
+                    <span class="excl-msg" id="a-msg" role="status"></span></div>
+                </div>
+              </div>
+              <div class="sgrp" data-srcgrp="jira" role="group" aria-labelledby="g-jira-h">
+                <div class="sgh"><h3 id="g-jira-h">Jira</h3><span class="offnote" hidden>Jira 소스가 꺼져 있어 — 값은 그대로 보존돼</span></div>
+                <div class="sgb excl x3">
+                  <div class="xitem"><span class="lab" id="xj-lab">제외 프로젝트</span>
+                    <div class="chipin" data-xbox="jira"><span class="cl">JIRA 프로젝트</span><span class="chips" id="x-jira"></span><input type="text" id="x-jira-in" data-x="jira" list="dl-jira" placeholder="KEY ⏎" aria-label="제외할 Jira 프로젝트 키 추가" aria-describedby="xj-hint" autocomplete="off"></div>
+                    <span class="hint" id="xj-hint">넣은 프로젝트 키는 순찰·브리핑·홈 agenda 에서 빠져.</span>
+                    <span class="excl-msg" id="j-msg" role="status"></span></div>
+                </div>
+              </div>
+              <datalist id="dl-slack"></datalist><datalist id="dl-jira"></datalist><datalist id="dl-watch"></datalist><datalist id="dl-ack"></datalist>
+            </div>
+          </section>
+
+          <!-- 3. 알림 -->
+          <section class="card ssec" id="s-notify" aria-labelledby="s-notify-h" aria-describedby="s-notify-d">
+            <div class="hd"><h2 id="s-notify-h" tabindex="-1">알림</h2></div>
+            <div class="bd">
+              <p class="sdesc" id="s-notify-d">Ned.app 배너와 데몬의 osascript 폴백이 모두 이 설정을 따라.</p>
+              <div class="ntf" role="group" aria-labelledby="s-notify-h">
+                <label class="ck non"><input type="checkbox" id="n-on"> 알림 켜기</label>
+                <div class="nrow"><span class="lab" id="nk-lab">소스별</span><div class="toggles ngrid" id="n-kinds" role="group" aria-labelledby="nk-lab"></div></div>
+                <div class="nrow"><span class="lab">브리핑 · 소리</span><div class="inl"><label class="ck"><input type="checkbox" id="n-brief"> 아침 브리핑 알림</label><label class="ck"><input type="checkbox" id="n-sound"> 소리</label></div></div>
+                <div class="nrow"><label class="lab" for="n-th">묶음 기준</label><div class="inl"><input type="number" id="n-th" min="0" max="50" step="1"><span class="hint">개를 넘으면 하나로 묶어서 알림</span></div></div>
+                <div class="nrow"><span class="lab" id="q-lab">조용한 시간</span>
+                  <div class="qbox" role="group" aria-labelledby="q-lab">
+                    <div class="inl"><label class="ck"><input type="checkbox" id="c-qon"> 사용</label><input type="time" id="c-qs" aria-label="조용한 시간 시작"><span class="tsep" aria-hidden="true">~</span><input type="time" id="c-qe" aria-label="조용한 시간 끝"></div>
+                    <div class="inl" role="radiogroup" aria-label="조용한 시간에는"><span class="hint">이 시간엔</span>
+                      <label class="ck"><input type="radio" name="n-quiet" value="skip"> 보내지 않음</label><label class="ck"><input type="radio" name="n-quiet" value="silent"> 소리 없이 보냄</label></div>
+                  </div></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 4. 순찰 주기 -->
+          <section class="card ssec" id="s-patrol" aria-labelledby="s-patrol-h" aria-describedby="s-patrol-d">
+            <div class="hd"><h2 id="s-patrol-h" tabindex="-1">순찰 주기</h2></div>
+            <div class="bd">
+              <p class="sdesc" id="s-patrol-d">Ned 가 얼마나 자주 둘러보고 홈을 새로 고칠지, 언제 아침 브리핑을 할지.</p>
+              <div class="form g3">
+                <div class="f"><label for="c-hb">heartbeat 간격 (분)</label><input id="c-hb" type="number" min="1" step="1" required></div>
+                <div class="f"><label for="c-sig">신호 조회 최소 간격 (분)</label><input id="c-sig" type="number" min="1" step="1" required aria-describedby="c-sig-h"><span class="hint" id="c-sig-h">세션 이벤트가 없을 때 LLM 으로 업무 신호를 보는 최소 간격</span></div>
+                <div class="f"><label for="c-bt">아침 브리핑 시각</label><input id="c-bt" type="time" required></div>
+              </div>
+              <div class="agint">
+                <div class="f"><label for="c-agmin">홈 자동 갱신 기본 주기 (분)</label><input id="c-agmin" type="number" min="1" step="1" required aria-describedby="c-agmin-h"><span class="hint" id="c-agmin-h">홈 agenda(일정·Slack·메일·Jira·GitHub)를 다시 읽는 주기. 아래 소스별 칸을 비우면 이 값을 따라.</span></div>
+                <div class="f"><span class="lab" id="c-int-lab">소스별 주기 (분)</span>
+                  <div class="intgrid" role="group" aria-labelledby="c-int-lab">
+                    <label class="intf" data-intsrc="slack"><span>Slack</span><input id="c-int-slack" type="number" min="1" step="1" data-int="slack"></label>
+                    <label class="intf" data-intsrc="gmail"><span>메일</span><input id="c-int-mail" type="number" min="1" step="1" data-int="mail"></label>
+                    <label class="intf" data-intsrc="calendar"><span>캘린더</span><input id="c-int-calendar" type="number" min="1" step="1" data-int="calendar"></label>
+                    <label class="intf" data-intsrc="jira"><span>Jira</span><input id="c-int-jira" type="number" min="1" step="1" data-int="jira"></label>
+                    <label class="intf" data-intsrc="github"><span>GitHub</span><input id="c-int-github" type="number" min="1" step="1" data-int="github"></label>
+                  </div></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 5. 쓰기 액션 -->
+          <section class="card ssec" id="s-actions" aria-labelledby="s-actions-h" aria-describedby="s-actions-d">
+            <div class="hd"><h2 id="s-actions-h" tabindex="-1">쓰기 액션</h2></div>
+            <div class="bd">
+              <p class="sdesc" id="s-actions-d">'답장 초안' 팝업에서 쓸 수 있는 실제 쓰기 동작. 꺼 둔 건 버튼이 비활성으로 보이고, 보내는 동작은 늘 대상을 한 번 더 확인해.</p>
+              <div class="form">
+                <div class="f full"><span class="lab" id="wa-lab">허용할 동작</span>
+                  <div class="toggles" id="c-actions" role="group" aria-labelledby="wa-lab"></div></div>
+                <div class="f full"><label for="c-tone">답장 말투</label><input type="text" id="c-tone" placeholder="예: 간결하고 정중하게, 존댓말, 이모지 없이" maxlength="200" style="max-width:460px"></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 6. Claude -->
+          <section class="card ssec" id="s-claude" aria-labelledby="s-claude-h" aria-describedby="s-claude-d">
+            <div class="hd"><h2 id="s-claude-h" tabindex="-1">Claude</h2></div>
+            <div class="bd">
+              <p class="sdesc" id="s-claude-d">자동 점검·agenda·맥락 수집이 쓰는 Claude 실행 설정.</p>
+              <div class="form g3">
+                <div class="f"><label for="c-model">모델 (비우면 기본값)</label><input id="c-model" type="text" placeholder="예: claude-sonnet-5-5"></div>
+                <div class="f"><label for="c-turns">최대 턴</label><input id="c-turns" type="number" min="1" step="1" required></div>
+                <div class="f"><label for="c-budget">하루 사용 상한 ($ 환산)</label><input id="c-budget" type="number" min="0" step="1" required aria-describedby="c-budget-h"><span class="hint" id="c-budget-h">오늘 사용량이 닿으면 자동 실행만 멈춰 (버튼 실행은 제외). 구독 계정이면 사용량 환산값.</span></div>
+              </div>
+            </div>
+          </section>
+
+          <div class="sbar" role="region" aria-label="설정 저장">
+            <span class="sdirty" id="c-dirty" hidden>● 저장 안 된 변경</span><span class="msg" id="c-msg" role="status"></span>
+            <span class="sp"></span><button type="submit" class="btn go" id="c-save">저장</button>
+          </div>
+        </form>
+      </div>
     </div>
   </main>
 </div>
