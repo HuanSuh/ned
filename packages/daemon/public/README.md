@@ -48,3 +48,11 @@ daemon 을 `NED_HOME=/some/fixture` 로 띄우거나, 같은 라우트를 흉내
 ## 카드 높이
 
 홈 그리드는 `align-items: stretch`. 소스 카드는 `packCards()` 가 `--cols` 개의 열에 (가장 짧은 열부터) 채워 넣고 열마다 마지막 카드를 늘려 모든 열이 행 바닥에서 끝난다(남는 공간은 비움). ≥1600 3열에서는 할 일 열이 `contain: size` 로 행 높이를 정하지 않고 안에서 스크롤한다.
+
+## 소스 pill 필터
+
+홈 '할 일' 영역 위와 인박스 탭 아래에 타임라인과 같은 chip(`.chips` / `.lbl` / `.chip` / `.chip.on`)으로 `소스` 줄: 전체 · 세션 · 메일 · Slack · Jira · GitHub · Sentry · 캘린더 · 개인(홈만). 각 chip 에 kind 아이콘과 개수(필터 전 기준), 0건은 흐리게. 클릭으로 다중 토글, '전체' 로 초기화. 상태는 `localStorage` `ned.pf.home` / `ned.pf.inbox`.
+- 홈: Ned 액션 아이템을 kind 로 거르고, 소스 카드는 선택한 소스만 남기고(메일=email · Jira · Slack · GitHub), 개인 할 일은 '개인' 을 고를 때만.
+- 인박스: 우선·기타는 항목 kind, 기록은 브리핑에 그 kind 항목이 있을 때만. j/k·Enter·선택은 걸러진 목록 기준.
+- 설정에서 꺼진 소스는 카드·pill·인사말 카운트에서 바로 빠진다(`/api/config` 의 `sources`; `GET /api/agenda` 도 꺼진 소스를 비워서 준다).
+- 폰 폭에서는 줄바꿈 없이 가로 스크롤.

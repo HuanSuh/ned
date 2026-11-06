@@ -341,6 +341,13 @@
   .chips .lbl { color: var(--faint); font: 11px var(--mono); margin-right: 2px; min-width: 52px; }
   .chip { font-size: 12px; padding: 2px 9px; border-radius: 999px; background: var(--hover); color: var(--fg); border: 1px solid transparent; cursor: pointer; user-select: none; }
   .chip.on { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: var(--accent); color: var(--accent); }
+  /* source pills (home / inbox) = the timeline chips + a kind icon and a count */
+  .chip .pi { margin-right: 4px; }
+  .chip .pn { margin-left: 5px; font: 10.5px var(--mono); opacity: .75; }
+  .chip.zero { opacity: .45; } .chip.zero.on { opacity: 1; }
+  .chips.pills { margin-bottom: 0; }
+  .chips.pills > * { flex: none; white-space: nowrap; }
+  .list .chips.pills { padding: 8px 12px 6px; border-bottom: 1px solid var(--line); }
   ul.tl { list-style: none; margin: 0; padding: 0; }
   ul.tl li { display: grid; grid-template-columns: 52px 1fr; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
   ul.tl li:last-child { border-bottom: 0; }
@@ -539,7 +546,8 @@
   @media (min-width: 1600px) {
     .hwrap, .pwrap { padding-left: 32px; padding-right: 32px; }
     /* home: 3 columns — timeline | source cards | Ned actions + personal todos (.hcol dissolves into the grid) */
-    .hgrid { grid-template-columns: clamp(360px, 22vw, 440px) minmax(0, 1fr) clamp(360px, 24vw, 520px); grid-template-areas: "cal cards todo"; }
+    .hgrid { grid-template-columns: clamp(360px, 22vw, 440px) minmax(0, 1fr) clamp(360px, 24vw, 520px); grid-template-areas: "cal pills pills" "cal cards todo"; grid-template-rows: auto 1fr; }
+    #pf-home { grid-area: pills; }
     .hgrid.wk { grid-template-columns: clamp(540px, 32vw, 760px) minmax(0, 1fr) clamp(340px, 22vw, 480px); }
     .hgrid.wk .sgrid { --cols: 1; }
     /* the todo column doesn't set the row height (contain: size); its list scrolls inside instead */
@@ -573,6 +581,7 @@
   @media (max-width: 1020px) { .leds .opt { display: none; } }
   @media (max-width: 899px) { .hgrid, .hgrid.wk { grid-template-columns: minmax(0, 1fr); } .hgrid { align-items: start; } }
   @media (max-width: 760px) {
+    .chips.pills { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; } .chips.pills::-webkit-scrollbar { display: none; } .chips.pills > * { flex: none; white-space: nowrap; }
     header.hq { padding: 8px 12px; gap: 8px 10px; }
     .who .mood { font-size: 9.5px; }
     .leds { order: 3; width: 100%; margin-left: 0; gap: 12px; }
@@ -644,11 +653,12 @@
           <div class="bd" id="agenda"></div>
         </section>
         <div class="hcol">
+          <div class="chips pills" id="pf-home" role="toolbar" aria-label="소스 필터"></div>
           <section class="card" id="todo-card">
             <div class="hd"><h2>할 일</h2><span class="sp"></span><span class="count" id="todo-count"></span></div>
             <div class="bd">
               <div class="tgrp g-ned"><div class="gh"><span class="ico">👓</span>NED 액션 아이템<span class="n" id="n-ned">0</span></div><div class="gl" id="g-ned"></div></div>
-              <div class="tgrp g-me"><div class="gh"><span class="ico">✅</span>개인 할 일<span class="n" id="n-me">0</span></div>
+              <div class="tgrp g-me" id="grp-me"><div class="gh"><span class="ico">✅</span>개인 할 일<span class="n" id="n-me">0</span></div>
                 <div class="gl">
                   <form class="tadd" id="tadd" autocomplete="off"><input type="text" id="tadd-t" placeholder="할 일 추가… (⏎)" aria-label="할 일" maxlength="200"><input type="date" id="tadd-d" aria-label="마감일 (선택)"><button class="btn small" type="submit">추가</button></form>
                   <div id="g-me"></div>
@@ -692,6 +702,7 @@
       <section class="list">
         <div class="say-slot" id="say"></div>
         <div class="tabs" id="tabs" role="tablist"></div>
+        <div class="chips pills" id="pf-inbox" role="toolbar" aria-label="소스 필터"></div>
         <div class="items" id="items" tabindex="0"></div>
         <details class="msess" id="msess"><summary id="msess-sum">장비실 · 세션</summary><div class="rack" id="msess-rack"></div></details>
         <div class="keys"><span><kbd>j</kbd><kbd>k</kbd> 이동</span><span><kbd>e</kbd> 완료</span><span><kbd>⏎</kbd> 열기</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 탭</span><span><kbd>r</kbd> 점검</span></div>
@@ -760,6 +771,31 @@
 
   const KIND_ICON = { session: "🖥", email: "✉️", slack: "💬", jira: "📋", github: "🐙", sentry: "🐞", calendar: "📅", other: "🔔" };
   const KIND_KO = { session: "세션", email: "메일", slack: "Slack", jira: "Jira", github: "GitHub", sentry: "Sentry", calendar: "캘린더", other: "기타" };
+  // ---------- source pills (home / inbox): the timeline's .chips/.chip UI + kind icon + count; multi-select, per-view state ----------
+  const PILL_KINDS = ["session", "email", "slack", "jira", "github", "sentry", "calendar", "me"];
+  const PILL_ICON = { ...KIND_ICON, me: "✅" }, PILL_KO = { ...KIND_KO, me: "개인" };
+  const CARD_KIND = { mail: "email", jira: "jira", slack: "slack", gh: "github" };
+  function loadPf(v) { try { return new Set(JSON.parse(lsGet(`ned.pf.${v}`) || "[]").filter((k) => PILL_KINDS.includes(k))); } catch { return new Set(); } }
+  const PF = { home: loadPf("home"), inbox: loadPf("inbox") };
+  const pfOn = (v, kind) => !PF[v].size || PF[v].has(kind);
+  // Sources switched off in Settings vanish from cards, pills and greeting counts right away (/api/config, else agenda.sources).
+  const KIND_SOURCE = { email: "gmail", slack: "slack", jira: "jira", github: "github", sentry: "sentry", calendar: "calendar" };
+  const srcOn = (kind) => { const src = KIND_SOURCE[kind], m = S.config?.sources || S.agenda?.sources; return !src || !m || m[src] !== false; };
+  function pillRow(v, counts, kinds) {
+    return `<span class="lbl">소스</span><button class="chip${PF[v].size ? "" : " on"}" type="button" data-pf="${v}" data-k="" aria-pressed="${!PF[v].size}">전체</button>` +
+      kinds.map((k) => {
+        const n = counts[k] || 0, on = PF[v].has(k);
+        return `<button class="chip${on ? " on" : ""}${n ? "" : " zero"}" type="button" data-pf="${v}" data-k="${k}" aria-pressed="${on}" title="${esc(PILL_KO[k])} ${n}건"><span class="pi" aria-hidden="true">${PILL_ICON[k]}</span>${esc(PILL_KO[k])}<span class="pn">${n}</span></button>`;
+      }).join("");
+  }
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-pf]"); if (!b) return;
+    const v = b.dataset.pf, k = b.dataset.k, set = PF[v];
+    if (!k) set.clear(); else if (set.has(k)) set.delete(k); else set.add(k);
+    lsSet(`ned.pf.${v}`, JSON.stringify([...set]));
+    if (v === "inbox") { ui.sel = 0; ui.selKey = null; }
+    renderAll();
+  });
   const SOURCE_LABEL = { gmail: "Gmail", slack: "Slack", jira: "Jira", github: "GitHub", sentry: "Sentry", calendar: "캘린더" };
   const STATUS_KO = { running: "실행 중", waiting: "입력 대기", done: "완료", error: "오류", ended: "종료" };
   const STATUS_LED = { running: "b", waiting: "a", error: "r", done: "g" };
@@ -1021,7 +1057,11 @@
     const ok = S.briefings.filter((b) => b.status === "NED_OK");
     return { pri, other, hist, ok };
   }
-  const listOf = (m) => (ui.tab === "priority" ? m.pri : ui.tab === "other" ? m.other : m.hist);
+  const tabRaw = (m) => (ui.tab === "priority" ? m.pri : ui.tab === "other" ? m.other : m.hist);
+  const briefKinds = (b) => new Set([...(b.action_items || []), ...(b.updates || []), ...(b.fyi || [])].map((x) => x.kind).filter(Boolean));
+  const rowKinds = (it) => (it.okrun ? [] : it.brief ? [...briefKinds(it.brief)] : [it.kind]);
+  /** The current tab's rows after the inbox source pills — j/k, Enter and selection all use this list. */
+  const listOf = (m) => { const raw = tabRaw(m); return PF.inbox.size ? raw.filter((it) => rowKinds(it).some((k) => PF.inbox.has(k))) : raw; };
 
   function renderTabs(m) {
     const t = (id, label, n, hot) => `<button class="tab ${ui.tab === id ? "on" : ""}" role="tab" aria-selected="${ui.tab === id}" data-t="${id}">${label}<span class="n ${hot ? "hot" : ""}">${n}</span></button>`;
@@ -1050,6 +1090,9 @@
   function renderInbox() {
     const m = model(), list = listOf(m);
     renderTabs(m);
+    const cnt = {};
+    for (const it of tabRaw(m)) for (const k of rowKinds(it)) cnt[k] = (cnt[k] || 0) + 1;
+    $("pf-inbox").innerHTML = pillRow("inbox", cnt, PILL_KINDS.filter((k) => k !== "me" && srcOn(k)));
     if (ui.selKey) { const i = list.findIndex((x) => x.key === ui.selKey); if (i >= 0) ui.sel = i; }
     ui.sel = Math.max(0, Math.min(ui.sel, list.length - 1));
     ui.selKey = list[ui.sel]?.key ?? null;
@@ -1060,7 +1103,7 @@
       if (day !== lastDay) { html += `<div class="grp">${esc(day)}</div>`; lastDay = day; }
       html += rowHtml(it, i);
     });
-    if (!list.length) html += `<div class="none">${ui.tab === "priority" ? "결정할 것 없음." : ui.tab === "other" ? "읽을 것 없음." : "아직 순찰 기록이 없어."}</div>`;
+    if (!list.length) html += `<div class="none">${PF.inbox.size ? "선택한 소스엔 없음." : ui.tab === "priority" ? "결정할 것 없음." : ui.tab === "other" ? "읽을 것 없음." : "아직 순찰 기록이 없어."}</div>`;
     if (ui.tab !== "history" && m.ok.length) html += `<button class="okrun" id="okrun">${esc(V().okRun(m.ok.length, rel(m.ok[0].ts)))}</button>`;
     const box = $("items");
     box.innerHTML = html;
@@ -1348,6 +1391,7 @@
     try {
       S.config = await api("/api/config", { method: "PUT", body: JSON.stringify(body) });
       await applyPersona(S.config.persona); // look + voice switch now; prompts use it from the next run
+      loadAgenda(); // sources switched off disappear from home now
       renderConfig(); msg.className = "msg ok"; msg.textContent = persona === "ned" ? "저장했어. 다음 순찰부터 적용." : persona === "alfred" ? "저장했습니다. 다음 순찰부터 적용됩니다." : persona === "oracle" ? "저장 완료. 다음 순찰부터 적용." : "저장했어요. 다음 순찰부터 반영됩니다.";
     } catch (err) {
       console.warn(err); msg.className = "msg err"; msg.textContent = `저장 실패: ${err.message}`;
@@ -1576,8 +1620,8 @@
   /** Render a source card: badge + list via group(), then summary line, preview, open/hidden state. */
   function card(id, { n, hot, rows, empty, sum, pv, hidden }) {
     const el = $("sc-" + id);
-    el.hidden = !!hidden;
-    if (hidden) return;
+    el.hidden = !!hidden || !srcOn(CARD_KIND[id]) || !pfOn("home", CARD_KIND[id]); // source off, or filtered out by the pills
+    if (el.hidden) return;
     group(id, n, hot, rows, empty);
     $("ss-" + id).className = sum ? "ss" : "ss none";
     $("ss-" + id).innerHTML = sum || esc(empty);
@@ -1590,16 +1634,16 @@
 
   function renderTodoGroups() {
     const s = S.state, ag = S.agenda;
-    const ned = (s?.attention || []).filter((a) => a.source !== "sessions");
+    const nedAll = (s?.attention || []).filter((a) => a.source !== "sessions" && srcOn(a.kind)), ned = nedAll.filter((a) => pfOn("home", a.kind));
     group("ned", ned.length, ned.length, ned.map((a) => {
       const u = safeUrl(a.url);
       return `<div class="ti"><span class="ic">${KIND_ICON[a.kind] || "🔔"}</span><div class="mn"><span class="tt">${u ? ext(u, esc(a.title)) : esc(a.title)}</span>${a.detail ? `<div class="sb"><span class="d">${esc(a.detail)}</span></div>` : ""}</div>
         <div class="ra">${u ? ext(u, "열기", "btn small") : ""}<button class="btn small" data-dismiss="${esc(a.id)}" title="처리 완료로 닫기">닫기</button></div></div>`;
-    }).join(""), s ? "내가 챙겨 둔 거 없어." : "불러오는 중…");
+    }).join(""), !s ? "불러오는 중…" : PF.home.size ? "선택한 소스엔 액션 아이템 없음." : "내가 챙겨 둔 거 없어.");
 
     const unavailable = ag === null ? "agenda 연결 안 됨." : ag === undefined ? "불러오는 중…" : "";
     // Gmail/Slack source off → hide the card; mail/slack === null → agenda.json predates the block (not fetched yet).
-    const mailOn = ag?.mail_enabled !== false, mail = mailOn ? ag?.mail : null, mi = mail?.items || [];
+    const mailOn = srcOn("email") && ag?.mail_enabled !== false, mail = mailOn ? ag?.mail : null, mi = mail?.items || [];
     const unreadN = `${Number(mail?.unread) || 0}${mail?.unread_capped ? "+" : ""}`;
     $("mail-sum").innerHTML = mail?.summary ? `<span>${esc(mail.summary)}</span>` : "";
     const mr = (k) => mi.filter((x) => (MAIL_REASON[x.reason] ? x.reason : "request") === k).length;
@@ -1632,7 +1676,7 @@
       pv: jira[0] && preview(`<span class="key">${esc(jira[0].key)}</span>`, jira[0].title, safeUrl(jira[0].url), dueChip(jira[0].due) || `<span class="chipx">${esc(jira[0].status || "—")}</span>`),
     });
 
-    const slackOn = ag?.slack_enabled !== false, slack = slackOn ? ag?.slack : null, si = slack?.items || [];
+    const slackOn = srcOn("slack") && ag?.slack_enabled !== false, slack = slackOn ? ag?.slack : null, si = slack?.items || [];
     $("slack-sum").innerHTML = slack?.summary ? `<span>${esc(slack.summary)}</span>` : "";
     const slRow = (x) => SLACK_REASON[x.reason] || SLACK_REASON.thread;
     card("slack", {
@@ -1674,7 +1718,13 @@
     if (done.length) rows += `<details class="tdone" ${ui.doneOpen ? "open" : ""}><summary>완료 ${done.length}</summary>${done.map(row).join("")}</details>`;
     group("me", open.length, open.some((t) => (dueInfo(t.due)?.days ?? 1) <= 0), rows, "");
     for (const el of $("tadd").elements) el.disabled = S.todos === null;
-    $("todo-count").textContent = `${ned.length + mi.length + jira.length + si.length + gh.length + open.length}건`;
+    $("grp-me").hidden = !pfOn("home", "me");
+    const shown = (id, n) => ($("sc-" + id).hidden ? 0 : n);
+    $("todo-count").textContent = `${ned.length + shown("mail", mi.length) + shown("jira", jira.length) + shown("slack", si.length) + shown("gh", gh.length) + (pfOn("home", "me") ? open.length : 0)}건`;
+    // pill counts are unfiltered so you can see what each source holds before picking it
+    const cnt = { email: mail ? mi.length : 0, slack: slack ? si.length : 0, jira: jira.length, github: gh.length, me: open.length };
+    for (const a of nedAll) cnt[a.kind] = (cnt[a.kind] || 0) + 1;
+    $("pf-home").innerHTML = pillRow("home", cnt, PILL_KINDS.filter(srcOn));
   }
 
   /** Ned's one line for the day, built from agenda + todos + attention. */
@@ -1689,9 +1739,9 @@
       if (!mt.length) bits.push(v.noMeet);
       else if (!left.length) bits.push(v.allDone(mt.length));
       else bits.push(v.meet({ left: left.length, cur: cur?.title, next: next ? hhmm(next.s) : "", first: next === mt[0] }));
-      const jira = ag.jira?.length || 0, rv = (ag.github || []).filter((g) => g.reason === "review_requested").length;
-      const mails = ag.mail_enabled !== false ? ag.mail?.items?.length || 0 : 0;
-      const slacks = ag.slack_enabled !== false ? ag.slack?.items?.length || 0 : 0;
+      const jira = srcOn("jira") ? ag.jira?.length || 0 : 0, rv = srcOn("github") ? (ag.github || []).filter((g) => g.reason === "review_requested").length : 0;
+      const mails = srcOn("email") && ag.mail_enabled !== false ? ag.mail?.items?.length || 0 : 0;
+      const slacks = srcOn("slack") && ag.slack_enabled !== false ? ag.slack?.items?.length || 0 : 0;
       const c = V().count;
       const w = [jira ? c("Jira", jira, "건") : "", rv ? c("리뷰", rv, "건") : "", mails ? c("메일", mails, "통") : "", slacks ? c("Slack", slacks, "건") : ""].filter(Boolean);
       if (w.length) bits.push(V().wait(w));

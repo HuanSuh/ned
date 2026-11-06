@@ -95,7 +95,20 @@ export function startServer(getConfig: () => NedConfig): void {
   // mail_enabled / slack_enabled (= sources.gmail / sources.slack) let HOME hide those cards even if agenda.json still has old data.
   app.get("/api/agenda", (c) => {
     const { sources } = loadConfig();
-    return c.json({ ...readAgenda(), busy: agendaBusy(), mail_enabled: sources.gmail, slack_enabled: sources.slack });
+    // A source switched off disappears now, not at the next agenda run (which also stops fetching / writes it empty).
+    const a = readAgenda();
+    return c.json({
+      ...a,
+      calendar: sources.calendar ? a.calendar : [],
+      jira: sources.jira ? a.jira : [],
+      github: sources.github ? a.github : [],
+      mail: sources.gmail ? a.mail : null,
+      slack: sources.slack ? a.slack : null,
+      busy: agendaBusy(),
+      mail_enabled: sources.gmail,
+      slack_enabled: sources.slack,
+      sources,
+    });
   });
   app.post("/api/agenda/refresh", async (c) => {
     // Concurrent refreshes share the in-flight run instead of spawning another claude -p.
