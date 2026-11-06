@@ -69,8 +69,8 @@ osascript 폴백도 같은 규칙: 꺼져 있으면 안 보냄, 켜진 kind 의 
 6시간 안이면 그대로, 아니면 캘린더 도구만 허용한 `claude -p`(`prompts/calendar.md`, maxTurns 6)로 받아 캐시한다. 같은 범위는
 실행 하나를 공유하고 다른 범위는 줄 세워 하나씩. `NED_NO_LLM=1` 이면 빈 배열(캐시 안 함).
 
-**페르소나 — 히든 기능** (`config.persona`: `ned` | `alfred` | `oracle` | `jarvis`, 기본 `ned`; 모르는 값은 PUT 에서 무시, 읽을 때 `ned`; 기존 값은 그대로 존중).
-설정 UI 는 기본 숨김 — 대시보드 설정 탭의 "설정" 제목 5연타 또는 ⌘K 에 `persona`(이 탭 세션 동안만 표시), 메뉴바는 ⌥ 누른 채 드롭다운 열기, 또는 config.yaml 에 직접 `persona:`.
+**페르소나 — 미제공 기능** (`config.persona`: `ned` | `alfred` | `oracle` | `jarvis`, 기본 `ned`; 모르는 값은 PUT 에서 무시, 읽을 때 `ned`; 기존 값은 그대로 존중).
+현재 UI 미제공 — 대시보드·메뉴바 어디에도 선택 진입점이 없고, config.yaml 의 `persona:` 로만 바꾼다.
 기능·데이터는 그대로 두고 말투 + 대시보드 테마 + 마크만 바꾼다. heartbeat.md · briefing.md · agenda-lists.md 의 `{{PERSONA}}` 는
 `prompts/personas/<id>.md`(이름, 말투 규칙 5줄, 헤드라인 예시 3개, NED_OK 멘트 예시 3개, 금지사항)로 치환된다. 상태값
 `NED_OK` / `UPDATE` 와 JSON 키는 페르소나와 무관하게 그대로. `state.json.persona` 에 같은 값을 미러링한다(세션 갱신마다,

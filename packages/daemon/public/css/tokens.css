@@ -1,4 +1,4 @@
-/* Theme + persona tokens (ned / alfred / oracle / jarvis), persona textures, mark colours, background pattern, timeline-list and persona-picker styles that live with them.
+/* Theme + persona tokens (ned / alfred / oracle / jarvis), persona textures, mark colours, background pattern and timeline-list styles that live with them.
  * Split from the old single-file index.html; link order in index.html is the cascade order. */
 /* Ned dashboard — inbox/triage body (direction C) wearing the sidekick identity (direction E).
    Dark first; light via prefers-color-scheme.
@@ -25,12 +25,12 @@
 }
 /* ---------- personas ----------
    config.persona → <html data-persona>. Same features/data; voice (JS table + prompts/personas/*.md), tokens, fonts,
-   background pattern and mark (marks/<id>.svg) change. Rules are written on [data-persona="…"] (not only :root) so the
-   settings preview cards render each persona in its own colours. Every block re-declares the derived tokens
+   background pattern and mark (marks/<id>.svg) change. Rules are written on [data-persona="…"] (not only :root) so any
+   element can render a persona in its own colours. Every block re-declares the derived tokens
    (--accent, --blue …) because a var() reference resolves where it is declared. Character names only — no logos,
    quotes or likenesses; marks and patterns are plain geometry. */
 [data-persona] { --head: var(--sans); --head-w: 650; }
-.card > .hd h2, .nm b, .pcard .pn { font-family: var(--head); font-weight: var(--head-w); }
+.card > .hd h2, .nm b { font-family: var(--head); font-weight: var(--head-w); }
 
 /* alfred — near-black + very dark navy, one restrained gold, serif headlines, gothic/art-deco lattice, header spotlight */
 [data-persona="alfred"] {
@@ -138,23 +138,6 @@
 :root[data-persona="jarvis"] .stk.r, :root[data-persona="jarvis"] .chipx.over { background: var(--hot); color: #fff; border: 0; box-shadow: none; }
 :root[data-persona="jarvis"] .count, :root[data-persona="jarvis"] .n, :root[data-persona="jarvis"] .tm, :root[data-persona="jarvis"] .nowline span,
 :root[data-persona="jarvis"] .day .hr span, :root[data-persona="jarvis"] .hmeta, :root[data-persona="jarvis"] .leds { font-family: var(--num); font-weight: 400; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
-
-
-/* settings: persona picker */
-.ppick { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-.pcard { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font-family: var(--sans); cursor: pointer; min-width: 0; }
-.pcard:has(input:checked) { border-color: var(--hero); box-shadow: 0 0 0 1px var(--hero); }
-.pcard:has(input:focus-visible) { outline: 2px solid var(--info); outline-offset: 2px; }
-.pcard input { position: absolute; opacity: 0; pointer-events: none; }
-.pcard .ptop { display: flex; align-items: center; gap: 8px; }
-.pcard .ptop .mark { width: 44px; height: 28px; flex: none; }
-.pcard .pn { font-size: 15px; }
-.pcard .pk { margin-left: auto; font: 10px var(--mono); color: var(--faint); }
-.pcard .sw { display: flex; gap: 4px; }
-.pcard .sw i { width: 18px; height: 10px; border-radius: 3px; border: 1px solid var(--line); }
-.pcard .ph { font-size: 12px; color: var(--fg); background: var(--pane); border: 1px solid var(--line); border-radius: 3px 10px 10px 10px; padding: 6px 9px; line-height: 1.45; }
-.pcard .pt { font-size: 11px; color: var(--dim); }
-@media (max-width: 1020px) { .ppick { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
