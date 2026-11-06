@@ -39,6 +39,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if CommandLine.arguments.contains("--dashboard") || AppConfig.env["NED_OPEN_DASHBOARD"] == "1" {
                 DashboardWindowController.shared.show()
             }
+            if CommandLine.arguments.contains("--persona-selftest") {
+                Task { await PersonaSelfTest.run() }
+            }
             // Diagnostic: exercise the same register/unregister path as the menu toggle and log it.
             if CommandLine.arguments.contains("--login-item-selftest") {
                 var li = LoginItem()
@@ -65,13 +68,54 @@ struct MenuBarLabel: View {
     @ObservedObject var store: StateStore
 
     var body: some View {
+        let p = store.persona
+        let mode: Persona.Mode = !store.state.daemonAlive ? .offline : (store.attentionCount > 0 ? .attention : .idle)
         HStack(spacing: 3) {
-            Image(systemName: store.state.daemonAlive ? (store.attentionCount > 0 ? "eyeglasses" : "eye") : "eye.slash")
             if store.attentionCount > 0 {
-                Text("\(store.attentionCount)").font(.system(size: 11, weight: .semibold)).monospacedDigit()
-            } else if store.runningCount > 0 {
-                Text("\(store.runningCount)").font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
+                // MenuBarExtra keeps only one image + one text from the label, and templates the
+                // image; so the symbol and the accent badge are composed into one non-template image.
+                Image(nsImage: Self.badged(p.symbol(mode), count: store.attentionCount, color: p.accentNS))
+                    .accessibilityLabel("\(p.displayName): 확인할 것 \(store.attentionCount)건")
+                    // New identity per persona/count/mode: an in-place NSImage swap could lag a redraw.
+                    .id("\(p.id.rawValue)-\(store.attentionCount)-\(mode)")
+            } else {
+                Image(systemName: p.symbol(mode))
+                if store.runningCount > 0 {
+                    Text("\(store.runningCount)").font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
+                }
             }
         }
+        .help(p.displayName)
+    }
+
+    /// Symbol in the menu bar's label color + an accent capsule holding the count (text black or
+    /// white, whichever reads on the accent). Drawn lazily, so `labelColor` follows the bar's appearance.
+    static func badged(_ symbol: String, count n: Int, color: NSColor) -> NSImage {
+        let sym = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 13, weight: .regular)) ?? NSImage()
+        let text = n > 99 ? "99+" : "\(n)"
+        let rgb = color.usingColorSpace(.sRGB) ?? color
+        let lum = 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .bold),
+            .foregroundColor: lum > 0.55 ? NSColor.black : NSColor.white,
+        ]
+        let ts = (text as NSString).size(withAttributes: attrs)
+        let badge = NSSize(width: max(14, ceil(ts.width) + 8), height: 14)
+        let gap: CGFloat = 3
+        let size = NSSize(width: ceil(sym.size.width) + gap + badge.width, height: max(ceil(sym.size.height), badge.height))
+        let img = NSImage(size: size, flipped: false) { _ in
+            let sr = NSRect(x: 0, y: (size.height - sym.size.height) / 2, width: sym.size.width, height: sym.size.height)
+            sym.draw(in: sr)
+            NSColor.labelColor.set()
+            sr.fill(using: .sourceAtop)
+            let br = NSRect(x: sr.maxX + gap, y: (size.height - badge.height) / 2, width: badge.width, height: badge.height)
+            color.setFill()
+            NSBezierPath(roundedRect: br, xRadius: br.height / 2, yRadius: br.height / 2).fill()
+            (text as NSString).draw(at: NSPoint(x: br.midX - ts.width / 2, y: br.midY - ts.height / 2), withAttributes: attrs)
+            return true
+        }
+        img.isTemplate = false
+        return img
     }
 }

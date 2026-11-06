@@ -93,6 +93,10 @@ struct NedState: Codable {
     var last_heartbeat_at: Double? = nil
     var next_heartbeat_at: Double? = nil
     var quiet: Bool = false
+    /// Raw `persona` from the daemon (config.persona). Missing/unknown → ned via `personaID`.
+    var persona: String? = nil
+
+    var personaID: PersonaID { PersonaID(raw: persona) }
 
     init() {}
 
@@ -106,6 +110,7 @@ struct NedState: Codable {
         last_heartbeat_at = try? c.decodeIfPresent(Double.self, forKey: .last_heartbeat_at)
         next_heartbeat_at = try? c.decodeIfPresent(Double.self, forKey: .next_heartbeat_at)
         quiet = (try? c.decodeIfPresent(Bool.self, forKey: .quiet)) ?? false
+        persona = try? c.decodeIfPresent(String.self, forKey: .persona)
     }
 
     /// Daemon writes state at least every heartbeat; treat >20 min silence as dead.
@@ -128,10 +133,22 @@ final class StateStore: ObservableObject {
     private var timer: Timer?
     private var pendingReload: DispatchWorkItem?
 
+    /// Optimistic choice from the menu's 페르소나 submenu, shown until the daemon's state.json
+    /// reports a persona different from `overrideBase` (it caught up, or someone else changed it).
+    @Published private(set) var personaOverride: PersonaID? = nil
+    private var overrideBase: PersonaID = .ned
+
+    var personaID: PersonaID { personaOverride ?? state.personaID }
+    var persona: Persona { personaID.persona }
+
     var attentionCount: Int { state.attention.count }
     var runningCount: Int { state.sessions.filter { $0.status == "running" }.count }
 
+    /// The app's single store (for `--persona-selftest`).
+    static weak var current: StateStore?
+
     init() {
+        Self.current = self
         log.info("NED_HOME=\(self.home, privacy: .public)")
         reload()
         watch()
@@ -154,7 +171,16 @@ final class StateStore: ObservableObject {
         }
         do {
             let decoded = try JSONDecoder().decode(NedState.self, from: data)
+            let before = personaID
+            if let o = personaOverride, decoded.personaID == o || decoded.personaID != overrideBase {
+                personaOverride = nil
+            }
             state = decoded
+            if personaID != before {
+                let p = persona
+                DaemonManager.shared.note("persona \(before.rawValue) -> \(personaID.rawValue) (state.json persona=\(decoded.persona ?? "nil")) label=\(p.symbol(decoded.daemonAlive ? (decoded.attention.isEmpty ? .idle : .attention) : .offline)) accent=\(p.accentHex) header=\(p.headerTitle)")
+            }
+            PersonaIcon.apply(personaID)
             lastError = nil
             Notifier.shared.stateDidLoad(decoded, store: self)
             log.info("decoded state: sessions=\(decoded.sessions.count) attention=\(decoded.attention.count) briefing=\(decoded.last_briefing?.status ?? "nil", privacy: .public) quiet=\(decoded.quiet)")
@@ -217,4 +243,35 @@ final class StateStore: ObservableObject {
     }
 
     func triggerHeartbeat() { post("/api/heartbeat") }
+
+    /// 페르소나 submenu: switch immediately, PUT {persona} to the daemon's config route, revert on failure.
+    func setPersona(_ id: PersonaID) {
+        guard id != personaID else { return }
+        let previous = personaOverride
+        let previousBase = overrideBase
+        overrideBase = state.personaID
+        personaOverride = id
+        PersonaIcon.apply(personaID)
+        var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/config")!)
+        req.httpMethod = "PUT"
+        req.timeoutInterval = 3
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["persona": id.rawValue])
+        DaemonManager.shared.note("PUT /api/config {\"persona\":\"\(id.rawValue)\"} (optimistic)")
+        URLSession.shared.dataTask(with: req) { _, resp, err in
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            let desc = err?.localizedDescription
+            Task { @MainActor in
+                guard self.personaOverride == id else { return } // superseded by a later pick
+                if desc == nil, (200..<300).contains(code) {
+                    DaemonManager.shared.note("PUT /api/config persona=\(id.rawValue) -> \(code)")
+                } else {
+                    DaemonManager.shared.note("PUT /api/config persona=\(id.rawValue) FAILED (\(desc ?? "HTTP \(code)")) — reverting")
+                    self.personaOverride = previous
+                    self.overrideBase = previousBase
+                    PersonaIcon.apply(self.personaID)
+                }
+            }
+        }.resume()
+    }
 }

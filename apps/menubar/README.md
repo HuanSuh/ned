@@ -84,6 +84,7 @@ kill <pid>                                            # quits cleanly (stops the
 
 Launch args: `--dashboard` opens the window at launch (`NED_OPEN_DASHBOARD=1` does the same).
 `--login-item-selftest` registers then unregisters the Login Item and logs both results.
+`--persona-selftest` logs persona resolution and exercises the persona PUT (see Persona below).
 
 Logs go to the unified log:
 
@@ -172,3 +173,39 @@ existing items as seen instead of notifying. Session ids are forgotten once they
 (the next alert notifies again); others after 7 days. Every request and its result is logged to
 `$NED_HOME/logs/app-daemon.log` as `notify: …`. Notifications need the bundle (`scripts/package.sh`);
 the bare `.build/release/Ned` binary cannot use `UNUserNotificationCenter`.
+
+## Persona
+
+`state.json` `persona` (the daemon's `config.persona`: `ned` | `alfred` | `oracle` | `jarvis`;
+missing or unknown → `ned`) picks the name, colors and copy. It switches live on the next
+state.json reload, no restart. Definitions are in `Sources/Ned/Persona.swift`.
+
+| id | menu bar symbol idle / attention / offline | accent | quiet line |
+|---|---|---|---|
+| ned | `eye` / `eyeglasses` / `eye.slash` | #e23636 (LED #4a78f0) | 레이더 깨끗함 |
+| alfred | `person.crop.circle` / `bell` / `person.crop.circle.badge.xmark` | #d4af37 | 현재 보고드릴 사항이 없습니다 |
+| oracle | `headphones` / `waveform` / `antenna.radiowaves.left.and.right.slash` | #8b5cf6 (LED #3ddc84) | 이상 무. 대기 중. |
+| jarvis | `circle.hexagongrid` / `circle.hexagongrid.fill` / `circle.slash` | #38bdf8 | 모든 시스템 정상입니다 |
+
+All of these symbols exist on macOS 13 or earlier. If a name is ever missing at runtime,
+Ned's eye symbols are used instead. While there is attention, the label shows a single
+non-template image: the symbol plus a count capsule in the accent color.
+
+- **Menu**: the header name and color, the quiet line, a time-of-day greeting when nothing
+  needs attention, the LED and button tint, and a `페르소나: <name>` pop-up next to
+  "저장소 위치…". Picking a persona there switches the UI right away and sends
+  `PUT /api/config {"persona":"<id>"}`. If the PUT fails, the UI goes back to the previous
+  persona.
+- **Notifications**: the briefing title is the persona name, the persona name is the subtitle
+  of per-item banners, and the >3 summary uses the persona's own wording.
+- **App icon**: `Resources/marks/<id>.svg` holds plain original geometry (ned.svg is the
+  existing glasses mark). `scripts/make-icon.sh --all` turns these into `Resources/Ned.icns`
+  and `Ned-<id>.icns`. At runtime the app sets `NSApp.applicationIconImage` to the persona's
+  icon, which shows in the Dock while the dashboard is open, in alerts, and in the About panel.
+  **Limitation:** Finder, the Login Items list and notification banners take the bundle's
+  `CFBundleIconFile`, which stays `Ned.icns`. Changing it per persona would mean rewriting
+  `Info.plist` and re-signing, which we don't do.
+- **Self-test** (log only, no UI input): `.build/Ned.app/Contents/MacOS/Ned --persona-selftest`
+  writes every persona's resolution and the decode fallbacks to `$NED_HOME/logs/app-daemon.log`.
+  It then calls `StateStore.setPersona` (the same function as the pop-up) for alfred and jarvis,
+  and quits. Set `NED_SELFTEST_WAIT=<s>` to keep it running so you can edit state.json by hand.

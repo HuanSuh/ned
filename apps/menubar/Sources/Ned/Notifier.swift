@@ -17,7 +17,9 @@ import UserNotifications
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
 
-    private let center = UNUserNotificationCenter.current()
+    // Lazy: `current()` throws (NSInternalInconsistencyException) outside a .app bundle, and the
+    // bare `.build/release/Ned` binary is the documented way to check UI changes on macOS 26.
+    private lazy var center = UNUserNotificationCenter.current()
     private let defaults = AppConfig.defaults
     // Scoped by NED_HOME: a test bundle (same bundle id) must not touch the real app's seen set.
     private let seenKey = "notifySeen:" + AppConfig.home
@@ -36,6 +38,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// Call from applicationDidFinishLaunching: delegate, categories, then authorization.
     func start() {
+        guard Bundle.main.bundleURL.pathExtension == "app" else {
+            note("not running from a .app bundle — native notifications off")
+            return
+        }
         center.delegate = self
         center.setNotificationCategories(Self.categories())
         center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
@@ -104,19 +110,22 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             return
         }
         let silent = state.quiet
+        // Optimistic menu pick wins over a state.json that has not caught up yet.
+        let persona = store?.persona ?? state.personaID.persona
 
         if fresh.count > 3 {
             let first = fresh.sorted { priority($0) > priority($1) }[0]
             let urgent = fresh.contains { $0.kind == "session" }
-            post(id: "summary:\(Int(now))", title: "Ned: 확인할 것 \(fresh.count)건",
-                 body: "\(first.title) 외 \(fresh.count - 1)건",
+            post(id: "summary:\(Int(now))", title: persona.summaryTitle(fresh.count),
+                 body: persona.summaryBody(first.title, fresh.count - 1),
                  category: "ned.summary", urgent: urgent, silent: silent, info: [:])
         } else {
             for a in fresh {
                 var info: [String: String] = ["attentionId": a.id]
                 if let u = a.url, !u.isEmpty { info["url"] = u }
                 let kind = Self.kinds.contains(a.kind) ? a.kind : "other"
-                post(id: a.id, title: a.title, body: a.detail ?? "",
+                // Item title stays the content; the persona name rides in the subtitle.
+                post(id: a.id, title: a.title, subtitle: persona.displayName, body: a.detail ?? "",
                      category: "ned.\(kind)" + (info["url"] != nil ? ".link" : ""),
                      urgent: a.kind == "session", silent: silent, info: info)
             }
@@ -125,7 +134,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             if fresh.contains(where: { $0.source == b.id }) {
                 note("briefing \(b.id) UPDATE covered by attention notifications — no separate banner")
             } else {
-                post(id: "briefing:\(b.id)", title: "Ned", body: b.headline ?? "새 브리핑",
+                post(id: "briefing:\(b.id)", title: persona.displayName, body: b.headline ?? persona.briefingFallback,
                      category: "ned.briefing", urgent: false, silent: silent, info: [:])
             }
         }
@@ -135,10 +144,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     private func priority(_ a: AttentionItem) -> Int { a.kind == "session" ? 1 : 0 }
 
-    private func post(id: String, title: String, body: String, category: String,
+    private func post(id: String, title: String, subtitle: String = "", body: String, category: String,
                       urgent: Bool, silent: Bool, info: [String: String]) {
         let c = UNMutableNotificationContent()
         c.title = title
+        c.subtitle = subtitle
         c.body = body
         c.categoryIdentifier = category
         c.userInfo = info
@@ -152,7 +162,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 if let error {
                     self.note("request \(id) FAILED: \(error.localizedDescription)")
                 } else {
-                    self.note("request \(id) delivered (category=\(category) level=\(level) silent=\(silent)) title=\(title)")
+                    self.note("request \(id) delivered (category=\(category) level=\(level) silent=\(silent)) title=\(title)" + (subtitle.isEmpty ? "" : " subtitle=\(subtitle)") + " body=\(body)")
                 }
             }
         }

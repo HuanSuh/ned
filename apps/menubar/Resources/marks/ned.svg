@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Ned">
+  <!-- Ned mark: round nerd glasses on a rounded tile. Works as app icon (64px+) and favicon (16px). -->
+  <rect width="64" height="64" rx="14" fill="#1c2430"/>
+  <g fill="none" stroke="#f4f1e8" stroke-width="4.5" stroke-linecap="round">
+    <circle cx="20" cy="34" r="10"/>
+    <circle cx="44" cy="34" r="10"/>
+    <path d="M30 33q2-3.5 4 0"/>
+    <path d="M10 31 5 26M54 31l5-5"/>
+  </g>
+  <path d="M14.5 30.5a6.5 6.5 0 0 1 5-4" stroke="#7fe0c4" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+  <path d="M38.5 30.5a6.5 6.5 0 0 1 5-4" stroke="#7fe0c4" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+</svg>

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the menu bar app and wrap it in a minimal .app bundle at .build/Ned.app.
 # The app supervises the daemon itself (see Sources/Ned/DaemonManager.swift); scripts/install.sh
-# copies this bundle to /Applications. Icon: Resources/Ned.icns (regenerate with scripts/make-icon.sh).
+# copies this bundle to /Applications. Icons: Resources/Ned*.icns (regenerate with scripts/make-icon.sh --all).
 # Usage: scripts/package.sh && open --env NED_HOME=/tmp/ned-mb --env NED_PORT=7790 .build/Ned.app
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -9,7 +9,9 @@ swift build -c release 2>&1 | tail -1
 APP=".build/Ned.app"
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/Ned "$APP/Contents/MacOS/Ned"
-cp Resources/Ned.icns "$APP/Contents/Resources/Ned.icns"
+# Ned.icns is the bundle icon (Finder, Login Items, notification banners); Ned-<persona>.icns are
+# applied at runtime through NSApp.applicationIconImage (Sources/Ned/Persona.swift).
+cp Resources/Ned*.icns "$APP/Contents/Resources/"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

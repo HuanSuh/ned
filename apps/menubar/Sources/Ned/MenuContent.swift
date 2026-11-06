@@ -12,7 +12,7 @@ struct MenuContent: View {
             header
             daemonLine
             if !store.state.daemonAlive && !daemon.isHealthy {
-                Label("Ned 데몬이 꺼져 있어요 — 로그를 확인하세요", systemImage: "exclamationmark.triangle")
+                Label("\(store.persona.displayName) 데몬이 꺼져 있어요 — 로그를 확인하세요", systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.orange)
             }
             if let e = store.lastError {
@@ -25,12 +25,16 @@ struct MenuContent: View {
                         AttentionRow(item: item) { store.dismiss(item.id) }
                     }
                 }
+            } else {
+                // Empty attention: the persona's greeting for this time of day.
+                Label(store.persona.greeting(), systemImage: store.persona.symbol(.idle))
+                    .font(.caption).foregroundStyle(.secondary)
             }
             section("에이전트 세션 (\(store.state.sessions.count))") {
                 if store.state.sessions.isEmpty {
                     Text("활성 세션 없음").font(.caption).foregroundStyle(.secondary)
                 }
-                ForEach(store.state.sessions.prefix(8)) { s in SessionRow(session: s) }
+                ForEach(store.state.sessions.prefix(8)) { s in SessionRow(session: s, live: store.persona.led) }
             }
             Divider()
             settings
@@ -38,12 +42,14 @@ struct MenuContent: View {
         }
         .padding(12)
         .frame(width: 360)
+        .tint(store.persona.accent)
         .onAppear { loginItem.refresh() }
     }
 
     private var daemonLine: some View {
         HStack(spacing: 6) {
             Circle().fill(daemonColor).frame(width: 7, height: 7)
+                .shadow(color: daemon.isHealthy ? store.persona.led.opacity(0.7) : .clear, radius: 2)
             Text(daemon.statusLine).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 .help(daemon.repoPath.map { "저장소: \($0)" } ?? "저장소 미지정")
             Spacer(minLength: 4)
@@ -56,8 +62,7 @@ struct MenuContent: View {
 
     private var daemonColor: Color {
         switch daemon.status {
-        case .running: return .green
-        case .external: return .teal
+        case .running, .external: return store.persona.led
         case .starting, .checking: return .yellow
         case .failed: return .red
         }
@@ -72,9 +77,30 @@ struct MenuContent: View {
             if let m = loginItem.message {
                 Text(m).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            Button("저장소 위치…") { chooseRepo() }.buttonStyle(.link).font(.caption)
-                .help(daemon.repoPath ?? "")
+            HStack(spacing: 12) {
+                Button("저장소 위치…") { chooseRepo() }.buttonStyle(.link).font(.caption)
+                    .help(daemon.repoPath ?? "")
+                personaMenu
+            }
         }
+    }
+
+    /// 페르소나 submenu (radio). Optimistic: StateStore switches now and reverts if the PUT fails.
+    private var personaMenu: some View {
+        Menu {
+            Picker("페르소나", selection: Binding(
+                get: { store.personaID },
+                set: { store.setPersona($0) })) {
+                ForEach(PersonaID.allCases) { p in Text(p.persona.displayName).tag(p) }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Text("페르소나: \(store.persona.displayName)").font(.caption)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("메뉴 막대·알림의 이름과 색 — 데몬 설정(PUT /api/config)에 저장")
     }
 
     private func chooseRepo() {
@@ -98,9 +124,12 @@ struct MenuContent: View {
 
     private var header: some View {
         HStack {
-            Text("Ned").font(.headline)
-            if let b = store.state.last_briefing {
-                Text(b.status == "NED_OK" ? "조용함" : (b.headline ?? "업데이트"))
+            Text(store.persona.headerTitle).font(.headline).foregroundStyle(store.persona.accent)
+            if let b = store.state.last_briefing, b.status != "NED_OK" {
+                Text(b.headline ?? "업데이트")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            } else {
+                Text(store.persona.nothingNew)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
@@ -169,6 +198,7 @@ struct AttentionRow: View {
 
 struct SessionRow: View {
     let session: SessionView
+    var live: Color = .green
 
     var body: some View {
         HStack(spacing: 8) {
@@ -192,7 +222,7 @@ struct SessionRow: View {
 
     private var color: Color {
         switch session.status {
-        case "running": return .green
+        case "running": return live
         case "waiting": return .orange
         case "error": return .red
         case "done": return .blue
