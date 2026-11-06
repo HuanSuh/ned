@@ -15,6 +15,16 @@ export interface ClaudeRunResult {
   error?: string;
   /** The argv the answering `claude` actually ran with (after a connector fallback: the full args). */
   argv?: string[];
+  /** Session id of the answering run (result line, else its system/init) — `--resume` continues it. */
+  session_id?: string;
+  /** Stopped through ClaudeStreamHooks.signal. */
+  aborted?: boolean;
+}
+
+/** Live hooks for a streaming caller (chat): every parsed stream-json line, and an abort signal (→ SIGTERM). */
+export interface ClaudeStreamHooks {
+  onEvent?: (j: Record<string, unknown>) => void;
+  signal?: AbortSignal;
 }
 
 /** `NED_NO_LLM=1` makes heartbeats skip `claude -p` entirely (tests, dry runs). */
@@ -55,6 +65,12 @@ export interface ClaudeRunOptions {
    * Omitted = `config.claude_fast_startup` (default on). Ignored when `isolated` (that already skips more).
    */
   fastStartup?: boolean;
+  /** `--resume <session id>`: continue that conversation (chat). */
+  resume?: string;
+  /** `--append-system-prompt` (chat: persona + rules + fresh context on every turn, also on resume). */
+  appendSystemPrompt?: string;
+  /** `--include-partial-messages`: stream_event text deltas (chat). */
+  includePartial?: boolean;
 }
 
 /**
@@ -128,6 +144,9 @@ export function buildClaudeArgs(opts: ClaudeRunOptions): string[] {
   if (opts.allowedTools.length) args.push("--allowedTools", ...opts.allowedTools);
   if (opts.model) args.push("--model", opts.model);
   if (opts.effort) args.push("--effort", opts.effort);
+  if (opts.resume) args.push("--resume", opts.resume);
+  if (opts.appendSystemPrompt) args.push("--append-system-prompt", opts.appendSystemPrompt);
+  if (opts.includePartial) args.push("--include-partial-messages");
   if (opts.isolated) args.push("--setting-sources", "", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--disable-slash-commands");
   else if (fast) args.push(...fastStartupArgs());
   return args;
@@ -145,16 +164,16 @@ function wantsConnectors(opts: ClaudeRunOptions): boolean {
  * connector in its MCP server list it is killed right at init (no API spend) and re-run with the full args, and the
  * rest of this process stays on the full args.
  */
-export async function runClaude(prompt: string, opts: ClaudeRunOptions): Promise<ClaudeRunResult> {
+export async function runClaude(prompt: string, opts: ClaudeRunOptions, hooks: ClaudeStreamHooks = {}): Promise<ClaudeRunResult> {
   const fast = !opts.isolated && (opts.fastStartup ?? fastStartupEnabled());
   const guard = fast && wantsConnectors(opts);
   let argv = buildClaudeArgs({ ...opts, fastStartup: fast });
-  let r = await spawnClaude(prompt, argv, opts.timeoutMs, guard);
-  if (r.noConnectors) {
+  let r = await spawnClaude(prompt, argv, opts.timeoutMs, guard, hooks);
+  if (r.noConnectors && !hooks.signal?.aborted) {
     fastStartupBroken = true;
     log(`claude -p: fast start-up came up without claude.ai connectors (${r.mcp_servers?.join(", ") || "no MCP servers"}) — falling back to full settings for this daemon run`);
     argv = buildClaudeArgs({ ...opts, fastStartup: false });
-    r = await spawnClaude(prompt, argv, opts.timeoutMs, false);
+    r = await spawnClaude(prompt, argv, opts.timeoutMs, false, hooks);
   }
   if (opts.job && r.cost_usd > 0) recordCost(opts.job, r.cost_usd);
   const { noConnectors: _n, mcp_servers: _m, ...res } = r;
@@ -173,7 +192,7 @@ interface SpawnResult extends ClaudeRunResult {
  * same fields as `--output-format json`, and the `system/init` line lists the MCP servers so a connector-less start can
  * be cut before the first API call. A server still `pending` at init counts as present (connectors attach late).
  */
-function spawnClaude(prompt: string, args: string[], timeoutMs: number | undefined, guardConnectors: boolean): Promise<SpawnResult> {
+function spawnClaude(prompt: string, args: string[], timeoutMs: number | undefined, guardConnectors: boolean, hooks: ClaudeStreamHooks = {}): Promise<SpawnResult> {
   return new Promise((resolve) => {
     const started = Date.now();
     // Long list answers (Slack items + all + watch channels) can exceed the CLI's default output cap and come back
@@ -187,12 +206,15 @@ function spawnClaude(prompt: string, args: string[], timeoutMs: number | undefin
     let servers: string[] | undefined;
     let noConnectors = false;
     let settled = false;
+    let sessionId: string | undefined;
+    let aborted = false;
     const finish = (r: SpawnResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       clearTimeout(killTimer);
-      resolve(r);
+      hooks.signal?.removeEventListener("abort", onAbort);
+      resolve({ ...r, session_id: r.session_id ?? sessionId, ...(aborted ? { aborted: true } : {}) });
     };
     let killTimer: NodeJS.Timeout | undefined;
     const timer = setTimeout(() => {
@@ -204,6 +226,18 @@ function spawnClaude(prompt: string, args: string[], timeoutMs: number | undefin
         finish({ ok: false, text: lastText, cost_usd: 0, num_turns: 0, duration_ms: Date.now() - started, error: err || "timeout", mcp_servers: servers });
       }, 10_000);
     }, timeoutMs ?? 10 * 60_000);
+    // Stop (chat): SIGTERM now, SIGKILL if it lingers; answer right away with what streamed so far.
+    function onAbort() {
+      if (settled) return;
+      aborted = true;
+      child.kill("SIGTERM");
+      setTimeout(() => { if (child.exitCode === null) child.kill("SIGKILL"); }, 5_000).unref?.();
+      child.stdout.destroy();
+      child.stderr.destroy();
+      finish({ ok: false, text: lastText, cost_usd: Number((result as Record<string, unknown> | null)?.total_cost_usd ?? 0), num_turns: 0, duration_ms: Date.now() - started, error: "aborted", mcp_servers: servers });
+    }
+    if (hooks.signal?.aborted) queueMicrotask(onAbort);
+    else hooks.signal?.addEventListener("abort", onAbort, { once: true });
     child.on("error", (e) => finish({ ok: false, text: "", cost_usd: 0, num_turns: 0, duration_ms: Date.now() - started, error: `spawn claude: ${e.message}` }));
     child.stdin.on("error", () => { /* EPIPE after an early kill */ });
     const onLine = (line: string) => {
@@ -212,6 +246,12 @@ function spawnClaude(prompt: string, args: string[], timeoutMs: number | undefin
         j = JSON.parse(line) as Record<string, unknown>;
       } catch {
         return;
+      }
+      if (typeof j.session_id === "string" && (j.type === "result" || (j.type === "system" && j.subtype === "init"))) sessionId = j.session_id;
+      try {
+        hooks.onEvent?.(j);
+      } catch {
+        /* a listener bug must not break the run */
       }
       if (j.type === "result") result = j;
       else if (j.type === "assistant") {

@@ -5,7 +5,7 @@ import { NED_HOME, localDay, readJson, writeJsonAtomic } from "./paths.js";
 export const COSTS_PATH = path.join(NED_HOME, "costs.json");
 const KEEP_DAYS = 30;
 
-export type CostJob = "agenda" | "agenda_context" | "heartbeat" | "draft" | "calendar" | "action";
+export type CostJob = "agenda" | "agenda_context" | "heartbeat" | "draft" | "calendar" | "action" | "chat";
 
 export interface DayCost {
   total_usd: number;

@@ -60,6 +60,8 @@ export interface NedConfig {
   agenda_light_model: string | null;
   /** Dashboard home: source card order + width (1 = half row, 2 = full row) — Settings → 홈 카드 배치. */
   dashboard: NedDashboard;
+  /** Ned 채팅 (POST /api/chat) runs even when today's spend ≥ agenda_daily_budget_usd. Default false: 429 over budget. */
+  chat_ignore_budget: boolean;
 }
 
 export const DASHBOARD_CARDS = ["slack", "mail", "jira", "github"] as const;
@@ -396,6 +398,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   agenda_daily_budget_usd: 15,
   agenda_light_model: "sonnet",
   dashboard: DEFAULT_DASHBOARD,
+  chat_ignore_budget: false,
 };
 
 /** A finite number within [min, max] (truncated when `int`), else `fallback`. */
@@ -425,6 +428,7 @@ export function loadConfig(): NedConfig {
       reply_tone_by_source: normalizeReplyToneBySource(parsed.reply_tone_by_source),
       draft_context_max_age_minutes: Number.isFinite(Number(parsed.draft_context_max_age_minutes)) && Number(parsed.draft_context_max_age_minutes) >= 0 ? Number(parsed.draft_context_max_age_minutes) : DEFAULT_CONFIG.draft_context_max_age_minutes,
       drafts_pregenerate: parsed.drafts_pregenerate === true,
+      chat_ignore_budget: parsed.chat_ignore_budget === true,
       dashboard: normalizeDashboard(parsed.dashboard, DEFAULT_DASHBOARD, watchChannels(filters)),
       agenda_source_minutes: normalizeAgendaSourceMinutes(parsed.agenda_source_minutes),
       agenda_all_limit: numIn(parsed.agenda_all_limit, 1, 50, DEFAULT_CONFIG.agenda_all_limit),

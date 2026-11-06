@@ -171,6 +171,10 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 | DELETE | `/api/todos/:id` | 삭제. 없으면 404 |
 | POST | `/api/draft` | 답장·코멘트 초안 3개 (Slack / 메일 / 에이전트 세션 / Jira 코멘트 / GitHub 리뷰). 읽기 전용 `claude -p`. 아래 참고 |
 | GET | `/api/draft/status` | 초안 미리 생성 마지막 실행 `{ pregenerated, skipped_cached, failed, cost_usd, last_run_ts, running }` |
+| POST | `/api/chat` | Ned 채팅 한 턴 `{ conversation_id?, text ≤2000자 }` → `text/event-stream`: `start{conversation_id,title}` → `delta{text}`* (`turn` = 새 응답 시작, `tool{name,label}`) → `done{text,stopped,cost_usd,chat_cost_usd,today_usd}` \| `error{error}`. 400 빈/긴 입력, 404 모르는 대화, 409 다른 턴 진행 중, 429 일일 예산 초과(`chat_ignore_budget: true` 면 예외). 읽기 도구만(`--tools ToolSearch,Bash`, 커넥터 읽기 + `gh` 읽기·`orca status`), plan 모드, `--resume <session_id>` 로 이어감, 비용 job `chat`. 저장: `~/.ned/chats/<id>.json` (최근 20개) |
+| GET | `/api/chats` | `{ chats: [{id,title,updated_at,messages,cost_usd}], active, input_max }` 최신순 |
+| GET | `/api/chat/:id` | 저장된 대화 `{ id, title, session_id, cost_usd, messages: [{role: user\|ned, text, ts, cost_usd?, error?, stopped?}], running }` |
+| POST | `/api/chat/:id/stop` | 진행 중인 턴에 SIGTERM (없으면 404). 지금까지 흐른 텍스트가 `stopped: true` 로 저장됨 |
 | POST | `/api/send` | 초안 보내기 — `config.actions` 로 켠 것만. 꺼져 있으면 403 |
 | GET | `/api/actions` | `sent-actions.log` 최근 50건 (최신 먼저) |
 
