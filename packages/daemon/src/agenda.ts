@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractJson, llmDisabled, runClaude } from "./claude.js";
 import { filtersPrompt, jqlExclude, type NedConfig } from "./config.js";
+import { personaPrompt } from "./persona.js";
 import { AGENDA_PATH, log, readJson, writeJsonAtomic } from "./paths.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -269,6 +270,7 @@ export function buildPrompt(cfg: NedConfig, now = new Date()): string {
     .replaceAll("{{GITHUB}}", off(cfg.sources.github))
     .replaceAll("{{GMAIL}}", off(cfg.sources.gmail))
     .replaceAll("{{SLACK}}", off(cfg.sources.slack))
+    .replaceAll("{{PERSONA}}", () => personaPrompt(cfg.persona))
     .replaceAll("{{FILTERS}}", () => filtersPrompt(cfg.filters))
     .replaceAll("{{JQL_EXCLUDE}}", () => (jqlExclude(cfg.filters) ? ` ${jqlExclude(cfg.filters)}` : ""))
     .replaceAll("{{SLACK_SINCE}}", String(Math.floor(now.getTime() / 1000) - 24 * 3600));

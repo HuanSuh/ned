@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ned</title>
+<script>try { const p = localStorage.getItem("ned.persona"); if (["ned", "alfred", "oracle", "jarvis"].includes(p)) document.documentElement.dataset.persona = p; } catch {} if (!document.documentElement.dataset.persona) document.documentElement.dataset.persona = "ned";</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;700&family=Share+Tech+Mono&display=swap">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%231c2430'/><g fill='none' stroke='%23f4f1e8' stroke-width='4.5' stroke-linecap='round'><circle cx='20' cy='34' r='10'/><circle cx='44' cy='34' r='10'/><path d='M30 33q2-3.5 4 0'/><path d='M10 31 5 26M54 31l5-5'/></g><path d='M14.5 30.5a6.5 6.5 0 0 1 5-4' stroke='%237fe0c4' stroke-width='2.6' stroke-linecap='round' fill='none'/><path d='M38.5 30.5a6.5 6.5 0 0 1 5-4' stroke='%237fe0c4' stroke-width='2.6' stroke-linecap='round' fill='none'/></svg>">
 <style>
   /* Ned dashboard — inbox/triage body (direction C) wearing the sidekick identity (direction E).
@@ -11,24 +14,157 @@
      Two accents: --hero (red: primary buttons, active tab, now-line, selection) and --info (blue: links, info badges,
      secondary emphasis). Mint stays Ned's own colour (lens mark, live LED). Status colours are separate:
      --red is *error* only — deeper than --hero and drawn outlined/dashed so it never reads as the accent. */
-  :root {
+  :root, [data-persona="ned"] {
     color-scheme: dark light;
     --bg: #0f1420; --side: #131a2a; --pane: #171f31; --raise: #1d263b; --hover: #232d45; --sel: #2a1d2b; --line: #28324b;
     --fg: #e8ebf3; --dim: #9ca6bd; --faint: #626d88; --edge: #3b4867;
-    --hero: #e23636; --hero-ink: #ffffff; --info: #5b87f0; --info-ink: #ffffff;
+    --hero: #e23636; --hero-fill: #d42a2a; --hero-text: #ff6161; --hero-ink: #ffffff; --info: #6b8ff5; --info-ink: #ffffff; --blue2: #1f4fd1;
     --mint: #5cc4a3; --amber: #f0ad3c; --red: #f08c80; --blue: var(--info); --lens: #5cc4a3;
-    --accent: var(--hero); --accent-ink: #ffffff; --bubble: #1b2337; --violet: #a991f0;
-    --web: #c9d4f2; --web-a: .025;
+    --accent: var(--hero-fill); --accent-ink: #ffffff; --mk-frame: var(--fg); --mk-glint: var(--lens); --mk-fill: transparent; --bubble: #1b2337; --violet: #a991f0;
+    --web: #c9d4f2; --web-a: .04;
     --sans: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", "Noto Sans KR", sans-serif;
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   }
   @media (prefers-color-scheme: light) {
-    :root { --bg: #f6f2ea; --side: #fbf8f2; --pane: #fffdf9; --raise: #ffffff; --hover: #efe9de; --sel: #fbe7e3; --line: #e5ddcf;
+    :root, [data-persona="ned"] { --bg: #f6f2ea; --side: #fbf8f2; --pane: #fffdf9; --raise: #ffffff; --hover: #efe9de; --sel: #fbe7e3; --line: #e5ddcf;
       --fg: #1c2133; --dim: #5d6376; --faint: #9a9ead; --edge: #1c2133;
-      --hero: #d42a2a; --info: #2b5bd7;
+      --hero: #d42a2a; --hero-fill: #d42a2a; --hero-text: #b51f1f; --info: #1f4fd1; --blue2: #1f4fd1;
       --mint: #2d8a6d; --amber: #a96b00; --red: #8f1d17; --lens: #2f9a79;
       --bubble: #f8f3ea; --violet: #6a46c4; --web: #2a3350; --web-a: .045; }
   }
+  /* ---------- personas ----------
+     config.persona → <html data-persona>. Same features/data; voice (JS table + prompts/personas/*.md), tokens, fonts,
+     background pattern and mark (marks/<id>.svg) change. Rules are written on [data-persona="…"] (not only :root) so the
+     settings preview cards render each persona in its own colours. Every block re-declares the derived tokens
+     (--accent, --blue …) because a var() reference resolves where it is declared. Character names only — no logos,
+     quotes or likenesses; marks and patterns are plain geometry. */
+  [data-persona] { --head: var(--sans); --head-w: 650; }
+  .card > .hd h2, .nm b, .pcard .pn { font-family: var(--head); font-weight: var(--head-w); }
+
+  /* alfred — near-black + very dark navy, one restrained gold, serif headlines, gothic/art-deco lattice, header spotlight */
+  [data-persona="alfred"] {
+    --bg: #0b0d12; --side: #0e1119; --pane: #12151d; --raise: #171b25; --hover: #1d2230; --sel: #1d1b14; --line: #232938;
+    --fg: #ece6d6; --dim: #a9a291; --faint: #6f6c64; --edge: #3b3a35;
+    --hero: #d4af37; --hero-fill: #d4af37; --hero-text: #d9bf6a; --hero-ink: #14110a; --info: #d9bf6a; --info-ink: #14110a; --blue2: #d4af37;
+    --mint: #8fae99; --amber: #d9a441; --red: #f0907f; --lens: #d4af37; --violet: #b9ae8f;
+    --accent: var(--hero-fill); --accent-ink: var(--hero-ink); --blue: var(--info); --bubble: #151925;
+    --web: #d4af37; --web-a: .035;
+    --mk-frame: #d4af37; --mk-glint: #f3dc8f; --mk-fill: color-mix(in srgb, #d4af37 14%, transparent);
+    --head: "Noto Serif KR", "AppleMyungjo", "Nanum Myeongjo", Georgia, serif; --head-w: 700;
+  }
+  @media (prefers-color-scheme: light) {
+    [data-persona="alfred"] { --bg: #f3efe6; --side: #f9f6ef; --pane: #fffdf8; --raise: #ffffff; --hover: #ebe5d8; --sel: #f3ead2; --line: #e0d8c6;
+      --fg: #1b1a17; --dim: #5f5a50; --faint: #9c968a; --edge: #1b1a17;
+      --hero: #8a6d1e; --hero-fill: #8a6d1e; --hero-text: #7a5f15; --hero-ink: #ffffff; --info: #7a5f15; --info-ink: #ffffff; --blue2: #8a6d1e;
+      --mint: #3f7a55; --amber: #9a6700; --red: #8f1d17; --lens: #8a6d1e; --bubble: #f8f3e8; --web: #5a4610; --web-a: .05;
+      --mk-frame: #8a6d1e; --mk-glint: #b8932f; }
+  }
+
+  /* oracle — black + terminal green, purple secondary, monospace, scanlines + grid, cards as monitor tiles */
+  [data-persona="oracle"] {
+    --bg: #050605; --side: #080c09; --pane: #0a110c; --raise: #0e1811; --hover: #122217; --sel: #102a1a; --line: #183324;
+    --fg: #c9f3d8; --dim: #7fbf98; --faint: #4d7d61; --edge: #2b5b40;
+    --hero: #3ddc84; --hero-fill: #3ddc84; --hero-text: #3ddc84; --hero-ink: #03140a; --info: #a78bfa; --info-ink: #120a26; --blue2: #8b5cf6;
+    --mint: #3ddc84; --amber: #f2b33d; --red: #ff8a7a; --lens: #3ddc84; --violet: #a78bfa;
+    --accent: var(--hero-fill); --accent-ink: var(--hero-ink); --blue: var(--info); --bubble: #0c160f;
+    --web: #3ddc84; --web-a: .035; --scan-a: .22;
+    --mk-frame: #3ddc84; --mk-glint: #a78bfa; --mk-fill: color-mix(in srgb, #3ddc84 12%, transparent);
+    --sans: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace; --head: var(--sans); --head-w: 700;
+  }
+  @media (prefers-color-scheme: light) {
+    [data-persona="oracle"] { --bg: #edf3ee; --side: #f5f9f5; --pane: #fbfdfb; --raise: #ffffff; --hover: #e3ece5; --sel: #dcefe2; --line: #d3e1d6;
+      --fg: #0c2016; --dim: #3f6a52; --faint: #86a493; --edge: #0c2016;
+      --hero: #0d8a4a; --hero-fill: #0d7a42; --hero-text: #0d7a42; --hero-ink: #ffffff; --info: #6d28d9; --info-ink: #ffffff; --blue2: #6d28d9;
+      --mint: #0d8a4a; --amber: #946300; --red: #8f1d17; --lens: #0d8a4a; --bubble: #f2f8f3; --web: #0d5a32; --web-a: .05; --scan-a: .08;
+      --mk-frame: #0d7a42; --mk-glint: #6d28d9; }
+  }
+
+  /* jarvis — dark navy + cyan glow; gold and hot-rod red only as tiny secondary (badges / warnings); HUD rings; thin digital numerals */
+  [data-persona="jarvis"] {
+    --bg: #08101f; --side: #0b1528; --pane: #0f1b33; --raise: #14223d; --hover: #192a4a; --sel: #0f3049; --line: #1d3254;
+    --fg: #e3f1fb; --dim: #94b3cc; --faint: #5b7692; --edge: #2e4c71;
+    --hero: #38bdf8; --hero-fill: #38bdf8; --hero-text: #38bdf8; --hero-ink: #032131; --info: #7dd3fc; --info-ink: #032131; --blue2: #38bdf8;
+    --mint: #5fd4c0; --amber: #f0b429; --red: #ff8f86; --hot: #c0392b; --lens: #38bdf8; --violet: #a7a3ff;
+    --accent: var(--hero-fill); --accent-ink: var(--hero-ink); --blue: var(--info); --bubble: #122140;
+    --web: #7dd3fc; --web-a: .045; --glow: color-mix(in srgb, #38bdf8 45%, transparent);
+    --mk-frame: #38bdf8; --mk-glint: #7dd3fc; --mk-fill: color-mix(in srgb, #38bdf8 10%, transparent);
+    --num: "Share Tech Mono", "SF Mono", ui-monospace, monospace;
+    --head: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Helvetica Neue", sans-serif; --head-w: 300;
+  }
+  @media (prefers-color-scheme: light) {
+    [data-persona="jarvis"] { --bg: #eef5fb; --side: #f6fafd; --pane: #ffffff; --raise: #ffffff; --hover: #e4eef7; --sel: #ddeffa; --line: #d4e3ef;
+      --fg: #0d2236; --dim: #4b6680; --faint: #92a8bb; --edge: #0d2236;
+      --hero: #0284c7; --hero-fill: #0369a1; --hero-text: #0369a1; --hero-ink: #ffffff; --info: #075985; --info-ink: #ffffff; --blue2: #0284c7;
+      --mint: #0f8f7c; --amber: #f0b429; --red: #8f1d17; --hot: #c0392b; --lens: #0284c7; --bubble: #f2f8fd; --web: #0c4a6e; --web-a: .05;
+      --glow: color-mix(in srgb, #0284c7 28%, transparent); --mk-frame: #0369a1; --mk-glint: #0284c7; }
+  }
+
+  /* ---- marks: ned's glints split red / blue; jarvis' core pulses (reduced-motion rule elsewhere stops it) ---- */
+  [data-persona="ned"] .mark .g1 { stroke: var(--hero); }
+  [data-persona="ned"] .mark .g2 { stroke: var(--blue2); }
+  .mark .core { fill: var(--hero); stroke: none; }
+  [data-persona="jarvis"] .mark .core { animation: core 2.6s ease-in-out infinite; transform-origin: 32px 34px; transform-box: view-box; }
+  @keyframes core { 0%, 100% { opacity: .45; transform: scale(.85); } 50% { opacity: 1; transform: scale(1.12); } }
+
+  /* ---- ned: bolder red + blue ---- */
+  :root[data-persona="ned"] header.hq { border-bottom-color: transparent; }
+  :root[data-persona="ned"] header.hq::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; pointer-events: none; background: linear-gradient(90deg, var(--hero), var(--blue2)); }
+  :root[data-persona="ned"] .row.sel { border-left-color: var(--blue2); }
+  :root[data-persona="ned"] .stk.b, :root[data-persona="ned"] .chipx.rv { background: var(--blue2); color: #fff; }
+  :root[data-persona="ned"] .card { position: relative; }
+  :root[data-persona="ned"] .card > .hd { padding-right: 34px; }
+  :root[data-persona="ned"] .card::before { content: ""; position: absolute; top: 0; right: 0; width: 28px; height: 28px; pointer-events: none; border-top-right-radius: 10px; background: var(--fg); opacity: .18;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M40 0L0.0 0.0M40 0L3.0 15.3M40 0L11.7 28.3M40 0L24.7 37.0M40 0L40.0 40.0M28.0 0.0L28.9 4.6L31.5 8.5L35.4 11.1L40.0 12.0M18.0 0.0L19.7 8.4L24.4 15.6L31.6 20.3L40.0 22.0M8.0 0.0L10.4 12.2L17.4 22.6L27.8 29.6L40.0 32.0' fill='none' stroke='%23000' stroke-width='1'/%3E%3C/svg%3E") 0 0 / 28px 28px no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M40 0L0.0 0.0M40 0L3.0 15.3M40 0L11.7 28.3M40 0L24.7 37.0M40 0L40.0 40.0M28.0 0.0L28.9 4.6L31.5 8.5L35.4 11.1L40.0 12.0M18.0 0.0L19.7 8.4L24.4 15.6L31.6 20.3L40.0 22.0M8.0 0.0L10.4 12.2L17.4 22.6L27.8 29.6L40.0 32.0' fill='none' stroke='%23000' stroke-width='1'/%3E%3C/svg%3E") 0 0 / 28px 28px no-repeat; }
+
+  /* ---- alfred: gold top border on cards, spotlight in the header, one accent everywhere ---- */
+  :root[data-persona="alfred"] body::before { -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 80'%3E%3Cg fill='none' stroke='%23000' stroke-width='1'%3E%3Cpath d='M0 80V34C0 18 12 7 24 0C36 7 48 18 48 34V80'/%3E%3Cpath d='M24 0V80'/%3E%3Cpath d='M8 80V40C8 30 15 22 24 17C33 22 40 30 40 40V80'/%3E%3Cpath d='M0 60H8M40 60H48M0 70H8M40 70H48'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 48px 80px repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 80'%3E%3Cg fill='none' stroke='%23000' stroke-width='1'%3E%3Cpath d='M0 80V34C0 18 12 7 24 0C36 7 48 18 48 34V80'/%3E%3Cpath d='M24 0V80'/%3E%3Cpath d='M8 80V40C8 30 15 22 24 17C33 22 40 30 40 40V80'/%3E%3Cpath d='M0 60H8M40 60H48M0 70H8M40 70H48'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 48px 80px repeat; }
+  :root[data-persona="alfred"] .card, :root[data-persona="alfred"] .scard { border-top: 1px solid color-mix(in srgb, var(--hero) 70%, transparent); }
+  :root[data-persona="alfred"] .g-ned, :root[data-persona="alfred"] .g-jira, :root[data-persona="alfred"] .g-gh, :root[data-persona="alfred"] .g-mail, :root[data-persona="alfred"] .g-slack, :root[data-persona="alfred"] .g-me { --gc: color-mix(in srgb, var(--hero) 55%, var(--line)); }
+  :root[data-persona="alfred"] header.hq { background: radial-gradient(60% 260% at 18% -150%, color-mix(in srgb, var(--hero) 22%, transparent), transparent 70%), color-mix(in srgb, var(--side) 82%, transparent); }
+  :root[data-persona="alfred"] .bubble .lead { font-family: var(--head); font-weight: 500; }
+
+  /* ---- oracle: grid + scanlines, monitor-tile cards (bezel + top LED bar), fixed-width 24h numerals ---- */
+  :root[data-persona="oracle"] body::before {
+    -webkit-mask: linear-gradient(#000 1px, transparent 1px) 0 0 / 28px 28px, linear-gradient(90deg, #000 1px, transparent 1px) 0 0 / 28px 28px;
+    mask: linear-gradient(#000 1px, transparent 1px) 0 0 / 28px 28px, linear-gradient(90deg, #000 1px, transparent 1px) 0 0 / 28px 28px; }
+  :root[data-persona="oracle"] body::after { content: ""; position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: var(--scan-a);
+    background: repeating-linear-gradient(0deg, rgba(0, 0, 0, .45) 0 1px, transparent 1px 3px); }
+  :root[data-persona="oracle"] body { font-variant-numeric: tabular-nums; }
+  :root[data-persona="oracle"] .card { position: relative; border-radius: 4px; border-color: #1f3d2b; box-shadow: inset 0 0 0 3px var(--bg), inset 0 0 0 4px #13281c, 0 0 0 1px #050605; }
+  :root[data-persona="oracle"] .card::after { content: ""; position: absolute; top: 5px; left: 14px; width: 64px; height: 2px; border-radius: 1px; pointer-events: none;
+    background: linear-gradient(90deg, var(--hero) 0 26px, transparent 26px 32px, var(--blue2) 32px 46px, transparent 46px 52px, color-mix(in srgb, var(--hero) 40%, transparent) 52px); }
+  :root[data-persona="oracle"] .scard { border-top-width: 1px; }
+
+  /* ---- jarvis: HUD rings, cyan-glow card borders, gold / hot-rod red only on badges & warnings, thin digital numerals ---- */
+  :root[data-persona="jarvis"] body::before {
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 840 840'%3E%3Cg fill='none' stroke='%23000' stroke-width='1.4'%3E%3Ccircle cx='420' cy='420' r='70'/%3E%3Ccircle cx='420' cy='420' r='140' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='200'/%3E%3Ccircle cx='420' cy='420' r='260' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='320'/%3E%3Ccircle cx='420' cy='420' r='380' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='410'/%3E%3Cpath d='M765.0 420.0L781.0 420.0M763.7 450.1L770.7 450.7M759.8 479.9L766.7 481.1M753.2 509.3L760.0 511.1M744.2 538.0L750.8 540.4M732.7 565.8L739.0 568.8M718.8 592.5L732.6 600.5M702.6 617.9L708.3 621.9M684.3 641.8L689.6 646.3M664.0 664.0L668.9 668.9M641.8 684.3L646.3 689.6M617.9 702.6L621.9 708.3M592.5 718.8L600.5 732.6M565.8 732.7L568.8 739.0M538.0 744.2L540.4 750.8M509.3 753.2L511.1 760.0M479.9 759.8L481.1 766.7M450.1 763.7L450.7 770.7M420.0 765.0L420.0 781.0M389.9 763.7L389.3 770.7M360.1 759.8L358.9 766.7M330.7 753.2L328.9 760.0M302.0 744.2L299.6 750.8M274.2 732.7L271.2 739.0M247.5 718.8L239.5 732.6M222.1 702.6L218.1 708.3M198.2 684.3L193.7 689.6M176.0 664.0L171.1 668.9M155.7 641.8L150.4 646.3M137.4 617.9L131.7 621.9M121.2 592.5L107.4 600.5M107.3 565.8L101.0 568.8M95.8 538.0L89.2 540.4M86.8 509.3L80.0 511.1M80.2 479.9L73.3 481.1M76.3 450.1L69.3 450.7M75.0 420.0L59.0 420.0M76.3 389.9L69.3 389.3M80.2 360.1L73.3 358.9M86.8 330.7L80.0 328.9M95.8 302.0L89.2 299.6M107.3 274.2L101.0 271.2M121.2 247.5L107.4 239.5M137.4 222.1L131.7 218.1M155.7 198.2L150.4 193.7M176.0 176.0L171.1 171.1M198.2 155.7L193.7 150.4M222.1 137.4L218.1 131.7M247.5 121.2L239.5 107.4M274.2 107.3L271.2 101.0M302.0 95.8L299.6 89.2M330.7 86.8L328.9 80.0M360.1 80.2L358.9 73.3M389.9 76.3L389.3 69.3M420.0 75.0L420.0 59.0M450.1 76.3L450.7 69.3M479.9 80.2L481.1 73.3M509.3 86.8L511.1 80.0M538.0 95.8L540.4 89.2M565.8 107.3L568.8 101.0M592.5 121.2L600.5 107.4M617.9 137.4L621.9 131.7M641.8 155.7L646.3 150.4M664.0 176.0L668.9 171.1M684.3 198.2L689.6 193.7M702.6 222.1L708.3 218.1M718.8 247.5L732.6 239.5M732.7 274.2L739.0 271.2M744.2 302.0L750.8 299.6M753.2 330.7L760.0 328.9M759.8 360.1L766.7 358.9M763.7 389.9L770.7 389.3M420 0V840M0 420H840'/%3E%3C/g%3E%3C/svg%3E") calc(100% + 380px) -380px / 840px 840px no-repeat, url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 840 840'%3E%3Cg fill='none' stroke='%23000' stroke-width='1.4'%3E%3Ccircle cx='420' cy='420' r='70'/%3E%3Ccircle cx='420' cy='420' r='140' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='200'/%3E%3Ccircle cx='420' cy='420' r='260' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='320'/%3E%3Ccircle cx='420' cy='420' r='380' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='410'/%3E%3Cpath d='M765.0 420.0L781.0 420.0M763.7 450.1L770.7 450.7M759.8 479.9L766.7 481.1M753.2 509.3L760.0 511.1M744.2 538.0L750.8 540.4M732.7 565.8L739.0 568.8M718.8 592.5L732.6 600.5M702.6 617.9L708.3 621.9M684.3 641.8L689.6 646.3M664.0 664.0L668.9 668.9M641.8 684.3L646.3 689.6M617.9 702.6L621.9 708.3M592.5 718.8L600.5 732.6M565.8 732.7L568.8 739.0M538.0 744.2L540.4 750.8M509.3 753.2L511.1 760.0M479.9 759.8L481.1 766.7M450.1 763.7L450.7 770.7M420.0 765.0L420.0 781.0M389.9 763.7L389.3 770.7M360.1 759.8L358.9 766.7M330.7 753.2L328.9 760.0M302.0 744.2L299.6 750.8M274.2 732.7L271.2 739.0M247.5 718.8L239.5 732.6M222.1 702.6L218.1 708.3M198.2 684.3L193.7 689.6M176.0 664.0L171.1 668.9M155.7 641.8L150.4 646.3M137.4 617.9L131.7 621.9M121.2 592.5L107.4 600.5M107.3 565.8L101.0 568.8M95.8 538.0L89.2 540.4M86.8 509.3L80.0 511.1M80.2 479.9L73.3 481.1M76.3 450.1L69.3 450.7M75.0 420.0L59.0 420.0M76.3 389.9L69.3 389.3M80.2 360.1L73.3 358.9M86.8 330.7L80.0 328.9M95.8 302.0L89.2 299.6M107.3 274.2L101.0 271.2M121.2 247.5L107.4 239.5M137.4 222.1L131.7 218.1M155.7 198.2L150.4 193.7M176.0 176.0L171.1 171.1M198.2 155.7L193.7 150.4M222.1 137.4L218.1 131.7M247.5 121.2L239.5 107.4M274.2 107.3L271.2 101.0M302.0 95.8L299.6 89.2M330.7 86.8L328.9 80.0M360.1 80.2L358.9 73.3M389.9 76.3L389.3 69.3M420.0 75.0L420.0 59.0M450.1 76.3L450.7 69.3M479.9 80.2L481.1 73.3M509.3 86.8L511.1 80.0M538.0 95.8L540.4 89.2M565.8 107.3L568.8 101.0M592.5 121.2L600.5 107.4M617.9 137.4L621.9 131.7M641.8 155.7L646.3 150.4M664.0 176.0L668.9 171.1M684.3 198.2L689.6 193.7M702.6 222.1L708.3 218.1M718.8 247.5L732.6 239.5M732.7 274.2L739.0 271.2M744.2 302.0L750.8 299.6M753.2 330.7L760.0 328.9M759.8 360.1L766.7 358.9M763.7 389.9L770.7 389.3M420 0V840M0 420H840'/%3E%3C/g%3E%3C/svg%3E") -460px calc(100% + 460px) / 1000px 1000px no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 840 840'%3E%3Cg fill='none' stroke='%23000' stroke-width='1.4'%3E%3Ccircle cx='420' cy='420' r='70'/%3E%3Ccircle cx='420' cy='420' r='140' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='200'/%3E%3Ccircle cx='420' cy='420' r='260' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='320'/%3E%3Ccircle cx='420' cy='420' r='380' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='410'/%3E%3Cpath d='M765.0 420.0L781.0 420.0M763.7 450.1L770.7 450.7M759.8 479.9L766.7 481.1M753.2 509.3L760.0 511.1M744.2 538.0L750.8 540.4M732.7 565.8L739.0 568.8M718.8 592.5L732.6 600.5M702.6 617.9L708.3 621.9M684.3 641.8L689.6 646.3M664.0 664.0L668.9 668.9M641.8 684.3L646.3 689.6M617.9 702.6L621.9 708.3M592.5 718.8L600.5 732.6M565.8 732.7L568.8 739.0M538.0 744.2L540.4 750.8M509.3 753.2L511.1 760.0M479.9 759.8L481.1 766.7M450.1 763.7L450.7 770.7M420.0 765.0L420.0 781.0M389.9 763.7L389.3 770.7M360.1 759.8L358.9 766.7M330.7 753.2L328.9 760.0M302.0 744.2L299.6 750.8M274.2 732.7L271.2 739.0M247.5 718.8L239.5 732.6M222.1 702.6L218.1 708.3M198.2 684.3L193.7 689.6M176.0 664.0L171.1 668.9M155.7 641.8L150.4 646.3M137.4 617.9L131.7 621.9M121.2 592.5L107.4 600.5M107.3 565.8L101.0 568.8M95.8 538.0L89.2 540.4M86.8 509.3L80.0 511.1M80.2 479.9L73.3 481.1M76.3 450.1L69.3 450.7M75.0 420.0L59.0 420.0M76.3 389.9L69.3 389.3M80.2 360.1L73.3 358.9M86.8 330.7L80.0 328.9M95.8 302.0L89.2 299.6M107.3 274.2L101.0 271.2M121.2 247.5L107.4 239.5M137.4 222.1L131.7 218.1M155.7 198.2L150.4 193.7M176.0 176.0L171.1 171.1M198.2 155.7L193.7 150.4M222.1 137.4L218.1 131.7M247.5 121.2L239.5 107.4M274.2 107.3L271.2 101.0M302.0 95.8L299.6 89.2M330.7 86.8L328.9 80.0M360.1 80.2L358.9 73.3M389.9 76.3L389.3 69.3M420.0 75.0L420.0 59.0M450.1 76.3L450.7 69.3M479.9 80.2L481.1 73.3M509.3 86.8L511.1 80.0M538.0 95.8L540.4 89.2M565.8 107.3L568.8 101.0M592.5 121.2L600.5 107.4M617.9 137.4L621.9 131.7M641.8 155.7L646.3 150.4M664.0 176.0L668.9 171.1M684.3 198.2L689.6 193.7M702.6 222.1L708.3 218.1M718.8 247.5L732.6 239.5M732.7 274.2L739.0 271.2M744.2 302.0L750.8 299.6M753.2 330.7L760.0 328.9M759.8 360.1L766.7 358.9M763.7 389.9L770.7 389.3M420 0V840M0 420H840'/%3E%3C/g%3E%3C/svg%3E") calc(100% + 380px) -380px / 840px 840px no-repeat, url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 840 840'%3E%3Cg fill='none' stroke='%23000' stroke-width='1.4'%3E%3Ccircle cx='420' cy='420' r='70'/%3E%3Ccircle cx='420' cy='420' r='140' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='200'/%3E%3Ccircle cx='420' cy='420' r='260' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='320'/%3E%3Ccircle cx='420' cy='420' r='380' stroke-dasharray='14 10'/%3E%3Ccircle cx='420' cy='420' r='410'/%3E%3Cpath d='M765.0 420.0L781.0 420.0M763.7 450.1L770.7 450.7M759.8 479.9L766.7 481.1M753.2 509.3L760.0 511.1M744.2 538.0L750.8 540.4M732.7 565.8L739.0 568.8M718.8 592.5L732.6 600.5M702.6 617.9L708.3 621.9M684.3 641.8L689.6 646.3M664.0 664.0L668.9 668.9M641.8 684.3L646.3 689.6M617.9 702.6L621.9 708.3M592.5 718.8L600.5 732.6M565.8 732.7L568.8 739.0M538.0 744.2L540.4 750.8M509.3 753.2L511.1 760.0M479.9 759.8L481.1 766.7M450.1 763.7L450.7 770.7M420.0 765.0L420.0 781.0M389.9 763.7L389.3 770.7M360.1 759.8L358.9 766.7M330.7 753.2L328.9 760.0M302.0 744.2L299.6 750.8M274.2 732.7L271.2 739.0M247.5 718.8L239.5 732.6M222.1 702.6L218.1 708.3M198.2 684.3L193.7 689.6M176.0 664.0L171.1 668.9M155.7 641.8L150.4 646.3M137.4 617.9L131.7 621.9M121.2 592.5L107.4 600.5M107.3 565.8L101.0 568.8M95.8 538.0L89.2 540.4M86.8 509.3L80.0 511.1M80.2 479.9L73.3 481.1M76.3 450.1L69.3 450.7M75.0 420.0L59.0 420.0M76.3 389.9L69.3 389.3M80.2 360.1L73.3 358.9M86.8 330.7L80.0 328.9M95.8 302.0L89.2 299.6M107.3 274.2L101.0 271.2M121.2 247.5L107.4 239.5M137.4 222.1L131.7 218.1M155.7 198.2L150.4 193.7M176.0 176.0L171.1 171.1M198.2 155.7L193.7 150.4M222.1 137.4L218.1 131.7M247.5 121.2L239.5 107.4M274.2 107.3L271.2 101.0M302.0 95.8L299.6 89.2M330.7 86.8L328.9 80.0M360.1 80.2L358.9 73.3M389.9 76.3L389.3 69.3M420.0 75.0L420.0 59.0M450.1 76.3L450.7 69.3M479.9 80.2L481.1 73.3M509.3 86.8L511.1 80.0M538.0 95.8L540.4 89.2M565.8 107.3L568.8 101.0M592.5 121.2L600.5 107.4M617.9 137.4L621.9 131.7M641.8 155.7L646.3 150.4M664.0 176.0L668.9 171.1M684.3 198.2L689.6 193.7M702.6 222.1L708.3 218.1M718.8 247.5L732.6 239.5M732.7 274.2L739.0 271.2M744.2 302.0L750.8 299.6M753.2 330.7L760.0 328.9M759.8 360.1L766.7 358.9M763.7 389.9L770.7 389.3M420 0V840M0 420H840'/%3E%3C/g%3E%3C/svg%3E") -460px calc(100% + 460px) / 1000px 1000px no-repeat; }
+  :root[data-persona="jarvis"] .btn.go { box-shadow: 0 0 14px var(--glow); }
+  :root[data-persona="jarvis"] nav.views a.on, :root[data-persona="jarvis"] .tab.on { box-shadow: inset 0 -2px 0 var(--hero), 0 4px 12px -6px var(--glow); }
+  :root[data-persona="jarvis"] .nowline { filter: drop-shadow(0 0 4px var(--glow)); }
+  :root[data-persona="jarvis"] .card { border-color: color-mix(in srgb, var(--hero) 28%, var(--line)); box-shadow: 0 0 18px -8px var(--glow), inset 0 0 0 1px color-mix(in srgb, var(--hero) 6%, transparent); }
+  :root[data-persona="jarvis"] .mark.hd { filter: drop-shadow(0 0 5px var(--glow)); }
+  :root[data-persona="jarvis"] .stk.r, :root[data-persona="jarvis"] .chipx.over { background: var(--hot); color: #fff; border: 0; box-shadow: none; }
+  :root[data-persona="jarvis"] .count, :root[data-persona="jarvis"] .n, :root[data-persona="jarvis"] .tm, :root[data-persona="jarvis"] .nowline span,
+  :root[data-persona="jarvis"] .day .hr span, :root[data-persona="jarvis"] .hmeta, :root[data-persona="jarvis"] .leds { font-family: var(--num); font-weight: 400; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+
+
+  /* settings: persona picker */
+  .ppick { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .pcard { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font-family: var(--sans); cursor: pointer; min-width: 0; }
+  .pcard:has(input:checked) { border-color: var(--hero); box-shadow: 0 0 0 1px var(--hero); }
+  .pcard:has(input:focus-visible) { outline: 2px solid var(--info); outline-offset: 2px; }
+  .pcard input { position: absolute; opacity: 0; pointer-events: none; }
+  .pcard .ptop { display: flex; align-items: center; gap: 8px; }
+  .pcard .ptop .mark { width: 44px; height: 28px; flex: none; }
+  .pcard .pn { font-size: 15px; }
+  .pcard .pk { margin-left: auto; font: 10px var(--mono); color: var(--faint); }
+  .pcard .sw { display: flex; gap: 4px; }
+  .pcard .sw i { width: 18px; height: 10px; border-radius: 3px; border: 1px solid var(--line); }
+  .pcard .ph { font-size: 12px; color: var(--fg); background: var(--pane); border: 1px solid var(--line); border-radius: 3px 10px 10px 10px; padding: 6px 9px; line-height: 1.45; }
+  .pcard .pt { font-size: 11px; color: var(--dim); }
+  @media (max-width: 1020px) { .ppick { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 13.5px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
@@ -77,9 +213,9 @@
   /* ---------- glasses mark (mood) ---------- */
   .mark { display: block; }
   .mark.hd { width: 52px; height: 33px; flex: none; }
-  .mark .frame { fill: none; stroke: var(--fg); stroke-width: 4.5; stroke-linecap: round; transition: stroke .3s; }
-  .mark .lens { fill: transparent; transition: fill .3s; }
-  .mark .glint { fill: none; stroke: var(--lens); stroke-width: 2.6; stroke-linecap: round; transition: stroke .3s, opacity .3s; }
+  .mark .frame { fill: none; stroke: var(--mk-frame, var(--fg)); stroke-width: 4.5; stroke-linecap: round; transition: stroke .3s; }
+  .mark .lens { fill: var(--mk-fill, transparent); transition: fill .3s; }
+  .mark .glint { fill: none; stroke: var(--mk-glint, var(--lens)); stroke-width: 2.6; stroke-linecap: round; transition: stroke .3s, opacity .3s; }
   .mark .sweep { fill: var(--lens); opacity: 0; }
   .mark .bang { font: 900 14px var(--sans); fill: var(--amber); opacity: 0; }
   .mark .moon { fill: var(--blue); opacity: 0; }
@@ -287,7 +423,7 @@
   .cev.tiny .t2 { display: none; }
   .nowline { position: absolute; left: -6px; right: 0; border-top: 2px solid var(--hero); z-index: 3; pointer-events: none; }
   .nowline::before { content: ""; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--hero); }
-  .nowline span { position: absolute; left: -46px; top: -9px; font: 700 10.5px var(--mono); color: var(--hero); background: var(--pane); padding-right: 2px; }
+  .nowline span { position: absolute; left: -46px; top: -9px; font: 700 10.5px var(--mono); color: var(--hero-text, var(--hero)); background: var(--pane); padding-right: 2px; }
   .hzero { padding: 18px 4px 8px; }
   /* todo groups */
   .tgrp + .tgrp { margin-top: 14px; }
@@ -407,7 +543,7 @@
         <text class="bang" x="29" y="24">!</text>
         <path class="moon" transform="translate(0 12)" d="M33.5 1.5a6 6 0 1 0 5.5 8.5a4.6 4.6 0 0 1-5.5-8.5z"/>
       </svg>
-      <div class="nm"><b>Ned</b><span class="mood" id="mood">—</span></div>
+      <div class="nm"><b id="pname">Ned</b><span class="mood" id="mood">—</span></div>
     </div>
     <nav class="views" id="views">
       <a href="#home" data-v="home">홈</a>
@@ -512,6 +648,9 @@
         <div class="bd">
           <form id="cfg" autocomplete="off">
             <div class="form">
+              <div class="f full"><span class="lab" id="pp-lab">페르소나 (말투 · 테마 · 마크)</span>
+                <div class="ppick" id="c-persona" role="radiogroup" aria-labelledby="pp-lab"></div>
+                <span class="hint">기능과 데이터는 그대로고 말투·색·마크만 바뀌어. 저장하면 바로 적용돼.</span></div>
               <div class="f"><label for="c-hb">heartbeat 간격 (분)</label><input id="c-hb" type="number" min="1" step="1" required></div>
               <div class="f"><label for="c-sig">신호 조회 최소 간격 (분)</label><input id="c-sig" type="number" min="1" step="1" required><span class="hint">세션 이벤트가 없을 때 LLM 으로 업무 신호를 보는 최소 간격</span></div>
               <div class="f"><label for="c-bt">아침 브리핑 시각</label><input id="c-bt" type="time" required></div>
@@ -597,10 +736,102 @@
   }
 
   /** Small glasses for Ned's avatar (no mood effects; the header mark carries the mood). */
-  const MINI = `<svg class="mark" viewBox="0 14 64 40" aria-hidden="true"><circle class="frame" cx="20" cy="34" r="10"/><circle class="frame" cx="44" cy="34" r="10"/><path class="frame" d="M30 33q2-3.5 4 0M10 31 5 26M54 31l5-5"/><path class="glint" d="M14.5 30.5a6.5 6.5 0 0 1 5-4M38.5 30.5a6.5 6.5 0 0 1 5-4"/></svg>`;
+  // ---------- persona voice (config.persona → state.persona). Tone only: same data, same features. ----------
+  const VOICE = {
+    ned: {
+      name: "Ned", spk: "ned", tagline: "친한 동료 반말 · 딥 네이비 + 빨강/파랑 · 거미줄·웹 코너", sample: "결재 2건이랑 리뷰 1건 기다려. 결재부터 보자.",
+      mood: { scanning: "스캔 중", offline: "자리 비움", headsup: "헤이, 이거 봐", quiet: "조용한 시간", idle: "지켜보는 중" },
+      greet: (h) => (h < 5 ? "늦게까지 하네." : h < 12 ? "좋은 아침." : h < 18 ? "오후 체크인." : "저녁 체크인."),
+      noMeet: "오늘은 회의 없음. 딥워크 데이.", allDone: (n) => `오늘 회의 ${n}개 다 끝났어.`,
+      meet: ({ left, cur, next, first }) => `회의 ${left}개${cur ? `, 지금 '${cur}' 중` : ""}${next ? `, ${first ? "첫" : "다음"} 미팅 ${next}` : ""}.`,
+      count: (label, n, unit) => `${label} ${n}${unit}`, wait: (w) => `${w.join(", ")} 기다려.`,
+      ask: (n) => `응답 안 한 초대 ${n}건`, held: (n) => `내가 챙겨 둔 거 ${n}건`, todo: (n, over) => `네 할 일 ${n}개${over ? ` (마감 지난 거 ${over}개)` : ""}`,
+      noAgenda: "일정은 아직 못 받아 왔어.",
+      okRun: (n, ago) => `✓ NED_OK ×${n} · 마지막 ${ago} — 조용한 순찰은 접어 뒀어`,
+      settings: ["여기서 내 근무 시간이랑 볼 곳을 정해 줘.", "저장하면 다음 순찰부터 적용돼. 쓰기 권한은 어차피 없으니 걱정 마."],
+    },
+    alfred: {
+      name: "Alfred", spk: "alfred", tagline: "정중한 존댓말 집사 · 블랙 + 금색 하나 · 고딕 격자·스포트라이트", sample: "결재 두 건과 리뷰 한 건이 기다리고 있습니다. 결재부터 보시지요.",
+      mood: { scanning: "살피는 중", offline: "자리 비움", headsup: "확인하실 일이 있습니다", quiet: "쉬시는 시간", idle: "대기 중" },
+      greet: (h) => (h < 5 ? "늦은 시간까지 수고가 많으십니다." : h < 12 ? "좋은 아침입니다." : h < 18 ? "오후 보고 올립니다." : "저녁 보고 올립니다."),
+      noMeet: "오늘은 회의가 없습니다. 집중하시기 좋은 날입니다.", allDone: (n) => `오늘 회의 ${n}건은 모두 마치셨습니다.`,
+      meet: ({ left, cur, next, first }) => [`남은 회의 ${left}건`, cur ? `지금 '${cur}' 진행 중` : "", next ? `${first ? "첫" : "다음"} 회의 ${next}` : ""].filter(Boolean).join(", ") + "입니다.",
+      count: (label, n, unit) => `${label} ${n}${unit}`, wait: (w) => `${w.join(", ")}이 기다리고 있습니다.`,
+      ask: (n) => `회신 안 하신 초대 ${n}건`, held: (n) => `제가 챙겨 둔 일 ${n}건`, todo: (n, over) => `할 일 ${n}건${over ? ` (기한 지남 ${over}건)` : ""}`,
+      noAgenda: "일정은 아직 받아 오지 못했습니다.",
+      okRun: (n, ago) => `✓ NED_OK ×${n} · 마지막 ${ago} — 아뢸 일 없는 순찰은 접어 두었습니다`,
+      settings: ["근무 시간과 살필 곳을 정해 주십시오.", "저장하시면 다음 순찰부터 적용됩니다. 쓰기 권한은 없으니 염려 마십시오."],
+    },
+    oracle: {
+      name: "Oracle", spk: "oracle", tagline: "간결한 관제 무전 · 블랙 + 초록/보라 모노 · 모니터 타일", sample: "[오늘] 결재 2 · 리뷰 1 대기. 결재 우선.",
+      mood: { scanning: "스캔", offline: "신호 없음", headsup: "확인 요망", quiet: "무음 시간", idle: "감시 중" },
+      greet: (h) => (h < 5 ? "[야간]" : h < 12 ? "[오전 보고]" : h < 18 ? "[오후 보고]" : "[야간 보고]"),
+      noMeet: "회의 0. 집중 시간 확보.", allDone: (n) => `회의 ${n} 종료.`,
+      meet: ({ left, cur, next, first }) => [`회의 ${left} 남음`, cur ? `진행 중 '${cur}'` : "", next ? `${first ? "첫" : "다음"} ${next}` : ""].filter(Boolean).join(" · ") + ".",
+      count: (label, n) => `${label} ${n}`, wait: (w) => `대기: ${w.join(" · ")}.`,
+      ask: (n) => `RSVP 대기 ${n}`, held: (n) => `보류 항목 ${n}`, todo: (n, over) => `개인 할 일 ${n}${over ? ` (기한 초과 ${over})` : ""}`,
+      noAgenda: "일정 수신 없음.",
+      okRun: (n, ago) => `✓ NED_OK ×${n} · 최종 ${ago} — 특이사항 없음, 접음`,
+      settings: ["근무 시간 · 감시 대상 설정.", "저장 시 다음 순찰부터 적용. 쓰기 권한 없음."],
+    },
+    jarvis: {
+      name: "Jarvis", spk: "jarvis", tagline: "매끄러운 존댓말 + 수치 보고 · 네이비 + 시안 글로우 · HUD", sample: "대기 항목 3건, 그중 결재 2건이 우선입니다. 처리하시면 대기율 0%예요.",
+      mood: { scanning: "분석 중", offline: "연결 끊김", headsup: "확인 필요", quiet: "방해 금지", idle: "모니터링 중" },
+      greet: (h) => (h < 5 ? "늦은 시간이네요." : h < 12 ? "좋은 아침이에요." : h < 18 ? "오후 현황입니다." : "저녁 현황입니다."),
+      noMeet: "오늘 회의 0건, 집중 가능 시간 100%예요.", allDone: (n) => `오늘 회의 ${n}건 모두 완료, 진척률 100%.`,
+      meet: ({ left, cur, next, first }) => [`남은 회의 ${left}건`, cur ? `현재 '${cur}' 진행 중` : "", next ? `${first ? "첫" : "다음"} 회의 ${next}` : ""].filter(Boolean).join(", ") + "이에요.",
+      count: (label, n, unit) => `${label} ${n}${unit}`,
+      wait: (w) => { const total = w.reduce((a, x) => a + (Number(/(\d+)/.exec(x)?.[1]) || 0), 0); return `대기 항목 ${total}건 — ${w.join(", ")}.`; },
+      ask: (n) => `미응답 초대 ${n}건`, held: (n) => `제가 표시해 둔 항목 ${n}건`, todo: (n, over) => `할 일 ${n}건${over ? ` (기한 초과 ${over}건)` : ""}`,
+      noAgenda: "일정 데이터가 아직 없어요.",
+      okRun: (n, ago) => `✓ NED_OK ×${n} · 마지막 ${ago} — 변동 없는 순찰은 접어 뒀어요`,
+      settings: ["근무 시간과 모니터링 범위를 설정해 주세요.", "저장하면 다음 순찰부터 반영돼요. 쓰기 권한은 없으니 안심하세요."],
+    },
+  };
+  const PERSONA_IDS = Object.keys(VOICE);
+  let persona = PERSONA_IDS.includes(document.documentElement.dataset.persona) ? document.documentElement.dataset.persona : "ned";
+  const V = () => VOICE[persona];
+  // Marks live in marks/<id>.svg and are inlined so CSS (mood states, tokens) reaches their parts.
+  const MARK_SRC = {};
+  async function loadMark(id) {
+    if (MARK_SRC[id] === undefined) {
+      try { const r = await fetch(`marks/${id}.svg`); MARK_SRC[id] = r.ok ? await r.text() : ""; } catch { MARK_SRC[id] = ""; }
+    }
+    return MARK_SRC[id];
+  }
+  /** Inline SVG string for a mark: `hd` keeps the mood parts (sweep / ! / moon); the mini copy drops them. */
+  function markSvg(id, hd) {
+    const src = MARK_SRC[id]; if (!src) return "";
+    const svg = new DOMParser().parseFromString(src, "image/svg+xml").documentElement;
+    if (svg.nodeName !== "svg") return "";
+    svg.setAttribute("class", hd ? "mark hd" : "mark");
+    svg.setAttribute("aria-hidden", "true");
+    if (!hd) for (const el of svg.querySelectorAll("defs, .sweep, .bang, .moon, [clip-path]")) el.remove();
+    for (const n of [...svg.childNodes]) if (n.nodeType === 8) n.remove(); // comments
+    return svg.outerHTML;
+  }
+  async function applyPersona(id, { save = true } = {}) {
+    if (!PERSONA_IDS.includes(id)) id = "ned";
+    const changed = id !== persona || !MARK_SRC[id];
+    persona = id;
+    document.documentElement.dataset.persona = id;
+    if (save) lsSet("ned.persona", id);
+    document.title = V().name;
+    $("pname").textContent = V().name;
+    if (!changed) return;
+    await Promise.all(PERSONA_IDS.map(loadMark));
+    const hd = markSvg(id, true);
+    if (hd) { const old = document.querySelector(".who .mark.hd"); if (old) old.outerHTML = hd; }
+    MINI = markSvg(id, false) || MINI;
+    for (const el of document.querySelectorAll("[data-mark]")) el.innerHTML = markSvg(el.dataset.mark, false);
+    renderAll();
+  }
+
+  let MINI = `<svg class="mark" viewBox="0 14 64 40" aria-hidden="true"><circle class="frame" cx="20" cy="34" r="10"/><circle class="frame" cx="44" cy="34" r="10"/><path class="frame" d="M30 33q2-3.5 4 0M10 31 5 26M54 31l5-5"/><path class="glint" d="M14.5 30.5a6.5 6.5 0 0 1 5-4M38.5 30.5a6.5 6.5 0 0 1 5-4"/></svg>`;
   /** Ned speaking: avatar + bubble. `lead` is HTML-escaped by the caller. */
   const say = (meta, leadHtml, subHtml = "") =>
-    `<div class="say"><span class="av">${MINI}</span><div class="bubble">${meta ? `<div class="meta">${meta}</div>` : ""}<p class="lead">${leadHtml}</p>${subHtml ? `<div class="sub">${subHtml}</div>` : ""}</div></div>`;
+    (meta = typeof meta === "string" ? meta.replace(/^ned\b/, V().spk) : meta,
+    `<div class="say"><span class="av">${MINI}</span><div class="bubble">${meta ? `<div class="meta">${meta}</div>` : ""}<p class="lead">${leadHtml}</p>${subHtml ? `<div class="sub">${subHtml}</div>` : ""}</div></div>`);
 
   let toastTimer = 0;
   function toast(msg, ms = 3200) {
@@ -618,7 +849,7 @@
     if (S.state.quiet) return "quiet";
     return "idle";
   }
-  const greet = () => { const h = new Date().getHours(); return h < 5 ? "늦게까지 하네." : h < 12 ? "좋은 아침." : h < 18 ? "오후 체크인." : "저녁 체크인."; };
+  const greet = () => V().greet(new Date().getHours());
   const quip = (ts) => QUIPS[Math.floor((ts || Date.now()) / 600000) % QUIPS.length];
 
   /** The one line Ned opens with — what needs you, in one breath. */
@@ -644,9 +875,9 @@
   function renderHeader() {
     const m = mood(), s = S.state;
     document.body.dataset.mood = m;
-    $("mood").textContent = MOOD_KO[m];
+    $("mood").textContent = V().mood[m] || MOOD_KO[m];
     const n = s?.attention.length ?? 0;
-    document.title = n ? `(${n}) Ned` : "Ned";
+    document.title = n ? `(${n}) ${V().name}` : V().name;
     const up = alive();
     const lb = s?.last_briefing;
     $("leds").innerHTML = `
@@ -657,7 +888,7 @@
       <span>next ${s?.next_heartbeat_at ? rel(s.next_heartbeat_at) : "—"}</span>`;
     const o = opener();
     $("say").innerHTML = say(`ned · ${hhmm(Date.now())}`, esc(o.lead), esc(o.sub));
-    $("say-settings").innerHTML = say("ned", "여기서 내 근무 시간이랑 볼 곳을 정해 줘.", "저장하면 다음 순찰부터 적용돼. 쓰기 권한은 어차피 없으니 걱정 마.");
+    $("say-settings").innerHTML = say("ned", esc(V().settings[0]), esc(V().settings[1]));
   }
 
   function setBusyButtons() {
@@ -756,7 +987,7 @@
       html += rowHtml(it, i);
     });
     if (!list.length) html += `<div class="none">${ui.tab === "priority" ? "결정할 것 없음." : ui.tab === "other" ? "읽을 것 없음." : "아직 순찰 기록이 없어."}</div>`;
-    if (ui.tab !== "history" && m.ok.length) html += `<button class="okrun" id="okrun">✓ NED_OK ×${m.ok.length} · 마지막 ${rel(m.ok[0].ts)} — 조용한 순찰은 접어 뒀어</button>`;
+    if (ui.tab !== "history" && m.ok.length) html += `<button class="okrun" id="okrun">${esc(V().okRun(m.ok.length, rel(m.ok[0].ts)))}</button>`;
     const box = $("items");
     box.innerHTML = html;
     for (const r of box.querySelectorAll(".row")) r.onclick = () => { select(+r.dataset.i); openDetail(); };
@@ -988,8 +1219,21 @@
     excl[k].splice(Number(i), 1); renderExcl(); $(`x-${k}-in`).focus();
   });
 
+  function renderPersonaPicker(cur) {
+    const box = $("c-persona");
+    if (!box.children.length) {
+      box.innerHTML = PERSONA_IDS.map((id) => { const v = VOICE[id]; return `<label class="pcard" data-persona="${id}">
+        <input type="radio" name="persona" value="${id}">
+        <div class="ptop"><span data-mark="${id}">${markSvg(id, false)}</span><b class="pn">${esc(v.name)}</b><span class="pk">${id}</span></div>
+        <div class="sw" aria-hidden="true"><i style="background:var(--bg)"></i><i style="background:var(--pane)"></i><i style="background:var(--hero)"></i><i style="background:var(--info)"></i><i style="background:var(--mint)"></i></div>
+        <div class="ph">${esc(v.sample)}</div><div class="pt">${esc(v.tagline)}</div></label>`; }).join("");
+    }
+    for (const r of box.querySelectorAll("input[name=persona]")) r.checked = r.value === cur;
+  }
+
   function renderConfig() {
     const c = S.config; if (!c) return;
+    renderPersonaPicker(c.persona || "ned");
     excl.slack = [...(c.filters?.slack?.exclude_channels || [])];
     excl.jira = [...(c.filters?.jira?.exclude_projects || [])];
     $("x-msg").textContent = "";
@@ -1021,6 +1265,7 @@
       briefing_time: $("c-bt").value,
       quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
       sources,
+      persona: document.querySelector("#c-persona input[name=persona]:checked")?.value || S.config?.persona || "ned",
       filters: { slack: { exclude_channels: [...excl.slack] }, jira: { exclude_projects: [...excl.jira] } },
       claude_model: $("c-model").value.trim() || null,
       claude_max_turns: Number($("c-turns").value),
@@ -1028,7 +1273,8 @@
     btn.disabled = true; msg.className = "msg"; msg.textContent = "저장 중…";
     try {
       S.config = await api("/api/config", { method: "PUT", body: JSON.stringify(body) });
-      renderConfig(); msg.className = "msg ok"; msg.textContent = "저장했어. 다음 순찰부터 적용.";
+      await applyPersona(S.config.persona); // look + voice switch now; prompts use it from the next run
+      renderConfig(); msg.className = "msg ok"; msg.textContent = persona === "ned" ? "저장했어. 다음 순찰부터 적용." : persona === "alfred" ? "저장했습니다. 다음 순찰부터 적용됩니다." : persona === "oracle" ? "저장 완료. 다음 순찰부터 적용." : "저장했어요. 다음 순찰부터 반영됩니다.";
     } catch (err) {
       console.warn(err); msg.className = "msg err"; msg.textContent = `저장 실패: ${err.message}`;
     } finally { btn.disabled = false; }
@@ -1262,28 +1508,25 @@
     const left = mt.filter((e) => e.en > now), cur = mt.find((e) => e.s <= now && now < e.en), next = mt.find((e) => e.s > now);
     const bits = [];
     if (ag) {
-      if (!mt.length) bits.push("오늘은 회의 없음. 딥워크 데이.");
-      else if (!left.length) bits.push(`오늘 회의 ${mt.length}개 다 끝났어.`);
-      else {
-        let t = `회의 ${left.length}개`;
-        if (cur) t += `, 지금 '${cur.title}' 중`;
-        if (next) t += `, ${next === mt[0] ? "첫" : "다음"} 미팅 ${hhmm(next.s)}`;
-        bits.push(t + ".");
-      }
+      const v = V();
+      if (!mt.length) bits.push(v.noMeet);
+      else if (!left.length) bits.push(v.allDone(mt.length));
+      else bits.push(v.meet({ left: left.length, cur: cur?.title, next: next ? hhmm(next.s) : "", first: next === mt[0] }));
       const jira = ag.jira?.length || 0, rv = (ag.github || []).filter((g) => g.reason === "review_requested").length;
       const mails = ag.mail_enabled !== false ? ag.mail?.items?.length || 0 : 0;
       const slacks = ag.slack_enabled !== false ? ag.slack?.items?.length || 0 : 0;
-      const w = [jira ? `Jira ${jira}건` : "", rv ? `리뷰 ${rv}건` : "", mails ? `메일 ${mails}통` : "", slacks ? `Slack ${slacks}건` : ""].filter(Boolean);
-      if (w.length) bits.push(`${w.join(", ")} 기다려.`);
+      const c = V().count;
+      const w = [jira ? c("Jira", jira, "건") : "", rv ? c("리뷰", rv, "건") : "", mails ? c("메일", mails, "통") : "", slacks ? c("Slack", slacks, "건") : ""].filter(Boolean);
+      if (w.length) bits.push(V().wait(w));
     }
     const sub = [];
     const ned = (S.state?.attention || []).filter((a) => a.source !== "sessions").length;
     const open = (S.todos || []).filter((t) => !t.done), over = open.filter((t) => (dueInfo(t.due)?.days ?? 1) < 0).length;
     const ask = mt.filter((e) => e.rsvp === "needsAction" && e.en > now).length;
-    if (ask) sub.push(`응답 안 한 초대 ${ask}건`);
-    if (ned) sub.push(`내가 챙겨 둔 거 ${ned}건`);
-    if (open.length) sub.push(`네 할 일 ${open.length}개${over ? ` (마감 지난 거 ${over}개)` : ""}`);
-    if (!bits.length) bits.push(ag === null ? "일정은 아직 못 받아 왔어." : "오늘은 회의 없음. 딥워크 데이.");
+    if (ask) sub.push(V().ask(ask));
+    if (ned) sub.push(V().held(ned));
+    if (open.length) sub.push(V().todo(open.length, over));
+    if (!bits.length) bits.push(ag === null ? V().noAgenda : V().noMeet);
     return { lead: `${greet()} ${bits.join(" ")}`, sub: sub.join(" · ") };
   }
 
@@ -1385,6 +1628,7 @@
     try {
       const s = await api("/api/state");
       S.state = s; S.conn = true;
+      if (s.persona && s.persona !== persona) applyPersona(s.persona);
       const bid = s.last_briefing?.id ?? null;
       const tasks = [];
       if (lastUpdated && s.updated_at !== lastUpdated) tasks.push(loadEvents(false));
@@ -1473,6 +1717,7 @@
   window.addEventListener("resize", syncRailButton);
 
   setView();
+  applyPersona(persona, { save: false });
   Promise.all([loadBriefings(false), loadEvents(false), loadConfig(), loadAgenda(false), loadTodos(false)]).then(loadState);
   setInterval(() => { if (!document.hidden) { loadAgenda(); loadTodos(); } }, HOME_POLL_MS);
   setInterval(() => { if (!document.hidden) loadState(); }, POLL_MS);

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="mark" viewBox="0 14 64 40" aria-hidden="true">
+  <!-- Jarvis: a circular core (outer ring, tick marks, inner ring, core). Generic geometry, no character art. -->
+  <defs><clipPath id="lc-jarvis"><circle cx="32" cy="34" r="11"/></clipPath></defs>
+  <circle class="lens" cx="32" cy="34" r="11"/>
+  <g clip-path="url(#lc-jarvis)"><rect class="sweep" x="0" y="20" width="10" height="28" rx="3"/></g>
+  <circle class="frame" cx="32" cy="34" r="17" style="stroke-width:3"/>
+  <circle class="frame" cx="32" cy="34" r="11"/>
+  <path class="glint" d="M32 14.8v3.2M32 50v3.2M12.8 34H16M48 34h3.2M18.4 20.4l2.3 2.3M43.3 45.3l2.3 2.3M45.6 20.4l-2.3 2.3M20.7 45.3l-2.3 2.3"/>
+  <circle class="core" cx="32" cy="34" r="4"/>
+  <text class="bang" x="50" y="24">!</text>
+  <path class="moon" transform="translate(14 10)" d="M33.5 1.5a6 6 0 1 0 5.5 8.5a4.6 4.6 0 0 1-5.5-8.5z"/>
+</svg>

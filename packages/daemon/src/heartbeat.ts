@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractJson, llmDisabled, noLlmResult, runClaude } from "./claude.js";
 import { filtersPrompt, inQuietHours, type NedConfig } from "./config.js";
+import { personaPrompt } from "./persona.js";
 import { readRecentEvents, readUnprocessedEvents, type NedEvent } from "./events.js";
 import { notify } from "./notify.js";
 import { BRIEFINGS_DIR, DISMISSED_PATH, SENT_LOG, log, readJson, writeJsonAtomic } from "./paths.js";
@@ -82,6 +83,7 @@ export function refreshSessions(cfg: NedConfig): void {
   state.sessions = sessions;
   state.attention = [...sessionAttention, ...state.attention.filter((a) => a.source !== "sessions")];
   state.quiet = inQuietHours(cfg);
+  state.persona = cfg.persona;
   writeState(state);
 }
 
@@ -98,6 +100,7 @@ export function buildHeartbeatPrompt(cfg: NedConfig, daily: boolean, state: Stat
   return template
     .replace("{{NOW}}", () => new Date().toLocaleString("ko-KR"))
     .replace("{{SOURCES}}", () => Object.entries(cfg.sources).filter(([, v]) => v).map(([k]) => k).join(", "))
+    .replace("{{PERSONA}}", () => personaPrompt(cfg.persona))
     .replace("{{FILTERS}}", () => filtersPrompt(cfg.filters))
     .replace("{{SESSIONS}}", () => (state.sessions.length ? state.sessions.map((s) => `- [${s.status}] ${s.worktree} — ${s.last_summary ?? s.last_prompt ?? ""}`).join("\n") : "(활성 세션 없음)"))
     .replace("{{EVENTS}}", () => summarizeEvents(events))

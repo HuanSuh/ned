@@ -25,6 +25,12 @@ node dist/cli.js prompt agenda       # dry-run: heartbeat | briefing | agenda �
 새 세션 이벤트도 없고 `signal_check_minutes` 가 지나지 않았으면 LLM 을 부르지 않고 침묵한다.
 `briefing_time` 이 지난 첫 tick 은 `prompts/briefing.md` 로 아침 브리핑을 만든다 (하루 1회).
 
+**페르소나** (`config.persona`: `ned` | `alfred` | `oracle` | `jarvis`, 기본 `ned`; 모르는 값은 PUT 에서 무시, 읽을 때 `ned`):
+기능·데이터는 그대로 두고 말투 + 대시보드 테마 + 마크만 바꾼다. heartbeat.md · briefing.md · agenda.md 의 `{{PERSONA}}` 는
+`prompts/personas/<id>.md`(이름, 말투 규칙 5줄, 헤드라인 예시 3개, NED_OK 멘트 예시 3개, 금지사항)로 치환된다. 상태값
+`NED_OK` / `UPDATE` 와 JSON 키는 페르소나와 무관하게 그대로. `state.json.persona` 에 같은 값을 미러링한다(세션 갱신마다,
+`PUT /api/config` 직후) — 대시보드와 메뉴바 앱이 이걸 읽는다. 캐릭터 이름만 표기하고 로고·실제 대사·이미지는 쓰지 않는다.
+
 **트래킹 제외** (`config.filters`): `slack.exclude_channels`(채널명, `#` 없이) · `jira.exclude_projects`(프로젝트 키, 대문자 영숫자만 —
 JQL 에 그대로 들어가므로 그 밖의 값은 버린다). heartbeat.md · briefing.md · agenda.md 의 `{{FILTERS}}` 가
 `제외 채널: #a, #b / 제외 Jira 프로젝트: KEY1, KEY2 — 이들에 속한 항목은 조회·보고하지 말 것` + Jira JQL 에 넣을
@@ -93,7 +99,7 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
 ~/.ned/
   config.yaml            설정 (없으면 기본값으로 생성). heartbeat_minutes, signal_check_minutes,
                          briefing_time, quiet_hours, sources.{gmail,slack,jira,github,sentry,calendar},
-                         filters.{slack.exclude_channels, jira.exclude_projects} (트래킹 제외, 기본 []),
+                         persona (ned|alfred|oracle|jarvis), filters.{slack.exclude_channels, jira.exclude_projects} (트래킹 제외, 기본 []),
                          port, claude_model, claude_max_turns, session_stale_minutes, agenda_refresh_minutes
   state.json             menu bar / 대시보드가 읽는 단일 뷰 (sessions, attention, last_briefing, quiet …)
   cursor.json            heartbeat 가 처리한 마지막 이벤트 ts

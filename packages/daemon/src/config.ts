@@ -13,6 +13,8 @@ export interface NedConfig {
   quiet_hours: { start: string; end: string } | null;
   /** Which work-signal sources Ned may consult. */
   sources: { gmail: boolean; slack: boolean; jira: boolean; github: boolean; sentry: boolean; calendar: boolean };
+  /** Voice + theme + mark set (prompts/personas/<id>.md, dashboard data-persona). Features/data don't change. */
+  persona: PersonaId;
   /** Tracking exclusions: items in these Slack channels / Jira projects are never queried or reported. */
   filters: NedFilters;
   /** Dashboard port. */
@@ -25,6 +27,10 @@ export interface NedConfig {
   /** Minutes between agenda (calendar/jira/github) refreshes for the dashboard HOME tab. */
   agenda_refresh_minutes: number;
 }
+
+export const PERSONAS = ["ned", "alfred", "oracle", "jarvis"] as const;
+export type PersonaId = (typeof PERSONAS)[number];
+export const normalizePersona = (v: unknown): PersonaId => (PERSONAS.includes(v as PersonaId) ? (v as PersonaId) : "ned");
 
 export interface NedFilters {
   /** Channel names without "#", e.g. ["random", "mobile_dev_casual"]. */
@@ -76,6 +82,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   briefing_time: "09:00",
   quiet_hours: { start: "23:00", end: "08:00" },
   sources: { gmail: true, slack: true, jira: true, github: true, sentry: true, calendar: true },
+  persona: "ned",
   filters: { slack: { exclude_channels: [] }, jira: { exclude_projects: [] } },
   port: 7777,
   claude_model: null,
@@ -94,6 +101,7 @@ export function loadConfig(): NedConfig {
     ...DEFAULT_CONFIG,
     ...parsed,
     sources: { ...DEFAULT_CONFIG.sources, ...(parsed.sources ?? {}) },
+    persona: normalizePersona(parsed.persona),
     filters: mergeFilters(normalizeFilters(DEFAULT_CONFIG.filters), parsed.filters),
   };
 }
