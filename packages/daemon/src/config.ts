@@ -166,6 +166,8 @@ export interface NedActions {
   slack_send: boolean;
   gmail_draft: boolean;
   gmail_send: boolean;
+  /** 메일 확인 완료(체크) 시 Gmail 에서도 읽음 표시(UNREAD 라벨 제거). Off = 확인 완료만 (Ned 안에서만). Default off. */
+  gmail_mark_read: boolean;
   session_send: boolean;
   /** Wave 2 (all default off): Jira comment, Jira status transition, GitHub PR review/comment, Calendar RSVP. */
   jira_comment: boolean;
@@ -179,6 +181,7 @@ export const DEFAULT_ACTIONS: NedActions = {
   slack_send: false,
   gmail_draft: true,
   gmail_send: false,
+  gmail_mark_read: false,
   session_send: true,
   jira_comment: false,
   jira_transition: false,

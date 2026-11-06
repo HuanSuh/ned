@@ -15,6 +15,7 @@ import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./dr
 import { readRecentEvents } from "./events.js";
 import { checkStatus, dismissAttention, heartbeat, listBriefings, runCheck } from "./heartbeat.js";
 import { log } from "./paths.js";
+import { onMailReviewed, type MarkReadOutcome } from "./mail-read.js";
 import { SOURCE_KEY, readSourceReviewed, readState, setReviewed, writeState } from "./state.js";
 import { registerSearch } from "./search.js";
 import { markThreadSeen } from "./slack-threads.js";
@@ -118,7 +119,10 @@ export function startServer(getConfig: () => NedConfig): void {
     const at = setReviewed(id, reviewed);
     // Slack: the thread remembers which reply was seen (key carries `@<last_reply_ts>`; a newer reply reopens it).
     if (id.startsWith("slack:")) try { patchAgenda((a) => void markThreadSeen(a.slack, id, reviewed)); } catch (e) { log(`review: thread seen mark failed — ${String(e).slice(0, 200)}`); }
-    return c.json({ ok: true, id, reviewed_at: at, attention_open_count: readState().attention_open_count });
+    // Mail + config.actions.gmail_mark_read: also mark the thread read in Gmail (background job; un-review never re-marks unread).
+    let mark_read: MarkReadOutcome | null = null;
+    if (reviewed && id.startsWith("mail:")) try { mark_read = await onMailReviewed(id, loadConfig()); } catch (e) { log(`review: gmail mark-read failed — ${String(e).slice(0, 200)}`); }
+    return c.json({ ok: true, id, reviewed_at: at, attention_open_count: readState().attention_open_count, ...(mark_read ? { mark_read } : {}) });
   });
   app.post("/api/attention/:id/dismiss", (c) => {
     dismissAttention(c.req.param("id"));

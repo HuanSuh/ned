@@ -3,6 +3,7 @@ import { api } from "../api.js";
 import { loadState, renderAll } from "../main.js";
 import { S, ui } from "../state.js";
 import { reviewIcon } from "../ui/icons.js";
+import { waitJob } from "./sendjob.js";
 import { toast } from "../ui/toast.js";
 import { esc, toMs } from "../util.js";
 /** attention items not marked 확인 완료 (counts, badges, greeting). */
@@ -47,12 +48,33 @@ export function withFold(cardId, kind, list, rowFn) {
   if (!rev.length) return open.map(rowFn).join("");
   return open.map(rowFn).join("") + `${open.length ? "" : `<div class="gnone">열린 항목 없음.</div>`}<details class="rvfold" data-rv="${esc(cardId)}" ${ui.revCard?.[cardId] ? "open" : ""}><summary>확인 완료 ${rev.length}</summary>${rev.map(rowFn).join("")}</details>`;
 }
+/** Optimistic Gmail 읽음 표시: the thread's row in mail.all → read, 안 읽은 count −1 (the next mail refresh sets the real values). */
+export function markThreadReadLocal(agenda, threadId) {
+  const m = agenda?.mail, row = m?.all?.find((x) => x.id === threadId);
+  if (!row || !row.unread) return false;
+  row.unread = false;
+  m.unread = Math.max(0, (Number(m.unread) || 0) - 1);
+  return true;
+}
+/** Background Gmail 읽음 표시 (config.actions.gmail_mark_read): only a failure is worth a toast — 확인 완료 stays either way. */
+async function followMarkRead(mr, threadId) {
+  if (mr.skipped === "budget") { toast("Gmail 읽음 표시 생략 — 오늘 예산을 다 썼어 (확인 완료는 저장됨)", 6000); return; }
+  if (mr.skipped === "invalid") { toast(`Gmail 읽음 표시 실패 — ${mr.detail || "스레드 id 를 알 수 없음"}`, 7000); return; }
+  if (!mr.job_id) return; // "already": marked read in the last 10 min
+  const r = await waitJob({ job_id: mr.job_id, started_at: mr.started_at, source: "email", mode: "mark_read", ref: { thread_id: threadId } });
+  if (!r.ok) toast(`Gmail 읽음 표시 실패 — ${r.data?.error || r.data?.detail || "알 수 없는 오류"}`, 8000);
+}
 export async function reviewSource(key, reviewed) {
   S.agenda = S.agenda || {}; S.agenda.reviewed = { ...(S.agenda.reviewed || {}) };
   if (reviewed) S.agenda.reviewed[key] = Date.now(); else delete S.agenda.reviewed[key];
+  // 확인 해제 never marks the mail unread again in Gmail (or here).
+  const markRead = reviewed && key.startsWith("mail:") && S.config?.actions?.gmail_mark_read === true;
+  if (markRead) markThreadReadLocal(S.agenda, key.slice(5));
   renderAll();
-  try { await api(`/api/attention/${encodeURIComponent(key)}/review`, { method: "POST", body: JSON.stringify({ reviewed }) }); }
-  catch (e) { console.warn(e); toast(`확인 표시 실패 — ${e.message}`); }
+  let r = null;
+  try { r = await api(`/api/attention/${encodeURIComponent(key)}/review`, { method: "POST", body: JSON.stringify({ reviewed }) }); }
+  catch (e) { console.warn(e); toast(`확인 표시 실패 — ${e.message}`); return; }
+  if (r?.mark_read) followMarkRead(r.mark_read, key.slice(5)).catch((e) => console.warn("mark-read", e));
 }
 export async function reviewAttention(id, reviewed) {
   const a = S.state?.attention.find((x) => x.id === id); if (!a) return;
