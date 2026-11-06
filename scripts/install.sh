@@ -22,23 +22,8 @@ launchctl bootstrap "gui/$(id -u)" "$PLIST"
 launchctl kickstart -k "gui/$(id -u)/com.ned.daemon"
 
 echo "▶ menu bar app"
-(cd "$REPO/apps/menubar" && swift build -c release 2>&1 | tail -1)
+bash "$REPO/apps/menubar/scripts/package.sh"
 APP="$REPO/apps/menubar/.build/Ned.app"
-rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS"
-cp "$REPO/apps/menubar/.build/release/Ned" "$APP/Contents/MacOS/Ned"
-cat > "$APP/Contents/Info.plist" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>CFBundleExecutable</key><string>Ned</string>
-  <key>CFBundleIdentifier</key><string>com.ned.menubar</string>
-  <key>CFBundleName</key><string>Ned</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>LSUIElement</key><true/>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
-</dict></plist>
-EOF
 pkill -x Ned 2>/dev/null || true
 open "$APP"
 
@@ -48,3 +33,4 @@ echo "  dashboard : http://127.0.0.1:7777"
 echo "  config    : ~/.ned/config.yaml"
 echo "  logs      : ~/.ned/logs/daemon.log"
 echo "  menu bar  : $APP   (add to Login Items to autostart)"
+echo "  macOS 26+ : if the glasses icon is hidden, allow Ned under System Settings > Menu Bar"
