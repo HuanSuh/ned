@@ -122,6 +122,68 @@ describe("chat context digest", () => {
   });
 });
 
+describe("feature guide (docs/FEATURES.md 요약) in the system prompt", () => {
+  const md = ["# Ned 기능 가이드", "", "## 요약", "", "- 인박스: 확인 필요 모음", "```", "## 코드블록 속 제목은 무시", "```", "### 하위 제목은 포함", "- 타임라인", "", "## 상세", "", "상세 본문"].join("\n");
+
+  it("extracts only the 요약 section (sub-headings kept, fenced headings ignored, stops at the next same-level heading)", () => {
+    const s = chat.extractFeaturesSummary(md)!;
+    expect(s.startsWith("- 인박스")).toBe(true);
+    expect(s).toContain("## 코드블록 속 제목은 무시");
+    expect(s).toContain("### 하위 제목은 포함");
+    expect(s).toContain("- 타임라인");
+    expect(s).not.toContain("상세 본문");
+    expect(chat.extractFeaturesSummary("# 제목\n\n## 상세\n본문")).toBeNull();
+    expect(chat.extractFeaturesSummary("## 요약\n\n## 상세\n본문")).toBeNull();
+    expect(chat.extractFeaturesSummary("## 요약 (≤2,500자)\n본문\n# 끝")).toBe("본문");
+  });
+
+  it("clamps at FEATURES_SUMMARY_MAX (3,000) independent of the context cap", () => {
+    const long = `## 요약\n${"가".repeat(5000)}\n## 상세\n`;
+    const s = chat.extractFeaturesSummary(long)!;
+    expect(chat.FEATURES_SUMMARY_MAX).toBe(3000);
+    expect(s.length).toBe(3000);
+    expect(s.endsWith("…")).toBe(true);
+    expect(chat.extractFeaturesSummary(long, 100)!.length).toBe(100);
+  });
+
+  it("clamps at a line boundary: over 3,000 chars the last kept line is whole", () => {
+    const lines = Array.from({ length: 80 }, (_, i) => `- 항목 ${String(i).padStart(2, "0")}: ${"설명".repeat(20)} 끝`);
+    const s = chat.extractFeaturesSummary(`## 요약\n${lines.join("\n")}\n## 상세\n`)!;
+    expect(lines.join("\n").length).toBeGreaterThan(3000);
+    expect(s.length).toBeLessThanOrEqual(3000);
+    expect(s.endsWith("끝…")).toBe(true);
+    const kept = s.slice(0, -1).split("\n");
+    expect(kept.every((l, i) => l === lines[i])).toBe(true);
+    expect(kept.length).toBeLessThan(lines.length);
+  });
+
+  it("missing file / no section → null; the prompt drops only that section", () => {
+    const dir = fs.mkdtempSync(path.join(process.env.NED_HOME!, "feat-"));
+    expect(chat.readFeaturesSummary(path.join(dir, "nope.md"))).toBeNull();
+    fs.writeFileSync(path.join(dir, "nosec.md"), "# 가이드\n\n## 상세\n본문\n");
+    expect(chat.readFeaturesSummary(path.join(dir, "nosec.md"))).toBeNull();
+    fs.writeFileSync(path.join(dir, "ok.md"), md);
+    expect(chat.readFeaturesSummary(path.join(dir, "ok.md"))).toContain("- 인박스");
+
+    const without = chat.buildChatSystemPrompt(loadConfig(), "CTX-MARKER", new Date(), null);
+    expect(without).not.toContain("Ned 기능 안내 (docs");
+    expect(without).toContain("CTX-MARKER");
+    expect(without).not.toMatch(/\{\{[A-Z]+\}\}/);
+    const withF = chat.buildChatSystemPrompt(loadConfig(), "CTX-MARKER", new Date(), "FEAT-MARKER");
+    expect(withF).toContain("## Ned 기능 안내");
+    expect(withF).toContain("FEAT-MARKER");
+    expect(withF.indexOf("FEAT-MARKER")).toBeLessThan(withF.indexOf("CTX-MARKER"));
+    expect(withF).toContain("설정 경로(탭 → 섹션 → 항목)와 설정 키");
+  });
+
+  it("the repo's docs/FEATURES.md has a 요약 section within 2,500 chars", () => {
+    const s = chat.readFeaturesSummary();
+    expect(s).toBeTruthy();
+    expect(s!.length).toBeLessThanOrEqual(2500);
+    expect(s).toContain("actions.gmail_mark_read");
+  });
+});
+
 describe("chat run options are read-only", () => {
   it("allowedTools: reads only; --tools has no Edit/Write; plan mode; resume + system prompt + partial deltas", () => {
     const cfg = { ...loadConfig(), sources: { ...DEFAULT_CONFIG.sources, sentry: true } };

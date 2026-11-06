@@ -5,6 +5,8 @@ Ned 의 코어 데몬. Claude Code 훅이 남긴 세션 이벤트를 집계하�
 menu bar 앱과 로컬 대시보드가 읽는 `state.json` 을 유지한다. 읽기 전용: 어떤 쓰기 액션도 하지 않는다 — 단 하나의 예외는
 사용자가 켠 경우의 `POST /api/send` (아래 "답장 초안 · 보내기" — Slack/Gmail/세션, Jira 코멘트·상태 변경, GitHub 리뷰·코멘트, 캘린더 참석 응답).
 
+> 사용자 기능 가이드(탭·카드·버튼·단축키·설정 키): [`docs/FEATURES.md`](../../docs/FEATURES.md) — 맨 위 "요약" 은 Ned 대화창 프롬프트에도 들어간다.
+
 ## Build
 
 ```sh
