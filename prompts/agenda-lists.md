@@ -42,8 +42,9 @@
 <!--@watch-->
 
 ### slack.watch — 팔로업 채널: {{WATCH_CHANNELS}}
-- 위 검색과 **같은 턴에** 채널마다 `slack_search_public_and_private` 한 번: `filters: "in:#<채널>"`, 나머지 인자는 위와 같다. 찾지 못한 채널은 `summary: ""`, `highlights: []`. 트래킹 제외 채널은 조회하지 않는다.
+- 위 검색과 **같은 턴에** 채널마다 `slack_search_public_and_private` 한 번: `filters: "in:#<채널>"`, 나머지 인자는 위와 같다. 찾지 못한 채널은 `summary: ""`, `highlights: []`, `recent: []`. 트래킹 제외 채널은 조회하지 않는다.
 - 채널마다 하나: `summary` 지난 24시간 정해진 것·물은 것 2~3줄(`\n` 구분, 잡담뿐이면 `""`), `highlights` 의미 있는 메시지 최대 5개(결정·질문·요청·마감·장애·공지): `from`, `text`(한 줄 ≤200자 요약), `ts`, `url` permalink, `needs_me`(나를 향한 질문·요청, 내 일에 영향 주는 결정, 마감 — 이미 처리됐으면 false), `reason`(25자 안팎). needs_me 를 먼저.
+- `recent`: 같은 검색 결과에서 **가장 최근 메시지 최대 3개, 최신순** — 고르지 않는다 (잡담이어도, highlights 와 겹쳐도 넣는다). `from` 표시 이름, `text` 원문 한 줄(≤120자, 넘치면 자름), `ts`, `url` permalink. 결과가 없으면 `[]`.
 <!--@/watch-->
 <!--@mail-->
 

@@ -139,7 +139,13 @@ function fixture(T0) {
     slack: {
       summary: "DM 2건과 멘션 1건이 답을 기다려요.",
       items: [
-        { channel: "DM", from: "김민수", text: "회의록 확인 부탁해요", url: "https://acme.slack.com/archives/D01ABC/p1730000000000100", ts: iso(at(0, 9, 40)), reason: "dm", count: 3 },
+        { channel: "DM", from: "김민수", text: "회의록 확인 부탁해요", url: "https://acme.slack.com/archives/D01ABC/p1730000000000100", ts: iso(at(0, 9, 40)), reason: "dm", count: 3,
+          dm: { key: "dm:D01ABC", channel_id: "D01ABC", recent: [
+            { from: "김민수", ts: iso(at(-1, 18)), text: "내일 회의 10시로 옮겨도 될까요?" },
+            { from: "나", ts: iso(at(-1, 18, 5)), text: "네 괜찮아요" },
+            { from: "김민수", ts: iso(at(0, 9, 30)), text: "회의록 올렸어요" },
+            { from: "김민수", ts: iso(at(0, 9, 40)), text: "회의록 확인 부탁해요" },
+          ] } },
         { channel: "#ned-dev", from: "이서연", text: "@me 배포 일정 괜찮을까요?", url: "https://acme.slack.com/archives/C02DEV/p1730000000000200", ts: iso(at(0, 9, 10)), reason: "mention" },
         { channel: "#ops", from: "최우진", text: "스레드: 로그 보관 기간 정해야 해요", url: "https://acme.slack.com/archives/C03OPS/p1730000000000300?thread_ts=1730000000.000100", ts: iso(at(-1, 19)), reason: "thread" },
       ],
@@ -152,8 +158,14 @@ function fixture(T0) {
         { channel: "#release", summary: "v0.5 릴리스는 목요일로 확정.\nQA 담당 정하는 중.", highlights: [
           { from: "이서연", text: "QA 누가 맡을지 정해 주세요", ts: iso(at(0, 9)), url: "https://acme.slack.com/archives/C05REL/p1730000000000500", needs_me: true, reason: "담당 지정 요청" },
           { from: "박지훈", text: "릴리스 목요일 확정", ts: iso(at(-1, 17)), url: "https://acme.slack.com/archives/C05REL/p1730000000000600", needs_me: false, reason: "결정" },
+        ], recent: [
+          { from: "한예린", text: "체인지로그 초안 공유드려요", ts: iso(at(0, 9, 20)), url: "https://acme.slack.com/archives/C05REL/p1730000000000700" },
+          { from: "이서연", text: "QA 누가 맡을지 정해 주세요", ts: iso(at(0, 9)), url: "https://acme.slack.com/archives/C05REL/p1730000000000500" },
         ] },
-        { channel: "#infra", summary: "", highlights: [] },
+        { channel: "#infra", summary: "", highlights: [], recent: [
+          { from: "오세훈", text: "노드 패치 끝났습니다", ts: iso(at(0, 8, 50)), url: "https://acme.slack.com/archives/C06INF/p1730000000000800" },
+          { from: "장하늘", text: "수고하셨어요", ts: iso(at(0, 8, 40)), url: "https://acme.slack.com/archives/C06INF/p1730000000000900" },
+        ] },
       ],
     },
   };

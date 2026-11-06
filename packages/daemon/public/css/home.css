@@ -236,4 +236,18 @@ body.lsize, body.lsize * { cursor: nwse-resize !important; }
 .trep .from { flex: none; font-weight: 600; color: var(--fg); max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trep .tw { flex: none; }
 .trep .tx { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* History panel (slackthread.js histToggle / histPanel): the conversation's kept messages, oldest first, wrapped. */
+button.chipx.hist-tg { border: 0; cursor: pointer; font: 600 10.5px/1.6 var(--mono); }
+button.chipx.hist-tg:hover { filter: brightness(1.15); }
+button.chipx.hist-tg:focus-visible { outline: 2px solid var(--info); outline-offset: 1px; }
+.ti .hist { margin: 4px 0 2px; padding: 4px 0 4px 8px; border-left: 2px solid var(--line); display: flex; flex-direction: column; gap: 3px; }
+.ti .hist[hidden] { display: none; }
+.ti .hist .trep .tx { white-space: normal; overflow-wrap: anywhere; }
+.trep.me .from { color: var(--info); }
+.trep.me .tx { color: var(--fg); }
+/* 팔로업 card "최근 대화" (slackthread.js recentHtml). */
+.wrec { margin: 6px 0 2px; padding: 0 4px 0 2px; display: flex; flex-direction: column; gap: 3px; }
+.wrec .wrech { font-size: 11px; font-weight: 600; color: var(--faint); letter-spacing: .02em; margin-bottom: 1px; }
+.wrec .trep .tx { white-space: normal; overflow-wrap: anywhere; }
+.wrec .wlk { flex: none; color: var(--info); text-decoration: none; font-weight: 600; }
 .scard .pv .pv2 { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }

@@ -2,7 +2,7 @@
  * line 1 = channel · opening message (short) + "+N 새 답글", line 2 = Ned's thread summary, line 3 = latest reply
  * (from · time · one line). Shrunk card preview: summary + latest reply. Expanded rows: up to 3 recent replies.
  * No summary yet (before phase 2) → latest reply only; never read → the caller's old markup. */
-import { esc, ext, rel, toMs } from "../util.js";
+import { esc, ext, lsGet, lsSet, rel, safeUrl, toMs } from "../util.js";
 
 const tsMs = (ts) => (/^\d{9,11}(\.\d+)?$/.test(String(ts || "")) ? Number(ts) * 1000 : toMs(ts));
 /** The row's followed thread, once phase 2 has read it (else null). */
@@ -38,6 +38,67 @@ export function threadTail(x) {
   const t = readThread(x);
   if (!t) return "";
   return (t.thread_summary ? `<div class="tsum">${esc(t.thread_summary)}</div>` : "") + reply(latestOf(t));
+}
+
+// ---------- history panel: a row's kept messages (thread.recent / DM dm.recent, ≤10, oldest first) ----------
+// A "▸ 이력 N" chip on the row toggles an inline panel under it; open state per history key (thread key / dm:<channel>)
+// in memory + localStorage (ned.hist.open), so a re-render keeps it. Not indexed by search (noise).
+const OPEN_KEY = "ned.hist.open", OPEN_MAX = 100;
+let openSet = null;
+const opened = () => {
+  if (!openSet) { try { const v = JSON.parse(lsGet(OPEN_KEY) || "[]"); openSet = new Set(Array.isArray(v) ? v.filter((k) => typeof k === "string") : []); } catch { openSet = new Set(); } }
+  return openSet;
+};
+/** The row's history: DM rows → their conversation, else the followed thread. {key, msgs} or null. */
+export function historyOf(x) {
+  const h = x?.reason === "dm" && x.dm?.recent?.length ? x.dm : x?.thread?.recent?.length ? x.thread : null;
+  return h ? { key: h.key, msgs: h.recent } : null;
+}
+/** Toggle chip, shown when there is more history than the row's own line(s). */
+export function histToggle(x) {
+  const h = historyOf(x);
+  if (!h || h.msgs.length < 2) return "";
+  const on = opened().has(h.key);
+  return `<button type="button" class="chipx more hist-tg" data-hist="${esc(h.key)}" aria-expanded="${on}" title="이 대화의 최근 메시지 ${h.msgs.length}개 펼치기">${on ? "▾" : "▸"} 이력 ${h.msgs.length}</button>`;
+}
+const histLine = (m) => {
+  const me = m.from === "나";
+  return `<div class="trep${me ? " me" : ""}"><span class="from">${esc(m.from || "?")}</span><span class="tw">${m.ts || m.at ? rel(tsMs(m.ts || m.at)) : ""}</span><span class="tx">${esc(m.text || "")}</span></div>`;
+};
+/** The inline panel (hidden unless opened), or "" when there is no history to unfold. */
+export function histPanel(x) {
+  const h = historyOf(x);
+  if (!h || h.msgs.length < 2) return "";
+  const msgs = [...h.msgs].sort((a, b) => tsMs(a.ts || a.at) - tsMs(b.ts || b.at));
+  return `<div class="hist" data-hist-panel="${esc(h.key)}"${opened().has(h.key) ? "" : " hidden"}>${msgs.map(histLine).join("")}</div>`;
+}
+function toggleHist(key) {
+  const s = opened(), on = !s.has(key);
+  if (on) s.add(key); else s.delete(key);
+  lsSet(OPEN_KEY, JSON.stringify([...s].slice(-OPEN_MAX)));
+  // The same conversation can sit in several cards / lists: keep them all in step.
+  for (const p of document.querySelectorAll(`[data-hist-panel="${CSS.escape(key)}"]`)) p.hidden = !on;
+  for (const b of document.querySelectorAll(`[data-hist="${CSS.escape(key)}"]`)) { b.setAttribute("aria-expanded", String(on)); b.textContent = b.textContent.replace(/^[▸▾]/, on ? "▾" : "▸"); }
+}
+
+/** 팔로업 card "최근 대화": the channel's newest messages (from · time · text · ↗), skipping urls already shown. */
+export function recentHtml(recent, skipUrls = new Set()) {
+  const rows = (recent || []).filter((m) => m && (m.text || m.url) && !(m.url && skipUrls.has(m.url)));
+  if (!rows.length) return "";
+  return `<div class="wrec"><div class="wrech">최근 대화</div>` + rows.map((m) => {
+    const u = safeUrl(m.url);
+    return `<div class="trep"><span class="from">${esc(m.from || "?")}</span><span class="tw">${m.ts ? rel(tsMs(m.ts)) : ""}</span><span class="tx">${esc(m.text || "")}</span>${u ? ext(u, "↗", "wlk") : ""}</div>`;
+  }).join("") + `</div>`;
+}
+
+export function init() {
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest?.("[data-hist]");
+    if (!b) return;
+    e.preventDefault();
+    e.stopPropagation();
+    toggleHist(b.dataset.hist);
+  });
 }
 
 /** Shrunk-card preview for the first row: summary + latest reply (2 lines), or "" when the thread wasn't read yet. */

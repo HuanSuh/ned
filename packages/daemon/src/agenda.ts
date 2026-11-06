@@ -8,7 +8,7 @@ import { extractJson, llmDisabled, runClaude } from "./claude.js";
 import { filtersPrompt, jqlExclude, watchChannels, type NedConfig } from "./config.js";
 import { personaPrompt } from "./persona.js";
 import { AGENDA_PATH, AGENDA_RAW_PATH, log, readJson, writeJsonAtomic } from "./paths.js";
-import { applyThreadState, syncThreadsFromList, type SlackThread, type ThreadRowFields } from "./slack-threads.js";
+import { applyThreadState, syncDmsFromList, syncThreadsFromList, type SlackThread, type ThreadRowFields } from "./slack-threads.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PROMPTS_DIR = path.resolve(here, "../../../prompts");
@@ -140,6 +140,8 @@ export interface SlackBlock {
   watch: SlackWatchChannel[];
   /** Followed threads (slack-threads.ts): phase 1 upserts, phase 2 re-reads the active ones. Absent in older agenda.json. */
   threads?: SlackThread[];
+  /** DM conversations (slack-threads.ts, key `dm:<channel_id>`): phase 2 reads their recent history. Absent in older agenda.json. */
+  dms?: SlackThread[];
 }
 
 export interface SlackWatchHighlight extends ThreadRowFields {
@@ -164,6 +166,17 @@ export interface SlackWatchChannel {
   summary: string;
   /** Max 5. */
   highlights: SlackWatchHighlight[];
+  /** The channel's newest messages (max 3, newest first), unpicked — the card shows them when nothing stood out. */
+  recent: SlackWatchRecent[];
+}
+
+export interface SlackWatchRecent {
+  from: string;
+  /** One line, ≤120 chars. */
+  text: string;
+  /** ISO-8601. */
+  ts: string;
+  url: string;
 }
 
 export interface SlackAllItem extends SlackItem {
@@ -249,7 +262,7 @@ function readMail(m: unknown): MailBlock | null {
 function readSlack(m: unknown): SlackBlock | null {
   if (!m || typeof m !== "object") return null;
   const b = m as Partial<SlackBlock>;
-  return { summary: str(b.summary), items: Array.isArray(b.items) ? b.items : [], all: Array.isArray(b.all) ? b.all : [], watch: Array.isArray(b.watch) ? b.watch : [], threads: Array.isArray(b.threads) ? b.threads : [] };
+  return { summary: str(b.summary), items: Array.isArray(b.items) ? b.items : [], all: Array.isArray(b.all) ? b.all : [], watch: Array.isArray(b.watch) ? b.watch : [], threads: Array.isArray(b.threads) ? b.threads : [], dms: Array.isArray(b.dms) ? b.dms : [] };
 }
 
 /** Connector tools each phase-1 list call may use (loaded via ToolSearch). github is `gh`, not a connector. */
@@ -567,6 +580,11 @@ function normalizeWatch(raw: unknown, cfg: NedConfig): SlackWatchChannel[] {
           reason: str(h.reason).replace(/\s+/g, " ").trim().slice(0, 120),
           ...(h.context ? { context: normalizeSlackContext(h.context, new Date().toISOString()) } : {}),
         })),
+      recent: arr(w.recent)
+        .map((m) => ({ from: str(m.from).replace(/\s+/g, " ").trim().slice(0, 80), text: str(m.text).replace(/\s+/g, " ").trim().slice(0, 120), ts: slackTs(m.ts), url: str(m.url) }))
+        .filter((m) => m.text || m.url)
+        .sort((a, b) => (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0))
+        .slice(0, 3),
     }));
 }
 
@@ -599,7 +617,7 @@ export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = 
     .replaceAll("{{ACK_EMOJIS}}", ack.map((e) => `:${e}:`).join(" "))
     .replaceAll("{{ACK_EXAMPLE}}", ack.length ? `\`hasmy::${ack[0]}:\`` : "")
     .replaceAll("{{ACK_KEY}}", ack.length ? ',"acked_urls":[]' : "")
-    .replaceAll("{{WATCH_KEY}}", watch.length ? ',"watch":[{"channel":"#채널","summary":"","highlights":[{"from":"","text":"","ts":"ISO","url":"","needs_me":false,"reason":""}]}]' : "")
+    .replaceAll("{{WATCH_KEY}}", watch.length ? ',"watch":[{"channel":"#채널","summary":"","highlights":[{"from":"","text":"","ts":"ISO","url":"","needs_me":false,"reason":""}],"recent":[{"from":"","text":"","ts":"ISO","url":""}]}]' : "")
     .replaceAll("{{PERSONA}}", () => personaPrompt(cfg.persona))
     .replaceAll("{{FILTERS}}", () => filtersPrompt(cfg.filters))
     .replaceAll("{{JQL_EXCLUDE}}", () => (jqlExclude(cfg.filters) ? ` ${jqlExclude(cfg.filters)}` : ""))
@@ -689,6 +707,7 @@ function carryContexts(prev: Agenda, next: AgendaPayload, keys: AgendaSourceKey[
   // Thread follow-up survives list refreshes; the new rows join it, and what earlier reads learned flows back onto them.
   if (keys.includes("slack") && next.slack) {
     next.slack.threads = syncThreadsFromList(prev.slack?.threads, next.slack);
+    next.slack.dms = syncDmsFromList(prev.slack?.dms, next.slack);
     applyThreadState(next.slack);
   }
   if (keys.includes("mail") && next.mail && prev.mail) {

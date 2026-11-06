@@ -9,8 +9,14 @@ import { agendaContext } from "../src/drafts.js";
 import { threadAttention } from "../src/heartbeat.js";
 import { CONFIG_PATH, NED_HOME } from "../src/paths.js";
 import {
+  DM_BATCH_MAX,
+  HIST_TEXT,
+  RECENT_KEEP,
   THREAD_RECHECK_MINUTES,
   applyThreadState,
+  dmCandidates,
+  dmKeyOf,
+  syncDmsFromList,
   hasNewSinceMe,
   markThreadSeen,
   mergeThreadReads,
@@ -217,6 +223,72 @@ describe("prompts", () => {
   });
 });
 
+describe("history (RECENT_KEEP / HIST_TEXT)", () => {
+  it("a thread read keeps the last 10 messages at ≤220 chars, and the row view carries all of them", () => {
+    const s = block({ items: [item()] });
+    s.threads = syncThreadsFromList([], s, NOW);
+    const messages = Array.from({ length: 14 }, (_, i) => ({ from: i % 3 ? "Kim" : "나", ts: ts(100 - i), text: `m${i} ` + "y".repeat(400) }));
+    mergeThreadReads(s.threads, [{ key: `C1:${ROOT}`, messages }], NOW);
+    const t = s.threads[0];
+    expect(t.recent).toHaveLength(RECENT_KEEP);
+    expect(RECENT_KEEP).toBe(10);
+    expect(t.recent[0].text.startsWith("m4 ")).toBe(true);
+    expect(t.recent.every((m) => m.text.length <= HIST_TEXT)).toBe(true);
+    expect(t.last_reply_text!.length).toBeLessThanOrEqual(160);
+    applyThreadState(s);
+    expect(s.items[0].thread?.recent).toHaveLength(10);
+  });
+});
+
+describe("DM conversations (slack.dms)", () => {
+  const dm = (ch: string, minAgo: number, over: Partial<SlackItem> = {}): SlackItem => ({ channel: "DM", from: "Lee", text: "q", url: link(ch, ts(minAgo)), ts: iso(ts(minAgo)), reason: "dm", ...over });
+  it("one record per DM conversation keyed dm:<channel>, newest ts; needs-me first", () => {
+    const s = block({ items: [dm("D1", 10)], all: [{ ...dm("D1", 30), answered: false }, { ...dm("D2", 5), answered: true }, { ...item(), answered: false }] as SlackAllItem[] });
+    const d = syncDmsFromList([], s, NOW);
+    expect(d.map((x) => x.key).sort()).toEqual(["dm:D1", "dm:D2"]);
+    expect(dmKeyOf(link("D1", ts(3)))).toBe("dm:D1");
+    const d1 = d.find((x) => x.key === "dm:D1")!;
+    expect(d1).toMatchObject({ channel_id: "D1", thread_ts: "", prio: 0, search_latest_ts: ts(10) });
+    expect(d.find((x) => x.key === "dm:D2")!.prio).toBe(1);
+  });
+  it("dmCandidates: at most 5, needs-me first; same last ts read <15 min ago is skipped", () => {
+    const s = block({ all: Array.from({ length: 8 }, (_, i) => ({ ...dm(`D${i}`, 10 + i), answered: i !== 7 })) as SlackAllItem[] });
+    const d = syncDmsFromList([], s, NOW);
+    const c = dmCandidates(d, 99, NOW);
+    expect(c).toHaveLength(DM_BATCH_MAX);
+    expect(c[0].key).toBe("dm:D7");
+    const read = d.find((x) => x.key === "dm:D0")!;
+    read.checked_at = new Date(NOW - 5 * 60_000).toISOString();
+    read.last_reply_ts = read.search_latest_ts;
+    expect(dmCandidates(d, 99, NOW).some((x) => x.key === "dm:D0")).toBe(false);
+    read.checked_at = new Date(NOW - (THREAD_RECHECK_MINUTES + 1) * 60_000).toISOString();
+    expect(dmCandidates([read], 99, NOW).map((x) => x.key)).toEqual(["dm:D0"]);
+    read.checked_at = new Date(NOW - 60_000).toISOString();
+    read.search_latest_ts = ts(1); // phase 1 saw a newer message
+    expect(dmCandidates([read], 99, NOW).map((x) => x.key)).toEqual(["dm:D0"]);
+  });
+  it("a read DM (mine included, ≤10) lands on its DM rows as `dm`, not on other rows", () => {
+    const s = block({ items: [dm("D1", 10)], all: [{ ...dm("D1", 10), answered: false }, { ...item(), answered: false }] as SlackAllItem[] });
+    s.dms = syncDmsFromList([], s, NOW);
+    const messages = Array.from({ length: 12 }, (_, i) => ({ from: i % 2 ? "나" : "Lee", ts: ts(60 - i), text: `d${i}` }));
+    expect(mergeThreadReads(s.dms, [{ key: "dm:D1", messages }], NOW)).toEqual(["dm:D1"]);
+    applyThreadState(s);
+    expect(s.items[0].dm?.key).toBe("dm:D1");
+    expect(s.items[0].dm?.recent.map((m) => m.text)).toEqual(messages.slice(2).map((m) => m.text));
+    expect(s.items[0].dm?.recent.some((m) => m.from === "나")).toBe(true);
+    expect(s.all[0].dm?.recent).toHaveLength(10);
+    expect(s.all[1].dm).toBeUndefined();
+  });
+  it("the thread prompt lists DM items with slack_read_channel only when there are some", () => {
+    const s = block({ items: [item(), dm("D1", 10)] });
+    const th = syncThreadsFromList([], s, NOW).filter((t) => t.key.startsWith("C1"));
+    const p = buildThreadPrompt(th, { ...DEFAULT_CONFIG }, syncDmsFromList([], s, NOW));
+    expect(p).toContain('"key":"dm:D1","kind":"dm","channel_id":"D1"');
+    expect(p).toContain("slack_read_channel");
+    expect(buildThreadPrompt(th, { ...DEFAULT_CONFIG })).not.toContain("mcp__claude_ai_Slack__slack_read_channel");
+  });
+});
+
 describe("end to end (NED_NO_LLM fixtures, temp NED_HOME)", () => {
   it("phase 1 keeps threads across refreshes, phase 2 reads them, drafts get the thread excerpt", async () => {
     fs.writeFileSync(CONFIG_PATH, YAML.stringify({ notify: "off", sources: { calendar: false, jira: false, github: false, gmail: false, slack: true, sentry: false } }));
@@ -250,6 +322,32 @@ describe("end to end (NED_NO_LLM fixtures, temp NED_HOME)", () => {
       expect(a.slack?.items[0]?.reopened).toBe(true);
       patchAgenda((x) => void markThreadSeen(x.slack, `slack:C1:${R}@${K}`, true));
       expect(readAgenda().slack?.threads?.[0].seen_reply_ts).toBe(K);
+    } finally {
+      delete process.env.NED_NO_LLM_AGENDA;
+      delete process.env.NED_NO_LLM_THREADS;
+    }
+  });
+
+  it("phase 2 reads DM conversations in the same batch and the DM row carries the history", async () => {
+    fs.writeFileSync(CONFIG_PATH, YAML.stringify({ notify: "off", sources: { calendar: false, jira: false, github: false, gmail: false, slack: true, sentry: false } }));
+    const fx = path.join(NED_HOME, "fx-agenda-dm.json");
+    const s0 = Math.floor(Date.now() / 1000);
+    const A = `${s0 - 900}.000100`, B = `${s0 - 600}.000100`, C = `${s0 - 120}.000100`;
+    const row = { channel: "DM", from: "Lee", text: "확인 부탁", url: link("D7", C), ts: C, reason: "dm" };
+    fs.writeFileSync(fx, JSON.stringify({ slack: { summary: "", items: [row], all: [{ ...row, answered: false }], watch: [] } }));
+    process.env.NED_NO_LLM_AGENDA = fx;
+    const tf = path.join(NED_HOME, "fx-threads-dm.json");
+    fs.writeFileSync(tf, JSON.stringify({ threads: [{ key: "dm:D7", messages: [{ from: "Lee", ts: A, text: "안녕하세요" }, { from: "나", ts: B, text: "네" }, { from: "Lee", ts: C, text: "확인 부탁" }] }] }));
+    process.env.NED_NO_LLM_THREADS = tf;
+    try {
+      await refreshAgenda(loadConfig());
+      expect(readAgenda().slack?.dms?.map((d) => d.key)).toEqual(["dm:D7"]);
+      expect(await processThreads(loadConfig())).toBe("ok");
+      const a = readAgenda();
+      expect(a.slack?.items[0].dm?.recent.map((m) => m.from)).toEqual(["Lee", "나", "Lee"]);
+      expect(a.slack?.dms?.[0]).toMatchObject({ last_reply_ts: C });
+      // Same last ts, read just now → the DM is not read again (the per-message thread record follows its own rule).
+      expect(dmCandidates(a.slack?.dms)).toEqual([]);
     } finally {
       delete process.env.NED_NO_LLM_AGENDA;
       delete process.env.NED_NO_LLM_THREADS;
