@@ -352,6 +352,7 @@
   .chips.pills { margin-bottom: 0; }
   .chips.pills > * { flex: none; white-space: nowrap; }
   .list .chips.pills { padding: 8px 12px 6px; border-bottom: 1px solid var(--line); }
+  #todo-card > .chips.pills { flex: none; padding: 8px 14px; border-bottom: 1px solid var(--line); }
   ul.tl { list-style: none; margin: 0; padding: 0; }
   ul.tl li { display: grid; grid-template-columns: 52px 1fr; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
   ul.tl li:last-child { border-bottom: 0; }
@@ -563,8 +564,7 @@
   @media (min-width: 1600px) {
     .hwrap, .pwrap { padding-left: 32px; padding-right: 32px; }
     /* home: 3 columns — timeline | source cards | Ned actions + personal todos (.hcol dissolves into the grid) */
-    .hgrid { grid-template-columns: clamp(360px, 22vw, 440px) minmax(0, 1fr) clamp(360px, 24vw, 520px); grid-template-areas: "cal pills pills" "cal cards todo"; grid-template-rows: auto 1fr; }
-    #pf-home { grid-area: pills; }
+    .hgrid { grid-template-columns: clamp(360px, 22vw, 440px) minmax(0, 1fr) clamp(360px, 24vw, 520px); grid-template-areas: "cal cards todo"; }
     .hgrid.wk { grid-template-columns: clamp(540px, 32vw, 760px) minmax(0, 1fr) clamp(340px, 22vw, 480px); }
     .hgrid.wk .sgrid { --cols: 1; }
     /* the todo column doesn't set the row height (contain: size); its list scrolls inside instead */
@@ -603,7 +603,7 @@
     .scol { min-height: 100%; }
   }
   @media (min-width: 1600px) {
-    .hgrid { grid-template-rows: auto minmax(0, 1fr); }
+    .hgrid { grid-template-rows: minmax(0, 1fr); }
     .hcol { overflow: visible; }
     .sgrid { min-height: 0; overflow: auto; }
   }
@@ -691,9 +691,9 @@
           <div class="bd" id="agenda"></div>
         </section>
         <div class="hcol">
-          <div class="chips pills" id="pf-home" role="toolbar" aria-label="소스 필터"></div>
           <section class="card" id="todo-card">
             <div class="hd"><h2>할 일</h2><span class="sp"></span><span class="count" id="todo-count"></span></div>
+            <div class="chips pills" id="pf-home" role="toolbar" aria-label="할 일 소스 필터"></div>
             <div class="bd">
               <div class="tgrp g-ned"><div class="gh"><span class="ico">👓</span>NED 액션 아이템<span class="n" id="n-ned">0</span></div><div class="gl" id="g-ned"></div></div>
               <div class="tgrp g-me" id="grp-me"><div class="gh"><span class="ico">✅</span>개인 할 일<span class="n" id="n-me">0</span></div>
@@ -820,7 +820,8 @@
 
   const KIND_ICON = { session: "🖥", email: "✉️", slack: "💬", jira: "📋", github: "🐙", sentry: "🐞", calendar: "📅", other: "🔔" };
   const KIND_KO = { session: "세션", email: "메일", slack: "Slack", jira: "Jira", github: "GitHub", sentry: "Sentry", calendar: "캘린더", other: "기타" };
-  // ---------- source pills (home / inbox): the timeline's .chips/.chip UI + kind icon + count; multi-select, per-view state ----------
+  // ---------- source pills: the timeline's .chips/.chip UI + kind icon + count; multi-select, per-view state.
+  //            Home: filters only the 할 일 card (Ned action items + personal todos). Inbox: the list. ----------
   const PILL_KINDS = ["session", "email", "slack", "jira", "github", "sentry", "calendar", "me"];
   const PILL_ICON = { ...KIND_ICON, me: "✅" }, PILL_KO = { ...KIND_KO, me: "개인" };
   const CARD_KIND = { mail: "email", jira: "jira", slack: "slack", gh: "github" };
@@ -1704,7 +1705,7 @@
     const el = $("sc-" + id);
     for (const b of el.querySelectorAll("[data-mode]")) b.setAttribute("aria-pressed", String(b.dataset.mode === (mode || "need")));
     if (mode === "all") { rows = allRows; empty = allEmpty; }
-    el.hidden = !!hidden || !srcOn(CARD_KIND[id]) || !pfOn("home", CARD_KIND[id]); // source off, or filtered out by the pills
+    el.hidden = !!hidden || !srcOn(CARD_KIND[id]); // source switched off (home pills only filter the 할 일 card)
     if (el.hidden) return;
     group(id, n, hot, rows, empty);
     $("ss-" + id).className = sum ? "ss" : "ss none";
@@ -1821,10 +1822,9 @@
     group("me", open.length, open.some((t) => (dueInfo(t.due)?.days ?? 1) <= 0), rows, "");
     for (const el of $("tadd").elements) el.disabled = S.todos === null;
     $("grp-me").hidden = !pfOn("home", "me");
-    const shown = (id, n) => ($("sc-" + id).hidden ? 0 : n);
-    $("todo-count").textContent = `${ned.length + shown("mail", mi.length) + shown("jira", jira.length) + shown("slack", si.length) + shown("gh", gh.length) + (pfOn("home", "me") ? open.length : 0)}건`;
-    // pill counts are unfiltered so you can see what each source holds before picking it
-    const cnt = { email: mail ? mi.length : 0, slack: slack ? si.length : 0, jira: jira.length, github: gh.length, me: open.length };
+    $("todo-count").textContent = `${ned.length + (pfOn("home", "me") ? open.length : 0)}건`; // what this card shows
+    // pill counts cover this card only (Ned action items by kind + personal todos), before filtering
+    const cnt = { me: open.length };
     for (const a of nedAll) cnt[a.kind] = (cnt[a.kind] || 0) + 1;
     $("pf-home").innerHTML = pillRow("home", cnt, PILL_KINDS.filter(srcOn));
   }
