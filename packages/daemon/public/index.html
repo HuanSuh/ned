@@ -18,7 +18,7 @@
     --hero: #e23636; --hero-ink: #ffffff; --info: #5b87f0; --info-ink: #ffffff;
     --mint: #5cc4a3; --amber: #f0ad3c; --red: #f08c80; --blue: var(--info); --lens: #5cc4a3;
     --accent: var(--hero); --accent-ink: #ffffff; --bubble: #1b2337; --violet: #a991f0;
-    --web: #c9d4f2;
+    --web: #c9d4f2; --web-a: .025;
     --sans: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", "Noto Sans KR", sans-serif;
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   }
@@ -27,11 +27,18 @@
       --fg: #1c2133; --dim: #5d6376; --faint: #9a9ead; --edge: #1c2133;
       --hero: #d42a2a; --info: #2b5bd7;
       --mint: #2d8a6d; --amber: #a96b00; --red: #8f1d17; --lens: #2f9a79;
-      --bubble: #f8f3ea; --violet: #6a46c4; --web: #2a3350; }
+      --bubble: #f8f3ea; --violet: #6a46c4; --web: #2a3350; --web-a: .045; }
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 13.5px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+  /* Faint geometric web (radial spokes + concentric polygons) over the whole page, fixed so it doesn't move on scroll.
+     Drawn as a mask so its colour follows --web; cards/panels sit on top with opaque backgrounds. Geometry only. */
+  body::before { content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none; background: var(--web); opacity: var(--web-a);
+    --web-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1600 1600'%3E%3Cpath d='M800 800L800 0M800 800L1106 61M800 800L1366 234M800 800L1539 494M800 800L1600 800M800 800L1539 1106M800 800L1366 1366M800 800L1106 1539M800 800L800 1600M800 800L494 1539M800 800L234 1366M800 800L61 1106M800 800L0 800M800 800L61 494M800 800L234 234M800 800L494 61M800.0 766.0L813.0 768.6L824.0 776.0L831.4 787.0L834.0 800.0L831.4 813.0L824.0 824.0L813.0 831.4L800.0 834.0L787.0 831.4L776.0 824.0L768.6 813.0L766.0 800.0L768.6 787.0L776.0 776.0L787.0 768.6ZM800.0 756.5L816.7 759.8L830.8 769.2L840.2 783.3L843.5 800.0L840.2 816.7L830.8 830.8L816.7 840.2L800.0 843.5L783.3 840.2L769.2 830.8L759.8 816.7L756.5 800.0L759.8 783.3L769.2 769.2L783.3 759.8ZM800.0 744.3L821.3 748.5L839.4 760.6L851.5 778.7L855.7 800.0L851.5 821.3L839.4 839.4L821.3 851.5L800.0 855.7L778.7 851.5L760.6 839.4L748.5 821.3L744.3 800.0L748.5 778.7L760.6 760.6L778.7 748.5ZM800.0 728.7L827.3 734.1L850.4 749.6L865.9 772.7L871.3 800.0L865.9 827.3L850.4 850.4L827.3 865.9L800.0 871.3L772.7 865.9L749.6 850.4L734.1 827.3L728.7 800.0L734.1 772.7L749.6 749.6L772.7 734.1ZM800.0 708.7L834.9 715.7L864.5 735.5L884.3 765.1L891.3 800.0L884.3 834.9L864.5 864.5L834.9 884.3L800.0 891.3L765.1 884.3L735.5 864.5L715.7 834.9L708.7 800.0L715.7 765.1L735.5 735.5L765.1 715.7ZM800.0 683.2L844.7 692.1L882.6 717.4L907.9 755.3L916.8 800.0L907.9 844.7L882.6 882.6L844.7 907.9L800.0 916.8L755.3 907.9L717.4 882.6L692.1 844.7L683.2 800.0L692.1 755.3L717.4 717.4L755.3 692.1ZM800.0 650.5L857.2 661.8L905.7 694.3L938.2 742.8L949.5 800.0L938.2 857.2L905.7 905.7L857.2 938.2L800.0 949.5L742.8 938.2L694.3 905.7L661.8 857.2L650.5 800.0L661.8 742.8L694.3 694.3L742.8 661.8ZM800.0 608.6L873.2 623.2L935.3 664.7L976.8 726.8L991.4 800.0L976.8 873.2L935.3 935.3L873.2 976.8L800.0 991.4L726.8 976.8L664.7 935.3L623.2 873.2L608.6 800.0L623.2 726.8L664.7 664.7L726.8 623.2ZM800.0 555.0L893.8 573.7L973.2 626.8L1026.3 706.2L1045.0 800.0L1026.3 893.8L973.2 973.2L893.8 1026.3L800.0 1045.0L706.2 1026.3L626.8 973.2L573.7 893.8L555.0 800.0L573.7 706.2L626.8 626.8L706.2 573.7ZM800.0 486.4L920.0 510.3L1021.7 578.3L1089.7 680.0L1113.6 800.0L1089.7 920.0L1021.7 1021.7L920.0 1089.7L800.0 1113.6L680.0 1089.7L578.3 1021.7L510.3 920.0L486.4 800.0L510.3 680.0L578.3 578.3L680.0 510.3ZM800.0 398.6L953.6 429.2L1083.8 516.2L1170.8 646.4L1201.4 800.0L1170.8 953.6L1083.8 1083.8L953.6 1170.8L800.0 1201.4L646.4 1170.8L516.2 1083.8L429.2 953.6L398.6 800.0L429.2 646.4L516.2 516.2L646.4 429.2ZM800.0 286.2L996.6 325.3L1163.3 436.7L1274.7 603.4L1313.8 800.0L1274.7 996.6L1163.3 1163.3L996.6 1274.7L800.0 1313.8L603.4 1274.7L436.7 1163.3L325.3 996.6L286.2 800.0L325.3 603.4L436.7 436.7L603.4 325.3ZM800.0 142.3L1051.7 192.4L1265.0 335.0L1407.6 548.3L1457.7 800.0L1407.6 1051.7L1265.0 1265.0L1051.7 1407.6L800.0 1457.7L548.3 1407.6L335.0 1265.0L192.4 1051.7L142.3 800.0L192.4 548.3L335.0 335.0L548.3 192.4Z' fill='none' stroke='%23000' stroke-width='1.4'/%3E%3C/svg%3E");
+    -webkit-mask: var(--web-svg) calc(100% + 640px) -640px / 1280px 1280px no-repeat, var(--web-svg) -760px calc(100% + 760px) / 1520px 1520px no-repeat;
+    mask: var(--web-svg) calc(100% + 640px) -640px / 1280px 1280px no-repeat, var(--web-svg) -760px calc(100% + 760px) / 1520px 1520px no-repeat; }
+  .shell { position: relative; z-index: 1; }
   a { color: var(--info); text-decoration: none; }
   a:hover { text-decoration: underline; }
   button, input, select { font: inherit; color: inherit; }
@@ -41,14 +48,7 @@
 
   /* ---------- shell ---------- */
   .shell { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; }
-  header.hq { display: flex; align-items: center; gap: 12px 16px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--side); position: relative; flex-wrap: wrap; }
-  header.hq::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .03;
-    background:
-      repeating-conic-gradient(from 90deg at 0 0, var(--web) 0 .35deg, transparent .35deg 11.25deg),
-      repeating-radial-gradient(circle at 0 0, transparent 0 21px, var(--web) 21px 22px),
-      repeating-conic-gradient(from 180deg at 100% 0, var(--web) 0 .35deg, transparent .35deg 11.25deg),
-      repeating-radial-gradient(circle at 100% 0, transparent 0 21px, var(--web) 21px 22px);
-    -webkit-mask: linear-gradient(90deg, #000, transparent 38%, transparent 62%, #000); mask: linear-gradient(90deg, #000, transparent 38%, transparent 62%, #000); }
+  header.hq { display: flex; align-items: center; gap: 12px 16px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--side) 72%, transparent); position: relative; flex-wrap: wrap; }
   .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .who .nm { min-width: 92px; }
   .who .nm b { font-size: 16px; letter-spacing: -.01em; display: block; line-height: 1.1; }
@@ -77,13 +77,12 @@
   /* ---------- glasses mark (mood) ---------- */
   .mark { display: block; }
   .mark.hd { width: 52px; height: 33px; flex: none; }
-  .mark .frame { fill: none; stroke: var(--fg); stroke-width: 4; stroke-linecap: round; transition: stroke .3s; }
+  .mark .frame { fill: none; stroke: var(--fg); stroke-width: 4.5; stroke-linecap: round; transition: stroke .3s; }
   .mark .lens { fill: transparent; transition: fill .3s; }
-  .mark .glint { fill: none; stroke: var(--lens); stroke-width: 2.5; stroke-linecap: round; transition: stroke .3s, opacity .3s; }
+  .mark .glint { fill: none; stroke: var(--lens); stroke-width: 2.6; stroke-linecap: round; transition: stroke .3s, opacity .3s; }
   .mark .sweep { fill: var(--lens); opacity: 0; }
   .mark .bang { font: 900 14px var(--sans); fill: var(--amber); opacity: 0; }
   .mark .moon { fill: var(--blue); opacity: 0; }
-  .mark .slash { stroke: var(--red); stroke-width: 3.5; stroke-linecap: round; opacity: 0; }
   [data-mood="scanning"] .mark.hd .sweep { opacity: .55; animation: sweep 1.2s ease-in-out infinite; }
   [data-mood="headsup"] .mark.hd .lens { fill: color-mix(in srgb, var(--amber) 22%, transparent); }
   [data-mood="headsup"] .mark.hd .glint { stroke: var(--amber); }
@@ -93,7 +92,6 @@
   [data-mood="quiet"] .mark.hd .moon { opacity: 1; }
   [data-mood="offline"] .mark.hd .frame { stroke: var(--faint); }
   [data-mood="offline"] .mark.hd .glint { opacity: 0; }
-  [data-mood="offline"] .mark.hd .slash { opacity: .9; }
   [data-mood="offline"] .mark.hd { opacity: .7; }
   @keyframes sweep { 0% { transform: translateX(-22px); } 100% { transform: translateX(46px); } }
   @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
@@ -398,16 +396,16 @@
 <div class="shell">
   <header class="hq">
     <div class="who">
-      <svg class="mark hd" viewBox="0 0 64 40" aria-hidden="true">
-        <defs><clipPath id="lc-hd"><circle cx="18" cy="22" r="10"/><circle cx="46" cy="22" r="10"/></clipPath></defs>
-        <circle class="lens" cx="18" cy="22" r="10"/><circle class="lens" cx="46" cy="22" r="10"/>
-        <g clip-path="url(#lc-hd)"><rect class="sweep" x="0" y="8" width="10" height="28" rx="3"/></g>
-        <circle class="frame" cx="18" cy="22" r="10"/><circle class="frame" cx="46" cy="22" r="10"/>
-        <path class="frame" d="M28 21q4-4.5 8 0M8 19 3 14M56 19l5-5"/>
-        <path class="glint" d="M12.5 18.5a6.5 6.5 0 0 1 5-4M40.5 18.5a6.5 6.5 0 0 1 5-4"/>
-        <text class="bang" x="29" y="12">!</text>
-        <path class="moon" d="M33.5 1.5a6 6 0 1 0 5.5 8.5a4.6 4.6 0 0 1-5.5-8.5z"/>
-        <path class="slash" d="M6 37 58 5"/>
+      <!-- Glasses geometry = proposals/ned-glasses.svg (lenses, bridge, temples, glints), minus its tile. -->
+      <svg class="mark hd" viewBox="0 14 64 40" aria-hidden="true">
+        <defs><clipPath id="lc-hd"><circle cx="20" cy="34" r="10"/><circle cx="44" cy="34" r="10"/></clipPath></defs>
+        <circle class="lens" cx="20" cy="34" r="10"/><circle class="lens" cx="44" cy="34" r="10"/>
+        <g clip-path="url(#lc-hd)"><rect class="sweep" x="0" y="20" width="10" height="28" rx="3"/></g>
+        <circle class="frame" cx="20" cy="34" r="10"/><circle class="frame" cx="44" cy="34" r="10"/>
+        <path class="frame" d="M30 33q2-3.5 4 0M10 31 5 26M54 31l5-5"/>
+        <path class="glint" d="M14.5 30.5a6.5 6.5 0 0 1 5-4M38.5 30.5a6.5 6.5 0 0 1 5-4"/>
+        <text class="bang" x="29" y="24">!</text>
+        <path class="moon" transform="translate(0 12)" d="M33.5 1.5a6 6 0 1 0 5.5 8.5a4.6 4.6 0 0 1-5.5-8.5z"/>
       </svg>
       <div class="nm"><b>Ned</b><span class="mood" id="mood">—</span></div>
     </div>
@@ -599,7 +597,7 @@
   }
 
   /** Small glasses for Ned's avatar (no mood effects; the header mark carries the mood). */
-  const MINI = `<svg class="mark" viewBox="0 0 64 40" aria-hidden="true"><circle class="frame" cx="18" cy="22" r="10"/><circle class="frame" cx="46" cy="22" r="10"/><path class="frame" d="M28 21q4-4.5 8 0M8 19 3 14M56 19l5-5"/><path class="glint" d="M12.5 18.5a6.5 6.5 0 0 1 5-4M40.5 18.5a6.5 6.5 0 0 1 5-4"/></svg>`;
+  const MINI = `<svg class="mark" viewBox="0 14 64 40" aria-hidden="true"><circle class="frame" cx="20" cy="34" r="10"/><circle class="frame" cx="44" cy="34" r="10"/><path class="frame" d="M30 33q2-3.5 4 0M10 31 5 26M54 31l5-5"/><path class="glint" d="M14.5 30.5a6.5 6.5 0 0 1 5-4M38.5 30.5a6.5 6.5 0 0 1 5-4"/></svg>`;
   /** Ned speaking: avatar + bubble. `lead` is HTML-escaped by the caller. */
   const say = (meta, leadHtml, subHtml = "") =>
     `<div class="say"><span class="av">${MINI}</span><div class="bubble">${meta ? `<div class="meta">${meta}</div>` : ""}<p class="lead">${leadHtml}</p>${subHtml ? `<div class="sub">${subHtml}</div>` : ""}</div></div>`;
