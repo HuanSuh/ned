@@ -43,10 +43,34 @@ export interface GithubItem {
   reason: "review_requested" | "my_pr_changes_requested" | "my_pr_approved";
 }
 
+export type MailReason = "reply" | "approval" | "deadline" | "request";
+
+export interface MailItem {
+  id: string;
+  from: string;
+  subject: string;
+  snippet: string;
+  received: string;
+  url: string;
+  reason: MailReason;
+  /** One short line: why this needs me (e.g. "금요일까지 회신 요청"). */
+  why: string;
+}
+
+export interface MailBlock {
+  /** One-line inbox summary in Ned's voice; "" when nothing notable. */
+  summary: string;
+  /** Unread inbox threads in the last 2 days (capped at 50). */
+  unread: number;
+  /** Mails that need my action, most urgent first (max 10). */
+  items: MailItem[];
+}
+
 export interface AgendaPayload {
   calendar: CalendarItem[];
   jira: JiraItem[];
   github: GithubItem[];
+  mail: MailBlock;
 }
 
 export interface Agenda extends AgendaPayload {
@@ -55,11 +79,13 @@ export interface Agenda extends AgendaPayload {
   error?: string;
 }
 
-const EMPTY: Agenda = { updated_at: 0, cost_usd: 0, calendar: [], jira: [], github: [] };
+const EMPTY_MAIL: MailBlock = { summary: "", unread: 0, items: [] };
+const EMPTY: Agenda = { updated_at: 0, cost_usd: 0, calendar: [], jira: [], github: [], mail: EMPTY_MAIL };
+const emptyAgenda = (now: number): Agenda => ({ ...EMPTY, updated_at: now, mail: { ...EMPTY_MAIL, items: [] } });
 
 export function readAgenda(): Agenda {
   const a = readJson<Partial<Agenda>>(AGENDA_PATH, {});
-  return { ...EMPTY, ...a, calendar: a.calendar ?? [], jira: a.jira ?? [], github: a.github ?? [] };
+  return { ...EMPTY, ...a, calendar: a.calendar ?? [], jira: a.jira ?? [], github: a.github ?? [], mail: { ...EMPTY_MAIL, ...a.mail, items: a.mail?.items ?? [] } };
 }
 
 /** Read tools for the agenda job only — narrower than the heartbeat's set. */
@@ -68,6 +94,7 @@ function agendaTools(cfg: NedConfig): string[] {
   if (cfg.sources.calendar) t.push("mcp__claude_ai_Google_Calendar__list_events", "mcp__claude_ai_Google_Calendar__search_events");
   if (cfg.sources.jira) t.push("mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql");
   if (cfg.sources.github) t.push("Bash(gh search prs:*)", "Bash(gh pr list:*)", "Bash(gh api:*)");
+  if (cfg.sources.gmail) t.push("mcp__claude_ai_Gmail__search_threads");
   return t;
 }
 
@@ -82,6 +109,7 @@ function isoLocal(d: Date): string {
 const str = (v: unknown): string => (typeof v === "string" ? v : v == null ? "" : String(v));
 const RSVPS: Rsvp[] = ["accepted", "needsAction", "declined", "tentative", "organizer"];
 const REASONS: GithubItem["reason"][] = ["review_requested", "my_pr_changes_requested", "my_pr_approved"];
+const MAIL_REASONS: MailReason[] = ["reply", "approval", "deadline", "request"];
 
 /** Coerce model output into the exact contract the dashboard expects. */
 function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedConfig): AgendaPayload {
@@ -129,7 +157,26 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
           reason: e.reason as GithubItem["reason"],
         }))
     : [];
-  return { calendar, jira, github };
+  const m = raw.mail && typeof raw.mail === "object" ? (raw.mail as Record<string, unknown>) : {};
+  const mail: MailBlock = cfg.sources.gmail
+    ? {
+        summary: str(m.summary).slice(0, 200),
+        unread: Math.max(0, Math.trunc(Number(m.unread) || 0)),
+        items: arr(m.items)
+          .slice(0, 10)
+          .map((e) => ({
+            id: str(e.id),
+            from: str(e.from),
+            subject: str(e.subject),
+            snippet: str(e.snippet).slice(0, 200),
+            received: str(e.received),
+            url: str(e.url) || (e.id ? `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(str(e.id))}` : ""),
+            reason: MAIL_REASONS.includes(e.reason as MailReason) ? (e.reason as MailReason) : "request",
+            why: str(e.why).slice(0, 120),
+          })),
+      }
+    : { ...EMPTY_MAIL, items: [] };
+  return { calendar, jira, github, mail };
 }
 
 function buildPrompt(cfg: NedConfig, now = new Date()): string {
@@ -144,7 +191,8 @@ function buildPrompt(cfg: NedConfig, now = new Date()): string {
     .replaceAll("{{DAY_END}}", isoLocal(dayEnd))
     .replaceAll("{{CALENDAR}}", off(cfg.sources.calendar))
     .replaceAll("{{JIRA}}", off(cfg.sources.jira))
-    .replaceAll("{{GITHUB}}", off(cfg.sources.github));
+    .replaceAll("{{GITHUB}}", off(cfg.sources.github))
+    .replaceAll("{{GMAIL}}", off(cfg.sources.gmail));
 }
 
 let inflight: Promise<Agenda> | null = null;
@@ -170,12 +218,12 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
   const now = Date.now();
   if (llmDisabled()) {
     log("agenda: NED_NO_LLM=1 — skipping claude, writing empty agenda");
-    const a: Agenda = { updated_at: now, cost_usd: 0, calendar: [], jira: [], github: [] };
+    const a = emptyAgenda(now);
     writeJsonAtomic(AGENDA_PATH, a);
     return a;
   }
-  if (!cfg.sources.calendar && !cfg.sources.jira && !cfg.sources.github) {
-    const a: Agenda = { updated_at: now, cost_usd: 0, calendar: [], jira: [], github: [] };
+  if (!cfg.sources.calendar && !cfg.sources.jira && !cfg.sources.github && !cfg.sources.gmail) {
+    const a = emptyAgenda(now);
     writeJsonAtomic(AGENDA_PATH, a);
     return a;
   }
@@ -194,6 +242,6 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
     log(`agenda: failed — ${error.slice(0, 300)}`);
   }
   writeJsonAtomic(AGENDA_PATH, agenda);
-  log(`agenda: ${agenda.calendar.length} events / ${agenda.jira.length} jira / ${agenda.github.length} prs ($${res.cost_usd.toFixed(2)}, ${res.num_turns} turns, ${Math.round(res.duration_ms / 1000)}s)`);
+  log(`agenda: ${agenda.calendar.length} events / ${agenda.jira.length} jira / ${agenda.github.length} prs / ${agenda.mail.items.length} mails ($${res.cost_usd.toFixed(2)}, ${res.num_turns} turns, ${Math.round(res.duration_ms / 1000)}s)`);
   return agenda;
 }
