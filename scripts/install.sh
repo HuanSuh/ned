@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Install Ned end to end: deps → build daemon → Claude Code hooks → LaunchAgent → menu bar app.
+# Install Ned end to end: deps → build daemon → Claude Code hooks → /Applications/Ned.app.
+# Ned.app supervises the daemon itself (spawns `node packages/daemon/dist/cli.js run`, restarts it,
+# stops it on quit), so the old com.ned.daemon LaunchAgent is removed if present.
+# Autostart: turn on "Login Items 에 등록" in the menu.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-NODE="$(command -v node)"
-CLAUDE_DIR="$(dirname "$(command -v claude)")"
+DEST="/Applications/Ned.app"
 PLIST="$HOME/Library/LaunchAgents/com.ned.daemon.plist"
-mkdir -p "$HOME/.ned/logs" "$HOME/Library/LaunchAgents"
+command -v node >/dev/null || { echo "✗ node not on PATH"; exit 1; }
+command -v claude >/dev/null || echo "! claude not on PATH — briefings will fail until it is"
+mkdir -p "$HOME/.ned/logs"
 
 echo "▶ deps + build"
 (cd "$REPO" && pnpm install --silent && pnpm -r build)
@@ -13,24 +17,38 @@ echo "▶ deps + build"
 echo "▶ Claude Code hooks"
 node "$REPO/packages/hook/install-hooks.mjs"
 
-echo "▶ LaunchAgent"
-sed -e "s|__NODE__|$NODE|g" -e "s|__REPO__|$REPO|g" -e "s|__HOME__|$HOME|g" \
-    -e "s|__PATH__|$CLAUDE_DIR:$(dirname "$NODE"):/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin|g" \
-    "$REPO/scripts/com.ned.daemon.plist.template" > "$PLIST"
-launchctl bootout "gui/$(id -u)/com.ned.daemon" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
-launchctl kickstart -k "gui/$(id -u)/com.ned.daemon"
+echo "▶ legacy LaunchAgent"
+if [ -f "$PLIST" ] || launchctl print "gui/$(id -u)/com.ned.daemon" >/dev/null 2>&1; then
+  launchctl bootout "gui/$(id -u)/com.ned.daemon" 2>/dev/null || true
+  rm -f "$PLIST"
+  echo "  removed com.ned.daemon (Ned.app runs the daemon now)"
+else
+  echo "  none"
+fi
 
-echo "▶ menu bar app"
+echo "▶ Ned.app"
 bash "$REPO/apps/menubar/scripts/package.sh"
-APP="$REPO/apps/menubar/.build/Ned.app"
-pkill -x Ned 2>/dev/null || true
-open "$APP"
+if [ -d "$DEST" ]; then
+  answer="y"
+  if [ -t 0 ]; then read -r -p "  $DEST exists. Overwrite? [Y/n] " answer || answer="y"; fi
+  case "${answer:-y}" in [nN]*) echo "  kept existing $DEST"; SKIP_COPY=1 ;; esac
+fi
+if [ -z "${SKIP_COPY:-}" ]; then
+  osascript -e 'tell application id "com.ned.menubar" to quit' >/dev/null 2>&1 || true
+  pkill -x Ned 2>/dev/null || true
+  sleep 1
+  rm -rf "$DEST"
+  cp -R "$REPO/apps/menubar/.build/Ned.app" "$DEST"
+fi
+# /Applications/Ned.app has no repo ancestor, so tell it where the daemon lives.
+defaults write com.ned.menubar nedRepoPath "$REPO"
+open "$DEST" --args --dashboard
 
 echo
 echo "✓ Ned installed."
-echo "  dashboard : http://127.0.0.1:7777"
+echo "  app       : $DEST  (menu: 'Login Items 에 등록' to autostart)"
+echo "  dashboard : http://127.0.0.1:7777  (or 메뉴 > 대시보드)"
 echo "  config    : ~/.ned/config.yaml"
-echo "  logs      : ~/.ned/logs/daemon.log"
-echo "  menu bar  : $APP   (add to Login Items to autostart)"
+echo "  logs      : ~/.ned/logs/app-daemon.log (supervisor + daemon output), ~/.ned/logs/daemon.log"
+echo "  uninstall : scripts/uninstall.sh"
 echo "  macOS 26+ : if the glasses icon is hidden, allow Ned under System Settings > Menu Bar"

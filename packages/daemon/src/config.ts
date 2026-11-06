@@ -38,16 +38,32 @@ export const DEFAULT_CONFIG: NedConfig = {
 };
 
 export function loadConfig(): NedConfig {
+  let cfg: NedConfig;
   if (!fs.existsSync(CONFIG_PATH)) {
     fs.writeFileSync(CONFIG_PATH, YAML.stringify(DEFAULT_CONFIG));
-    return { ...DEFAULT_CONFIG };
+    cfg = { ...DEFAULT_CONFIG };
+  } else {
+    const parsed = (YAML.parse(fs.readFileSync(CONFIG_PATH, "utf8")) ?? {}) as Partial<NedConfig>;
+    cfg = { ...DEFAULT_CONFIG, ...parsed, sources: { ...DEFAULT_CONFIG.sources, ...(parsed.sources ?? {}) } };
   }
-  const parsed = (YAML.parse(fs.readFileSync(CONFIG_PATH, "utf8")) ?? {}) as Partial<NedConfig>;
-  return { ...DEFAULT_CONFIG, ...parsed, sources: { ...DEFAULT_CONFIG.sources, ...(parsed.sources ?? {}) } };
+  const envPort = portOverride();
+  return envPort ? { ...cfg, port: envPort } : cfg;
+}
+
+/** `NED_PORT` env overrides `config.yaml`'s port (used by Ned.app and tests). Never persisted. */
+function portOverride(): number | null {
+  const n = Number(process.env.NED_PORT);
+  return Number.isInteger(n) && n > 0 && n < 65536 ? n : null;
 }
 
 export function saveConfig(cfg: NedConfig): void {
-  fs.writeFileSync(CONFIG_PATH, YAML.stringify(cfg));
+  let out = cfg;
+  if (portOverride() && fs.existsSync(CONFIG_PATH)) {
+    // Keep the file's own port: the env override is per-process, not a setting.
+    const onDisk = (YAML.parse(fs.readFileSync(CONFIG_PATH, "utf8")) ?? {}) as Partial<NedConfig>;
+    out = { ...cfg, port: onDisk.port ?? DEFAULT_CONFIG.port };
+  }
+  fs.writeFileSync(CONFIG_PATH, YAML.stringify(out));
 }
 
 export function inQuietHours(cfg: NedConfig, now = new Date()): boolean {

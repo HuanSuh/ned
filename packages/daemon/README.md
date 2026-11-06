@@ -70,10 +70,11 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
 | 변수 | 기본 | 설명 |
 |---|---|---|
 | `NED_HOME` | `~/.ned` | 데이터 루트. 테스트 시 `/tmp/ned-test` 같은 경로로 격리 |
+| `NED_PORT` | (unset) | 설정 시 `config.yaml` 의 `port` 대신 이 포트로 listen (저장되지 않음). Ned.app 이 띄울 때 넘기고, 테스트 격리에 쓴다 |
 | `NED_NO_LLM` | (unset) | `1` 이면 heartbeat 가 `claude -p` 를 호출하지 않고 `NED_OK` 를 기록하며, agenda 잡은 빈 agenda 를 쓴다 (비용 0, 테스트용) |
 | `NED_CHILD` | — | 데몬이 띄운 `claude -p` 자식에 `1` 로 설정됨 (훅이 자기 자신을 관찰하지 않도록 쓸 수 있음) |
 
-`claude` 바이너리는 `PATH` 에서 찾는다. LaunchAgent 로 띄울 때는 plist 의 `PATH` 에 포함돼야 한다.
+`claude` 바이너리는 `PATH` 에서 찾는다. 보통은 Ned.app 이 데몬을 자식 프로세스로 띄우며 `node`/`claude` 위치를 로그인 셸에서 찾아 `PATH` 에 넣는다 (`apps/menubar/README.md`).
 
 ## Data layout (`$NED_HOME`, 기본 `~/.ned`)
 

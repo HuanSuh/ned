@@ -12,7 +12,7 @@ struct NedApp: App {
 
     var body: some Scene {
         MenuBarExtra(isInserted: $inserted) {
-            MenuContent(store: store)
+            MenuContent(store: store, daemon: DaemonManager.shared)
         } label: {
             MenuBarLabel(store: store)
         }
@@ -20,12 +20,42 @@ struct NedApp: App {
     }
 }
 
-/// Logs lifecycle and keeps the app alive when its only window (the menu panel) closes.
+/// Logs lifecycle, owns the daemon child, and keeps the app alive when its windows close.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var sigterm: DispatchSourceSignal?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         log.info("didFinishLaunching policy=\(NSApp.activationPolicy().rawValue)")
+        // `kill <pid>` / `pkill -x Ned` / logout: quit through NSApp so the daemon child is stopped too.
+        signal(SIGTERM, SIG_IGN)
+        let src = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        src.setEventHandler { NSApp.terminate(nil) }
+        src.resume()
+        sigterm = src
+        MainActor.assumeIsolated {
+            DaemonManager.shared.start()
+            // `open Ned.app --args --dashboard` (install.sh first launch) or NED_OPEN_DASHBOARD=1.
+            if CommandLine.arguments.contains("--dashboard") || AppConfig.env["NED_OPEN_DASHBOARD"] == "1" {
+                DashboardWindowController.shared.show()
+            }
+            // Diagnostic: exercise the same register/unregister path as the menu toggle and log it.
+            if CommandLine.arguments.contains("--login-item-selftest") {
+                var li = LoginItem()
+                li.set(true)
+                DaemonManager.shared.note("login item selftest: enabled=\(li.enabled) message=\(li.message ?? "nil")")
+                li.set(false)
+            }
+        }
     }
-    func applicationWillTerminate(_ notification: Notification) { log.error("applicationWillTerminate") }
+    func applicationWillTerminate(_ notification: Notification) {
+        log.error("applicationWillTerminate")
+        MainActor.assumeIsolated { DaemonManager.shared.stopSync() }
+    }
+    /// Dock icon click (while the dashboard made the app .regular) reopens the dashboard.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        MainActor.assumeIsolated { DashboardWindowController.shared.show() }
+        return true
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
 }
