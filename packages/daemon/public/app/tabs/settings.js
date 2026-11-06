@@ -3,9 +3,8 @@
 import { api } from "../api.js";
 import { readCardLayout, renderCardLayout } from "../features/cardlayout.js";
 import { ACTION_DEFAULTS, ACTION_KO } from "../features/drafts.js";
-import { personaFieldHtml, personaUnlocked, tapTitle, unlockPersona } from "../features/persona-gate.js";
 import { readToneBySource, syncWriteActionGroups, writeActionsHtml } from "./settings-actions.js";
-import { PERSONA_IDS, VOICE, applyPersona, markSvg, persona } from "../features/personas.js";
+import { persona } from "../features/personas.js";
 import { loadAgenda } from "../main.js";
 import { S } from "../state.js";
 import { KIND_ICON, KIND_KO, SOURCE_LABEL } from "../ui/icons.js";
@@ -55,23 +54,6 @@ export function addExcl(k, raw) {
   }
   $(X_MSG[k]).textContent = bad.length ? `${k === "jira" ? "프로젝트 키는 영문 대문자로 시작하는 영숫자만 돼" : k === "ack" ? "이모지 이름에 공백·기호는 안 돼 (영문·한글·숫자·_+-.' 만)" : "채널 이름이 비었거나 너무 길어"}: ${bad.join(", ")}` : added ? "추가했어. 저장을 눌러야 적용돼." : "";
   renderExcl();
-}
-
-/** Hidden feature: #f-persona stays empty + hidden until persona-gate unlocks it (title ×5 or ⌘K "persona"). */
-export function renderPersonaPicker(cur) {
-  const field = $("f-persona");
-  if (!personaUnlocked()) { field.hidden = true; field.innerHTML = ""; return; }
-  if (!$("c-persona")) field.innerHTML = personaFieldHtml(true);
-  field.hidden = false;
-  const box = $("c-persona");
-  if (!box.children.length) {
-    box.innerHTML = PERSONA_IDS.map((id) => { const v = VOICE[id]; return `<label class="pcard" data-persona="${id}">
-        <input type="radio" name="persona" value="${id}">
-        <div class="ptop"><span data-mark="${id}">${markSvg(id, false)}</span><b class="pn">${esc(v.name)}</b><span class="pk">${id}</span></div>
-        <div class="sw" aria-hidden="true"><i style="background:var(--bg)"></i><i style="background:var(--pane)"></i><i style="background:var(--hero)"></i><i style="background:var(--info)"></i><i style="background:var(--mint)"></i></div>
-        <div class="ph">${esc(v.sample)}</div><div class="pt">${esc(v.tagline)}</div></label>`; }).join("");
-  }
-  for (const r of box.querySelectorAll("input[name=persona]")) r.checked = r.value === cur;
 }
 
 export const NOTIFY_KINDS = ["session", "email", "slack", "jira", "github", "sentry", "calendar"];
@@ -192,7 +174,6 @@ export function renderConfig() {
   renderWriteActions(c);
   renderActionLog(); loadActionLog();
   $("c-tone").value = c.reply_tone || "";
-  renderPersonaPicker(c.persona || "ned");
   renderCardLayout(c.dashboard ?? null);
   excl.slack = [...(c.filters?.slack?.exclude_channels || [])];
   excl.jira = [...(c.filters?.jira?.exclude_projects || [])];
@@ -233,7 +214,6 @@ export function readBody() {
     agenda_source_minutes: readIntervals(),
     quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
     sources,
-    persona: document.querySelector("#c-persona input[name=persona]:checked")?.value || S.config?.persona || "ned",
     filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack] }, jira: { exclude_projects: [...excl.jira] } },
     dashboard: readCardLayout(),
     notifications: readNotifications(),
@@ -287,10 +267,6 @@ function initNav() {
 /** Listeners + one-time setup; main.js calls every module's init() once, in the old file's order. */
 export function init() {
   const st = document.createElement("style"); st.textContent = ACTLOG_CSS; document.head.appendChild(st);
-  // Hidden persona picker: title ×5 or the ⌘K palette's `persona` command (search.js dispatches the event).
-  const showPersona = () => renderPersonaPicker(S.config?.persona || persona);
-  $("s-title").addEventListener("click", () => { if (tapTitle()) showPersona(); });
-  window.addEventListener("ned:persona-unlock", () => { if (unlockPersona()) showPersona(); });
   $("cfg").addEventListener("change", (e) => {
     const f = e.target.closest("[data-alf]"); if (!f) return;
     AL[f.dataset.alf] = f.type === "checkbox" ? f.checked : f.value; renderActionLog();
@@ -330,7 +306,6 @@ export function init() {
     btn.disabled = true; msg.className = "msg"; msg.textContent = "저장 중…";
     try {
       S.config = await api("/api/config", { method: "PUT", body: JSON.stringify(body) });
-      await applyPersona(S.config.persona); // look + voice switch now; prompts use it from the next run
       loadAgenda(); // sources switched off disappear from home now
       renderConfig(); msg.className = "msg ok"; msg.textContent = persona === "ned" ? "저장했어. 다음 순찰부터 적용." : persona === "alfred" ? "저장했습니다. 다음 순찰부터 적용됩니다." : persona === "oracle" ? "저장 완료. 다음 순찰부터 적용." : "저장했어요. 다음 순찰부터 반영됩니다.";
     } catch (err) {

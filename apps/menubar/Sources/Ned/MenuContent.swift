@@ -6,7 +6,6 @@ struct MenuContent: View {
     @ObservedObject var store: StateStore
     @ObservedObject var daemon: DaemonManager
     @State private var loginItem = LoginItem()
-    @State private var showPersona = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -105,36 +104,9 @@ struct MenuContent: View {
             if let m = loginItem.message {
                 Text(m).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: 12) {
-                Button("저장소 위치…") { chooseRepo() }.buttonStyle(.link).font(.caption)
-                    .help(daemon.repoPath ?? "")
-                if showPersona { personaMenu }
-            }
-            // Hidden feature: the persona submenu shows only when the dropdown was opened with ⌥ held.
-            // Re-checked every time the menu window becomes key, so a plain open hides it again.
-            .onAppear { showPersona = NSEvent.modifierFlags.contains(.option) }
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
-                showPersona = NSEvent.modifierFlags.contains(.option)
-            }
+            Button("저장소 위치…") { chooseRepo() }.buttonStyle(.link).font(.caption)
+                .help(daemon.repoPath ?? "")
         }
-    }
-
-    /// 페르소나 submenu (radio) — hidden unless ⌥-opened (`showPersona`). Optimistic: StateStore switches now and reverts if the PUT fails.
-    private var personaMenu: some View {
-        Menu {
-            Picker("페르소나", selection: Binding(
-                get: { store.personaID },
-                set: { store.setPersona($0) })) {
-                ForEach(PersonaID.allCases) { p in Text(p.persona.displayName).tag(p) }
-            }
-            .pickerStyle(.inline)
-            .labelsHidden()
-        } label: {
-            Text("페르소나: \(store.persona.displayName)").font(.caption)
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help("메뉴 막대·알림의 이름과 색 — 데몬 설정(PUT /api/config)에 저장")
     }
 
     private func chooseRepo() {

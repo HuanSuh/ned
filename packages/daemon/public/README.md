@@ -49,7 +49,7 @@ daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙�
 | 에이전트 세션 | `state.sessions` | 워크트리·상태(색상)·마지막 요약/프롬프트·서브에이전트 수·상대 시간 |
 | 브리핑 히스토리 | `GET /api/briefings?limit=30` | 최신순, 펼치면 headline/action_items/updates/fyi/sessions/cost/raw. `NED_OK` 는 접힘·흐리게 |
 | 타임라인 | `GET /api/events?days=2` + 브리핑 | ts 로 병합, 이벤트 유형·워크트리 칩 필터 |
-| 설정 | `GET/PUT /api/config` | **페르소나**(히든 — 기본 숨김, "설정" 제목 5연타 또는 ⌘K `persona` 로 이 세션만 표시, `features/persona-gate.js`) 라디오 4개 + 미리보기 카드(마크·색 견본·예시 헤드라인, 카드마다 그 페르소나 토큰으로 그림). 저장하면 즉시 `<html data-persona>` 가 바뀐다. heartbeat/신호 간격, 브리핑 시각, 조용한 시간, 소스 토글(`config.sources` 키에서 자동 생성), **트래킹 제외**(Slack 채널 / Jira 프로젝트 칩 입력: 엔터·쉼표로 추가, ✕·빈 입력에서 Backspace 로 빼기, `MNT-123` 은 `MNT` 로, 잘못된 키는 안내만. 자동완성 후보는 `/api/agenda` 의 slack 채널·jira 키 접두어와 `/api/briefings` 의 slack·jira 항목에서 클라이언트가 모은 datalist. 저장 = `PUT /api/config` 의 `filters`), claude_model, claude_max_turns |
+| 설정 | `GET/PUT /api/config` | 페르소나 선택 UI 는 없음(현재 UI 미제공, config.persona 로만 — 테마는 `state.persona` 를 따름). heartbeat/신호 간격, 브리핑 시각, 조용한 시간, 소스 토글(`config.sources` 키에서 자동 생성), **트래킹 제외**(Slack 채널 / Jira 프로젝트 칩 입력: 엔터·쉼표로 추가, ✕·빈 입력에서 Backspace 로 빼기, `MNT-123` 은 `MNT` 로, 잘못된 키는 안내만. 자동완성 후보는 `/api/agenda` 의 slack 채널·jira 키 접두어와 `/api/briefings` 의 slack·jira 항목에서 클라이언트가 모은 datalist. 저장 = `PUT /api/config` 의 `filters`), claude_model, claude_max_turns |
 
 ## 갱신 주기
 - `/api/state` 10초 폴링(탭이 다시 보이면 즉시). `/api/agenda`·`/api/todos` 60초 폴링.
