@@ -86,8 +86,9 @@ kill <pid>                                            # quits cleanly (stops the
 Launch: a normal launch opens the dashboard window (boot screen → dashboard), so starting Ned always shows
 something (LSUIElement: no Dock icon otherwise). Turn it off in the dropdown (실행 시 대시보드 열기, defaults
 `openDashboardAtLaunch`, default true) or with `NED_OPEN_DASHBOARD=0`; `--dashboard` / `NED_OPEN_DASHBOARD=1` always
-open it; `--*-selftest` runs never do. A launch at login (the launch Apple event's `keyAELaunchedAsLogInItem`, or
-< 60 s after the Dock process started) stays in the menu bar unless 자동 시작 시에도 열기 (`openDashboardAtLoginLaunch`,
+open it; `--*-selftest` runs never do. A launch at login (the launch Apple event's `keyAELaunchedAsLogInItem`; only
+when no launch event was received, < 60 s after the Dock process started — an event without the marker is a direct
+launch even right after login) stays in the menu bar unless 자동 시작 시에도 열기 (`openDashboardAtLoginLaunch`,
 default false) is on. The decision is logged: `launch: dashboard open|not opened — <reason>` (`Sources/Ned/LaunchBehavior.swift`).
 
 Status item diagnostics: at creation and +1 s / +5 s / +15 s the log gets
