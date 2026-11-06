@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import YAML from "yaml";
+import type { NotifyMode } from "./notify.js";
 import { CONFIG_PATH } from "./paths.js";
 
 export interface NedConfig {
@@ -26,6 +27,8 @@ export interface NedConfig {
   session_stale_minutes: number;
   /** Minutes between agenda (calendar/jira/github) refreshes for the dashboard HOME tab. */
   agenda_refresh_minutes: number;
+  /** Briefing banners: `auto` = Ned.app when it spawned the daemon (`NED_NOTIFY=app`), else osascript. */
+  notify: NotifyMode;
 }
 
 export const PERSONAS = ["ned", "alfred", "oracle", "jarvis"] as const;
@@ -89,25 +92,42 @@ export const DEFAULT_CONFIG: NedConfig = {
   claude_max_turns: 25,
   session_stale_minutes: 180,
   agenda_refresh_minutes: 60,
+  notify: "auto",
 };
 
 export function loadConfig(): NedConfig {
+  let cfg: NedConfig;
   if (!fs.existsSync(CONFIG_PATH)) {
     fs.writeFileSync(CONFIG_PATH, YAML.stringify(DEFAULT_CONFIG));
-    return { ...DEFAULT_CONFIG, filters: normalizeFilters(DEFAULT_CONFIG.filters) };
+    cfg = { ...DEFAULT_CONFIG, filters: normalizeFilters(DEFAULT_CONFIG.filters) };
+  } else {
+    const parsed = (YAML.parse(fs.readFileSync(CONFIG_PATH, "utf8")) ?? {}) as Partial<NedConfig>;
+    cfg = {
+      ...DEFAULT_CONFIG,
+      ...parsed,
+      sources: { ...DEFAULT_CONFIG.sources, ...(parsed.sources ?? {}) },
+      persona: normalizePersona(parsed.persona),
+      filters: mergeFilters(normalizeFilters(DEFAULT_CONFIG.filters), parsed.filters),
+    };
   }
-  const parsed = (YAML.parse(fs.readFileSync(CONFIG_PATH, "utf8")) ?? {}) as Partial<NedConfig>;
-  return {
-    ...DEFAULT_CONFIG,
-    ...parsed,
-    sources: { ...DEFAULT_CONFIG.sources, ...(parsed.sources ?? {}) },
-    persona: normalizePersona(parsed.persona),
-    filters: mergeFilters(normalizeFilters(DEFAULT_CONFIG.filters), parsed.filters),
-  };
+  const envPort = portOverride();
+  return envPort ? { ...cfg, port: envPort } : cfg;
+}
+
+/** `NED_PORT` env overrides `config.yaml`'s port (used by Ned.app and tests). Never persisted. */
+function portOverride(): number | null {
+  const n = Number(process.env.NED_PORT);
+  return Number.isInteger(n) && n > 0 && n < 65536 ? n : null;
 }
 
 export function saveConfig(cfg: NedConfig): void {
-  fs.writeFileSync(CONFIG_PATH, YAML.stringify(cfg));
+  let out = cfg;
+  if (portOverride() && fs.existsSync(CONFIG_PATH)) {
+    // Keep the file's own port: the env override is per-process, not a setting.
+    const onDisk = (YAML.parse(fs.readFileSync(CONFIG_PATH, "utf8")) ?? {}) as Partial<NedConfig>;
+    out = { ...cfg, port: onDisk.port ?? DEFAULT_CONFIG.port };
+  }
+  fs.writeFileSync(CONFIG_PATH, YAML.stringify(out));
 }
 
 export function inQuietHours(cfg: NedConfig, now = new Date()): boolean {

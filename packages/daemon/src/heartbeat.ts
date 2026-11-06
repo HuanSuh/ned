@@ -128,7 +128,7 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
 
   let res;
   if (llmDisabled()) {
-    log(`heartbeat: NED_NO_LLM=1 — skipping claude, recording NED_OK`);
+    log(`heartbeat: NED_NO_LLM=1 — skipping claude, recording ${process.env.NED_NO_LLM_RESULT ? "NED_NO_LLM_RESULT" : "NED_OK"}`);
     res = noLlmResult();
   } else {
     log(`heartbeat: asking claude (${opts.daily ? "daily" : "heartbeat"}, ${events.length} new events, signalDue=${signalDue})`);
@@ -178,7 +178,7 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
       source: id,
     }));
     next.attention = [...next.attention.filter((a) => a.source === "sessions"), ...items, ...next.attention.filter((a) => a.source !== "sessions")].slice(0, 30);
-    if (!inQuietHours(cfg)) notify("Ned", briefing.headline ?? `${briefing.action_items.length}건 확인 필요`);
+    if (!inQuietHours(cfg)) notify("Ned", briefing.headline ?? `${briefing.action_items.length}건 확인 필요`, cfg.notify);
   }
   writeState(next);
   log(`heartbeat: ${briefing.status} (${briefing.action_items.length} action / ${briefing.updates.length} updates / ${briefing.fyi.length} fyi, $${res.cost_usd.toFixed(2)}, ${res.num_turns} turns)`);

@@ -15,9 +15,13 @@ export function llmDisabled(): boolean {
   return process.env.NED_NO_LLM === "1";
 }
 
-/** What a heartbeat sees when the LLM is disabled: a clean NED_OK with zero cost. */
+/**
+ * What a heartbeat sees when the LLM is disabled: a clean NED_OK with zero cost, or the briefing JSON
+ * in `NED_NO_LLM_RESULT` (tests: exercise the UPDATE path without calling claude).
+ */
 export function noLlmResult(): ClaudeRunResult {
-  return { ok: true, text: '{"status":"NED_OK"}', cost_usd: 0, num_turns: 0, duration_ms: 0 };
+  const text = process.env.NED_NO_LLM_RESULT || '{"status":"NED_OK"}';
+  return { ok: true, text, cost_usd: 0, num_turns: 0, duration_ms: 0 };
 }
 
 /**
