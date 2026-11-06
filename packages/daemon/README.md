@@ -242,6 +242,19 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
 
 `claude` 바이너리는 `PATH` 에서 찾는다. 보통은 Ned.app 이 데몬을 자식 프로세스로 띄우며 `node`/`claude` 위치를 로그인 셸에서 찾아 `PATH` 에 넣는다 (`apps/menubar/README.md`).
 
+## `claude -p` 빠른 시작 (`config.claude_fast_startup`, 기본 켬)
+
+커넥터를 쓰는 `claude -p` 는 사용자 훅(Stop 훅 하나가 ~10s)·플러그인 때문에 호출마다 ~18-20s 가 고정으로 붙었다. 이제
+`isolated` 가 아닌 모든 호출에 `--settings $NED_HOME/claude-settings.json --disable-slash-commands` 를 붙인다 — 그 파일은
+`{"disableAllHooks": true, "enabledPlugins": {<사용자가 켠 플러그인>: false}}` 이고 `src/claude.ts` 가 `~/.claude/settings*.json` 을
+읽어 내용이 바뀔 때만 다시 쓴다 (`~/.claude` 는 쓰지 않음). 사용자 settings 의 model/effort 와 claude.ai 커넥터·Sentry 는 그대로.
+측정: overhead(총 − API) 18.9s → 3.2s, 실제 캘린더 호출 26.1s → 13.5s — 표와 근거는 `docs/claude-startup.md`.
+
+- 출력 형식은 `--output-format stream-json --verbose` (`result` 줄을 파싱). `allowedTools` 에 `mcp__claude_ai_*` 가 있는 호출이
+  `system/init` 에서 claude.ai 서버를 하나도 못 보면 즉시 kill → 기존 argv 로 재실행하고, 그 데몬 프로세스는 이후 기존 argv 를 쓴다
+  (로그 `fast start-up came up without claude.ai connectors`).
+- 끄기: `config.yaml` 에 `claude_fast_startup: false` (다음 호출부터 적용). 호출별로는 `ClaudeRunOptions.fastStartup`.
+
 ## 알림 (`config.notify`)
 
 | 값 | 동작 |
