@@ -1,14 +1,18 @@
 /* Settings tab: one form, six section cards (외형 · 소스 · 알림 · 순찰 주기 · 쓰기 액션 · Claude), a jump nav and a sticky save bar.
  * Field ids and the PUT /api/config body are unchanged; only the layout moved (index.html #v-settings). */
 import { api } from "../api.js";
+import { BUILD, onBuildStale } from "../features/build.js";
+import { diffConfig, isEmptyPatch, mergePatch } from "../features/config-diff.js";
 import { readCardLayout, renderCardLayout } from "../features/cardlayout.js";
 import { ACTION_DEFAULTS, ACTION_KO } from "../features/drafts.js";
 import { readToneBySource, syncWriteActionGroups, writeActionsHtml } from "./settings-actions.js";
 import { persona } from "../features/personas.js";
 import { applyTheme, normTheme, syncTheme, themeHtml } from "../features/theme.js";
 import { loadAgenda } from "../main.js";
+import { readAutoSched, renderAutoSched } from "../features/autosched.js";
 import { S } from "../state.js";
 import { KIND_ICON, KIND_KO, SOURCE_LABEL } from "../ui/icons.js";
+import { toast } from "../ui/toast.js";
 import { $, esc } from "../util.js";
 
 // ---------- settings ----------
@@ -169,13 +173,14 @@ const ACTLOG_CSS = `.actlog { margin-top: 10px; padding: 10px; border: 1px solid
 .actlog .altab code { font-size: 11px; }
 .actlog .alw { overflow-wrap: anywhere; }`;
 
-export function renderConfig() {
-  const c = S.config; if (!c) return;
+/** Fill the form from `c` (default S.config) and take it as the saved baseline. `preview`: the theme is applied, not cached. */
+export function renderConfig(c = S.config, { preview = false } = {}) {
+  if (!c) return;
   renderNotifications(c.notifications);
   renderWriteActions(c);
   renderActionLog(); loadActionLog();
   $("c-tone").value = c.reply_tone || "";
-  syncTheme(c.dashboard); // server value wins over the <head> cache (and drops an unsaved preview)
+  if (preview) applyTheme(normTheme(c.dashboard?.theme)); else syncTheme(c.dashboard); // server value wins over the <head> cache (and drops an unsaved preview)
   $("c-theme").innerHTML = themeHtml(c.dashboard?.theme);
   renderCardLayout(c.dashboard ?? null);
   excl.slack = [...(c.filters?.slack?.exclude_channels || [])];
@@ -189,6 +194,7 @@ export function renderConfig() {
   $("c-sig").value = c.signal_check_minutes ?? "";
   $("c-bt").value = c.briefing_time ?? "";
   renderIntervals(c);
+  renderAutoSched(c); // 조용한 시간 동작 / 유휴 시 동작
   $("c-qon").checked = !!c.quiet_hours;
   $("c-qs").value = c.quiet_hours?.start ?? "23:00";
   $("c-qe").value = c.quiet_hours?.end ?? "08:00";
@@ -201,8 +207,22 @@ export function renderConfig() {
   $("c-turns").value = c.claude_max_turns ?? "";
   $("c-budget").value = c.agenda_daily_budget_usd ?? "";
   $("c-msg").textContent = ""; $("c-msg").className = "msg";
-  saved = snap(); syncDirty();
+  savedBody = readBody(); saved = snap(); syncDirty();
+  syncSaveLock();
   syncNav();
+}
+
+/**
+ * 409 from PUT /api/config: someone else saved since this form was rendered. Re-render from `current` (the new baseline),
+ * then lay the user's own edits (`patch`, what they had changed) back on top — those fields stay dirty, nothing else does.
+ */
+export function applyConflict(current, patch) {
+  S.config = current;
+  renderConfig(current);
+  const base = [savedBody, saved];
+  renderConfig(mergePatch(current, patch), { preview: true });
+  [savedBody, saved] = base;
+  syncDirty();
 }
 
 /** 외형 → 테마 radio (none rendered yet → "system"). */
@@ -218,6 +238,7 @@ export function readBody() {
     briefing_time: $("c-bt").value,
     agenda_refresh_minutes: Number($("c-agmin").value),
     agenda_source_minutes: readIntervals(),
+    ...readAutoSched(), // quiet_schedule, idle_schedule
     quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
     sources,
     filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack] }, jira: { exclude_projects: [...excl.jira] } },
@@ -237,6 +258,7 @@ export function readBody() {
 // readCardLayout().layout (cardlayout.js re-derives the grid only when they were touched here).
 // theme is part of dashboard but only saves with the form, so it stays in the snapshot.
 let saved = "";
+let savedBody = null; // readBody() right after the last render: the PUT sends only diffConfig(savedBody, readBody())
 const snap = () => { const { dashboard, ...rest } = readBody(); return JSON.stringify({ ...rest, theme: dashboard.theme }); };
 export const isDirty = () => !!S.config && (snap() !== saved || !!readCardLayout().layout);
 export function syncDirty() {
@@ -310,14 +332,87 @@ export function init() {
   $("cfg").addEventListener("submit", async (e) => {
     e.preventDefault();
     const msg = $("c-msg"), btn = $("c-save");
-    const body = readBody();
+    if (BUILD.stale) { syncSaveLock(); return; }
+    const patch = diffConfig(savedBody, readBody());
+    if (isEmptyPatch(patch)) { msg.className = "msg"; msg.textContent = "바뀐 항목이 없어."; return; }
     btn.disabled = true; msg.className = "msg"; msg.textContent = "저장 중…";
     try {
+      // Only the changed keys (sub-key level), plus the version this form was rendered from: a save made elsewhere since → 409.
+      const body = S.config?.updated_at != null ? { ...patch, if_updated_at: S.config.updated_at } : patch;
       S.config = await api("/api/config", { method: "PUT", body: JSON.stringify(body) });
       loadAgenda(); // sources switched off disappear from home now
       renderConfig(); msg.className = "msg ok"; msg.textContent = persona === "ned" ? "저장했어. 다음 순찰부터 적용." : persona === "alfred" ? "저장했습니다. 다음 순찰부터 적용됩니다." : persona === "oracle" ? "저장 완료. 다음 순찰부터 적용." : "저장했어요. 다음 순찰부터 반영됩니다.";
+      if (RB.open) loadBackups();
     } catch (err) {
-      console.warn(err); msg.className = "msg err"; msg.textContent = `저장 실패: ${err.message}`;
-    } finally { btn.disabled = false; }
+      if (err.status === 409 && err.data?.current) {
+        applyConflict(err.data.current, patch);
+        msg.className = "msg err"; msg.textContent = "다른 곳에서 설정이 바뀌어 최신 값을 불러왔어 — 수정한 항목은 유지됨, 다시 저장해 줘.";
+        toast("다른 곳에서 설정이 바뀌어 최신 값을 불러왔어 — 수정한 항목은 유지됨, 다시 저장", 6000);
+      } else {
+        console.warn(err); msg.className = "msg err"; msg.textContent = `저장 실패: ${err.message}`;
+      }
+    } finally { btn.disabled = false; syncSaveLock(); }
+  });
+  onBuildStale(syncSaveLock);
+  initRestore();
+}
+
+// ---------- 새 버전 감지: daemon build changed since page load → 저장 잠금 (build.js shows the reload banner) ----------
+export function syncSaveLock() {
+  const btn = $("c-save"); if (!btn) return;
+  if (!BUILD.stale) { if (btn.dataset.lock) { btn.disabled = false; delete btn.dataset.lock; btn.title = ""; } return; }
+  btn.disabled = true; btn.dataset.lock = "build"; btn.title = "새 버전이 실행 중 — 새로고침한 뒤 저장";
+  const msg = $("c-msg");
+  msg.className = "msg err"; msg.textContent = "새 버전의 Ned 가 실행 중이라 저장을 막았어 — 새로고침한 뒤 다시 저장해 줘.";
+}
+
+// ---------- 이전 설정으로 되돌리기: GET /api/config/backups, POST /api/config/restore { name } ----------
+export const RB = { open: false, list: null, error: "", pick: "", confirm: false, busy: false };
+const fmtBackup = (t) => { const d = new Date(t), p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
+export async function loadBackups() {
+  try { RB.list = await api("/api/config/backups"); RB.error = ""; } catch (e) { RB.error = e.message; }
+  if (RB.pick && !(RB.list || []).some((b) => b.name === RB.pick)) { RB.pick = ""; RB.confirm = false; }
+  renderRestore();
+}
+export function renderRestore() {
+  const box = $("c-restore"); if (!box) return;
+  const list = RB.list || [];
+  const picked = list.find((b) => b.name === RB.pick);
+  box.querySelector(".rbbody").innerHTML = RB.error ? `<div class="hint" style="color:var(--red)">불러오지 못했어: ${esc(RB.error)}</div>`
+    : RB.list === null ? `<div class="hint">불러오는 중…</div>`
+    : !list.length ? `<div class="hint">아직 백업이 없어. 설정을 저장할 때마다 직전 설정이 ~/.ned/config-backups 에 남아 (최근 10개).</div>`
+    : `<div class="rbrow"><select id="c-rb-pick" aria-label="되돌릴 시점"><option value="">시점 선택…</option>${list.map((b) => `<option value="${esc(b.name)}" ${b.name === RB.pick ? "selected" : ""}>${esc(fmtBackup(b.at))} 저장 전</option>`).join("")}</select>
+        <button type="button" class="btn small" id="c-rb-go" ${picked && !RB.busy ? "" : "disabled"}>되돌리기…</button></div>
+      ${RB.confirm && picked ? `<div class="rbconfirm" role="alert"><span>${esc(fmtBackup(picked.at))} 의 설정으로 되돌릴까? 지금 설정은 백업되고${isDirty() ? ", 저장 안 된 변경은 사라져" : ""}.</span>
+        <button type="button" class="btn small go" id="c-rb-yes" ${RB.busy ? "disabled" : ""}>되돌리기 확인</button><button type="button" class="btn small" id="c-rb-no">취소</button></div>` : ""}`;
+}
+async function doRestore() {
+  if (!RB.pick || RB.busy) return;
+  RB.busy = true; renderRestore();
+  try {
+    S.config = await api("/api/config/restore", { method: "POST", body: JSON.stringify({ name: RB.pick }) });
+    RB.confirm = false; RB.pick = "";
+    loadAgenda();
+    renderConfig();
+    toast("이전 설정으로 되돌렸어.");
+  } catch (e) {
+    toast(`되돌리기 실패: ${e.message}`);
+  } finally { RB.busy = false; loadBackups(); }
+}
+function initRestore() {
+  if ($("c-restore")) return;
+  $("cfg").insertAdjacentHTML("afterend", `<details class="card ssec rbsec" id="c-restore"><summary><b>이전 설정으로 되돌리기</b> <span class="hint">저장할 때마다 직전 설정을 최근 10개까지 보관해</span></summary><div class="rbbody"></div></details>`);
+  const st = document.createElement("style");
+  st.textContent = `.rbsec { margin-top: 12px; padding: 10px 14px; } .rbsec summary { cursor: pointer; } .rbsec .rbbody { margin-top: 8px; }
+.rbsec .rbrow, .rbsec .rbconfirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; } .rbsec .rbconfirm { margin-top: 8px; } .rbsec select { font: inherit; font-size: 12px; }`;
+  document.head.appendChild(st);
+  const box = $("c-restore");
+  box.addEventListener("toggle", () => { RB.open = box.open; if (box.open) loadBackups(); });
+  box.addEventListener("change", (e) => { if (e.target.id === "c-rb-pick") { RB.pick = e.target.value; RB.confirm = false; renderRestore(); } });
+  box.addEventListener("click", (e) => {
+    const id = e.target.closest("button")?.id;
+    if (id === "c-rb-go") { RB.confirm = true; renderRestore(); }
+    else if (id === "c-rb-no") { RB.confirm = false; renderRestore(); }
+    else if (id === "c-rb-yes") doRestore();
   });
 }

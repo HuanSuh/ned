@@ -11,13 +11,14 @@ import { contextStatus, requestContext } from "./agenda-context.js";
 import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runChatTurn, sseFrame, stopChat } from "./chat.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { PERSONAS, loadConfig, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeDashboard, normalizeNotifications, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, saveConfig, sourceRefreshMinutes, watchChannels, type NedConfig, type PersonaId } from "./config.js";
+import { PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeDashboard, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, restoreConfigBackup, saveConfig, sourceRefreshMinutes, watchChannels, type NedConfig, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { checkStatus, dismissAttention, heartbeat, listBriefings, runCheck } from "./heartbeat.js";
 import { log } from "./paths.js";
 import { onMailReviewed, type MarkReadOutcome } from "./mail-read.js";
 import { SOURCE_KEY, readSourceReviewed, readState, setReviewed, writeState } from "./state.js";
+import { noteActivity, schedulerStatus } from "./scheduler.js";
 import { registerSearch } from "./search.js";
 import { markThreadSeen } from "./slack-threads.js";
 import { addTodo, deleteTodo, listTodos, updateTodo } from "./todos.js";
@@ -64,6 +65,52 @@ function resolvePublic(urlPath: string): string | null {
 }
 
 /**
+ * Identifies the running daemon code: dist (or src under tsx) file mtime. The dashboard compares it across polls and asks
+ * for a reload once the daemon restarts on new code, so an old page never saves with a stale idea of the config.
+ */
+export const BUILD_ID = process.env.NED_BUILD_ID || (() => {
+  try { return Math.floor(fs.statSync(fileURLToPath(import.meta.url)).mtimeMs).toString(36); } catch { return "dev"; }
+})();
+
+/** GET/PUT /api/config payload: the config plus its version token and the daemon build. */
+const configView = (cfg: NedConfig) => ({ ...cfg, updated_at: configUpdatedAt(), build_id: BUILD_ID });
+
+/**
+ * A partial PUT body over the current config: only keys present in the body change. Plain objects merge key by key
+ * (deepMerge), arrays / scalars replace; then the per-key normalizers run on the result. filters / dashboard keep
+ * their own merge rules (dashboard.layout replaces as a whole, null clears it). An unknown persona keeps the current one.
+ */
+export function mergeConfigPatch(cur: NedConfig, body: Partial<NedConfig>): NedConfig {
+  const { filters, dashboard, persona, ...rest } = body;
+  const m = deepMerge(cur, rest);
+  const merged: NedConfig = {
+    ...m,
+    persona: PERSONAS.includes(persona as PersonaId) ? normalizePersona(persona) : cur.persona,
+    notifications: normalizeNotifications(m.notifications, cur.notifications),
+    actions: normalizeActions(m.actions, cur.actions),
+    reply_tone: normalizeReplyTone(m.reply_tone, cur.reply_tone),
+    reply_tone_by_source: normalizeReplyToneBySource(m.reply_tone_by_source, cur.reply_tone_by_source),
+    filters: mergeFilters(cur.filters, filters),
+    agenda_source_minutes: normalizeAgendaSourceMinutes(m.agenda_source_minutes, cur.agenda_source_minutes),
+    quiet_schedule: normalizeQuietSchedule(m.quiet_schedule, cur.quiet_schedule),
+    idle_schedule: normalizeIdleSchedule(m.idle_schedule, cur.idle_schedule),
+  };
+  // Re-normalized even without a dashboard patch: a 팔로업 channel added / removed in filters adds / drops its `watch:` card.
+  merged.dashboard = normalizeDashboard(dashboard ?? {}, cur.dashboard, watchChannels(merged.filters));
+  return merged;
+}
+
+/** Mirror persona + notification settings into state.json right away (dashboard / Ned.app read them there). */
+function mirrorToState(cfg: NedConfig): void {
+  const st = readState();
+  if (st.persona !== cfg.persona || JSON.stringify(st.notifications) !== JSON.stringify(cfg.notifications)) {
+    st.persona = cfg.persona;
+    st.notifications = cfg.notifications;
+    writeState(st);
+  }
+}
+
+/**
  * Routes read config.yaml fresh (loadConfig) instead of the daemon's cached copy, so a PUT /api/config is
  * visible right away (settings reload, agenda refresh) rather than after the next heartbeat tick.
  */
@@ -75,28 +122,51 @@ export function startServer(getConfig: () => NedConfig): void {
     if (fs.existsSync(index)) return c.html(fs.readFileSync(index, "utf8"));
     return c.html("<!doctype html><title>Ned</title><p>Ned daemon is running. API: /api/state, /api/events, /api/briefings, /api/config</p>");
   });
-  app.get("/api/state", (c) => c.json(readState()));
+  // ?visible=1: the dashboard is visible + focused → counts as user activity (idle auto-slowdown, src/scheduler.ts).
+  // state.quiet stays a boolean (Ned.app decodes it); the scheduler's view is quiet_schedule / idle.
+  app.get("/api/state", (c) => {
+    if (c.req.query("visible") === "1") noteActivity();
+    const sch = schedulerStatus(loadConfig());
+    return c.json({ ...readState(), build_id: BUILD_ID, quiet_schedule: sch.quiet, idle: sch.idle });
+  });
+  // Dashboard activity ping (input / focus, ≤ once a minute): ends idle mode right away.
+  app.post("/api/activity", (c) => {
+    noteActivity();
+    return c.json({ ok: true });
+  });
   app.get("/api/events", (c) => c.json(readRecentEvents(Number(c.req.query("days") ?? 2))));
   app.get("/api/briefings", (c) => c.json(listBriefings(Number(c.req.query("limit") ?? 30))));
-  app.get("/api/config", (c) => c.json(loadConfig()));
+  app.get("/api/config", (c) => c.json(configView(loadConfig())));
   app.put("/api/config", async (c) => {
-    const body = (await c.req.json()) as Partial<NedConfig>;
-    const cur = loadConfig();
-    // filters is nested: merge it per source so a PUT carrying only filters.slack keeps filters.jira.
-    // An unknown persona value keeps the current one.
-    const merged = { ...cur, ...body, persona: PERSONAS.includes(body.persona as PersonaId) ? normalizePersona(body.persona) : cur.persona, notifications: normalizeNotifications(body.notifications, cur.notifications), actions: normalizeActions(body.actions, cur.actions), reply_tone: normalizeReplyTone(body.reply_tone, cur.reply_tone), reply_tone_by_source: normalizeReplyToneBySource(body.reply_tone_by_source, cur.reply_tone_by_source), filters: mergeFilters(cur.filters, body.filters), agenda_source_minutes: normalizeAgendaSourceMinutes(body.agenda_source_minutes, cur.agenda_source_minutes) };
-    // Re-normalized even without body.dashboard: a 팔로업 channel added / removed in filters adds / drops its `watch:` card.
-    merged.dashboard = normalizeDashboard(body.dashboard ?? {}, cur.dashboard, watchChannels(merged.filters));
+    let raw: unknown;
+    try { raw = await c.req.json(); } catch { return c.json({ error: "bad json" }, 400); }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return c.json({ error: "body must be an object" }, 400);
+    const { if_updated_at, updated_at: _u, build_id: _b, ...body } = raw as Partial<NedConfig> & { if_updated_at?: unknown; updated_at?: unknown; build_id?: unknown };
+    // Optimistic concurrency: the page sends the updated_at it rendered from; a save made elsewhere since then
+    // (another tab, a hand edit of config.yaml, a daemon upgrade) → 409 with the current config instead of clobbering it.
+    if (if_updated_at != null && Number(if_updated_at) !== configUpdatedAt()) return c.json({ error: "conflict", current: configView(loadConfig()) }, 409);
+    const cur = loadConfig(); // may create config.yaml — so read the token after it
+    const seen = configUpdatedAt();
+    const merged = mergeConfigPatch(cur, body);
+    // Check → save runs synchronously (no await), so no other request of this daemon can interleave. An outside
+    // writer (hand edit) landing between the stat above and the write below is caught by this second look; the
+    // remaining window is the few µs inside saveConfig itself — accepted (backups cover it).
+    if (configUpdatedAt() !== seen || (if_updated_at != null && Number(if_updated_at) !== seen)) return c.json({ error: "conflict", current: configView(loadConfig()) }, 409);
+    for (const ch of configChanges(cur, merged)) log(`config: ${ch.key} ${logValue(ch.from)} → ${logValue(ch.to)}`);
     saveConfig(merged);
-    // Mirror the persona into state.json right away so the dashboard / menu-bar app switch without waiting a tick.
-    const st = readState();
-    // …and the notification settings, which Ned.app reads from state.json.
-    if (st.persona !== merged.persona || JSON.stringify(st.notifications) !== JSON.stringify(merged.notifications)) {
-      st.persona = merged.persona;
-      st.notifications = merged.notifications;
-      writeState(st);
-    }
-    return c.json(merged);
+    mirrorToState(merged);
+    return c.json(configView(merged));
+  });
+  app.get("/api/config/backups", (c) => c.json(listConfigBackups()));
+  app.post("/api/config/restore", async (c) => {
+    const { name } = (await readBody(c)) as { name?: unknown };
+    const cur = loadConfig();
+    let next: NedConfig;
+    try { next = restoreConfigBackup(name); } catch (e) { return c.json({ error: String((e as Error).message ?? e) }, /no such/.test(String(e)) ? 404 : 400); }
+    log(`config: restored ${String(name)}`);
+    for (const ch of configChanges(cur, next)) log(`config: ${ch.key} ${logValue(ch.from)} → ${logValue(ch.to)}`);
+    mirrorToState(next);
+    return c.json(configView(next));
   });
   app.post("/api/heartbeat", async (c) => {
     const daily = c.req.query("daily") === "1";
@@ -149,6 +219,8 @@ export function startServer(getConfig: () => NedConfig): void {
       running_sources: live,
       // Effective auto-refresh interval per source (config.agenda_source_minutes ?? agenda_refresh_minutes).
       refresh_minutes: Object.fromEntries(AGENDA_SOURCES.map((k) => [k, sourceRefreshMinutes(cfg, k)])),
+      // Quiet hours / idle throttling of automatic runs (HOME status chip).
+      ...schedulerStatus(cfg),
       // A "running" left on disk by a daemon that died mid-run would spin forever: only trust it while that source's run is live.
       sources_status: Object.fromEntries(Object.entries(a.sources_status ?? {}).map(([k, s]) => [k, s?.status === "running" && !live.includes(k as AgendaSourceKey) ? { ...s, status: "error", error: "interrupted" } : s])),
       context_status: contextStatus(),

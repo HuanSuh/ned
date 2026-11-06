@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import YAML from "yaml";
 import type { NotifyMode } from "./notify.js";
 import { CONFIG_PATH } from "./paths.js";
@@ -12,6 +13,10 @@ export interface NedConfig {
   briefing_time: string;
   /** Quiet hours: no notifications (heartbeats still run). */
   quiet_hours: { start: string; end: string } | null;
+  /** What automatic work does during quiet_hours: normal, slow (every interval × slow_factor) or pause. Manual runs are never affected. */
+  quiet_schedule: QuietSchedule;
+  /** Idle auto-slowdown: no user activity for after_minutes AND the last unchanged_runs automatic refreshes all unchanged. */
+  idle_schedule: IdleSchedule;
   /** Which work-signal sources Ned may consult. */
   sources: { gmail: boolean; slack: boolean; jira: boolean; github: boolean; sentry: boolean; calendar: boolean };
   /** Voice + theme + mark set (prompts/personas/<id>.md, dashboard data-persona). Features/data don't change. */
@@ -376,6 +381,50 @@ export function normalizeAgendaSourceMinutes(raw: unknown, base: AgendaSourceMin
   return Object.fromEntries(AGENDA_SOURCE_KEYS.map((k) => [k, k in o ? normalizeSourceMinute(o[k]) : base[k]])) as AgendaSourceMinutes;
 }
 
+export type QuietScheduleMode = "normal" | "slow" | "pause";
+export interface QuietSchedule {
+  mode: QuietScheduleMode;
+  /** slow: multiply every automatic interval by this (2..24). */
+  slow_factor: number;
+}
+export const DEFAULT_QUIET_SCHEDULE: QuietSchedule = { mode: "slow", slow_factor: 6 };
+
+/** Unknown mode → base's; slow_factor clamps to 2..24 (integer); missing keys keep base. */
+export function normalizeQuietSchedule(raw: unknown, base: QuietSchedule = DEFAULT_QUIET_SCHEDULE): QuietSchedule {
+  const o = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const mode = o.mode === "normal" || o.mode === "slow" || o.mode === "pause" ? o.mode : base.mode;
+  const n = Number(o.slow_factor);
+  const slow_factor = o.slow_factor == null || o.slow_factor === "" || typeof o.slow_factor === "boolean" || !Number.isFinite(n) ? base.slow_factor : Math.max(2, Math.min(24, Math.round(n)));
+  return { mode, slow_factor };
+}
+
+export interface IdleSchedule {
+  enabled: boolean;
+  /** Minutes since the latest user activity (dashboard ping, Claude Code session event, macOS input) — 10..1440. */
+  after_minutes: number;
+  /** How many consecutive automatic refreshes must all come back unchanged — 1..50. */
+  unchanged_runs: number;
+  mode: "slow" | "pause";
+  /** slow: multiply every automatic interval by this (2..24). */
+  slow_factor: number;
+}
+export const DEFAULT_IDLE_SCHEDULE: IdleSchedule = { enabled: true, after_minutes: 120, unchanged_runs: 6, mode: "slow", slow_factor: 6 };
+
+export function normalizeIdleSchedule(raw: unknown, base: IdleSchedule = DEFAULT_IDLE_SCHEDULE): IdleSchedule {
+  const o = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const int = (v: unknown, min: number, max: number, fb: number) => {
+    const n = Number(v);
+    return v == null || v === "" || typeof v === "boolean" || !Number.isFinite(n) ? fb : Math.max(min, Math.min(max, Math.round(n)));
+  };
+  return {
+    enabled: typeof o.enabled === "boolean" ? o.enabled : base.enabled,
+    after_minutes: int(o.after_minutes, 10, 1440, base.after_minutes),
+    unchanged_runs: int(o.unchanged_runs, 1, 50, base.unchanged_runs),
+    mode: o.mode === "slow" || o.mode === "pause" ? o.mode : base.mode,
+    slow_factor: int(o.slow_factor, 2, 24, base.slow_factor),
+  };
+}
+
 /** Effective auto-refresh interval for one source (minutes ≥ 1). */
 export function sourceRefreshMinutes(cfg: Pick<NedConfig, "agenda_refresh_minutes" | "agenda_source_minutes">, k: keyof AgendaSourceMinutes): number {
   return cfg.agenda_source_minutes?.[k] ?? Math.max(1, cfg.agenda_refresh_minutes || DEFAULT_CONFIG.agenda_refresh_minutes);
@@ -386,6 +435,8 @@ export const DEFAULT_CONFIG: NedConfig = {
   signal_check_minutes: 60,
   briefing_time: "09:00",
   quiet_hours: { start: "23:00", end: "08:00" },
+  quiet_schedule: DEFAULT_QUIET_SCHEDULE,
+  idle_schedule: DEFAULT_IDLE_SCHEDULE,
   sources: { gmail: true, slack: true, jira: true, github: true, sentry: true, calendar: true },
   persona: "ned",
   filters: { slack: { exclude_channels: [], watch_channels: [], ack_reactions: [...DEFAULT_ACK_REACTIONS] }, jira: { exclude_projects: [] } },
@@ -442,6 +493,8 @@ export function loadConfig(): NedConfig {
       chat_ignore_budget: parsed.chat_ignore_budget === true,
       dashboard: normalizeDashboard(parsed.dashboard, DEFAULT_DASHBOARD, watchChannels(filters)),
       agenda_source_minutes: normalizeAgendaSourceMinutes(parsed.agenda_source_minutes),
+      quiet_schedule: normalizeQuietSchedule(parsed.quiet_schedule),
+      idle_schedule: normalizeIdleSchedule(parsed.idle_schedule),
       agenda_all_limit: numIn(parsed.agenda_all_limit, 1, 50, DEFAULT_CONFIG.agenda_all_limit),
       agenda_context_batch: numIn(parsed.agenda_context_batch, 1, 10, DEFAULT_CONFIG.agenda_context_batch),
       agenda_thread_batch: numIn(parsed.agenda_thread_batch, 0, 20, DEFAULT_CONFIG.agenda_thread_batch),
@@ -467,7 +520,104 @@ export function saveConfig(cfg: NedConfig): void {
     const onDisk = (YAML.parse(fs.readFileSync(CONFIG_PATH, "utf8")) ?? {}) as Partial<NedConfig>;
     out = { ...cfg, port: onDisk.port ?? DEFAULT_CONFIG.port };
   }
+  backupConfigFile();
   fs.writeFileSync(CONFIG_PATH, YAML.stringify(out));
+  stampConfig();
+}
+
+// ---------- updated_at: the version token for PUT /api/config's if_updated_at ----------
+let lastStamp = 0;
+/**
+ * After a save: set the file's mtime to a fresh, strictly increasing whole ms, so configUpdatedAt() changes on every
+ * save (even two within one ms) while a hand edit of config.yaml (new mtime) still reads as a change.
+ */
+function stampConfig(): void {
+  const now = Math.max(Date.now(), lastStamp + 1, Math.floor(configUpdatedAt()) + 1);
+  lastStamp = now;
+  try { fs.utimesSync(CONFIG_PATH, new Date(now), new Date(now)); } catch { /* the mtime still moved with the write */ }
+}
+/** config.yaml's mtime in whole ms (0 when missing). Changes on every saveConfig and on any hand edit. */
+export function configUpdatedAt(): number {
+  try { return Math.floor(fs.statSync(CONFIG_PATH).mtimeMs); } catch { return 0; }
+}
+
+// ---------- backups: ~/.ned/config-backups/config-<ISO>.yaml, newest CONFIG_BACKUP_KEEP kept ----------
+export const CONFIG_BACKUP_KEEP = 10;
+const BACKUP_RE = /^config-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(?:-\d+)?\.yaml$/;
+export const configBackupDir = () => path.join(path.dirname(CONFIG_PATH), "config-backups");
+export interface ConfigBackup { name: string; at: number; size: number }
+
+/** Copy the current config.yaml (if any) into the backup dir, then drop all but the newest CONFIG_BACKUP_KEEP. */
+export function backupConfigFile(): string | null {
+  if (!fs.existsSync(CONFIG_PATH)) return null;
+  const dir = configBackupDir();
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const stem = `config-${new Date().toISOString().replace(/:/g, "-").replace(".", "-")}`;
+    let name = `${stem}.yaml`;
+    for (let i = 1; fs.existsSync(path.join(dir, name)); i++) name = `${stem}-${i}.yaml`;
+    fs.copyFileSync(CONFIG_PATH, path.join(dir, name));
+    for (const old of listConfigBackups().slice(CONFIG_BACKUP_KEEP)) fs.rmSync(path.join(dir, old.name), { force: true });
+    return name;
+  } catch {
+    return null; // a backup failure never blocks the save itself
+  }
+}
+
+/** Newest first (by the time in the name, then file mtime). */
+export function listConfigBackups(): ConfigBackup[] {
+  const dir = configBackupDir();
+  let names: string[];
+  try { names = fs.readdirSync(dir).filter((n) => BACKUP_RE.test(n)); } catch { return []; }
+  return names
+    .map((name) => {
+      const st = fs.statSync(path.join(dir, name));
+      const iso = name.replace(/^config-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z.*$/, "$1T$2:$3:$4.$5Z");
+      const at = Date.parse(iso);
+      return { name, at: Number.isFinite(at) ? at : Math.floor(st.mtimeMs), size: st.size };
+    })
+    .sort((a, b) => b.at - a.at || b.name.localeCompare(a.name, "en", { numeric: true }));
+}
+
+/** Restore a backup (by exact name from listConfigBackups) over config.yaml — the current file is backed up first. */
+export function restoreConfigBackup(name: unknown): NedConfig {
+  if (typeof name !== "string" || !BACKUP_RE.test(name)) throw new Error("bad backup name");
+  const file = path.join(configBackupDir(), name);
+  if (!fs.existsSync(file)) throw new Error("no such backup");
+  const parsed = YAML.parse(fs.readFileSync(file, "utf8")) ?? {};
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("backup is not a config");
+  saveConfig(parsed as NedConfig); // backs up the current file, keeps the file's port under NED_PORT
+  return loadConfig();
+}
+
+// ---------- PUT /api/config: deep merge + change log ----------
+const isPlain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/** `patch` over `base`: plain objects merge key by key (recursively), anything else (arrays, null, scalars) replaces. Keys absent from `patch` are kept. */
+export function deepMerge<T>(base: T, patch: unknown): T {
+  if (!isPlain(base) || !isPlain(patch)) return (patch === undefined ? base : patch) as T;
+  const out: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined || UNSAFE_KEYS.has(k)) continue; // a JSON body can carry "__proto__" as an own key
+    out[k] = isPlain(out[k]) && isPlain(v) ? deepMerge(out[k], v) : v;
+  }
+  return out as T;
+}
+
+/** Leaf-level differences (`a.b.c`), arrays compared whole. */
+export function configChanges(before: unknown, after: unknown, prefix = ""): Array<{ key: string; from: unknown; to: unknown }> {
+  if (isPlain(before) && isPlain(after)) {
+    const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])];
+    return keys.flatMap((k) => configChanges(before[k], after[k], prefix ? `${prefix}.${k}` : k));
+  }
+  return JSON.stringify(before) === JSON.stringify(after) ? [] : [{ key: prefix, from: before, to: after }];
+}
+
+/** One log value: strings as-is, the rest as JSON; clamped to 200 chars. */
+export function logValue(v: unknown): string {
+  const s = v === undefined ? "(없음)" : typeof v === "string" ? v : JSON.stringify(v);
+  return s.length > 200 ? `${s.slice(0, 199)}…` : s;
 }
 
 export function inQuietHours(cfg: NedConfig, now = new Date()): boolean {

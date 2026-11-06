@@ -133,12 +133,18 @@ describe("other routes", () => {
     expect((await request(`/api/todos/${created.id}`, { method: "DELETE" })).status).toBe(404);
   });
 
-  it("PUT /api/config merges filters per source and ignores unknown persona", async () => {
-    fs.writeFileSync(CONFIG_PATH, YAML.stringify({ notify: "off", persona: "alfred", filters: { jira: { exclude_projects: ["MNT"] } } }));
+  it("PUT /api/config merges filters per source, ignores unknown persona, leaves keys the body doesn't name", async () => {
+    fs.writeFileSync(CONFIG_PATH, YAML.stringify({ notify: "off", persona: "alfred", claude_model: "claude-opus-5-5", sources: { slack: false }, filters: { jira: { exclude_projects: ["MNT"] } } }));
     const r = await (await request("/api/config", json("PUT", { persona: "nobody", filters: { slack: { exclude_channels: ["#rand"] } } }))).json();
     expect(r.persona).toBe("alfred");
     expect(r.filters.jira.exclude_projects).toEqual(["MNT"]);
     expect(r.filters.slack.exclude_channels).toEqual(["rand"]);
+    expect(r.claude_model).toBe("claude-opus-5-5"); // a partial PUT never resets other keys
+    expect(r.sources.slack).toBe(false);
+    expect(typeof r.updated_at).toBe("number");
+    // sources merge per key too: one toggle doesn't rewrite the others
+    const s = await (await request("/api/config", json("PUT", { sources: { gmail: false } }))).json();
+    expect(s.sources).toMatchObject({ slack: false, gmail: false, jira: true });
   });
 
   it("PUT /api/config: dashboard.theme saves, survives a partial dashboard PUT, junk → system", async () => {
