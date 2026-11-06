@@ -5,6 +5,8 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { parseSendRequest, performSend, readActionLog } from "./actions.js";
 import { agendaBusy, readAgenda, refreshAgenda } from "./agenda.js";
+import { contextStatus, requestContext } from "./agenda-context.js";
+import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
 import { PERSONAS, loadConfig, mergeFilters, normalizeActions, normalizeDashboard, normalizeNotifications, normalizeReplyTone, normalizePersona, saveConfig, type NedConfig, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
@@ -123,6 +125,9 @@ export function startServer(getConfig: () => NedConfig): void {
       mail: sources.gmail ? a.mail : null,
       slack: sources.slack ? a.slack : null,
       busy: agendaBusy(),
+      // A "running" left on disk by a daemon that died mid-run would spin forever: only trust it while a run is live.
+      sources_status: agendaBusy() ? a.sources_status : Object.fromEntries(Object.entries(a.sources_status ?? {}).map(([k, s]) => [k, s?.status === "running" ? { ...s, status: "error", error: "interrupted" } : s])),
+      context_status: contextStatus(),
       reviewed: readSourceReviewed(), // 확인 완료 marks for mail / slack / jira / github items (key → ms)
       mail_enabled: sources.gmail,
       slack_enabled: sources.slack,
@@ -130,11 +135,20 @@ export function startServer(getConfig: () => NedConfig): void {
     });
   });
   app.post("/api/agenda/refresh", async (c) => {
-    // Concurrent refreshes share the in-flight run instead of spawning another claude -p.
+    // Phase 1 only: returns once every source's list is merged (each lands in agenda.json as soon as its own call ends).
+    // Phase 2 (reply context) keeps running in the background — see context_status.
+    // Concurrent refreshes share the in-flight run instead of spawning more claude -p.
     const cfg = loadConfig();
     const a = await refreshAgenda(cfg);
-    return c.json({ ...a, mail_enabled: cfg.sources.gmail, slack_enabled: cfg.sources.slack });
+    return c.json({ ...a, context_status: contextStatus(), mail_enabled: cfg.sources.gmail, slack_enabled: cfg.sources.slack });
   });
+  // Phase 2 on demand (background). ?force=1 re-collects even for sources whose list didn't change.
+  app.post("/api/agenda/context", (c) => {
+    const force = c.req.query("force") === "1";
+    const cfg = loadConfig();
+    return c.json({ context_status: requestContext(cfg, ["slack", "mail"], { force }) });
+  });
+  app.get("/api/costs", (c) => c.json(costSummary(loadConfig().agenda_daily_budget_usd, Number(c.req.query("days") ?? 14))));
 
   // HOME tab: calendar ranges outside agenda.calendar_range (week view navigation). Cached 6 h; one claude -p at a time.
   app.get("/api/calendar", async (c) => {
