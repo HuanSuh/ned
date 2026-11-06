@@ -291,7 +291,17 @@ enum ToolResolver {
             if isExec(d + "/node") { nodes.append((d + "/node", "fallback dirs")) }
             if isExec(d + "/claude") { claudes.append((d + "/claude", "fallback dirs")) }
         }
-        var r = Result(node: nil, claude: claudes.first?.0, source: "")
+        // claude: several installs may coexist (e.g. a stale /usr/local/bin/claude 1.x next to
+        // ~/.local/bin/claude 2.x). Pick the highest version, not the first on PATH.
+        var bestClaude: (path: String, label: String, version: [Int])? = nil
+        var seenClaude = Set<String>()
+        for (c, label) in claudes where seenClaude.insert(c).inserted {
+            let v = claudeVersion(c)
+            if bestClaude == nil || bestClaude!.version.lexicographicallyPrecedes(v) {
+                bestClaude = (c, label, v)
+            }
+        }
+        var r = Result(node: nil, claude: bestClaude?.path, source: "")
         var tried: [String] = []
         for (n, label) in nodes where !tried.contains(n) {
             tried.append(n)
@@ -299,7 +309,12 @@ enum ToolResolver {
             if let major, major >= minNodeMajor { r.node = n; r.source = "node via \(label) v\(major)"; break }
         }
         if r.node == nil, let first = nodes.first { r.node = first.0; r.source = "node via \(first.1) (version check failed)" }
-        r.source += ", claude via " + (claudes.first?.1 ?? "none")
+        if let b = bestClaude {
+            r.source += ", claude via \(b.label) v\(b.version.map(String.init).joined(separator: "."))"
+            if seenClaude.count > 1 { r.source += " (of \(seenClaude.count) installs)" }
+        } else {
+            r.source += ", claude via none"
+        }
         if tried.count > 1 { r.source += "; node candidates: " + tried.joined(separator: " ") }
         return r
     }
@@ -307,6 +322,14 @@ enum ToolResolver {
     static func nodeMajor(_ node: String) -> Int? {
         let out = run(node, ["--version"], timeout: 3).trimmingCharacters(in: .whitespacesAndNewlines)
         return Int(out.dropFirst().split(separator: ".").first ?? "")   // "v22.1.0" → 22
+    }
+
+    /// "2.1.319 (Claude Code)" → [2, 1, 319]; [] when it cannot be read.
+    static func claudeVersion(_ claude: String) -> [Int] {
+        let out = run(claude, ["--version"], timeout: 5)
+        let token = out.split(whereSeparator: { $0 == " " || $0 == "\n" }).first ?? ""
+        let parts = token.split(separator: ".").compactMap { Int($0) }
+        return parts.count >= 2 ? parts : []
     }
 
     static func fallbackDirs() -> [String] {
