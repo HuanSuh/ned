@@ -9,16 +9,14 @@ struct NedApp: App {
     /// Bound so that the system hiding the item (macOS 26 "Allow in Menu Bar",
     /// a crowded/notched menu bar, Cmd-drag removal) does not terminate the app.
     /// In-memory on purpose: persisting it would keep the item hidden on every later launch.
-    @State private var inserted = true
+    @StateObject private var itemGuard = StatusItemGuard.shared
 
     init() {
         // When the item is hidden (⌘-drag off the bar, or the macOS 26 Menu Bar toggle) AppKit writes
         // "NSStatusItem Visible(CC) Item-0" = 0 into our defaults and keeps the item hidden on every later launch,
         // even after the toggle is on again (seen live 2026-11-07). A menu bar app with no icon is unreachable,
         // so forget that flag at start-up; the user can still hide it for the current run.
-        for key in ["NSStatusItem Visible Item-0", "NSStatusItem VisibleCC Item-0"] {
-            UserDefaults.standard.removeObject(forKey: key)
-        }
+        StatusItemGuard.clearFlags()
         // Headless: before any scene, store, daemon or notification center exists.
         if CommandLine.arguments.contains("--notify-selftest") { exit(NotifySelfTest.run()) }
         // Read-only: print SMAppService.mainApp status (registers nothing) and exit.
@@ -34,12 +32,45 @@ struct NedApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra(isInserted: $inserted) {
+        MenuBarExtra(isInserted: $itemGuard.inserted) {
             MenuContent(store: store, daemon: DaemonManager.shared)
         } label: {
             MenuBarLabel(store: store)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+/// Keeps the menu bar item on screen. macOS persists "NSStatusItem Visible(CC) Item-0" = 0 in our defaults when it
+/// hides the item (⌘-drag, the macOS 26 Menu Bar toggle, or — seen live 2026-11-07 — a status item re-created by a
+/// label change) and then honours that flag on every later launch. A menu bar app with no icon is unreachable, so:
+/// forget the flag at start-up, and while running poll it every 10 s; if it reappears, clear it and re-insert the item.
+@MainActor
+final class StatusItemGuard: ObservableObject {
+    static let shared = StatusItemGuard()
+    static let keys = ["NSStatusItem Visible Item-0", "NSStatusItem VisibleCC Item-0"]
+    @Published var inserted = true
+    private var timer: Timer?
+
+    static func clearFlags() {
+        for k in keys { UserDefaults.standard.removeObject(forKey: k) }
+    }
+
+    func start() {
+        Self.clearFlags()
+        timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in
+            Task { @MainActor in StatusItemGuard.shared.check() }
+        }
+    }
+
+    func check() {
+        let d = UserDefaults.standard
+        let hidden = Self.keys.contains { d.object(forKey: $0) != nil && !d.bool(forKey: $0) }
+        guard hidden else { return }
+        DaemonManager.shared.note("status item: macOS flagged it hidden — clearing the flag and re-inserting")
+        Self.clearFlags()
+        inserted = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.inserted = true }
     }
 }
 
@@ -56,6 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         src.resume()
         sigterm = src
         MainActor.assumeIsolated {
+            StatusItemGuard.shared.start()
             DaemonManager.shared.start()
             Notifier.shared.start()
             // `open Ned.app --args --dashboard` (install.sh first launch) or NED_OPEN_DASHBOARD=1.
@@ -96,22 +128,29 @@ struct MenuBarLabel: View {
     var body: some View {
         let p = store.persona
         let mode: Persona.Mode = !store.state.daemonAlive ? .offline : (store.attentionCount > 0 ? .attention : .idle)
+        let n = store.attentionCount
+        // One fixed shape — always exactly one Image and one Text, never `.id()`, never an if/else between
+        // different view trees. Seen live (2026-11-07): the old label switched trees when the first attention
+        // item arrived (02:39:18) and 9 s later AppKit wrote "NSStatusItem VisibleCC Item-0 = 0" into our
+        // defaults — the status item had been torn down and re-created, and macOS 26 treated the teardown as
+        // "hidden". The icon vanished while the daemon kept running, and came back only on a relaunch.
+        // MenuBarExtra keeps one image + one text from the label and templates the image; the badge is
+        // composed into one non-template image so the accent capsule keeps its color.
         HStack(spacing: 3) {
-            if store.attentionCount > 0 {
-                // MenuBarExtra keeps only one image + one text from the label, and templates the
-                // image; so the symbol and the accent badge are composed into one non-template image.
-                Image(nsImage: Self.badged(p.symbol(mode), count: store.attentionCount, color: p.accentNS))
-                    .accessibilityLabel("\(p.displayName): 확인할 것 \(store.attentionCount)건")
-                    // New identity per persona/count/mode: an in-place NSImage swap could lag a redraw.
-                    .id("\(p.id.rawValue)-\(store.attentionCount)-\(mode)")
-            } else {
-                Image(systemName: p.symbol(mode))
-                if store.runningCount > 0 {
-                    Text("\(store.runningCount)").font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
-                }
-            }
+            Image(nsImage: n > 0 ? Self.badged(p.symbol(mode), count: n, color: p.accentNS) : Self.plain(p.symbol(mode)))
+                .accessibilityLabel(n > 0 ? "\(p.displayName): 확인할 것 \(n)건" : p.displayName)
+            Text(n == 0 && store.runningCount > 0 ? "\(store.runningCount)" : "")
+                .font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
         }
         .help(p.displayName)
+    }
+
+    /// The bare symbol as a template image (follows the menu bar's label color like `Image(systemName:)` did).
+    static func plain(_ symbol: String) -> NSImage {
+        let img = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 13, weight: .regular)) ?? NSImage()
+        img.isTemplate = true
+        return img
     }
 
     /// Symbol in the menu bar's label color + an accent capsule holding the count (text black or
