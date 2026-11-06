@@ -10,6 +10,7 @@ import { readRecentEvents } from "./events.js";
 import { dismissAttention, heartbeat, listBriefings } from "./heartbeat.js";
 import { log } from "./paths.js";
 import { readState, writeState } from "./state.js";
+import { registerSearch } from "./search.js";
 import { addTodo, deleteTodo, listTodos, updateTodo } from "./todos.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -151,6 +152,7 @@ export function startServer(getConfig: () => NedConfig): void {
   });
   app.delete("/api/todos/:id", (c) => (deleteTodo(c.req.param("id")) ? c.json({ ok: true }) : c.json({ error: "not found" }, 404)));
 
+  registerSearch(app); // GET /api/search (src/search.ts) — before the static catch-all
   // Static files under public/ (proposals, svg mark, ...). Registered last so /api/* wins.
   app.get("/*", (c) => {
     const file = resolvePublic(c.req.path);
