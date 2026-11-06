@@ -366,6 +366,27 @@ enum BootSelfTest {
         let ned = PersonaID.ned.persona
         write("boot-ned-connect.html", BootScreen.html(theme: .init(id: .ned, name: ned.displayName, accent: ned.accentHex), step: 2, text: "데몬 시작 중… (pid 4242)", elapsed: 3.2, failed: false))
         write("boot-ned-failed.html", BootScreen.html(theme: .init(id: .ned, name: ned.displayName, accent: ned.accentHex), step: 1, text: "데몬 실패: node 를 찾을 수 없음", elapsed: 21.7, failed: true))
+        // Launch: open the dashboard by default, never for selftests / NED_OPEN_DASHBOARD=0, login launch → off by default.
+        LaunchBehavior.registerDefaults(d)
+        let app = ["/x/Ned"]
+        let normal = LaunchBehavior.decide(args: app, env: [:], defaults: d)
+        let loginNow = (LaunchBehavior.secondsSinceLogin() ?? .infinity) < LaunchBehavior.loginWindowSeconds
+        check(normal.open == !loginNow, "launch default: open=\(normal.open) — \(normal.reason)")
+        check(LaunchBehavior.decide(args: app + ["--dashboard"], env: ["NED_OPEN_DASHBOARD": "0"], defaults: d).open, "--dashboard wins")
+        check(!LaunchBehavior.decide(args: app, env: ["NED_OPEN_DASHBOARD": "0"], defaults: d).open, "NED_OPEN_DASHBOARD=0 → closed")
+        check(!LaunchBehavior.decide(args: app + ["--wake-selftest"], env: [:], defaults: d).open, "selftest run → closed")
+        // Launch event present + 10 s after login + not a login item → direct launch → open (heuristic must not win).
+        let direct = LaunchBehavior.decide(args: app, env: [:], defaults: d, eventAvailable: true, eventSaysLoginItem: false, sinceLogin: .some(10))
+        check(direct.open, "event without login-item marker, 10 s after login → open: \(direct.reason)")
+        let lgit = LaunchBehavior.decide(args: app, env: [:], defaults: d, eventAvailable: true, eventSaysLoginItem: true, sinceLogin: .some(3600))
+        check(!lgit.open, "login-item event → menu bar only: \(lgit.reason)")
+        let noEvent = LaunchBehavior.decide(args: app, env: [:], defaults: d, eventAvailable: false, eventSaysLoginItem: false, sinceLogin: .some(10))
+        check(!noEvent.open, "no event, 10 s after login → heuristic says login → menu bar only: \(noEvent.reason)")
+        let noEventLate = LaunchBehavior.decide(args: app, env: [:], defaults: d, eventAvailable: false, eventSaysLoginItem: false, sinceLogin: .some(600))
+        check(noEventLate.open, "no event, 600 s after login → open: \(noEventLate.reason)")
+        d.set(false, forKey: LaunchBehavior.openAtLaunchKey)
+        check(!LaunchBehavior.decide(args: app, env: [:], defaults: d).open, "openDashboardAtLaunch=false → closed")
+        d.removeObject(forKey: LaunchBehavior.openAtLaunchKey)
         // Greetings: every persona has a pool; a pick never repeats the previous boot's line.
         let now = Date()
         for id in PersonaID.allCases {

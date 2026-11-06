@@ -112,7 +112,18 @@ open -n --env NED_HOME=/tmp/ned-app --env NED_PORT=7790 --env NED_NO_LLM=1 .buil
 kill <pid>                                            # quits cleanly (stops the daemon child too)
 ```
 
-Launch args: `--dashboard` opens the window at launch (`NED_OPEN_DASHBOARD=1` does the same).
+Launch: a normal launch opens the dashboard window (boot screen → dashboard), so starting Ned always shows
+something (LSUIElement: no Dock icon otherwise). Turn it off in the dropdown (실행 시 대시보드 열기, defaults
+`openDashboardAtLaunch`, default true) or with `NED_OPEN_DASHBOARD=0`; `--dashboard` / `NED_OPEN_DASHBOARD=1` always
+open it; `--*-selftest` runs never do. A launch at login (the launch Apple event's `keyAELaunchedAsLogInItem`; only
+when no launch event was received, < 60 s after the Dock process started — an event without the marker is a direct
+launch even right after login) stays in the menu bar unless 자동 시작 시에도 열기 (`openDashboardAtLoginLaunch`,
+default false) is on. The decision is logged: `launch: dashboard open|not opened — <reason>` (`Sources/Ned/LaunchBehavior.swift`).
+
+Status item diagnostics: at creation and +1 s / +5 s / +15 s the log gets
+`status item [+5s]: visible=… frame=(x,y w×h) window.isVisible=… occluded=… thickness=… screenW=…`, with a WARNING
+when the frame is missing / zero-sized or the window is occluded (icon not on screen — e.g. hidden by System Settings >
+Menu Bar or behind the notch). Use it instead of looking at the menu bar.
 `--login-item-selftest` registers then unregisters the Login Item and logs both results.
 `--login-item-status` prints `SMAppService.mainApp.status` to stdout and exits (read-only, no UI; see Login Item below).
 `--persona-selftest` logs persona resolution and exercises the persona PUT (see Persona below).

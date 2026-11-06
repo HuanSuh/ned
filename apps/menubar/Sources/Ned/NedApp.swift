@@ -43,6 +43,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: StateStore?
     private var statusItem: StatusItemController?
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        LaunchBehavior.registerDefaults()
+        LaunchBehavior.captureLaunchEvent()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         log.info("didFinishLaunching policy=\(NSApp.activationPolicy().rawValue)")
         // `kill <pid>` / `pkill -x Ned` / logout: quit through NSApp so the daemon child is stopped too.
@@ -58,10 +63,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             StatusItemGuard.shared.start()
             DaemonManager.shared.start()
             Notifier.shared.start()
-            // `open Ned.app --args --dashboard` (install.sh first launch) or NED_OPEN_DASHBOARD=1.
-            if CommandLine.arguments.contains("--dashboard") || AppConfig.env["NED_OPEN_DASHBOARD"] == "1" {
-                DashboardWindowController.shared.show()
-            }
+            // A launch should show something: the dashboard window (boot screen → dashboard) unless turned off,
+            // or launched at login (menu bar only by default) — see LaunchBehavior.
+            let launch = LaunchBehavior.decide()
+            DaemonManager.shared.note("launch: dashboard \(launch.open ? "open" : "not opened") — \(launch.reason)")
+            if launch.open { DashboardWindowController.shared.show() }
             if CommandLine.arguments.contains("--wake-selftest") {
                 Task { await DaemonManager.shared.wakeSelfTest() }
             }

@@ -49,6 +49,39 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.render() } }
         }
         Self.shared = self
+        // Diagnostics: judge "is the icon on screen" from the log instead of by eye.
+        logVisibility("created")
+        for t in [1.0, 5.0, 15.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self] in
+                MainActor.assumeIsolated { self?.logVisibility(String(format: "+%.0fs", t)) }
+            }
+        }
+    }
+
+    /// One line: isVisible, the button window's frame / visibility / occlusion, bar thickness, screen width.
+    /// Warns when the frame is missing/zero-sized or the window is not on screen (occluded = hidden by the system,
+    /// e.g. behind the notch or turned off in System Settings > Menu Bar).
+    func visibilityLine() -> (line: String, ok: Bool) {
+        let w = statusItem.button?.window
+        let frame = w?.frame
+        let occluded = w.map { !$0.occlusionState.contains(.visible) }
+        let screenW = (w?.screen ?? NSScreen.main)?.frame.width
+        func f(_ r: NSRect?) -> String {
+            guard let r else { return "nil" }
+            return String(format: "(%.0f,%.0f %.0f×%.0f)", r.minX, r.minY, r.width, r.height)
+        }
+        let ok = statusItem.isVisible && frame.map { $0.width > 0 && $0.height > 0 } == true && occluded == false
+        let line = "visible=\(statusItem.isVisible) frame=\(f(frame)) window.isVisible=\(w.map { "\($0.isVisible)" } ?? "nil")"
+            + " occluded=\(occluded.map { "\($0)" } ?? "nil") thickness=\(String(format: "%.0f", NSStatusBar.system.thickness))"
+            + " screenW=\(screenW.map { String(format: "%.0f", $0) } ?? "nil")"
+        return (line, ok)
+    }
+
+    /// At creation the button window is not laid out yet (0 height, occluded) — no warning for that sample.
+    func logVisibility(_ tag: String) {
+        let v = visibilityLine()
+        let verdict = v.ok ? "" : tag == "created" ? " (layout pending)" : " — WARNING: icon probably not on screen (no/zero frame, hidden or occluded)"
+        DaemonManager.shared.note("status item [\(tag)]: \(v.line)\(verdict)")
     }
 
     /// Same look as the old MenuBarLabel: template symbol, or the symbol + accent count badge composed into one
@@ -188,6 +221,10 @@ enum StatusItemSelfTest {
         let id = ObjectIdentifier(item)
         check(item.autosaveName == StatusItemController.autosaveName, "autosaveName = \(item.autosaveName ?? "nil")")
         check(item.isVisible, "isVisible = \(item.isVisible)")
+        print("statusitem-selftest: diag at creation — \(c.visibilityLine().line)")
+        RunLoop.main.run(until: Date().addingTimeInterval(1))
+        let v = c.visibilityLine()
+        print("statusitem-selftest: diag +1s — \(v.line) → \(v.ok ? "on screen" : "WARNING: probably not on screen")")
         check(item.behavior == [], "behavior rawValue = \(item.behavior.rawValue) (removalAllowed off, terminationOnRemoval off)")
         check(item.button?.image != nil && item.button?.action != nil, "button image \(item.button?.image.map { "\($0.size)" } ?? "nil"), template=\(item.button?.image?.isTemplate ?? false), action set")
         // State change → image/title swap on the same item.

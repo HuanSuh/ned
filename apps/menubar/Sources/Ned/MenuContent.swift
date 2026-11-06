@@ -6,6 +6,8 @@ struct MenuContent: View {
     @ObservedObject var store: StateStore
     @ObservedObject var daemon: DaemonManager
     @State private var loginItem = LoginItem()
+    @AppStorage(LaunchBehavior.openAtLaunchKey) private var openAtLaunch = true
+    @AppStorage(LaunchBehavior.openAtLoginLaunchKey) private var openAtLoginLaunch = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -103,6 +105,13 @@ struct MenuContent: View {
             }
             if let m = loginItem.message {
                 Text(m).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 12) {
+                Toggle("실행 시 대시보드 열기", isOn: $openAtLaunch).toggleStyle(.checkbox).font(.caption)
+                    .help("Ned 를 실행하면 대시보드 창을 엽니다 (NED_OPEN_DASHBOARD=0 이면 항상 꺼짐)")
+                Toggle("자동 시작 시에도 열기", isOn: $openAtLoginLaunch).toggleStyle(.checkbox).font(.caption)
+                    .disabled(!openAtLaunch)
+                    .help("로그인 직후 자동 시작됐을 때도 대시보드를 엽니다 (기본: 메뉴 막대만)")
             }
             Button("저장소 위치…") { chooseRepo() }.buttonStyle(.link).font(.caption)
                 .help(daemon.repoPath ?? "")
