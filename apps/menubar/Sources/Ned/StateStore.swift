@@ -20,6 +20,8 @@ struct SessionView: Codable, Identifiable {
     var last_summary: String? = nil
     var subagents_active: Int = 0
     var orca_worktree: String? = nil
+    /// Orca child worktree (the user's own agent worker): shown dimmed, never attention.
+    var is_worker: Bool = false
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -34,6 +36,7 @@ struct SessionView: Codable, Identifiable {
         last_summary = try c.decodeIfPresent(String.self, forKey: .last_summary)
         subagents_active = try c.decodeIfPresent(Int.self, forKey: .subagents_active) ?? 0
         orca_worktree = try c.decodeIfPresent(String.self, forKey: .orca_worktree)
+        is_worker = (try? c.decodeIfPresent(Bool.self, forKey: .is_worker)) ?? false
     }
 }
 
@@ -45,6 +48,10 @@ struct AttentionItem: Codable, Identifiable {
     var url: String? = nil
     var ts: Double = 0
     var source: String = ""
+    /// 확인 완료 (ms). Reviewed items stay in `attention` but are not open.
+    var reviewed_at: Double? = nil
+
+    var isOpen: Bool { reviewed_at == nil }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -55,6 +62,7 @@ struct AttentionItem: Codable, Identifiable {
         url = try c.decodeIfPresent(String.self, forKey: .url)
         ts = try c.decodeIfPresent(Double.self, forKey: .ts) ?? 0
         source = try c.decodeIfPresent(String.self, forKey: .source) ?? ""
+        reviewed_at = try? c.decodeIfPresent(Double.self, forKey: .reviewed_at)
     }
 }
 
@@ -126,8 +134,14 @@ struct NedState: Codable {
     var persona: String? = nil
     /// Notification preferences; defaults when the daemon does not write them.
     var notifications = NotifySettings()
+    /// Daemon's count of attention not marked 확인 완료. `nil` = older daemon → derived from `reviewed_at`.
+    var attention_open_count: Int? = nil
 
     var personaID: PersonaID { PersonaID(raw: persona) }
+    /// Attention items still open (not 확인 완료) — what the dropdown lists.
+    var openAttention: [AttentionItem] { attention.filter(\.isOpen) }
+    /// Menu bar badge: `attention_open_count`, else the open items.
+    var openCount: Int { attention_open_count.map { max(0, $0) } ?? openAttention.count }
 
     init() {}
 
@@ -143,6 +157,7 @@ struct NedState: Codable {
         quiet = (try? c.decodeIfPresent(Bool.self, forKey: .quiet)) ?? false
         persona = try? c.decodeIfPresent(String.self, forKey: .persona)
         notifications = (try? c.decodeIfPresent(NotifySettings.self, forKey: .notifications)) ?? NotifySettings()
+        attention_open_count = try? c.decodeIfPresent(Int.self, forKey: .attention_open_count)
     }
 
     /// Daemon writes state at least every heartbeat; treat >20 min silence as dead.
@@ -173,7 +188,8 @@ final class StateStore: ObservableObject {
     var personaID: PersonaID { personaOverride ?? state.personaID }
     var persona: Persona { personaID.persona }
 
-    var attentionCount: Int { state.attention.count }
+    /// Badge count: open (not 확인 완료) attention — see `NedState.openCount`.
+    var attentionCount: Int { state.openCount }
     var runningCount: Int { state.sessions.filter { $0.status == "running" }.count }
 
     /// The app's single store (for `--persona-selftest`).
@@ -210,12 +226,12 @@ final class StateStore: ObservableObject {
             state = decoded
             if personaID != before {
                 let p = persona
-                DaemonManager.shared.note("persona \(before.rawValue) -> \(personaID.rawValue) (state.json persona=\(decoded.persona ?? "nil")) label=\(p.symbol(decoded.daemonAlive ? (decoded.attention.isEmpty ? .idle : .attention) : .offline)) accent=\(p.accentHex) header=\(p.headerTitle)")
+                DaemonManager.shared.note("persona \(before.rawValue) -> \(personaID.rawValue) (state.json persona=\(decoded.persona ?? "nil")) label=\(p.symbol(decoded.daemonAlive ? (decoded.openCount == 0 ? .idle : .attention) : .offline)) accent=\(p.accentHex) header=\(p.headerTitle)")
             }
             PersonaIcon.apply(personaID)
             lastError = nil
             Notifier.shared.stateDidLoad(decoded, store: self)
-            log.info("decoded state: sessions=\(decoded.sessions.count) attention=\(decoded.attention.count) briefing=\(decoded.last_briefing?.status ?? "nil", privacy: .public) quiet=\(decoded.quiet)")
+            log.info("decoded state: sessions=\(decoded.sessions.count) attention=\(decoded.attention.count) open=\(decoded.openCount) workers=\(decoded.sessions.filter(\.is_worker).count) briefing=\(decoded.last_briefing?.status ?? "nil", privacy: .public) quiet=\(decoded.quiet)")
         } catch {
             // Partial write or garbage: keep the last good state instead of blanking the UI.
             lastError = String(describing: error)

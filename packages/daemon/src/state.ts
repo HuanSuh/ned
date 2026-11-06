@@ -94,7 +94,15 @@ export function setReviewed(id: string, reviewed: boolean, now = Date.now()): nu
   return reviewed ? now : null;
 }
 
+/** Attention ids (`session:<id>`) of worker sessions (Orca child worktrees) — never attention. */
+export function workerAttentionIds(sessions: SessionView[]): Set<string> {
+  return new Set(sessions.filter((s) => s.is_worker).map((s) => `session:${s.id}`));
+}
+
 export function writeState(state: NedState): void {
+  // Worker sessions stay in `sessions` (the rail shows them) but never raise 입력 대기/오류 attention.
+  const workers = workerAttentionIds(state.sessions ?? []);
+  if (workers.size) state.attention = state.attention.filter((a) => !workers.has(a.id));
   // Re-apply 확인 완료 on every write, so attention rebuilt by refreshSessions / heartbeat keeps it.
   // An item that changed after it was reviewed (ts later than the mark, e.g. a session's new alert) is open again.
   const reviewed = readReviewed();
