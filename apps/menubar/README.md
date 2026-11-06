@@ -50,14 +50,21 @@ macOS 의 TCC 는 앱을 코드 서명으로 알아본다. ad-hoc 서명(`codesi
 
 ```sh
 scripts/make-signing-cert.sh --dry-run   # 무엇을 할지 보기만
-scripts/make-signing-cert.sh             # 로그인 키체인에 "Ned Local Signing" (자체 서명, 10년) 생성; 이미 있으면 그대로
+scripts/make-signing-cert.sh             # 로그인 키체인에 "Ned Local Signing" (자체 서명, 10년) 생성 + 코드 서명용 신뢰
 # codesign 이 매번 키체인 암호를 묻지 않게 (로그인 암호 입력, 한 번만):
 security set-key-partition-list -S apple-tool:,apple: -s -k "<로그인 암호>" ~/Library/Keychains/login.keychain-db
+security find-identity -v -p codesigning # "Ned Local Signing" 이 valid 로 1개 보여야 한다
 scripts/install.sh                       # 이제 "Ned Local Signing" 으로 서명된다
 ```
 
-- `package.sh` 는 `$NED_SIGN_IDENTITY` → 키체인의 "Ned Local Signing" → ad-hoc 순으로 고르고
-  (`--identifier com.ned.menubar`), ad-hoc 이면 경고 한 줄을 남긴다. 서명 결과(`Authority=`)는 빌드 로그에 찍힌다.
+- `make-signing-cert.sh` 는 두 단계다: ① 키·인증서 생성 후 import(키체인 대화상자), ② `security add-trusted-cert
+  -r trustRoot -p codeSign` 로 코드 서명 정책 신뢰 설정(인증 대화상자 1회 — 로그인 암호/Touch ID 로 직접 승인).
+  자체 서명 인증서는 ②가 없으면 `find-identity` 에 `CSSMERR_TP_NOT_TRUSTED` 로 나오고 `-v` 에선 0 valid 라
+  ad-hoc 으로 폴백한다. 멱등: 이미 valid 면 아무것도 안 하고, import 만 된 상태면 재생성 없이 ②만 한다.
+  끝에 `find-identity -v -p codesigning` 결과로 성공(✓)/실패를 출력한다.
+- `package.sh` 는 `$NED_SIGN_IDENTITY` → 키체인의 **valid** "Ned Local Signing"(`find-identity -v`) → ad-hoc 순으로
+  고르고 (`--identifier com.ned.menubar`), ad-hoc 이면 경고 한 줄을 남긴다 — 인증서는 있는데 신뢰가 안 된 경우엔
+  `make-signing-cert.sh` 를 다시 실행(신뢰 단계)하라고 안내한다. 서명 결과(`Authority=`)는 빌드 로그에 찍힌다.
   확인: `codesign -dv --verbose=2 /Applications/Ned.app 2>&1 | grep Authority`.
 - 인증서로 바꾼 뒤 첫 설치에서는 한 번 더 묻는다(서명 정체성이 바뀌었으므로). 그다음부터는 묻지 않는다.
 - 문서 폴더 접근이 생기는 이유: node/claude 를 찾을 때 쓰던 `zsh -lic` 가 `.zshrc` 전체(oh-my-zsh, p10k,
