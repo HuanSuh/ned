@@ -19,6 +19,8 @@ struct NedApp: App {
         StatusItemGuard.clearFlags()
         // Headless: before any scene, store, daemon or notification center exists.
         if CommandLine.arguments.contains("--notify-selftest") { exit(NotifySelfTest.run()) }
+        // Headless: tool cache + boot screen HTML (own defaults suite, writes only to $TMPDIR / NED_BOOT_HTML_OUT).
+        if CommandLine.arguments.contains("--boot-selftest") { exit(BootSelfTest.run()) }
         // Read-only: print SMAppService.mainApp status (registers nothing) and exit.
         if CommandLine.arguments.contains("--login-item-status") {
             let s = SMAppService.mainApp.status

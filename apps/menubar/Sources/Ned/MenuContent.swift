@@ -10,8 +10,12 @@ struct MenuContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
-            daemonLine
-            if !store.state.daemonAlive && !daemon.isHealthy {
+            if daemon.isBooting {
+                bootLine
+            } else {
+                daemonLine
+            }
+            if !store.state.daemonAlive && !daemon.isHealthy && !daemon.isBooting {
                 Label("\(store.persona.displayName) 데몬이 꺼져 있어요 — 로그를 확인하세요", systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.orange)
             }
@@ -56,10 +60,26 @@ struct MenuContent: View {
                 .help(daemon.repoPath.map { "저장소: \($0)" } ?? "저장소 미지정")
             Spacer(minLength: 4)
             if case .failed = daemon.status {
-                Button("다시 시작") { daemon.restart() }.buttonStyle(.link).font(.caption)
+                Button { daemon.restart() } label: { Label("다시 시작", systemImage: "arrow.clockwise") }
+                    .buttonStyle(.borderedProminent).tint(.red).controlSize(.small).font(.caption.weight(.semibold))
             }
             Button("로그 열기") { daemon.revealLog() }.buttonStyle(.link).font(.caption)
         }
+    }
+
+    /// While the daemon is .checking / .starting: the boot screen's step (n/4 + label) with a small spinner.
+    private var bootLine: some View {
+        HStack(alignment: .center, spacing: 8) {
+            ProgressView().controlSize(.small)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("시작 중 \(daemon.bootStage.rawValue + 1)/\(DaemonManager.BootStage.allCases.count) · \(daemon.bootStage.label)")
+                    .font(.caption.weight(.medium))
+                Text(daemon.statusLine).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Button("로그 열기") { daemon.revealLog() }.buttonStyle(.link).font(.caption)
+        }
+        .help(daemon.repoPath.map { "저장소: \($0)" } ?? "저장소 미지정")
     }
 
     private var daemonColor: Color {

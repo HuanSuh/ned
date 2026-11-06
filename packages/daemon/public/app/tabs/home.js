@@ -32,6 +32,8 @@ export function renderTodoGroups() {
   group("ned", ned.length, ned.length, nedRows, !s ? "불러오는 중…" : PF.home.size ? "선택한 소스엔 액션 아이템 없음." : "내가 챙겨 둔 거 없어.");
 
   const unavailable = ag === null ? "agenda 연결 안 됨." : ag === undefined ? "불러오는 중…" : "";
+  // Skeleton (cards.js SKELETON) only on a first load: agenda not read yet, or this source is running and has never landed.
+  const loadingSrc = (key, data) => ag === undefined || (!!ag && ag.sources_status?.[key]?.status === "running" && data == null);
   // Gmail/Slack source off → hide the card; mail/slack === null → agenda.json predates the block (not fetched yet).
   const mailOn = srcOn("email") && ag?.mail_enabled !== false, mail = mailOn ? ag?.mail : null, miAll = mail?.items || [], mi = miAll.filter(isOpenSrc("email"));
   const unreadN = `${Number(mail?.unread) || 0}${mail?.unread_capped ? "+" : ""}`;
@@ -49,7 +51,7 @@ export function renderTodoGroups() {
         <div class="ra">${draftFor("email", x, srcKey("email", x))}${openIcon(u)}${srcCheck("email", x)}</div></div>`;
   });
   card("mail", {
-    hidden: !mailOn, n: mi.length, hot: mi.some((x) => x.reason === "deadline" || x.reason === "approval"),
+    hidden: !mailOn, loading: loadingSrc("mail", ag?.mail), n: mi.length, hot: mi.some((x) => x.reason === "deadline" || x.reason === "approval"),
     mode: cardMode("mail"), allRows: mailAllRows, allEmpty: mail ? "최근 2일 안 읽은 메일 목록 없음 (다음 새로고침 때 채워져)." : "다음 새로고침 때 메일도 가져올게.",
     rows: withFold("mail", "email", miAll, (x) => {
       const u = safeUrl(x.url), r = mailRow(x);
@@ -65,7 +67,7 @@ export function renderTodoGroups() {
   const jiraAll = [...(ag?.jira || [])].sort((a, b) => byDue(a, b) || toMs(b.updated) - toMs(a.updated)), jira = jiraAll.filter(isOpenSrc("jira"));
   const jDays = (j) => dueInfo(j.due)?.days;
   card("jira", {
-    n: jira.length, hot: jira.some((j) => (jDays(j) ?? 1) <= 0),
+    loading: loadingSrc("jira", ag?.jira), n: jira.length, hot: jira.some((j) => (jDays(j) ?? 1) <= 0),
     rows: withFold("jira", "jira", jiraAll, (j) => {
       const u = safeUrl(j.url);
       return `<div class="ti${revCls("jira", j)}"><span class="ic" title="${esc(j.priority || "")}"><span class="led ${PRIO_LED[String(j.priority || "").toLowerCase()] || ""}" style="margin:0"></span></span><div class="mn"><span class="tt">${u ? ext(u, esc(j.title)) : esc(j.title)}</span>
@@ -95,7 +97,7 @@ export function renderTodoGroups() {
         <div class="ra">${draftFor("slack", x, srcKey("slack", x))}${openIcon(u)}${srcCheck("slack", x)}</div></div>`;
   });
   card("slack", {
-    hidden: !slackOn, n: si.length + wNeed.length, hot: si.some((x) => x.reason === "dm" || x.reason === "mention") || wNeed.length > 0,
+    hidden: !slackOn, loading: loadingSrc("slack", ag?.slack), n: si.length + wNeed.length, hot: si.some((x) => x.reason === "dm" || x.reason === "mention") || wNeed.length > 0,
     mode: cardMode("slack"), allRows: slackAllRows, allEmpty: slack ? "최근 24시간 멘션·DM 목록 없음 (다음 새로고침 때 채워져)." : "다음 새로고침 때 Slack 도 가져올게.",
     rows: withFold("slack", "slack", siAll, (x) => {
       const u = safeUrl(x.url), r = slRow(x);
@@ -111,7 +113,7 @@ export function renderTodoGroups() {
   const ghAll = [...(ag?.github || [])].sort((a, b) => (a.reason === "review_requested" ? 0 : 1) - (b.reason === "review_requested" ? 0 : 1) || toMs(b.updated) - toMs(a.updated)), gh = ghAll.filter(isOpenSrc("github"));
   const ghR = (x) => GH_REASON[x.reason] || ["", x.reason || "", "🐙"];
   card("gh", {
-    n: gh.length, hot: gh.some((x) => x.reason === "review_requested"),
+    loading: loadingSrc("github", ag?.github), n: gh.length, hot: gh.some((x) => x.reason === "review_requested"),
     rows: withFold("gh", "github", ghAll, (x) => {
       const u = safeUrl(x.url), r = ghR(x);
       return `<div class="ti${revCls("github", x)}"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.title)) : esc(x.title)}</span>
