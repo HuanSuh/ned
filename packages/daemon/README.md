@@ -27,8 +27,8 @@ node dist/cli.js agenda              # agenda 잡 1회 실행 (calendar/jira/git
 **Agenda 잡** (`src/agenda.ts`, `prompts/agenda.md`): 대시보드 HOME 탭용 구조화 데이터. 시작 직후 1회,
 이후 `agenda_refresh_minutes`(기본 60) 마다, 그리고 `POST /api/agenda/refresh` 때 `claude -p` 를 돌린다.
 허용 도구는 `ToolSearch`, Calendar `list_events`/`search_events`, Jira `searchJiraIssuesUsingJql`,
-`Bash(gh search prs:*)`/`Bash(gh pr list:*)`/`Bash(gh api:*)`, Gmail `search_threads` 뿐이고 `--max-turns 14`. `sources.*` 가 꺼진 블록은
-조회하지 않고 `[]` (mail 은 `null`). 동시에 여러 번 요청돼도 실행 중인 한 번을 공유한다 (busy guard). 모델 출력이 깨지면
+`Bash(gh search prs:*)`/`Bash(gh pr list:*)`/`Bash(gh api:*)`, Gmail `search_threads`, Slack `slack_search_public_and_private`/`slack_read_thread` 뿐이고 `--max-turns 16`. `sources.*` 가 꺼진 블록은
+조회하지 않고 `[]` (mail·slack 은 `null`). 동시에 여러 번 요청돼도 실행 중인 한 번을 공유한다 (busy guard). 모델 출력이 깨지면
 이전 목록을 유지하고 `error` 를 채운다. `NED_NO_LLM=1` 이면 claude 없이 빈 agenda 를 쓴다.
 
 ### HTTP API
@@ -56,7 +56,8 @@ Agenda 응답 형태:
   "calendar": [{"id":"","title":"","start":"ISO","end":"ISO","all_day":false,"location":"","url":"","meet_url":"","rsvp":"accepted|needsAction|declined|tentative|organizer","attendees":0}],
   "jira":     [{"key":"","title":"","status":"","priority":"","due":"YYYY-MM-DD|null","url":"","updated":"ISO"}],
   "github":   [{"repo":"owner/name","number":0,"title":"","url":"","author":"","updated":"ISO","reason":"review_requested|my_pr_changes_requested|my_pr_approved"}],
-  "mail":     null | {"summary":"한 줄 요약 | \"\"","unread":0,"unread_capped":false,"items":[{"id":"thread id","from":"","subject":"","snippet":"","received":"ISO","url":"","reason":"reply|approval|deadline|request","why":"한 줄"}]}
+  "mail":     null | {"summary":"한 줄 요약 | \"\"","unread":0,"unread_capped":false,"items":[{"id":"thread id","from":"","subject":"","snippet":"","received":"ISO","url":"","reason":"reply|approval|deadline|request","why":"한 줄"}]},
+  "slack":    null | {"summary":"한 줄 요약 | \"\"","items":[{"channel":"#채널|DM|그룹 DM","from":"","text":"한 줄","url":"permalink","ts":"ISO","reason":"mention|dm|thread"}]}
 }
 ```
 
@@ -64,6 +65,7 @@ Agenda 응답 형태:
 - jira: `assignee = currentUser() AND statusCategory != Done`, 마감 오름차순 → 갱신 내림차순, 최대 25
 - github: 내 리뷰 요청 PR + 변경 요청/승인된 내 열린 PR, 최대 20
 - mail: `unread` 는 최근 2일 안 읽은 받은편지함 스레드 수(최대 50, 50 에 닿으면 `unread_capped: true` → 홈은 "50+통"), `items` 는 최근 3일 중 사람이 보낸 업무 메일로 내 행동이 필요한 것(최대 10, 급한 순). 본문은 열지 않고 검색 결과의 발신자·제목·스니펫만 본다. 읽음 처리 등 쓰기는 하지 않는다. `mail: null` 은 아직 안 가져옴(mail 도입 전 agenda.json) 또는 gmail 소스 꺼짐. `GET /api/agenda`·`POST /api/agenda/refresh` 응답에는 `mail_enabled`(= `sources.gmail`)가 붙고, false 면 홈은 메일 묶음을 숨긴다
+- slack: 최근 24시간, 나를 멘션했거나 DM/스레드에서 질문·요청했고 내가 아직 답하지 않은 것(최대 10, 급한 순). 검색 3번(멘션 `<@me>` / `is:dm` / `is:thread with:<@me>`)과 필요할 때만 `slack_read_thread` 최대 3개. Slack epoch ts 는 ISO 로 바꾼다. 응답에는 `slack_enabled`(= `sources.slack`)가 붙고, false 면 홈은 Slack 카드를 숨긴다
 
 Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` (ms 타임스탬프).
 
@@ -89,7 +91,7 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
   events/YYYY-MM-DD.jsonl  훅(packages/hook/ned-hook.sh)이 append 하는 이벤트. 로컬 날짜 기준
   briefings/<iso-ts>.json  heartbeat / daily 브리핑 결과 (status, action_items, updates, fyi, sessions, cost_usd)
   briefings/sent.log     이미 알린 항목 키 (title 또는 url) — 중복 억제
-  agenda.json            HOME 탭 agenda: {updated_at, cost_usd, error?, calendar, jira, github, mail}
+  agenda.json            HOME 탭 agenda: {updated_at, cost_usd, error?, calendar, jira, github, mail, slack}
   todos.json             개인 할 일. 완료 후 7일 지난 항목은 로드할 때 정리된다
   dismissed.json         dismiss 한 세션 attention: {id: {alert_ts, at}} (7일 보관)
   logs/daemon.log        데몬 로그

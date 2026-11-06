@@ -81,13 +81,13 @@ export function startServer(getConfig: () => NedConfig): void {
   });
 
   // HOME tab: agenda (calendar / jira / github), refreshed by a cheap structured claude -p job.
-  // mail_enabled lets HOME hide the mail group when the gmail source is off (even if agenda.json still has old mail).
-  app.get("/api/agenda", (c) => c.json({ ...readAgenda(), busy: agendaBusy(), mail_enabled: getConfig().sources.gmail }));
+  // mail_enabled / slack_enabled (= sources.gmail / sources.slack) let HOME hide those cards even if agenda.json still has old data.
+  app.get("/api/agenda", (c) => c.json({ ...readAgenda(), busy: agendaBusy(), mail_enabled: getConfig().sources.gmail, slack_enabled: getConfig().sources.slack }));
   app.post("/api/agenda/refresh", async (c) => {
     // Concurrent refreshes share the in-flight run instead of spawning another claude -p.
     const cfg = getConfig();
     const a = await refreshAgenda(cfg);
-    return c.json({ ...a, mail_enabled: cfg.sources.gmail });
+    return c.json({ ...a, mail_enabled: cfg.sources.gmail, slack_enabled: cfg.sources.slack });
   });
 
   // HOME tab: personal todos.

@@ -68,12 +68,36 @@ export interface MailBlock {
   items: MailItem[];
 }
 
+export type SlackReason = "mention" | "dm" | "thread";
+
+export interface SlackItem {
+  /** "#channel" or "DM" / "그룹 DM". */
+  channel: string;
+  from: string;
+  /** The ask, one line. */
+  text: string;
+  /** Permalink to the message. */
+  url: string;
+  /** ISO-8601 (Slack epoch ts strings are converted). */
+  ts: string;
+  reason: SlackReason;
+}
+
+export interface SlackBlock {
+  /** One-line summary in Ned's voice; "" when nothing notable. */
+  summary: string;
+  /** Last 24h: mentions / DMs / thread asks I haven't answered, max 10. */
+  items: SlackItem[];
+}
+
 export interface AgendaPayload {
   calendar: CalendarItem[];
   jira: JiraItem[];
   github: GithubItem[];
   /** null = not fetched (agenda.json predates mail, or the gmail source is off). */
   mail: MailBlock | null;
+  /** null = not fetched (agenda.json predates slack, or the slack source is off). */
+  slack: SlackBlock | null;
 }
 
 export interface Agenda extends AgendaPayload {
@@ -84,12 +108,12 @@ export interface Agenda extends AgendaPayload {
 
 /** Must match the `unread` search limit in prompts/agenda.md. */
 export const MAIL_UNREAD_CAP = 50;
-const EMPTY: Agenda = { updated_at: 0, cost_usd: 0, calendar: [], jira: [], github: [], mail: null };
+const EMPTY: Agenda = { updated_at: 0, cost_usd: 0, calendar: [], jira: [], github: [], mail: null, slack: null };
 const emptyAgenda = (now: number): Agenda => ({ ...EMPTY, updated_at: now });
 
 export function readAgenda(): Agenda {
   const a = readJson<Partial<Agenda>>(AGENDA_PATH, {});
-  return { ...EMPTY, ...a, calendar: a.calendar ?? [], jira: a.jira ?? [], github: a.github ?? [], mail: readMail(a.mail) };
+  return { ...EMPTY, ...a, calendar: a.calendar ?? [], jira: a.jira ?? [], github: a.github ?? [], mail: readMail(a.mail), slack: readSlack(a.slack) };
 }
 
 /** A missing/garbled mail block stays null so the dashboard can say mail hasn't been fetched yet. */
@@ -100,6 +124,12 @@ function readMail(m: unknown): MailBlock | null {
   return { summary: str(b.summary), unread, unread_capped: b.unread_capped ?? unread >= MAIL_UNREAD_CAP, items: Array.isArray(b.items) ? b.items : [] };
 }
 
+function readSlack(m: unknown): SlackBlock | null {
+  if (!m || typeof m !== "object") return null;
+  const b = m as Partial<SlackBlock>;
+  return { summary: str(b.summary), items: Array.isArray(b.items) ? b.items : [] };
+}
+
 /** Read tools for the agenda job only — narrower than the heartbeat's set. */
 function agendaTools(cfg: NedConfig): string[] {
   const t = ["ToolSearch"];
@@ -107,6 +137,7 @@ function agendaTools(cfg: NedConfig): string[] {
   if (cfg.sources.jira) t.push("mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql");
   if (cfg.sources.github) t.push("Bash(gh search prs:*)", "Bash(gh pr list:*)", "Bash(gh api:*)");
   if (cfg.sources.gmail) t.push("mcp__claude_ai_Gmail__search_threads");
+  if (cfg.sources.slack) t.push("mcp__claude_ai_Slack__slack_search_public_and_private", "mcp__claude_ai_Slack__slack_read_thread");
   return t;
 }
 
@@ -122,6 +153,14 @@ const str = (v: unknown): string => (typeof v === "string" ? v : v == null ? "" 
 const RSVPS: Rsvp[] = ["accepted", "needsAction", "declined", "tentative", "organizer"];
 const REASONS: GithubItem["reason"][] = ["review_requested", "my_pr_changes_requested", "my_pr_approved"];
 const MAIL_REASONS: MailReason[] = ["reply", "approval", "deadline", "request"];
+const SLACK_REASONS: SlackReason[] = ["mention", "dm", "thread"];
+
+/** Slack "1730860000.123456" (epoch seconds) → ISO; ISO/other strings pass through. */
+function slackTs(v: unknown): string {
+  const t = str(v);
+  if (/^\d{9,11}(\.\d+)?$/.test(t)) return new Date(Number(t) * 1000).toISOString();
+  return t;
+}
 
 /** Coerce model output into the exact contract the dashboard expects. */
 function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedConfig): AgendaPayload {
@@ -190,7 +229,24 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
           })),
       }
     : null;
-  return { calendar, jira, github, mail };
+  const sl = raw.slack && typeof raw.slack === "object" ? (raw.slack as Record<string, unknown>) : {};
+  const slack: SlackBlock | null = cfg.sources.slack
+    ? {
+        summary: str(sl.summary).slice(0, 200),
+        items: arr(sl.items)
+          .filter((e) => SLACK_REASONS.includes(e.reason as SlackReason))
+          .slice(0, 10)
+          .map((e) => ({
+            channel: str(e.channel).slice(0, 80),
+            from: str(e.from).slice(0, 80),
+            text: str(e.text).replace(/\s+/g, " ").trim().slice(0, 160),
+            url: str(e.url),
+            ts: slackTs(e.ts),
+            reason: e.reason as SlackReason,
+          })),
+      }
+    : null;
+  return { calendar, jira, github, mail, slack };
 }
 
 function buildPrompt(cfg: NedConfig, now = new Date()): string {
@@ -206,7 +262,9 @@ function buildPrompt(cfg: NedConfig, now = new Date()): string {
     .replaceAll("{{CALENDAR}}", off(cfg.sources.calendar))
     .replaceAll("{{JIRA}}", off(cfg.sources.jira))
     .replaceAll("{{GITHUB}}", off(cfg.sources.github))
-    .replaceAll("{{GMAIL}}", off(cfg.sources.gmail));
+    .replaceAll("{{GMAIL}}", off(cfg.sources.gmail))
+    .replaceAll("{{SLACK}}", off(cfg.sources.slack))
+    .replaceAll("{{SLACK_SINCE}}", String(Math.floor(now.getTime() / 1000) - 24 * 3600));
 }
 
 let inflight: Promise<Agenda> | null = null;
@@ -236,14 +294,14 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
     writeJsonAtomic(AGENDA_PATH, a);
     return a;
   }
-  if (!cfg.sources.calendar && !cfg.sources.jira && !cfg.sources.github && !cfg.sources.gmail) {
+  if (!cfg.sources.calendar && !cfg.sources.jira && !cfg.sources.github && !cfg.sources.gmail && !cfg.sources.slack) {
     const a = emptyAgenda(now);
     writeJsonAtomic(AGENDA_PATH, a);
     return a;
   }
 
   log("agenda: asking claude");
-  const res = await runClaude(buildPrompt(cfg), { allowedTools: agendaTools(cfg), maxTurns: 14, model: cfg.claude_model, timeoutMs: 5 * 60_000 });
+  const res = await runClaude(buildPrompt(cfg), { allowedTools: agendaTools(cfg), maxTurns: 16, model: cfg.claude_model, timeoutMs: 5 * 60_000 });
   const parsed = res.ok ? extractJson<Partial<Record<keyof AgendaPayload, unknown>>>(res.text) : null;
   let agenda: Agenda;
   if (parsed) {
@@ -256,6 +314,6 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
     log(`agenda: failed — ${error.slice(0, 300)}`);
   }
   writeJsonAtomic(AGENDA_PATH, agenda);
-  log(`agenda: ${agenda.calendar.length} events / ${agenda.jira.length} jira / ${agenda.github.length} prs / ${agenda.mail?.items.length ?? "-"} mails ($${res.cost_usd.toFixed(2)}, ${res.num_turns} turns, ${Math.round(res.duration_ms / 1000)}s)`);
+  log(`agenda: ${agenda.calendar.length} events / ${agenda.jira.length} jira / ${agenda.github.length} prs / ${agenda.mail?.items.length ?? "-"} mails / ${agenda.slack?.items.length ?? "-"} slack ($${res.cost_usd.toFixed(2)}, ${res.num_turns} turns, ${Math.round(res.duration_ms / 1000)}s)`);
   return agenda;
 }

@@ -234,7 +234,8 @@
   .htop .bubble .lead { font-size: 14.5px; }
   .hmeta { display: flex; gap: 10px; align-items: center; font: 11px var(--mono); color: var(--faint); flex-wrap: wrap; justify-content: flex-end; padding-top: 4px; }
   .hmeta .err { color: var(--red); }
-  .hgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .hgrid { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .hcol { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
   .hgrid .card > .hd { min-height: 44px; }
   .hgrid .card > .bd { padding: 10px 14px 14px; }
   /* day timeline */
@@ -269,10 +270,32 @@
   .tgrp + .tgrp { margin-top: 14px; }
   .tgrp > .gh { display: flex; align-items: center; gap: 8px; padding: 6px 2px 6px; border-bottom: 1px solid var(--line); font: 700 11px var(--mono); letter-spacing: .06em; color: var(--dim); }
   .tgrp > .gh .ico { font-size: 13px; letter-spacing: 0; }
-  .tgrp > .gh .n { margin-left: auto; font-weight: 600; color: var(--faint); background: var(--hover); border-radius: 999px; padding: 0 8px; }
-  .tgrp > .gh .n.hot { color: var(--accent-ink); background: var(--amber); }
+  .tgrp > .gh .n, .scard > .sh .n { margin-left: auto; font-weight: 600; color: var(--faint); background: var(--hover); border-radius: 999px; padding: 0 8px; }
+  .tgrp > .gh .n.hot, .scard > .sh .n.hot { color: var(--accent-ink); background: var(--amber); }
   .tgrp .gl { border-left: 2px solid var(--gc, var(--line)); margin-top: 4px; }
-  .tgrp.g-ned { --gc: var(--mint); } .tgrp.g-jira { --gc: var(--blue); } .tgrp.g-gh { --gc: var(--dim); } .tgrp.g-mail { --gc: var(--violet); } .tgrp.g-me { --gc: var(--amber); }
+  .g-ned { --gc: var(--mint); } .g-jira { --gc: var(--blue); } .g-gh { --gc: var(--dim); } .g-mail { --gc: var(--violet); } .g-slack { --gc: var(--red); } .g-me { --gc: var(--amber); }
+  /* source cards (mail · jira · slack · github): shrink (summary + top item) ⇄ expanded (full list) */
+  .sgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+  .scard { border-top: 2px solid var(--gc); overflow: hidden; }
+  .scard > .sh { appearance: none; background: none; border: 0; color: var(--dim); width: 100%; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 14px; cursor: pointer; text-align: left; font: 700 11px var(--mono); letter-spacing: .06em; }
+  .scard > .sh:hover { background: var(--hover); }
+  .scard > .sh:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .scard > .sh .ico { font-size: 13px; letter-spacing: 0; }
+  .scard > .sh .chev { color: var(--faint); font-size: 10px; transition: transform .15s; }
+  .scard.open > .sh .chev { transform: rotate(180deg); }
+  .scard .ss { padding: 0 14px 10px; font-size: 13px; color: var(--fg); }
+  .scard .ss .u { font: 11px var(--mono); color: var(--faint); }
+  .scard .ss.none { color: var(--faint); font-size: 12px; }
+  .scard .pv { display: flex; align-items: center; gap: 8px; margin: 0 14px 12px; padding: 5px 8px; border-left: 2px solid var(--gc); background: var(--bubble); border-radius: 0 6px 6px 0; min-width: 0; font-size: 12.5px; }
+  .scard .pv:empty { display: none; }
+  .scard .pv .ic { flex: none; font-size: 13px; }
+  .scard .pv .tt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .scard .pv .tt a { color: inherit; }
+  .scard .pv .chipx { flex: none; }
+  .scard .sl { border-top: 1px solid var(--line); padding: 6px 10px 10px 12px; max-height: 460px; overflow: auto; }
+  .scard .sl .gl { border-left: 2px solid var(--gc); }
+  .scard:not(.open) .sl, .scard.open .pv { display: none; }
+  @media (prefers-reduced-motion: reduce) { .scard > .sh .chev { transition: none; } }
   .msum { display: flex; gap: 6px 10px; align-items: baseline; flex-wrap: wrap; padding: 6px 10px 4px; color: var(--dim); font-size: 12.5px; }
   .msum:empty { display: none; }
   .msum .u { font: 11px var(--mono); color: var(--faint); white-space: nowrap; }
@@ -285,7 +308,7 @@
   .ti .tt a { color: inherit; }
   .ti .sb { display: flex; gap: 4px 8px; align-items: center; flex-wrap: wrap; color: var(--dim); font-size: 11.5px; min-width: 0; }
   .ti .sb .d { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-  .ti .key { font: 600 11.5px var(--mono); color: var(--blue); white-space: nowrap; }
+  .ti .key, .scard .pv .key { font: 600 11.5px var(--mono); color: var(--blue); white-space: nowrap; }
   .ti .ra { display: flex; gap: 4px; align-items: center; }
   .ti .x { opacity: 0; transition: opacity .12s; }
   .ti:hover .x, .ti .x:focus-visible { opacity: 1; }
@@ -319,7 +342,7 @@
     details.msess { display: block; }
     #rail-toggle { display: none; }
   }
-  @media (max-width: 1020px) { .leds .opt { display: none; } }
+  @media (max-width: 1020px) { .leds .opt { display: none; } .sgrid { grid-template-columns: minmax(0, 1fr); } }
   @media (max-width: 760px) {
     header.hq { padding: 8px 12px; gap: 8px 10px; }
     .who .mood { font-size: 9.5px; }
@@ -339,7 +362,7 @@
     .form { grid-template-columns: 1fr; }
     ul.tl li { grid-template-columns: 44px 1fr; }
     .hwrap { padding: 12px 12px 40px; }
-    .hgrid { grid-template-columns: minmax(0, 1fr); }
+    .hgrid, .sgrid { grid-template-columns: minmax(0, 1fr); }
     .htop .say-slot { flex-basis: 100% !important; }
     .hmeta { justify-content: flex-start; padding-top: 0; }
     .hkeys { display: none; }
@@ -380,27 +403,52 @@
     <div class="hwrap">
       <div class="htop">
         <div class="say-slot" id="say-home" style="flex:1 1 420px;min-width:0"></div>
-        <div class="hmeta"><span id="ag-meta"></span><button class="btn small" id="ag-refresh" title="캘린더·Jira·GitHub 다시 가져오기 — 30~90초">새로고침</button></div>
+        <div class="hmeta"><span id="ag-meta"></span><button class="btn small" id="ag-refresh" title="캘린더·Jira·GitHub·메일·Slack 다시 가져오기 — 1~2분">새로고침</button></div>
       </div>
       <div class="hgrid">
         <section class="card">
           <div class="hd"><h2>오늘 일정</h2><span class="count" id="ag-date"></span><span class="sp"></span><span class="count" id="ag-count"></span></div>
           <div class="bd" id="agenda"></div>
         </section>
-        <section class="card">
-          <div class="hd"><h2>할 일</h2><span class="sp"></span><span class="count" id="todo-count"></span></div>
-          <div class="bd">
-            <div class="tgrp g-ned"><div class="gh"><span class="ico">👓</span>NED 액션 아이템<span class="n" id="n-ned">0</span></div><div class="gl" id="g-ned"></div></div>
-            <div class="tgrp g-mail" id="grp-mail"><div class="gh"><span class="ico">📬</span>메일 확인 필요<span class="n" id="n-mail">0</span></div><div class="gl"><div class="msum" id="mail-sum"></div><div id="g-mail"></div></div></div>
-            <div class="tgrp g-jira"><div class="gh"><span class="ico">📋</span>JIRA 내 이슈<span class="n" id="n-jira">0</span></div><div class="gl" id="g-jira"></div></div>
-            <div class="tgrp g-gh"><div class="gh"><span class="ico">🐙</span>GITHUB 리뷰 요청<span class="n" id="n-gh">0</span></div><div class="gl" id="g-gh"></div></div>
-            <div class="tgrp g-me"><div class="gh"><span class="ico">✅</span>개인 할 일<span class="n" id="n-me">0</span></div>
-              <div class="gl">
-                <form class="tadd" id="tadd" autocomplete="off"><input type="text" id="tadd-t" placeholder="할 일 추가… (⏎)" aria-label="할 일" maxlength="200"><input type="date" id="tadd-d" aria-label="마감일 (선택)"><button class="btn small" type="submit">추가</button></form>
-                <div id="g-me"></div>
-              </div></div>
+        <div class="hcol">
+          <section class="card" id="todo-card">
+            <div class="hd"><h2>할 일</h2><span class="sp"></span><span class="count" id="todo-count"></span></div>
+            <div class="bd">
+              <div class="tgrp g-ned"><div class="gh"><span class="ico">👓</span>NED 액션 아이템<span class="n" id="n-ned">0</span></div><div class="gl" id="g-ned"></div></div>
+              <div class="tgrp g-me"><div class="gh"><span class="ico">✅</span>개인 할 일<span class="n" id="n-me">0</span></div>
+                <div class="gl">
+                  <form class="tadd" id="tadd" autocomplete="off"><input type="text" id="tadd-t" placeholder="할 일 추가… (⏎)" aria-label="할 일" maxlength="200"><input type="date" id="tadd-d" aria-label="마감일 (선택)"><button class="btn small" type="submit">추가</button></form>
+                  <div id="g-me"></div>
+                </div></div>
+            </div>
+          </section>
+          <div class="sgrid" id="sgrid">
+          <section class="card scard g-mail" id="sc-mail">
+            <button class="sh" type="button" data-card="mail" aria-expanded="false" aria-controls="sl-mail"><span class="ico">📬</span>메일 확인 필요<span class="n" id="n-mail">0</span><span class="chev" aria-hidden="true">▼</span></button>
+            <div class="ss" id="ss-mail"></div>
+            <div class="pv" id="pv-mail"></div>
+            <div class="sl" id="sl-mail"><div class="gl"><div class="msum" id="mail-sum"></div><div id="g-mail"></div></div></div>
+          </section>
+          <section class="card scard g-jira" id="sc-jira">
+            <button class="sh" type="button" data-card="jira" aria-expanded="false" aria-controls="sl-jira"><span class="ico">📋</span>JIRA 내 이슈<span class="n" id="n-jira">0</span><span class="chev" aria-hidden="true">▼</span></button>
+            <div class="ss" id="ss-jira"></div>
+            <div class="pv" id="pv-jira"></div>
+            <div class="sl" id="sl-jira"><div class="gl"><div id="g-jira"></div></div></div>
+          </section>
+          <section class="card scard g-slack" id="sc-slack">
+            <button class="sh" type="button" data-card="slack" aria-expanded="false" aria-controls="sl-slack"><span class="ico">💬</span>SLACK 답할 것<span class="n" id="n-slack">0</span><span class="chev" aria-hidden="true">▼</span></button>
+            <div class="ss" id="ss-slack"></div>
+            <div class="pv" id="pv-slack"></div>
+            <div class="sl" id="sl-slack"><div class="gl"><div class="msum" id="slack-sum"></div><div id="g-slack"></div></div></div>
+          </section>
+          <section class="card scard g-gh" id="sc-gh">
+            <button class="sh" type="button" data-card="gh" aria-expanded="false" aria-controls="sl-gh"><span class="ico">🐙</span>GITHUB 리뷰 요청<span class="n" id="n-gh">0</span><span class="chev" aria-hidden="true">▼</span></button>
+            <div class="ss" id="ss-gh"></div>
+            <div class="pv" id="pv-gh"></div>
+            <div class="sl" id="sl-gh"><div class="gl"><div id="g-gh"></div></div></div>
+          </section>
           </div>
-        </section>
+        </div>
       </div>
       <div class="hkeys"><span><kbd>h</kbd> 홈</span><span><kbd>i</kbd> 인박스</span><span><kbd>r</kbd> 점검</span><span><kbd>n</kbd> 할 일 추가</span></div>
     </div>
@@ -898,6 +946,7 @@
   const RSVP = { needsAction: ["a", "응답 필요"], tentative: ["", "미정"], declined: ["", "거절"], organizer: ["", "주최"] };
   const GH_REASON = { review_requested: ["rv", "리뷰 요청", "👀"], my_pr_changes_requested: ["over", "변경 요청", "✍️"], my_pr_approved: ["ok", "승인됨", "✅"] };
   const MAIL_REASON = { reply: ["rv", "답장", "↩️"], approval: ["today", "결재", "🖊️"], deadline: ["over", "마감", "⏰"], request: ["", "확인", "📨"] };
+  const SLACK_REASON = { dm: ["today", "DM", "💬"], mention: ["rv", "멘션", "📣"], thread: ["", "스레드", "🧵"] };
   const PRIO_LED = { highest: "r", high: "r", medium: "a" };
   const WEEK = "일월화수목금토";
   const ymdOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -1003,6 +1052,26 @@
     $("n-" + id).classList.toggle("hot", !!hot);
     $("g-" + id).innerHTML = rows || `<div class="gnone">${esc(emptyMsg)}</div>`;
   }
+  /** Source card open state: remembered per card (ned.card.<id> = "1"/"0"); default open iff it has items. */
+  const cardKey = (id) => `ned.card.${id}`;
+  function cardOpen(id, n) { const v = lsGet(cardKey(id)); return v === "1" ? true : v === "0" ? false : n > 0; }
+  /** One-line preview of the most urgent item, shown only while the card is shrunk. */
+  const preview = (ic, title, url, chip) => `<span class="ic">${ic}</span><span class="tt">${url ? ext(url, esc(title)) : esc(title)}</span>${chip || ""}`;
+  /** Render a source card: badge + list via group(), then summary line, preview, open/hidden state. */
+  function card(id, { n, hot, rows, empty, sum, pv, hidden }) {
+    const el = $("sc-" + id);
+    el.hidden = !!hidden;
+    if (hidden) return;
+    group(id, n, hot, rows, empty);
+    $("ss-" + id).className = sum ? "ss" : "ss none";
+    $("ss-" + id).innerHTML = sum || esc(empty);
+    $("pv-" + id).innerHTML = n ? pv || "" : "";
+    const open = cardOpen(id, n);
+    el.classList.toggle("open", open);
+    el.querySelector(".sh").setAttribute("aria-expanded", String(open));
+  }
+  const counts = (pairs, sep = ", ") => pairs.filter(([, k]) => k > 0).map(([label, k]) => `${label} ${k}`).join(sep);
+
   function renderTodoGroups() {
     const s = S.state, ag = S.agenda;
     const ned = (s?.attention || []).filter((a) => a.source !== "sessions");
@@ -1013,32 +1082,70 @@
     }).join(""), s ? "내가 챙겨 둔 거 없어." : "불러오는 중…");
 
     const unavailable = ag === null ? "agenda 연결 안 됨." : ag === undefined ? "불러오는 중…" : "";
-    // Gmail source off → hide the group; mail === null → agenda.json predates mail (not fetched yet).
+    // Gmail/Slack source off → hide the card; mail/slack === null → agenda.json predates the block (not fetched yet).
     const mailOn = ag?.mail_enabled !== false, mail = mailOn ? ag?.mail : null, mi = mail?.items || [];
-    $("grp-mail").hidden = !mailOn;
     const unreadN = `${Number(mail?.unread) || 0}${mail?.unread_capped ? "+" : ""}`;
-    $("mail-sum").innerHTML = mail ? `${mail.summary ? `<span>${esc(mail.summary)}</span>` : ""}<span class="u">안 읽은 메일 ${unreadN}통 · 최근 2일</span>` : "";
-    group("mail", mi.length, mi.some((x) => x.reason === "deadline" || x.reason === "approval"), mi.map((x) => {
-      const u = safeUrl(x.url), r = MAIL_REASON[x.reason] || MAIL_REASON.request;
-      return `<div class="ti"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.subject || "(제목 없음)")) : esc(x.subject || "(제목 없음)")}</span>
-        <div class="sb"><span class="from">${esc(x.from)}</span><span class="chipx ${r[0]}">${r[1]}</span>${x.why ? `<span class="d">${esc(x.why)}</span>` : ""}${x.received ? `<span>${rel(toMs(x.received))}</span>` : ""}</div></div>
-        <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
-    }).join(""), unavailable || (mail ? "확인할 메일 없음." : "다음 새로고침 때 메일도 가져올게."));
+    $("mail-sum").innerHTML = mail?.summary ? `<span>${esc(mail.summary)}</span>` : "";
+    const mr = (k) => mi.filter((x) => (MAIL_REASON[x.reason] ? x.reason : "request") === k).length;
+    const mailRow = (x) => MAIL_REASON[x.reason] || MAIL_REASON.request;
+    card("mail", {
+      hidden: !mailOn, n: mi.length, hot: mi.some((x) => x.reason === "deadline" || x.reason === "approval"),
+      rows: mi.map((x) => {
+        const u = safeUrl(x.url), r = mailRow(x);
+        return `<div class="ti"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.subject || "(제목 없음)")) : esc(x.subject || "(제목 없음)")}</span>
+          <div class="sb"><span class="from">${esc(x.from)}</span><span class="chipx ${r[0]}">${r[1]}</span>${x.why ? `<span class="d">${esc(x.why)}</span>` : ""}${x.received ? `<span>${rel(toMs(x.received))}</span>` : ""}</div></div>
+          <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
+      }).join(""),
+      empty: unavailable || (mail ? "확인할 메일 없음." : "다음 새로고침 때 메일도 가져올게."),
+      sum: mail ? esc([counts([["결재", mr("approval")], ["마감", mr("deadline")], ["답장", mr("reply")], ["확인", mr("request")]], " · "), `안 읽은 ${unreadN}`].filter(Boolean).join(" · ")) : "",
+      pv: mi[0] && preview(mailRow(mi[0])[2], mi[0].subject || "(제목 없음)", safeUrl(mi[0].url), `<span class="chipx ${mailRow(mi[0])[0]}">${mailRow(mi[0])[1]}</span>`),
+    });
+
     const jira = [...(ag?.jira || [])].sort((a, b) => byDue(a, b) || toMs(b.updated) - toMs(a.updated));
-    group("jira", jira.length, jira.some((j) => (dueInfo(j.due)?.days ?? 1) <= 0), jira.map((j) => {
-      const u = safeUrl(j.url);
-      return `<div class="ti"><span class="ic" title="${esc(j.priority || "")}"><span class="led ${PRIO_LED[String(j.priority || "").toLowerCase()] || ""}" style="margin:0"></span></span><div class="mn"><span class="tt">${u ? ext(u, esc(j.title)) : esc(j.title)}</span>
-        <div class="sb"><span class="key">${esc(j.key)}</span><span class="chipx">${esc(j.status || "—")}</span>${dueChip(j.due)}</div></div>
-        <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
-    }).join(""), unavailable || "배정된 이슈 없음.");
+    const jDays = (j) => dueInfo(j.due)?.days;
+    card("jira", {
+      n: jira.length, hot: jira.some((j) => (jDays(j) ?? 1) <= 0),
+      rows: jira.map((j) => {
+        const u = safeUrl(j.url);
+        return `<div class="ti"><span class="ic" title="${esc(j.priority || "")}"><span class="led ${PRIO_LED[String(j.priority || "").toLowerCase()] || ""}" style="margin:0"></span></span><div class="mn"><span class="tt">${u ? ext(u, esc(j.title)) : esc(j.title)}</span>
+          <div class="sb"><span class="key">${esc(j.key)}</span><span class="chipx">${esc(j.status || "—")}</span>${dueChip(j.due)}</div></div>
+          <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
+      }).join(""),
+      empty: unavailable || "배정된 이슈 없음.",
+      sum: jira.length ? esc(counts([["마감 지난", jira.filter((j) => jDays(j) < 0).length], ["오늘", jira.filter((j) => jDays(j) === 0).length], ["진행 중", jira.filter((j) => /진행|progress/i.test(j.status || "")).length]]).replace(/ (\d+)/g, " $1건") || `열린 이슈 ${jira.length}건`) : "",
+      pv: jira[0] && preview(`<span class="key">${esc(jira[0].key)}</span>`, jira[0].title, safeUrl(jira[0].url), dueChip(jira[0].due) || `<span class="chipx">${esc(jira[0].status || "—")}</span>`),
+    });
+
+    const slackOn = ag?.slack_enabled !== false, slack = slackOn ? ag?.slack : null, si = slack?.items || [];
+    $("slack-sum").innerHTML = slack?.summary ? `<span>${esc(slack.summary)}</span>` : "";
+    const slRow = (x) => SLACK_REASON[x.reason] || SLACK_REASON.thread;
+    card("slack", {
+      hidden: !slackOn, n: si.length, hot: si.some((x) => x.reason === "dm" || x.reason === "mention"),
+      rows: si.map((x) => {
+        const u = safeUrl(x.url), r = slRow(x);
+        return `<div class="ti"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
+          <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span><span class="chipx ${r[0]}">${r[1]}</span>${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div></div>
+          <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
+      }).join(""),
+      empty: unavailable || (slack ? "답할 Slack 없음." : "다음 새로고침 때 Slack 도 가져올게."),
+      sum: si.length ? esc(`${counts([["멘션", si.filter((x) => x.reason === "mention").length], ["DM", si.filter((x) => x.reason === "dm").length], ["스레드", si.filter((x) => x.reason === "thread").length]])} 답 필요`) : "",
+      pv: si[0] && preview(slRow(si[0])[2], si[0].text || "(내용 없음)", safeUrl(si[0].url), `<span class="chipx">${esc(si[0].channel)}</span>`),
+    });
 
     const gh = [...(ag?.github || [])].sort((a, b) => (a.reason === "review_requested" ? 0 : 1) - (b.reason === "review_requested" ? 0 : 1) || toMs(b.updated) - toMs(a.updated));
-    group("gh", gh.length, gh.some((x) => x.reason === "review_requested"), gh.map((x) => {
-      const u = safeUrl(x.url), r = GH_REASON[x.reason] || ["", x.reason || "", "🐙"];
-      return `<div class="ti"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.title)) : esc(x.title)}</span>
-        <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.repo)}#${esc(x.number)}</span><span class="chipx ${r[0]}">${esc(r[1])}</span>${x.author ? `<span>@${esc(x.author)}</span>` : ""}${x.updated ? `<span>${rel(toMs(x.updated))}</span>` : ""}</div></div>
-        <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
-    }).join(""), unavailable || "기다리는 리뷰 없음.");
+    const ghR = (x) => GH_REASON[x.reason] || ["", x.reason || "", "🐙"];
+    card("gh", {
+      n: gh.length, hot: gh.some((x) => x.reason === "review_requested"),
+      rows: gh.map((x) => {
+        const u = safeUrl(x.url), r = ghR(x);
+        return `<div class="ti"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.title)) : esc(x.title)}</span>
+          <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.repo)}#${esc(x.number)}</span><span class="chipx ${r[0]}">${esc(r[1])}</span>${x.author ? `<span>@${esc(x.author)}</span>` : ""}${x.updated ? `<span>${rel(toMs(x.updated))}</span>` : ""}</div></div>
+          <div class="ra">${u ? ext(u, "열기", "btn small") : ""}</div></div>`;
+      }).join(""),
+      empty: unavailable || "기다리는 리뷰 없음.",
+      sum: esc(counts(Object.keys(GH_REASON).map((k) => [GH_REASON[k][1], gh.filter((x) => x.reason === k).length]))),
+      pv: gh[0] && preview(ghR(gh[0])[2], gh[0].title, safeUrl(gh[0].url), `<span class="chipx ${ghR(gh[0])[0]}">${esc(ghR(gh[0])[1])}</span>`),
+    });
 
     const todos = S.todos || [];
     const open = todos.filter((t) => !t.done).sort((a, b) => byDue(a, b) || toMs(a.created_at) - toMs(b.created_at));
@@ -1051,7 +1158,7 @@
     if (done.length) rows += `<details class="tdone" ${ui.doneOpen ? "open" : ""}><summary>완료 ${done.length}</summary>${done.map(row).join("")}</details>`;
     group("me", open.length, open.some((t) => (dueInfo(t.due)?.days ?? 1) <= 0), rows, "");
     for (const el of $("tadd").elements) el.disabled = S.todos === null;
-    $("todo-count").textContent = `${ned.length + mi.length + jira.length + gh.length + open.length}건`;
+    $("todo-count").textContent = `${ned.length + mi.length + jira.length + si.length + gh.length + open.length}건`;
   }
 
   /** Ned's one line for the day, built from agenda + todos + attention. */
@@ -1072,7 +1179,8 @@
       }
       const jira = ag.jira?.length || 0, rv = (ag.github || []).filter((g) => g.reason === "review_requested").length;
       const mails = ag.mail_enabled !== false ? ag.mail?.items?.length || 0 : 0;
-      const w = [jira ? `Jira ${jira}건` : "", rv ? `리뷰 ${rv}건` : "", mails ? `메일 ${mails}통` : ""].filter(Boolean);
+      const slacks = ag.slack_enabled !== false ? ag.slack?.items?.length || 0 : 0;
+      const w = [jira ? `Jira ${jira}건` : "", rv ? `리뷰 ${rv}건` : "", mails ? `메일 ${mails}통` : "", slacks ? `Slack ${slacks}건` : ""].filter(Boolean);
       if (w.length) bits.push(`${w.join(", ")} 기다려.`);
     }
     const sub = [];
@@ -1162,7 +1270,14 @@
     t.value = ""; d.value = ""; t.focus();
   });
   $("tadd-t").addEventListener("keydown", (e) => { if (e.key === "Escape") e.target.blur(); });
-  const homeCard = $("g-me").closest(".card");
+  // Source card header (a <button>: click, Enter or Space) toggles shrink ⇄ expanded and remembers it per card.
+  $("sgrid").addEventListener("click", (e) => {
+    const h = e.target.closest(".sh[data-card]"); if (!h) return;
+    const el = h.closest(".scard"), open = !el.classList.contains("open");
+    el.classList.toggle("open", open); h.setAttribute("aria-expanded", String(open));
+    lsSet(cardKey(h.dataset.card), open ? "1" : "0");
+  });
+  const homeCard = $("todo-card");
   homeCard.addEventListener("click", (e) => {
     const dis = e.target.closest("[data-dismiss]"), del = e.target.closest("[data-del]");
     if (dis) dismissAttention(dis.dataset.dismiss);
