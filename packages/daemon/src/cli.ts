@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import { buildPrompt, refreshAgenda } from "./agenda.js";
 import { loadConfig } from "./config.js";
+import { todayCost } from "./costs.js";
 import { buildHeartbeatPrompt, heartbeat, listBriefings, refreshSessions } from "./heartbeat.js";
 import { readUnprocessedEvents } from "./events.js";
 import { EVENTS_DIR, STATE_PATH, ensureDirs, localDay, log } from "./paths.js";
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
         busy = true;
         try {
           cfg = loadConfig();
+          if (overBudget(cfg, "heartbeat")) return;
           const today = localDay();
           const hhmm = new Date().toTimeString().slice(0, 5);
           const dailyDue = lastDaily !== today && hhmm >= cfg.briefing_time;
@@ -57,8 +59,22 @@ async function main(): Promise<void> {
       };
       // Agenda (dashboard HOME): at start, then every agenda_refresh_minutes. Runs alongside heartbeats;
       // refreshAgenda() has its own busy guard shared with POST /api/agenda/refresh.
+      // Hard stop for *automatic* runs once today's spend reaches agenda_daily_budget_usd
+      // (manual buttons / POST endpoints are not gated — the user asked for them explicitly).
+      let budgetWarnedAt = 0;
+      const overBudget = (c: ReturnType<typeof loadConfig>, job: string): boolean => {
+        const spent = todayCost();
+        if (spent < c.agenda_daily_budget_usd) return false;
+        if (Date.now() - budgetWarnedAt > 60 * 60_000) {
+          budgetWarnedAt = Date.now();
+          log(`${job}: skipped — today's spend $${spent.toFixed(2)} ≥ budget $${c.agenda_daily_budget_usd} (config.agenda_daily_budget_usd)`);
+        }
+        return true;
+      };
       const agendaTick = () => {
-        refreshAgenda(loadConfig()).catch((e) => log(`agenda failed: ${String(e)}`));
+        const c = loadConfig();
+        if (overBudget(c, "agenda")) return;
+        refreshAgenda(c).catch((e) => log(`agenda failed: ${String(e)}`));
       };
       agendaTick();
       setInterval(agendaTick, Math.max(1, cfg.agenda_refresh_minutes) * 60_000);

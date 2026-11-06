@@ -193,6 +193,7 @@
               </div>
               <div class="f"><label for="c-model">Claude 모델 (비우면 기본값)</label><input id="c-model" type="text" placeholder="예: claude-sonnet-5-5"></div>
               <div class="f"><label for="c-turns">Claude 최대 턴</label><input id="c-turns" type="number" min="1" step="1" required></div>
+              <div class="f"><label for="c-budget">하루 사용 상한 ($ 환산)</label><input id="c-budget" type="number" min="0" step="1" required><div class="hint">자동 점검·agenda·맥락 수집은 오늘 사용량이 이 값에 닿으면 멈춤. 버튼으로 직접 실행하는 건 제외. 구독 계정이면 실제 청구가 아니라 사용량 환산값.</div></div>
             </div>
             <div class="form-foot"><button type="submit" class="btn go" id="c-save">저장</button><span class="msg" id="c-msg"></span></div>
           </form>

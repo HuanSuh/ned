@@ -162,6 +162,7 @@ export function renderConfig() {
   $("c-sources").innerHTML = keys.length ? keys.map((k) => `<label><input type="checkbox" data-src="${esc(k)}" ${c.sources[k] ? "checked" : ""}>${esc(SOURCE_LABEL[k] || k)}</label>`).join("") : `<span class="hint">소스 없음</span>`;
   $("c-model").value = c.claude_model ?? "";
   $("c-turns").value = c.claude_max_turns ?? "";
+  $("c-budget").value = c.agenda_daily_budget_usd ?? "";
   $("c-msg").textContent = ""; $("c-msg").className = "msg";
 }
 
@@ -212,6 +213,7 @@ export function init() {
       reply_tone: $("c-tone").value.trim(),
       claude_model: $("c-model").value.trim() || null,
       claude_max_turns: Number($("c-turns").value),
+      agenda_daily_budget_usd: Number($("c-budget").value),
     };
     btn.disabled = true; msg.className = "msg"; msg.textContent = "저장 중…";
     try {
