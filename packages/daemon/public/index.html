@@ -515,6 +515,16 @@
   /* "전체" view: items that also need me get a bar in the accent colour; answered Slack messages fade */
   .ti.need { box-shadow: inset 3px 0 0 var(--hero); }
   .ti.answered { opacity: .6; }
+  /* Slack card: 채널 팔로업 (filters.slack.watch_channels) — collapsed fold under the list */
+  details.swatch { margin-top: 6px; border-top: 1px dashed var(--line); }
+  details.swatch > summary { cursor: pointer; padding: 6px 10px 4px; font: 600 11px var(--mono); color: var(--faint); list-style: none; }
+  details.swatch > summary::-webkit-details-marker { display: none; }
+  details.swatch > summary::before { content: "▸ "; } details.swatch[open] > summary::before { content: "▾ "; }
+  details.swatch > summary .chipx { margin-left: 6px; }
+  .swch { padding: 4px 0 6px; }
+  .swch + .swch { border-top: 1px solid var(--line); }
+  .swch .swh { display: flex; align-items: center; gap: 8px; padding: 2px 10px; font: 600 12px var(--mono); color: var(--dim); }
+  .swch .sws { padding: 2px 10px 4px; font-size: 12.5px; color: var(--fg); white-space: pre-line; }
   .chipx.more { background: color-mix(in srgb, var(--info) 18%, transparent); color: var(--info); }
   .scard > .sh:focus-visible, .scard > .shw > .sh:focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
   .scard .sh .ico { font-size: 13px; letter-spacing: 0; }
@@ -791,7 +801,7 @@
             <div class="shw"><button class="sh" type="button" data-card="slack" aria-expanded="false" aria-controls="sl-slack"><span class="ico">💬</span>SLACK 답할 것<span class="n" id="n-slack">0</span><span class="chev" aria-hidden="true">▼</span></button><span class="seg vmode" role="group" aria-label="보기"><button type="button" class="btn small" data-vm="slack" data-mode="need">확인 필요</button><button type="button" class="btn small" data-vm="slack" data-mode="all">전체</button></span></div>
             <div class="ss" id="ss-slack"></div>
             <div class="pv" id="pv-slack"></div>
-            <div class="sl" id="sl-slack"><div class="gl"><div class="msum" id="slack-sum"></div><div id="g-slack"></div></div></div>
+            <div class="sl" id="sl-slack"><div class="gl"><div class="msum" id="slack-sum"></div><div id="g-slack"></div><div id="slack-watch"></div></div></div>
           </section>
           <section class="card scard g-gh" id="sc-gh">
             <button class="sh" type="button" data-card="gh" aria-expanded="false" aria-controls="sl-gh"><span class="ico">🐙</span>GITHUB 리뷰 요청<span class="n" id="n-gh">0</span><span class="chev" aria-hidden="true">▼</span></button>
@@ -859,6 +869,14 @@
                 </div>
                 <span class="excl-msg" id="x-msg" role="status"></span>
                 <datalist id="dl-slack"></datalist><datalist id="dl-jira"></datalist>
+              </div>
+              <div class="f full"><span class="lab">팔로업 채널</span>
+                <span class="hint">멘션이 없어도 따라가 볼 Slack 채널. 홈 agenda 가 채널별 24시간 요약·하이라이트를 만들고, 순찰은 나한테 필요한 건 할 일로, 정해진 건 업데이트로 올려. 트래킹 제외에 있는 채널은 건너뛰어.</span>
+                <div class="excl">
+                  <div class="chipin" data-xbox="watch"><span class="cl">SLACK 채널</span><span class="chips" id="x-watch"></span><input type="text" id="x-watch-in" data-x="watch" list="dl-watch" placeholder="#채널 ⏎" aria-label="팔로업할 Slack 채널 추가" autocomplete="off"></div>
+                </div>
+                <span class="excl-msg" id="w-msg" role="status"></span>
+                <datalist id="dl-watch"></datalist>
               </div>
               <div class="f full"><span class="lab" id="wa-lab">쓰기 액션</span>
                 <span class="hint">'답장 초안' 팝업에서 쓸 수 있는 실제 쓰기 동작. 꺼 둔 건 버튼이 비활성으로 보이고, 보내는 동작은 늘 대상을 한 번 더 확인해.</span>
@@ -1494,21 +1512,22 @@
 
   // ---------- settings ----------
   // ---------- tracking exclusions (settings) ----------
-  const excl = { slack: [], jira: [] };
+  const excl = { slack: [], jira: [], watch: [] }; // watch = 팔로업 채널 (filters.slack.watch_channels), same chip UI
   const normX = {
     slack: (v) => v.trim().replace(/^#+/, "").replace(/\s+/g, ""),
+    watch: (v) => v.trim().replace(/^#+/, "").replace(/\s+/g, ""),
     jira: (v) => v.trim().toUpperCase().replace(/-\d*$/, ""), // "MNT-123" → "MNT"
   };
-  const validX = { slack: (v) => v.length > 0 && v.length <= 80, jira: (v) => /^[A-Z][A-Z0-9_]{0,19}$/.test(v) };
-  const showX = { slack: (v) => `#${v}`, jira: (v) => v };
+  const validX = { slack: (v) => v.length > 0 && v.length <= 80, watch: (v) => v.length > 0 && v.length <= 80, jira: (v) => /^[A-Z][A-Z0-9_]{0,19}$/.test(v) };
+  const showX = { slack: (v) => `#${v}`, watch: (v) => `#${v}`, jira: (v) => v };
   function renderExcl() {
-    for (const k of ["slack", "jira"]) {
-      $("x-" + k).innerHTML = excl[k].map((v, i) => `<span class="xchip">${esc(showX[k](v))}<button type="button" data-xdel="${k}:${i}" aria-label="${esc(showX[k](v))} 빼기" title="빼기">✕</button></span>`).join("");
+    for (const k of ["slack", "jira", "watch"]) {
+      $("x-" + k).innerHTML = excl[k].map((v, i) => `<span class="xchip"${k === "watch" && excl.slack.some((x) => x.toLowerCase() === v.toLowerCase()) ? ` style="opacity:.5" title="트래킹 제외에도 있어서 건너뛰어"` : ""}>${esc(showX[k](v))}<button type="button" data-xdel="${k}:${i}" aria-label="${esc(showX[k](v))} 빼기" title="빼기">✕</button></span>`).join("");
     }
     // Candidates: channels / project keys seen so far in agenda.json and briefings (client-side, no new API).
     const ch = new Set(), pj = new Set();
     const ag = S.agenda;
-    for (const x of ag?.slack?.items || []) if (x.channel?.startsWith("#")) ch.add(x.channel.slice(1));
+    for (const x of [...(ag?.slack?.items || []), ...(ag?.slack?.all || []), ...(ag?.slack?.watch || [])]) if (x.channel?.startsWith("#")) ch.add(x.channel.slice(1));
     for (const j of ag?.jira || []) { const m = /^([A-Z][A-Z0-9_]*)-\d+/.exec(j.key || ""); if (m) pj.add(m[1]); }
     for (const b of S.briefings || []) for (const it of [...(b.action_items || []), ...(b.updates || []), ...(b.fyi || [])]) {
       const text = `${it.title || ""} ${it.detail || ""} ${it.url || ""}`;
@@ -1517,6 +1536,7 @@
       if (it.kind === "jira" || /atlassian\.net\/browse\//.test(text)) for (const m of text.matchAll(/\b([A-Z][A-Z0-9_]{1,19})-\d+\b/g)) pj.add(m[1]);
     }
     $("dl-slack").innerHTML = [...ch].filter((v) => !excl.slack.includes(v)).sort().map((v) => `<option value="#${esc(v)}">`).join("");
+    $("dl-watch").innerHTML = [...ch].filter((v) => !excl.watch.includes(v) && !excl.slack.includes(v)).sort().map((v) => `<option value="#${esc(v)}">`).join("");
     $("dl-jira").innerHTML = [...pj].filter((v) => !excl.jira.includes(v)).sort().map((v) => `<option value="${esc(v)}">`).join("");
   }
   function addExcl(k, raw) {
@@ -1527,10 +1547,10 @@
       if (!validX[k](v)) { bad.push(part.trim()); continue; }
       if (!excl[k].includes(v)) { excl[k].push(v); added++; }
     }
-    $("x-msg").textContent = bad.length ? `${k === "jira" ? "프로젝트 키는 영문 대문자로 시작하는 영숫자만 돼" : "채널 이름이 비었거나 너무 길어"}: ${bad.join(", ")}` : added ? "추가했어. 저장을 눌러야 적용돼." : "";
+    $(k === "watch" ? "w-msg" : "x-msg").textContent = bad.length ? `${k === "jira" ? "프로젝트 키는 영문 대문자로 시작하는 영숫자만 돼" : "채널 이름이 비었거나 너무 길어"}: ${bad.join(", ")}` : added ? "추가했어. 저장을 눌러야 적용돼." : "";
     renderExcl();
   }
-  for (const k of ["slack", "jira"]) {
+  for (const k of ["slack", "jira", "watch"]) {
     const input = $(`x-${k}-in`);
     input.addEventListener("keydown", (e) => {
       if ((e.key === "Enter" || e.key === ",") && !e.isComposing) { e.preventDefault(); if (input.value.trim()) { addExcl(k, input.value); input.value = ""; } }
@@ -1596,7 +1616,8 @@
     renderPersonaPicker(c.persona || "ned");
     excl.slack = [...(c.filters?.slack?.exclude_channels || [])];
     excl.jira = [...(c.filters?.jira?.exclude_projects || [])];
-    $("x-msg").textContent = "";
+    excl.watch = [...(c.filters?.slack?.watch_channels || [])];
+    $("x-msg").textContent = $("w-msg").textContent = "";
     renderExcl();
     $("cfg-port").textContent = c.port ? `port ${c.port}` : "";
     $("c-hb").value = c.heartbeat_minutes ?? "";
@@ -1626,7 +1647,7 @@
       quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
       sources,
       persona: document.querySelector("#c-persona input[name=persona]:checked")?.value || S.config?.persona || "ned",
-      filters: { slack: { exclude_channels: [...excl.slack] }, jira: { exclude_projects: [...excl.jira] } },
+      filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch] }, jira: { exclude_projects: [...excl.jira] } },
       notifications: readNotifications(),
       actions: Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])),
       reply_tone: $("c-tone").value.trim(),
@@ -2128,6 +2149,33 @@
   const cardMode = (id) => (lsGet(`ned.cardmode.${id}`) === "all" ? "all" : "need");
   const counts = (pairs, sep = ", ") => pairs.filter(([, k]) => k > 0).map(([label, k]) => `${label} ${k}`).join(sep);
 
+  /** Open (not 확인 완료) 채널 팔로업 highlights that need me (agenda slack.watch[].highlights[].needs_me), one per url. */
+  function watchNeeds(slack) {
+    const seen = new Set();
+    return (slack?.watch || []).flatMap((w) => (w.highlights || []).filter((h) => h.needs_me && isOpenSrc("slack")(h)).map((h) => ({ ...h, channel: w.channel })))
+      .filter((h) => !h.url || (!seen.has(h.url) && seen.add(h.url)));
+  }
+  /** Slack card's 채널 팔로업 fold: collapsed by default, per-channel summary + highlights; needs_me rows get the accent bar. */
+  function renderSlackWatch(watch, needN) {
+    const el = $("slack-watch");
+    if (!watch.length) { el.innerHTML = ""; return; }
+    const hl = (w, h) => {
+      const u = safeUrl(h.url);
+      const rv = h.needs_me ? revCls("slack", h) : "";
+      return `<div class="ti${h.needs_me && !rv ? " need" : ""}${rv}"><span class="ic">${h.needs_me ? "❗" : "·"}</span><div class="mn"><span class="tt">${u ? ext(u, esc(h.text || "(내용 없음)")) : esc(h.text || "(내용 없음)")}</span>
+        <div class="sb"><span class="from">${esc(h.from)}</span>${h.needs_me ? `<span class="chipx today">나한테</span>` : ""}${h.reason ? `<span class="d">${esc(h.reason)}</span>` : ""}${h.ts ? `<span>${rel(toMs(h.ts))}</span>` : ""}</div></div>
+        <div class="ra">${h.needs_me ? draftFor("slack", { ...h, channel: w.channel }, srcKey("slack", h)) : ""}${openIcon(u)}${h.needs_me ? srcCheck("slack", h) : ""}</div></div>`;
+    };
+    el.innerHTML = `<details class="swatch" ${ui.watchOpen ? "open" : ""}><summary>채널 팔로업 ${watch.length}${needN ? `<span class="chipx today">나한테 ${needN}</span>` : ""}</summary>` +
+      watch.map((w) => {
+        const n = (w.highlights || []).filter((h) => h.needs_me && isOpenSrc("slack")(h)).length;
+        return `<div class="swch"><div class="swh">${esc(w.channel)}${n ? `<span class="chipx today">${n}</span>` : ""}</div>` +
+          (w.summary ? `<div class="sws">${esc(w.summary)}</div>` : `<div class="gnone">지난 24시간 눈에 띄는 대화 없음.</div>`) +
+          (w.highlights || []).map((h) => hl(w, h)).join("") + `</div>`;
+      }).join("") + `</details>`;
+  }
+  $("sc-slack").addEventListener("toggle", (e) => { if (e.target.classList?.contains("swatch")) { ui.watchOpen = e.target.open; packCards(); } }, true);
+
   function renderTodoGroups() {
     const s = S.state, ag = S.agenda;
     const nedAll = (s?.attention || []).filter((a) => a.source !== "sessions" && srcOn(a.kind)), nedF = nedAll.filter((a) => pfOn("home", a.kind));
@@ -2188,6 +2236,8 @@
     $("slack-sum").innerHTML = slack?.summary ? `<span>${esc(slack.summary)}</span>` : "";
     const slRow = (x) => SLACK_REASON[x.reason] || SLACK_REASON.thread;
     const slackNeed = new Set(siAll.map((x) => x.url).filter(Boolean));
+    const watch = slack?.watch || [], wNeed = watchNeeds(slack).filter((h) => !slackNeed.has(h.url));
+    renderSlackWatch(watch, wNeed.length);
     const slackAllRows = withFold("slack-all", "slack", collapseDMs(slack?.all || []), (x) => {
       const u = safeUrl(x.url), r = slRow(x), need = slackNeed.has(x.url);
       return `<div class="ti${need ? " need" : ""}${x.answered && !need ? " answered" : ""}${revCls("slack", x)}"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
@@ -2195,7 +2245,7 @@
         <div class="ra">${draftFor("slack", x, srcKey("slack", x))}${openIcon(u)}${srcCheck("slack", x)}</div></div>`;
     });
     card("slack", {
-      hidden: !slackOn, n: si.length, hot: si.some((x) => x.reason === "dm" || x.reason === "mention"),
+      hidden: !slackOn, n: si.length + wNeed.length, hot: si.some((x) => x.reason === "dm" || x.reason === "mention") || wNeed.length > 0,
       mode: cardMode("slack"), allRows: slackAllRows, allEmpty: slack ? "최근 24시간 멘션·DM 목록 없음 (다음 새로고침 때 채워져)." : "다음 새로고침 때 Slack 도 가져올게.",
       rows: withFold("slack", "slack", siAll, (x) => {
         const u = safeUrl(x.url), r = slRow(x);
@@ -2204,7 +2254,7 @@
           <div class="ra">${draftFor("slack", x, srcKey("slack", x))}${openIcon(u)}${srcCheck("slack", x)}</div></div>`;
       }),
       empty: unavailable || (slack ? "답할 Slack 없음." : "다음 새로고침 때 Slack 도 가져올게."),
-      sum: si.length ? esc(`${counts([["멘션", si.filter((x) => x.reason === "mention").length], ["DM", si.filter((x) => x.reason === "dm").length], ["스레드", si.filter((x) => x.reason === "thread").length]])} 답 필요`) : "",
+      sum: si.length || wNeed.length ? esc([si.length ? `${counts([["멘션", si.filter((x) => x.reason === "mention").length], ["DM", si.filter((x) => x.reason === "dm").length], ["스레드", si.filter((x) => x.reason === "thread").length]])} 답 필요` : "", wNeed.length ? `팔로업 채널 ${wNeed.length}건 확인` : ""].filter(Boolean).join(" · ")) : "",
       pv: si[0] && preview(slRow(si[0])[2], si[0].text || "(내용 없음)", safeUrl(si[0].url), `<span class="chipx">${esc(si[0].channel)}</span>`),
     });
 
@@ -2239,6 +2289,10 @@
     // pill counts cover this card only (Ned action items by kind + personal todos), before filtering
     const cnt = { me: open.length };
     for (const a of nedAll) if (!a.reviewed_at) cnt[a.kind] = (cnt[a.kind] || 0) + 1; // open only
+    if (srcOn("slack") && ag?.slack_enabled !== false) { // + 채널 팔로업 needs_me not already surfaced as an action item
+      const attUrls = new Set(nedAll.map((a) => a.url).filter(Boolean)), wn = watchNeeds(ag?.slack).filter((h) => !attUrls.has(h.url)).length;
+      if (wn) cnt.slack = (cnt.slack || 0) + wn;
+    }
     $("pf-home").innerHTML = pillRow("home", cnt, PILL_KINDS.filter(srcOn));
   }
 
@@ -2257,7 +2311,8 @@
       // 확인 완료 items don't count
       const jira = srcOn("jira") ? (ag.jira || []).filter(isOpenSrc("jira")).length : 0, rv = srcOn("github") ? (ag.github || []).filter((g) => g.reason === "review_requested" && !revAt("github", g)).length : 0;
       const mails = srcOn("email") && ag.mail_enabled !== false ? (ag.mail?.items || []).filter(isOpenSrc("email")).length : 0;
-      const slacks = srcOn("slack") && ag.slack_enabled !== false ? collapseDMs(ag.slack?.items || []).filter(isOpenSrc("slack")).length : 0; // one per DM conversation, like the card
+      const slackItems = collapseDMs(ag.slack?.items || []), slackUrls = new Set(slackItems.map((x) => x.url).filter(Boolean));
+      const slacks = srcOn("slack") && ag.slack_enabled !== false ? slackItems.filter(isOpenSrc("slack")).length + watchNeeds(ag.slack).filter((h) => !slackUrls.has(h.url)).length : 0; // one per DM conversation, like the card; + open 팔로업 needs_me
       const c = V().count;
       const w = [jira ? c("Jira", jira, "건") : "", rv ? c("리뷰", rv, "건") : "", mails ? c("메일", mails, "통") : "", slacks ? c("Slack", slacks, "건") : ""].filter(Boolean);
       if (w.length) bits.push(V().wait(w));

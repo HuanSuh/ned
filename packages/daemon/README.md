@@ -65,6 +65,14 @@ JQL 에 그대로 들어가므로 그 밖의 값은 버린다). heartbeat.md · 
 (`{{JQL_EXCLUDE}}`), 정규화 단계에서 제외 프로젝트 이슈·제외 채널 Slack 항목을 한 번 더 걸러낸다. `PUT /api/config` 는
 `filters` 를 소스별로 깊게 머지한다 (`filters.slack` 만 보내도 `filters.jira` 유지). API 라우트는 config.yaml 을 매번 새로 읽는다.
 
+**팔로업 채널** (`config.filters.slack.watch_channels`, 기본 `[]`, 최대 20): 멘션·태그가 없어도 따라가 볼 Slack 채널(채널명, `#` 없이).
+`exclude_channels` 에도 있으면 제외가 이긴다. 비어 있지 않으면 agenda.md 의 `{{SLACK_WATCH}}` 자리에 블록이 들어가
+채널마다 `slack_search_public_and_private`(`filters: "in:#채널"`, 최근 24h, 20개)를 다른 검색과 같은 턴에 병렬로 부르고
+(`maxTurns` +2), `slack.watch[]` = `{channel:"#채널", summary(2~3줄: 정해진 것·물은 것), highlights:[{from, text(≤200), ts, url,
+needs_me, reason}](채널당 최대 5)}` 를 돌려준다. `needs_me` = 나를 향한 듯한 질문·요청, 내 일에 영향 주는 결정, 마감.
+heartbeat / briefing 의 `{{FILTERS}}` 에도 팔로업 목록이 붙어 needs_me 는 `action_items`(kind slack), 채널 결정은 `updates` 로 간다.
+대시보드: 설정 → "팔로업 채널" 칩 입력, 홈 Slack 카드의 "채널 팔로업" 접힘 섹션(needs_me 는 강조 바), 카드·소스 pill·인사말 카운트에 needs_me 포함.
+
 **Agenda 잡** (`src/agenda.ts`, `prompts/agenda.md`): 대시보드 HOME 탭용 구조화 데이터. 시작 직후 1회,
 이후 `agenda_refresh_minutes`(기본 60) 마다, 그리고 `POST /api/agenda/refresh` 때 `claude -p` 를 돌린다.
 허용 도구는 `ToolSearch`, Calendar `list_events`/`search_events`, Jira `searchJiraIssuesUsingJql`,
@@ -202,7 +210,7 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
 ~/.ned/
   config.yaml            설정 (없으면 기본값으로 생성). heartbeat_minutes, signal_check_minutes,
                          briefing_time, quiet_hours, sources.{gmail,slack,jira,github,sentry,calendar},
-                         persona (ned|alfred|oracle|jarvis), filters.{slack.exclude_channels, jira.exclude_projects} (트래킹 제외, 기본 []),
+                         persona (ned|alfred|oracle|jarvis), filters.{slack.exclude_channels, slack.watch_channels, jira.exclude_projects} (트래킹 제외 / 팔로업 채널, 기본 []),
                          port, claude_model, claude_max_turns, session_stale_minutes, agenda_refresh_minutes, notify,
                          actions.{slack_send=false, gmail_draft=true, gmail_send=false, session_send=true} (POST /api/send 허용),
                          reply_tone (답장 초안 말투, 기본 "간결하고 정중한 존댓말, 핵심 먼저"),

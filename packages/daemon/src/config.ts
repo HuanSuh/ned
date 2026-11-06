@@ -112,7 +112,11 @@ export function normalizeNotifications(raw: unknown, base: NedNotifications = DE
 
 export interface NedFilters {
   /** Channel names without "#", e.g. ["random", "mobile_dev_casual"]. */
-  slack: { exclude_channels: string[] };
+  slack: {
+    exclude_channels: string[];
+    /** Channels followed even without a mention (agenda `slack.watch`, heartbeat). Excluded channels win. */
+    watch_channels: string[];
+  };
   /** Jira project keys, e.g. ["MNT", "IP2"]. */
   jira: { exclude_projects: string[] };
 }
@@ -125,10 +129,12 @@ const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is st
  * Jira keys are upper-cased and must look like a project key (they are pasted into JQL verbatim).
  */
 export function normalizeFilters(raw: unknown): NedFilters {
-  const f = (raw && typeof raw === "object" ? raw : {}) as { slack?: { exclude_channels?: unknown }; jira?: { exclude_projects?: unknown } };
-  const channels = strs(f.slack?.exclude_channels).map((c) => c.trim().replace(/^#+/, "").replace(/\s+/g, "")).filter((c) => c && c.length <= 80);
+  const f = (raw && typeof raw === "object" ? raw : {}) as { slack?: { exclude_channels?: unknown; watch_channels?: unknown }; jira?: { exclude_projects?: unknown } };
+  const chans = (v: unknown) => strs(v).map((c) => c.trim().replace(/^#+/, "").replace(/\s+/g, "")).filter((c) => c && c.length <= 80);
+  const channels = chans(f.slack?.exclude_channels);
+  const watch = chans(f.slack?.watch_channels);
   const projects = strs(f.jira?.exclude_projects).map((k) => k.trim().toUpperCase()).filter((k) => /^[A-Z][A-Z0-9_]{0,19}$/.test(k));
-  return { slack: { exclude_channels: uniq(channels) }, jira: { exclude_projects: uniq(projects) } };
+  return { slack: { exclude_channels: uniq(channels), watch_channels: uniq(watch).slice(0, 20) }, jira: { exclude_projects: uniq(projects) } };
 }
 
 /** Deep-merge a partial filters patch over the current filters (a key that is present replaces that list). */
@@ -154,6 +160,23 @@ export function filtersPrompt(f: NedFilters): string {
   return lines.join("\n");
 }
 
+/** Watched channels minus excluded ones (case-insensitive) — what the agenda / heartbeat actually follow. */
+export function watchChannels(f: NedFilters): string[] {
+  const ex = new Set(f.slack.exclude_channels.map((c) => c.toLowerCase()));
+  return (f.slack.watch_channels ?? []).filter((c) => !ex.has(c.toLowerCase()));
+}
+
+/** Heartbeat / briefing {{FILTERS}} addendum for watched channels; "" when none. */
+export function watchPrompt(f: NedFilters): string {
+  const w = watchChannels(f);
+  if (!w.length) return "";
+  return [
+    `팔로업 채널: ${w.map((c) => `#${c}`).join(", ")} — 멘션이 없어도 최근 대화를 본다 (채널별 \`slack_search_public_and_private\` \`in:#채널\` 한 번, 읽기만).`,
+    "  - 나에게 향한 듯한 질문·요청, 내 일에 영향을 주는 결정, 마감이 걸린 것 → `action_items` (kind `slack`, 원문 permalink 를 `url` 로).",
+    "  - 그 밖에 채널에서 정해진 것·중요한 변화 → `updates` (kind `slack`, 채널당 1줄). 잡담·단순 공유는 버린다.",
+  ].join("\n");
+}
+
 export const DEFAULT_CONFIG: NedConfig = {
   heartbeat_minutes: 10,
   signal_check_minutes: 60,
@@ -161,7 +184,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   quiet_hours: { start: "23:00", end: "08:00" },
   sources: { gmail: true, slack: true, jira: true, github: true, sentry: true, calendar: true },
   persona: "ned",
-  filters: { slack: { exclude_channels: [] }, jira: { exclude_projects: [] } },
+  filters: { slack: { exclude_channels: [], watch_channels: [] }, jira: { exclude_projects: [] } },
   port: 7777,
   claude_model: null,
   claude_max_turns: 25,
