@@ -1,14 +1,18 @@
 import SwiftUI
 import AppKit
+import ServiceManagement
 
 struct MenuContent: View {
     @ObservedObject var store: StateStore
+    @ObservedObject var daemon: DaemonManager
+    @State private var loginItem = LoginItem()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
-            if !store.state.daemonAlive {
-                Label("Ned 데몬이 꺼져 있어요 — `ned run` 또는 launchctl 확인", systemImage: "exclamationmark.triangle")
+            daemonLine
+            if !store.state.daemonAlive && !daemon.isHealthy {
+                Label("Ned 데몬이 꺼져 있어요 — 로그를 확인하세요", systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.orange)
             }
             if let e = store.lastError {
@@ -29,10 +33,67 @@ struct MenuContent: View {
                 ForEach(store.state.sessions.prefix(8)) { s in SessionRow(session: s) }
             }
             Divider()
+            settings
             footer
         }
         .padding(12)
         .frame(width: 360)
+        .onAppear { loginItem.refresh() }
+    }
+
+    private var daemonLine: some View {
+        HStack(spacing: 6) {
+            Circle().fill(daemonColor).frame(width: 7, height: 7)
+            Text(daemon.statusLine).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                .help(daemon.repoPath.map { "저장소: \($0)" } ?? "저장소 미지정")
+            Spacer(minLength: 4)
+            if case .failed = daemon.status {
+                Button("다시 시작") { daemon.restart() }.buttonStyle(.link).font(.caption)
+            }
+            Button("로그 열기") { daemon.revealLog() }.buttonStyle(.link).font(.caption)
+        }
+    }
+
+    private var daemonColor: Color {
+        switch daemon.status {
+        case .running: return .green
+        case .external: return .teal
+        case .starting, .checking: return .yellow
+        case .failed: return .red
+        }
+    }
+
+    private var settings: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle("Login Items 에 등록", isOn: Binding(
+                get: { loginItem.enabled },
+                set: { loginItem.set($0) }))
+                .toggleStyle(.checkbox).font(.caption)
+            if let m = loginItem.message {
+                Text(m).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Button("저장소 위치…") { chooseRepo() }.buttonStyle(.link).font(.caption)
+                .help(daemon.repoPath ?? "")
+        }
+    }
+
+    private func chooseRepo() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Ned 저장소 (packages/daemon 이 있는 폴더) 를 선택하세요"
+        if let r = daemon.repoPath { panel.directoryURL = URL(fileURLWithPath: r) }
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard FileManager.default.fileExists(atPath: url.path + "/packages/daemon/package.json") else {
+            let a = NSAlert()
+            a.messageText = "Ned 저장소가 아니에요"
+            a.informativeText = "\(url.path) 에 packages/daemon 이 없습니다."
+            a.runModal()
+            return
+        }
+        daemon.setRepoPath(url.path)
     }
 
     private var header: some View {
@@ -50,7 +111,7 @@ struct MenuContent: View {
     private var footer: some View {
         HStack {
             Button("지금 점검") { store.triggerHeartbeat() }
-            Button("대시보드") { NSWorkspace.shared.open(URL(string: "http://127.0.0.1:\(store.port)")!) }
+            Button("대시보드") { DashboardWindowController.shared.show() }
             Spacer()
             if let t = store.state.last_heartbeat_at {
                 Text("마지막 \(relative(t))").font(.caption2).foregroundStyle(.secondary)
@@ -154,4 +215,31 @@ func relative(_ ms: Double) -> String {
     let f = RelativeDateTimeFormatter()
     f.unitsStyle = .short
     return f.localizedString(for: Date(timeIntervalSince1970: ms / 1000), relativeTo: Date())
+}
+
+/// `SMAppService.mainApp` wrapper. Registration of an unsigned/dev bundle may need the user's
+/// approval in System Settings > General > Login Items; that state is surfaced as a message.
+@MainActor
+struct LoginItem {
+    var enabled = false
+    var message: String? = nil
+
+    mutating func refresh() {
+        let s = SMAppService.mainApp.status
+        enabled = s == .enabled || s == .requiresApproval
+        message = s == .requiresApproval ? "시스템 설정 > 일반 > 로그인 항목에서 Ned 를 허용해야 해요" : message
+    }
+
+    mutating func set(_ on: Bool) {
+        do {
+            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+            message = nil
+            DaemonManager.shared.note("login item \(on ? "register" : "unregister") ok, status=\(SMAppService.mainApp.status.rawValue)")
+        } catch {
+            message = "로그인 항목 \(on ? "등록" : "해제") 실패: \(error.localizedDescription)"
+            DaemonManager.shared.note("login item \(on ? "register" : "unregister") failed: \(error) status=\(SMAppService.mainApp.status.rawValue)")
+        }
+        refresh()
+        if SMAppService.mainApp.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
+    }
 }
