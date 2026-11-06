@@ -3,9 +3,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
+import { parseSendRequest, performSend, readActionLog } from "./actions.js";
 import { agendaBusy, readAgenda, refreshAgenda } from "./agenda.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { PERSONAS, loadConfig, mergeFilters, normalizeNotifications, normalizePersona, saveConfig, type NedConfig, type PersonaId } from "./config.js";
+import { PERSONAS, loadConfig, mergeFilters, normalizeActions, normalizeNotifications, normalizeReplyTone, normalizePersona, saveConfig, type NedConfig, type PersonaId } from "./config.js";
+import { DraftError, generateDraft, parseDraftRequest } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { dismissAttention, heartbeat, listBriefings } from "./heartbeat.js";
 import { log } from "./paths.js";
@@ -74,7 +76,7 @@ export function startServer(getConfig: () => NedConfig): void {
     const cur = loadConfig();
     // filters is nested: merge it per source so a PUT carrying only filters.slack keeps filters.jira.
     // An unknown persona value keeps the current one.
-    const merged = { ...cur, ...body, persona: PERSONAS.includes(body.persona as PersonaId) ? normalizePersona(body.persona) : cur.persona, notifications: normalizeNotifications(body.notifications, cur.notifications), filters: mergeFilters(cur.filters, body.filters) };
+    const merged = { ...cur, ...body, persona: PERSONAS.includes(body.persona as PersonaId) ? normalizePersona(body.persona) : cur.persona, notifications: normalizeNotifications(body.notifications, cur.notifications), actions: normalizeActions(body.actions, cur.actions), reply_tone: normalizeReplyTone(body.reply_tone, cur.reply_tone), filters: mergeFilters(cur.filters, body.filters) };
     saveConfig(merged);
     // Mirror the persona into state.json right away so the dashboard / menu-bar app switch without waiting a tick.
     const st = readState();
@@ -150,6 +152,26 @@ export function startServer(getConfig: () => NedConfig): void {
     return t ? c.json(t) : c.json({ error: "not found" }, 404);
   });
   app.delete("/api/todos/:id", (c) => (deleteTodo(c.req.param("id")) ? c.json({ ok: true }) : c.json({ error: "not found" }, 404)));
+
+  // Reply drafts (read-only claude -p, user's own voice) and the opt-in send endpoint — the only write path in Ned.
+  app.post("/api/draft", async (c) => {
+    try {
+      const r = await generateDraft(parseDraftRequest(await readBody(c)), loadConfig());
+      const { hint: _h, tone: _t, created_at: _c, ...out } = r;
+      return c.json(out);
+    } catch (e) {
+      if (e instanceof DraftError) return c.json({ error: e.message }, e.status);
+      log(`draft: unexpected error ${String(e)}`);
+      return c.json({ error: String(e) }, 500);
+    }
+  });
+  app.post("/api/send", async (c) => {
+    const req = parseSendRequest(await readBody(c));
+    if (typeof req === "string") return c.json({ ok: false, error: req }, 400);
+    const { status, ...out } = await performSend(req, loadConfig());
+    return c.json(status === 200 ? out : { ...out, error: out.detail }, status);
+  });
+  app.get("/api/actions", (c) => c.json(readActionLog(50)));
 
   // Static files under public/ (proposals, svg mark, ...). Registered last so /api/* wins.
   app.get("/*", (c) => {

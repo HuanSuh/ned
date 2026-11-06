@@ -24,23 +24,33 @@ export function noLlmResult(): ClaudeRunResult {
   return { ok: true, text, cost_usd: 0, num_turns: 0, duration_ms: 0 };
 }
 
+export interface ClaudeRunOptions {
+  /** `--allowedTools` entries. Empty → the flag is omitted (nothing pre-approved). */
+  allowedTools: string[];
+  maxTurns: number;
+  model?: string | null;
+  timeoutMs?: number;
+  /** Default `plan` (read-only). Action runs use `dontAsk`: anything not in allowedTools is denied, never prompted. */
+  permissionMode?: "plan" | "dontAsk";
+  /** `--tools`: restrict the built-in tool set (e.g. ["ToolSearch"], or [] = no built-ins). Omitted = default set. */
+  tools?: string[];
+}
+
+/** The exact argv `runClaude` spawns `claude` with (exported so action runs can log / test it). */
+export function buildClaudeArgs(opts: ClaudeRunOptions): string[] {
+  const args = ["-p", "--output-format", "json", "--permission-mode", opts.permissionMode ?? "plan", "--max-turns", String(opts.maxTurns)];
+  if (opts.tools) args.push("--tools", opts.tools.join(","));
+  if (opts.allowedTools.length) args.push("--allowedTools", ...opts.allowedTools);
+  if (opts.model) args.push("--model", opts.model);
+  return args;
+}
+
 /**
  * Run `claude -p` headless with a prompt. Read-only by construction:
- * plan permission mode + an explicit allow-list of read tools.
+ * plan permission mode + an explicit allow-list of read tools (callers may narrow further, see ClaudeRunOptions).
  */
-export function runClaude(prompt: string, opts: { allowedTools: string[]; maxTurns: number; model?: string | null; timeoutMs?: number }): Promise<ClaudeRunResult> {
-  const args = [
-    "-p",
-    "--output-format",
-    "json",
-    "--permission-mode",
-    "plan",
-    "--max-turns",
-    String(opts.maxTurns),
-    "--allowedTools",
-    ...opts.allowedTools,
-  ];
-  if (opts.model) args.push("--model", opts.model);
+export function runClaude(prompt: string, opts: ClaudeRunOptions): Promise<ClaudeRunResult> {
+  const args = buildClaudeArgs(opts);
 
   return new Promise((resolve) => {
     const started = Date.now();
