@@ -110,10 +110,22 @@ details.swatch > summary .chipx { margin-left: 6px; }
 /* 팔로업 channel cards (features/watchcards.js, config.dashboard.watch_cards): summary ≤3 lines + needs_me while shrunk */
 .scard.g-watch .sh .wch { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: .02em; }
 .scard.g-watch .sh .wme:empty { display: none; }
-.scard .ss.wsum { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; flex: none; }
-.scard.open .ss.wsum { display: block; }
-.scard .wneed { margin: 0 10px 10px 12px; border-left: 2px solid var(--gc); overflow: auto; min-height: 0; }
-.scard .wneed:empty, .scard.open .wneed { display: none; }
+/* 팔로업 card body (features/watchcards.js): one scroll area filling the card — summary lines, then highlights. */
+.scard.g-watch .wbody { flex: 1 1 auto; min-height: 0; max-height: 460px; overflow: auto; display: flex; flex-direction: column; padding: 0 10px 10px 12px; scrollbar-width: thin; }
+#hgrid.free .scard.g-watch .wbody, .scard.g-watch.last .wbody { max-height: none; }
+.scard .wsum { list-style: none; margin: 0 0 8px; padding: 0 4px 0 2px; flex: none; font-size: 13px; color: var(--fg); }
+.scard .wsum li { position: relative; padding: 5px 0 5px 16px; line-height: 1.45; overflow-wrap: anywhere; }
+.scard .wsum li::before { content: "▸"; position: absolute; left: 2px; top: 5px; color: var(--gc); font-size: 11px; }
+.scard .wsum li + li { border-top: 1px solid var(--line); }
+.scard .wsum.none li { color: var(--faint); font-size: 12px; }
+.scard .wsum.none li::before { content: none; }
+.scard .wsum .wlk { margin-left: 2px; padding: 0 3px; border-radius: 4px; color: var(--info); text-decoration: none; font-weight: 600; white-space: nowrap; }
+.scard .wsum .wlk:hover { background: var(--hover); }
+.scard .wsum .wlk:focus-visible { outline: 2px solid var(--info); outline-offset: 0; }
+.scard.g-watch .wbody > .gl { flex: 1 0 auto; border-left: 2px solid var(--gc); } /* the colour rule on the left runs to the bottom of the card */
+.scard .wneed:empty, .scard.open .wneed, .scard.g-watch:not(.open) .wall { display: none; }
+.scard.g-watch .wall:empty { display: none; }
+.scard.g-watch .ti .trep, .scard.g-watch .ti .tsum { margin-top: 1px; }
 .chipx.more { background: color-mix(in srgb, var(--info) 18%, transparent); color: var(--info); }
 .scard > .sh:focus-visible, .scard > .shw > .sh:focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
 .scard .sh .ico { font-size: 13px; letter-spacing: 0; }

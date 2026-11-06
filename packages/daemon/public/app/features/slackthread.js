@@ -33,6 +33,13 @@ export function threadMain(x, url, chips = "") {
   return line1 + sum + recent.map(reply).join("");
 }
 
+/** Lines under a row whose own title stays (팔로업 highlight rows): Ned's thread summary + the latest reply, or "". */
+export function threadTail(x) {
+  const t = readThread(x);
+  if (!t) return "";
+  return (t.thread_summary ? `<div class="tsum">${esc(t.thread_summary)}</div>` : "") + reply(latestOf(t));
+}
+
 /** Shrunk-card preview for the first row: summary + latest reply (2 lines), or "" when the thread wasn't read yet. */
 export function threadPreview(x, url, icon) {
   const t = readThread(x);
