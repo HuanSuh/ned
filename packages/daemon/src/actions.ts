@@ -103,7 +103,7 @@ const GH_COMMENT = "Bash(gh pr comment:*)";
 /** Review / comment bodies go through a file so the model never has to shell-quote user text. */
 const ACTION_TMP = path.join(NED_HOME, "tmp");
 
-function appendLog(e: ActionLogEntry): void {
+export function appendActionLog(e: ActionLogEntry): void {
   try {
     fs.mkdirSync(NED_HOME, { recursive: true });
     fs.appendFileSync(SENT_ACTIONS_LOG, JSON.stringify(e) + "\n");
@@ -516,7 +516,7 @@ export async function performSend(req: SendRequest, cfg: NedConfig): Promise<Sen
   const logged_at = new Date().toISOString();
   const entry: ActionLogEntry = { ts: logged_at, source: req.source, mode: req.mode, action: "", ref: req.ref, draft_id: req.draft_id, text: req.text.slice(0, 120), ok: false, result: "" };
   const finish = (status: SendResult["status"], ok: boolean, action: string, detail: string): SendResult => {
-    appendLog({ ...entry, action, ok, result: detail });
+    appendActionLog({ ...entry, action, ok, result: detail });
     log(`send: ${req.source}/${req.mode} ${action} → ${ok ? "ok" : action.startsWith("dry_run:") ? "dry-run" : `FAIL(${status})`} ${detail.slice(0, 160)}`);
     return { ok, action, detail, logged_at, status };
   };

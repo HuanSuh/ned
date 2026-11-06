@@ -21,6 +21,17 @@ const { SENT_ACTIONS_LOG } = await import("../src/actions.js");
 
 const request = (p: string, init?: RequestInit) => Promise.resolve(captured.fetch!(new Request(`http://ned.test${p}`, init)));
 const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+/** Poll GET /api/send/:id until the job is done (NED_NO_LLM jobs finish within a tick or two). */
+async function waitJob(id: string) {
+  for (let i = 0; i < 100; i++) {
+    const r = await request(`/api/send/${id}`);
+    expect(r.status).toBe(200);
+    const j = await r.json();
+    if (j.state === "done") return j;
+    await new Promise((res) => setTimeout(res, 10));
+  }
+  throw new Error(`job ${id} never finished`);
+}
 const setActions = (actions: Record<string, boolean>) => fs.writeFileSync(CONFIG_PATH, YAML.stringify({ notify: "off", actions }));
 
 beforeAll(() => {
@@ -57,9 +68,16 @@ describe("POST /api/send gating", () => {
   it("enabled gmail_draft passes the gate; NED_NO_LLM makes it a logged dry run (no claude spawned)", async () => {
     setActions({ gmail_draft: true });
     const r = await request("/api/send", json("POST", { source: "email", mode: "gmail_draft", text: "draft body", ref: { thread_id: "t1", message_id: "<m1@x>" } }));
-    expect(r.status).toBe(200);
-    const body = await r.json();
+    expect(r.status).toBe(202);
+    const started = await r.json();
+    expect(started).toMatchObject({ ok: true, reused: false });
+    expect(started.job_id).toBeTypeOf("string");
+    const done = await waitJob(started.job_id);
+    expect(done.state).toBe("done");
+    expect(done.elapsed_ms).toBeGreaterThanOrEqual(0);
+    const body = done.result;
     expect(body.ok).toBe(false);
+    expect(body.http_status).toBe(200);
     expect(body.action).toMatch(/^dry_run:/);
     const entry = JSON.parse(fs.readFileSync(SENT_ACTIONS_LOG, "utf8").trim());
     expect(entry.claude_args).toContain("dontAsk");
@@ -69,7 +87,30 @@ describe("POST /api/send gating", () => {
   it("session_send on but no Orca pane recorded → 409 before touching orca", async () => {
     setActions({ session_send: true });
     const r = await request("/api/send", json("POST", { source: "session", mode: "session", text: "go", ref: { session_id: "nopane" } }));
+    expect(r.status).toBe(202);
+    const done = await waitJob((await r.json()).job_id);
+    expect(done.result).toMatchObject({ ok: false, http_status: 409, action: "session_send" });
+    expect(done.result.error).toContain("orca_pane");
+  });
+
+  it("GET /api/send/:job_id → 404 for an unknown (or pre-restart) job", async () => {
+    const r = await request("/api/send/nope");
+    expect(r.status).toBe(404);
+    expect((await r.json()).error).toContain("/api/actions");
+  });
+
+  it("an ok send of the same draft logged in the last 10 min → 409 already_sent with the link (survives a restart)", async () => {
+    setActions({ slack_send: true });
+    const entry = { ts: new Date().toISOString(), source: "slack", mode: "send", action: "slack_message C1", ref: { channel: "C1" }, draft_id: "d-sent", text: "hi", ok: true, result: "https://x.slack.com/archives/C1/p1700000000000200 ($0.010)" };
+    fs.writeFileSync(SENT_ACTIONS_LOG, JSON.stringify(entry) + "\n");
+    const r = await request("/api/send", json("POST", { draft_id: "d-sent", source: "slack", mode: "send", text: "hi again", ref: { channel: "C1" } }));
     expect(r.status).toBe(409);
+    expect(await r.json()).toMatchObject({ ok: false, already_sent: true, link: "https://x.slack.com/archives/C1/p1700000000000200" });
+    // an older send (>10 min) does not block
+    fs.writeFileSync(SENT_ACTIONS_LOG, JSON.stringify({ ...entry, ts: new Date(Date.now() - 11 * 60_000).toISOString() }) + "\n");
+    const again = await request("/api/send", json("POST", { draft_id: "d-sent", source: "slack", mode: "send", text: "hi again", ref: { channel: "C1" } }));
+    expect(again.status).toBe(202);
+    await waitJob((await again.json()).job_id);
   });
 
   it("GET /api/actions returns the log newest first", async () => {
