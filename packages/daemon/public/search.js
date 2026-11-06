@@ -156,6 +156,14 @@
         if (seen.has(id)) continue; seen.add(id);
         out.push({ type: "slack", id, title: x.text || "(내용 없음)", detail: `${x.channel} · ${x.from}`, ts: isoTs(x.ts), url: safeUrl(x.url), kind: "slack", tab: "home", anchor: "card:slack", fields: [[x.text, 3], [x.channel, 2], [x.from, 2]] });
       }
+      // 팔로업 channel highlights → their own card (card:watch:<channel>), or the Slack card's fold when dashboard.watch_cards is off.
+      const wOff = d.config && d.config.dashboard && d.config.dashboard.watch_cards === false;
+      for (const w of a.slack.watch || []) for (const x of w.highlights || []) {
+        const id = x.url || `${w.channel}:${x.ts}`;
+        if (seen.has(id)) continue; seen.add(id);
+        out.push({ type: "slack", id, title: x.text || "(내용 없음)", detail: `${w.channel} · ${x.from}${x.needs_me ? " · 나한테" : ""}`, ts: isoTs(x.ts), url: safeUrl(x.url), kind: "slack", tab: "home",
+          anchor: wOff ? "card:slack" : `card:watch:${String(w.channel || "").replace(/^#+/, "")}`, fields: [[x.text, 3], [w.channel, 2], [x.from, 2], [w.summary, 1]] });
+      }
     }
     for (const t of Array.isArray(d.todos) ? d.todos : []) out.push({ type: "todo", id: t.id, title: t.title, detail: [t.done ? "완료" : "", t.due ? `마감 ${t.due}` : "", t.note || ""].filter(Boolean).join(" · "), ts: t.created_at, url: null, kind: "me", tab: "home", anchor: "card:todo", done: !!t.done, fields: [[t.title, 3], [t.note, 1]] });
     for (const b of Array.isArray(d.briefings) ? d.briefings : []) {
@@ -490,12 +498,16 @@
     return true;
   }
   const CARD_EL = { cal: "cal-card", todo: "todo-card", mail: "sc-mail", jira: "sc-jira", slack: "sc-slack", gh: "sc-gh" };
+  /** card:watch:<channel> → that 팔로업 channel's card (features/watchcards.js, matched on data-watch, case-insensitive). */
+  const watchCard = (ch) => [...document.querySelectorAll(".scard.g-watch")].find((c) => String(c.dataset.watch || "").toLowerCase() === ch.toLowerCase()) || null;
   async function homeCard(h) {
-    const which = h.anchor.split(":")[1], card = $(CARD_EL[which]);
+    const which = h.anchor.slice("card:".length), wch = which.startsWith("watch:") ? which.slice(6) : null;
+    const card = wch ? watchCard(wch) || $("sc-slack") : $(CARD_EL[which]);
     if (!card) return false;
     if (!visible(card)) { clearPills("home"); await nextFrame(); }
     if (card.classList.contains("scard") && !card.classList.contains("open")) card.querySelector(".sh[data-card]")?.click();
-    if (which === "todo") for (const d of card.querySelectorAll("details")) if (!d.open && [...d.querySelectorAll(".tt")].some((t) => sameText(txt(t), h.title))) d.open = true;
+    // todo's 완료 fold, a card's 확인 완료 fold, the Slack card's 채널 팔로업 fold: open the one holding the hit
+    if (which === "todo" || card.classList.contains("scard")) for (const d of card.querySelectorAll("details")) if (!d.open && [...d.querySelectorAll(".tt")].some((t) => sameText(txt(t), h.title))) d.open = true;
     const isMe = (x) => sameText(txt(x.querySelector(".tt")), h.title);
     let el = await findRow(`#${card.id} .ti`, isMe);
     if (!el && (which === "mail" || which === "slack")) {
@@ -506,7 +518,7 @@
       el = [...card.querySelectorAll("#agenda *")].filter((x) => x.children.length <= 2 && sameText(txt(x), h.title) && txt(x).length < h.title.length + 40).pop() || null;
       card.focus({ preventScroll: true });
     }
-    flash(el || card, el && which !== "cal" ? finder(`#${card.id} .ti`, isMe) : () => $(CARD_EL[which]));
+    flash(el || card, el && which !== "cal" ? finder(`#${card.id} .ti`, isMe) : () => $(card.id));
     return true;
   }
   const NAV = {

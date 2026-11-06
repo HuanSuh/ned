@@ -3,7 +3,9 @@ import { api } from "../api.js";
 import { costHtml, followAgenda, loadCosts, renderAgStatus } from "../features/agstatus.js";
 import { meetings, renderAgenda, todayEvents } from "../features/calendar.js";
 import { GH_REASON, MAIL_REASON, PRIO_LED, SLACK_REASON, card, cardMode, collapseDMs, counts, group, moreBadge, packCards, preview, renderSlackWatch, unionAll, watchNeeds } from "../features/cards.js";
+import { watchCardsOn } from "../features/cardlayout.js";
 import { draftFor } from "../features/drafts.js";
+import { renderWatchCards } from "../features/watchcards.js";
 import { V, greet, say } from "../features/personas.js";
 import { isOpenSrc, openAtt, revAt, revCls, srcCheck, srcKey, withFold } from "../features/reviewed.js";
 import { loadAgenda, loadState, loadTodos, renderAll, renderHeader } from "../main.js";
@@ -78,8 +80,10 @@ export function renderTodoGroups() {
   $("slack-sum").innerHTML = slack?.summary ? `<span>${esc(slack.summary)}</span>` : "";
   const slRow = (x) => SLACK_REASON[x.reason] || SLACK_REASON.thread;
   const slackNeed = new Set(siAll.map((x) => x.url).filter(Boolean));
-  const watch = slack?.watch || [], wNeed = watchNeeds(slack).filter((h) => !slackNeed.has(h.url));
-  renderSlackWatch(watch, wNeed.length);
+  // 팔로업 channels: own cards (watch_cards on) or the fold inside this card. Either way needs_me stays in 할 일 / greeting.
+  const wCards = watchCardsOn(), watch = slack?.watch || [], wNeed = wCards ? [] : watchNeeds(slack).filter((h) => !slackNeed.has(h.url));
+  renderSlackWatch(wCards ? [] : watch, wNeed.length);
+  renderWatchCards(slack, slackOn, unavailable);
   // 전체 = all ∪ items by channel id + ts (a thread ask is often missing from `all`, and its link carries ?thread_ts).
   const slackU = unionAll("slack", siAll, slack?.all || [], (x) => x.ts);
   const slackAllRows = withFold("slack-all", "slack", collapseDMs(slackU.list), (x) => {

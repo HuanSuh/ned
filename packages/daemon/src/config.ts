@@ -58,7 +58,12 @@ export interface NedConfig {
 
 export const DASHBOARD_CARDS = ["slack", "mail", "jira", "github"] as const;
 export type DashboardCard = (typeof DASHBOARD_CARDS)[number];
-/** Home panels on the free grid (≥1100px): 일정, the four source cards, 할 일. */
+/** A 팔로업 channel's own home card: `watch:<channel>` (channel as in filters.slack.watch_channels, no "#"). */
+export const WATCH_PREFIX = "watch:";
+export type WatchCardId = `watch:${string}`;
+/** Any source card: the four fixed ones + one per followed channel. */
+export type DashboardCardId = DashboardCard | WatchCardId;
+/** Home panels on the free grid (≥1100px): 일정, the four source cards, 할 일 (+ watch cards, see WatchCardId). */
 export const DASHBOARD_PANELS = ["cal", "slack", "mail", "jira", "github", "todo"] as const;
 export type DashboardPanel = (typeof DASHBOARD_PANELS)[number];
 /** A panel's cell on the 12-column grid: x/w in columns, y/h in row units. */
@@ -66,16 +71,21 @@ export interface PanelRect { x: number; y: number; w: number; h: number }
 export const LAYOUT_COLS = 12;
 /** Smallest size a panel may be resized to (columns × rows). */
 export const PANEL_MIN: Record<DashboardPanel, { w: number; h: number }> = { cal: { w: 2, h: 4 }, todo: { w: 2, h: 3 }, slack: { w: 2, h: 2 }, mail: { w: 2, h: 2 }, jira: { w: 2, h: 2 }, github: { w: 2, h: 2 } };
+export const WATCH_MIN = { w: 2, h: 2 };
 export interface NedDashboard {
-  card_order: DashboardCard[];
-  card_span: Record<DashboardCard, 1 | 2>;
+  /** Fixed cards first-class; `watch:<ch>` ids only for channels currently followed (watchChannels). */
+  card_order: DashboardCardId[];
+  card_span: Partial<Record<DashboardCardId, 1 | 2>> & Record<DashboardCard, 1 | 2>;
   /** Free-grid layout (drag / resize on home). null = not set yet: the dashboard derives it once from order/span and saves. */
-  layout: Partial<Record<DashboardPanel, PanelRect>> | null;
+  layout: Partial<Record<DashboardPanel | WatchCardId, PanelRect>> | null;
   /** Home layout editing off (no drag / resize). */
   locked: boolean;
+  /** 팔로업 channels as their own home cards (true) or folded into the Slack card (false). */
+  watch_cards: boolean;
 }
 /** Slack first (most real-time), mail + Jira side by side, then GitHub. */
-export const DEFAULT_DASHBOARD: NedDashboard = { card_order: ["slack", "mail", "jira", "github"], card_span: { slack: 2, mail: 1, jira: 1, github: 2 }, layout: null, locked: false };
+export const DEFAULT_DASHBOARD: NedDashboard = { card_order: ["slack", "mail", "jira", "github"], card_span: { slack: 2, mail: 1, jira: 1, github: 2 }, layout: null, locked: false, watch_cards: true };
+export const watchCardId = (channel: string): WatchCardId => `${WATCH_PREFIX}${channel}`;
 /** What DEFAULT_DASHBOARD's order/span become on the free grid: 일정 3 | cards 6 | 할 일 3, 12 rows tall. */
 export const DEFAULT_LAYOUT: Record<DashboardPanel, PanelRect> = {
   cal: { x: 0, y: 0, w: 3, h: 12 },
@@ -86,35 +96,64 @@ export const DEFAULT_LAYOUT: Record<DashboardPanel, PanelRect> = {
   todo: { x: 9, y: 0, w: 3, h: 12 },
 };
 
-/** Known panels only, integer cells clamped into the grid (min size per panel, h ≤ 48, y ≤ 500); nothing valid → null. */
-export function normalizeLayout(raw: unknown): NedDashboard["layout"] {
+/**
+ * `watch:<channel>` → the canonical id for a channel in `watch` (case-insensitive, "#" tolerated), else null.
+ * Unknown / unfollowed channels have no card, so their ids are dropped.
+ */
+export function watchIdIn(id: unknown, watch: readonly string[]): WatchCardId | null {
+  if (typeof id !== "string" || !id.startsWith(WATCH_PREFIX)) return null;
+  const want = id.slice(WATCH_PREFIX.length).replace(/^#+/, "").toLowerCase();
+  const ch = want ? watch.find((c) => c.toLowerCase() === want) : undefined;
+  return ch ? watchCardId(ch) : null;
+}
+
+/** Known panels (+ `watch:` ids for channels in `watch`), integer cells clamped into the grid (min size per panel, h ≤ 48, y ≤ 500); nothing valid → null. */
+export function normalizeLayout(raw: unknown, watch: readonly string[] = []): NedDashboard["layout"] {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const out: Partial<Record<DashboardPanel, PanelRect>> = {};
-  for (const id of DASHBOARD_PANELS) {
-    const v = (raw as Record<string, unknown>)[id] as Partial<Record<keyof PanelRect, unknown>> | undefined;
-    if (!v || typeof v !== "object") continue;
-    const n = (k: keyof PanelRect) => Number(v[k]);
-    if (!(["x", "y", "w", "h"] as const).every((k) => Number.isFinite(n(k)))) continue;
-    const m = PANEL_MIN[id];
+  const out: NonNullable<NedDashboard["layout"]> = {};
+  const put = (id: DashboardPanel | WatchCardId, v: unknown, m: { w: number; h: number }) => {
+    if (!v || typeof v !== "object") return;
+    const n = (k: keyof PanelRect) => Number((v as Record<string, unknown>)[k]);
+    if (!(["x", "y", "w", "h"] as const).every((k) => Number.isFinite(n(k)))) return;
     const w = Math.max(m.w, Math.min(LAYOUT_COLS, Math.trunc(n("w"))));
     const h = Math.max(m.h, Math.min(48, Math.trunc(n("h"))));
     out[id] = { x: Math.max(0, Math.min(LAYOUT_COLS - w, Math.trunc(n("x")))), y: Math.max(0, Math.min(500, Math.trunc(n("y")))), w, h };
+  };
+  for (const id of DASHBOARD_PANELS) put(id, (raw as Record<string, unknown>)[id], PANEL_MIN[id]);
+  for (const [k, v] of Object.entries(raw)) {
+    const id = watchIdIn(k, watch);
+    if (id && !out[id]) put(id, v, WATCH_MIN);
   }
   return Object.keys(out).length ? out : null;
 }
 
-/** Known card ids only, each once; missing ones keep `base`'s relative order at the end. Spans are 1 | 2, else `base`'s.
- * layout: absent keeps `base`'s, null / junk clears it (→ re-derived by the dashboard); locked: boolean, else `base`'s. */
-export function normalizeDashboard(raw: unknown, base: NedDashboard = DEFAULT_DASHBOARD): NedDashboard {
-  const r = (raw && typeof raw === "object" ? raw : {}) as { card_order?: unknown; card_span?: unknown; layout?: unknown; locked?: unknown };
+/**
+ * Known card ids only, each once; missing fixed ones keep `base`'s relative order at the end, then any followed channel
+ * (`watch`, = watchChannels(filters)) that has no `watch:<ch>` id yet. `watch:` ids for channels not in `watch` are dropped
+ * (also from `base`, so removing a channel in settings removes its card). Spans are 1 | 2, else `base`'s (watch cards: 1).
+ * layout: absent keeps `base`'s, null / junk clears it (→ re-derived by the dashboard); locked / watch_cards: boolean, else `base`'s.
+ */
+export function normalizeDashboard(raw: unknown, base: NedDashboard = DEFAULT_DASHBOARD, watch: readonly string[] = []): NedDashboard {
+  const r = (raw && typeof raw === "object" ? raw : {}) as { card_order?: unknown; card_span?: unknown; layout?: unknown; locked?: unknown; watch_cards?: unknown };
   const isCard = (v: unknown): v is DashboardCard => DASHBOARD_CARDS.includes(v as DashboardCard);
-  const order = Array.isArray(r.card_order) ? [...new Set(r.card_order.filter(isCard))] : [...base.card_order];
-  for (const id of base.card_order) if (!order.includes(id)) order.push(id);
+  const cardId = (v: unknown): DashboardCardId | null => (isCard(v) ? v : watchIdIn(v, watch));
+  const ids = (xs: readonly unknown[]) => [...new Set(xs.map(cardId).filter((x): x is DashboardCardId => x !== null))];
+  const order = ids(Array.isArray(r.card_order) ? r.card_order : base.card_order);
+  for (const id of [...base.card_order, ...DASHBOARD_CARDS]) if (isCard(id) && !order.includes(id)) order.push(id);
+  for (const id of ids([...base.card_order, ...watch.map(watchCardId)])) if (!order.includes(id)) order.push(id);
   const spans = (r.card_span && typeof r.card_span === "object" ? r.card_span : {}) as Record<string, unknown>;
-  const card_span = Object.fromEntries(DASHBOARD_CARDS.map((id) => [id, Number(spans[id]) === 1 || Number(spans[id]) === 2 ? Number(spans[id]) : base.card_span[id]])) as NedDashboard["card_span"];
-  const layout = r.layout === undefined ? (base.layout ?? null) : normalizeLayout(r.layout);
+  const baseSpans = Object.fromEntries(Object.entries(base.card_span ?? {}).map(([k, v]) => [cardId(k) ?? "", v]));
+  const spanOf = (id: DashboardCardId): 1 | 2 => {
+    const own = Object.entries(spans).find(([k]) => cardId(k) === id)?.[1];
+    if (Number(own) === 1 || Number(own) === 2) return Number(own) as 1 | 2;
+    const b = baseSpans[id];
+    return b === 1 || b === 2 ? b : isCard(id) ? DEFAULT_DASHBOARD.card_span[id] : 1;
+  };
+  const card_span = Object.fromEntries(order.map((id) => [id, spanOf(id)])) as NedDashboard["card_span"];
+  const layout = r.layout === undefined ? normalizeLayout(base.layout, watch) : normalizeLayout(r.layout, watch);
   const locked = typeof r.locked === "boolean" ? r.locked : base.locked === true;
-  return { card_order: order, card_span, layout, locked };
+  const watch_cards = typeof r.watch_cards === "boolean" ? r.watch_cards : base.watch_cards !== false;
+  return { card_order: order, card_span, layout, locked, watch_cards };
 }
 
 export interface NedActions {
@@ -304,6 +343,7 @@ export function loadConfig(): NedConfig {
     cfg = { ...DEFAULT_CONFIG, filters: normalizeFilters(DEFAULT_CONFIG.filters) };
   } else {
     const parsed = (YAML.parse(fs.readFileSync(CONFIG_PATH, "utf8")) ?? {}) as Partial<NedConfig>;
+    const filters = mergeFilters(normalizeFilters(DEFAULT_CONFIG.filters), parsed.filters);
     cfg = {
       ...DEFAULT_CONFIG,
       ...parsed,
@@ -314,12 +354,12 @@ export function loadConfig(): NedConfig {
       reply_tone: normalizeReplyTone(parsed.reply_tone),
       draft_context_max_age_minutes: Number.isFinite(Number(parsed.draft_context_max_age_minutes)) && Number(parsed.draft_context_max_age_minutes) >= 0 ? Number(parsed.draft_context_max_age_minutes) : DEFAULT_CONFIG.draft_context_max_age_minutes,
       drafts_pregenerate: parsed.drafts_pregenerate === true,
-      dashboard: normalizeDashboard(parsed.dashboard),
+      dashboard: normalizeDashboard(parsed.dashboard, DEFAULT_DASHBOARD, watchChannels(filters)),
       agenda_all_limit: numIn(parsed.agenda_all_limit, 1, 50, DEFAULT_CONFIG.agenda_all_limit),
       agenda_context_batch: numIn(parsed.agenda_context_batch, 1, 10, DEFAULT_CONFIG.agenda_context_batch),
       agenda_daily_budget_usd: numIn(parsed.agenda_daily_budget_usd, 0, 10_000, DEFAULT_CONFIG.agenda_daily_budget_usd, false),
       agenda_light_model: parsed.agenda_light_model === null ? null : typeof parsed.agenda_light_model === "string" && parsed.agenda_light_model.trim() ? parsed.agenda_light_model.trim() : DEFAULT_CONFIG.agenda_light_model,
-      filters: mergeFilters(normalizeFilters(DEFAULT_CONFIG.filters), parsed.filters),
+      filters,
     };
   }
   const envPort = portOverride();

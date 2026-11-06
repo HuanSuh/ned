@@ -1,13 +1,12 @@
 /* Home source cards (mail · jira · slack · github): render, shrink/expand, list modes, packing. */
-import { CARD_DOM, dashLayout } from "./cardlayout.js";
+import { cardDomId, cardIds, dashLayout } from "./cardlayout.js";
 import { applyLayout, cardOrder } from "./layout.js";
-import { draftFor } from "./drafts.js";
-import { isOpenSrc, revCls, srcCheck, srcKey } from "./reviewed.js";
+import { isOpenSrc, srcKey } from "./reviewed.js";
+import { watchRow } from "./watchcards.js";
 import { ui } from "../state.js";
 import { renderTodoGroups } from "../tabs/home.js";
 import { CARD_KIND, srcOn } from "../ui/chips.js";
-import { openIcon } from "../ui/icons.js";
-import { $, esc, ext, lsGet, lsSet, rel, safeUrl, toMs } from "../util.js";
+import { $, esc, ext, lsGet, lsSet, toMs } from "../util.js";
 export const GH_REASON = { review_requested: ["rv", "리뷰 요청", "👀"], my_pr_changes_requested: ["over", "변경 요청", "✍️"], my_pr_approved: ["ok", "승인됨", "✅"] };
 export const MAIL_REASON = { reply: ["rv", "답장", "↩️"], approval: ["today", "결재", "🖊️"], deadline: ["over", "마감", "⏰"], request: ["", "확인", "📨"] };
 export const SLACK_REASON = { dm: ["today", "DM", "💬"], mention: ["rv", "멘션", "📣"], thread: ["", "스레드", "🧵"] };
@@ -75,17 +74,12 @@ export function watchNeeds(slack) {
   return (slack?.watch || []).flatMap((w) => (w.highlights || []).filter((h) => h.needs_me && isOpenSrc("slack")(h)).map((h) => ({ ...h, channel: w.channel })))
     .filter((h) => !h.url || (!seen.has(h.url) && seen.add(h.url)));
 }
-/** Slack card's 채널 팔로업 fold: collapsed by default, per-channel summary + highlights; needs_me rows get the accent bar. */
+/** Slack card's 채널 팔로업 fold (config.dashboard.watch_cards = false; else each channel has its own card — watchcards.js):
+ *  collapsed by default, per-channel summary + highlights; needs_me rows get the accent bar. */
 export function renderSlackWatch(watch, needN) {
   const el = $("slack-watch");
   if (!watch.length) { el.innerHTML = ""; return; }
-  const hl = (w, h) => {
-    const u = safeUrl(h.url);
-    const rv = h.needs_me ? revCls("slack", h) : "";
-    return `<div class="ti${h.needs_me && !rv ? " need" : ""}${rv}"><span class="ic">${h.needs_me ? "❗" : "·"}</span><div class="mn"><span class="tt">${u ? ext(u, esc(h.text || "(내용 없음)")) : esc(h.text || "(내용 없음)")}</span>
-        <div class="sb"><span class="from">${esc(h.from)}</span>${h.needs_me ? `<span class="chipx today">나한테</span>` : ""}${h.reason ? `<span class="d">${esc(h.reason)}</span>` : ""}${h.ts ? `<span>${rel(toMs(h.ts))}</span>` : ""}</div></div>
-        <div class="ra">${h.needs_me ? draftFor("slack", { ...h, channel: w.channel }, srcKey("slack", h)) : ""}${openIcon(u)}${h.needs_me ? srcCheck("slack", h) : ""}</div></div>`;
-  };
+  const hl = (w, h) => watchRow(w.channel, h);
   el.innerHTML = `<details class="swatch" ${ui.watchOpen ? "open" : ""}><summary>채널 팔로업 ${watch.length}${needN ? `<span class="chipx today">나한테 ${needN}</span>` : ""}</summary>` +
     watch.map((w) => {
       const n = (w.highlights || []).filter((h) => h.needs_me && isOpenSrc("slack")(h)).length;
@@ -101,13 +95,14 @@ export function renderSlackWatch(watch, needN) {
 export function packCards() {
   const g = $("sgrid");
   const n = Math.min(2, Math.max(1, Number(getComputedStyle(g).getPropertyValue("--cols")) || 1));
-  if (applyLayout()) { for (const id of Object.keys(CARD_DOM)) $("sc-" + CARD_DOM[id]).classList.remove("last"); g.style.gridTemplateRows = ""; return; } // ≥1100px: free grid (features/layout.js)
+  if (applyLayout()) { for (const id of cardIds()) $(cardDomId(id))?.classList.remove("last"); g.style.gridTemplateRows = ""; return; } // ≥1100px: free grid (features/layout.js)
   // Stacked flow: cards in layout reading order (y, then x), widths from the settings' 1열/2열.
   const { card_span } = dashLayout(), card_order = cardOrder();
   let rows = 0, used = 0;
   const placed = [];
   for (const id of card_order) {
-    const c = $("sc-" + CARD_DOM[id]), span = Math.min(n, card_span[id]);
+    const c = $(cardDomId(id)), span = Math.min(n, card_span[id] || 1);
+    if (!c) continue;
     g.appendChild(c); // DOM order = visual order (keyboard / screen readers follow it)
     c.classList.remove("last");
     c.style.gridColumn = `span ${span}`;

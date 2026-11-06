@@ -92,6 +92,7 @@ daemon 을 `NED_HOME=/some/fixture` 로 띄우거나, 같은 라우트를 흉내
 - 잠금: `config.dashboard.locked` — 홈 상단 오른쪽 자물쇠 아이콘(`#lay-lock`) 또는 설정 → 홈 카드 배치의 체크박스. 잠기면 그립·핸들이 사라지고 드래그가 안 됨. 설정의 `배치 초기화` 는 기본 배치로 바로 저장.
 - <1100px: 예전 쌓기 흐름(아래 '카드 높이') 그대로 — 배치는 무시하고 소스 카드 순서만 배치의 위→아래(y, 그다음 x). 폰 그대로.
 - 설정의 ↑/↓·1열/2열은 간단한 대안으로 남아 있어서, 바꿔서 저장하면 그 순서·폭으로 배치를 다시 짠다(`deriveLayout`).
+- 팔로업 채널 카드(`app/features/watchcards.js`): `config.dashboard.watch_cards`(기본 true)면 `filters.slack.watch_channels`(제외 채널 뺀 것)마다 홈 카드 1개, id `watch:<채널>` — `card_order`·`card_span`·`layout` 에 그대로 들어감(DOM id 는 `sc-w-<채널, [A-Za-z0-9-] 밖 글자는 _hex_>`). 서버 `normalizeDashboard` 는 지금 따라가는 채널의 `watch:` id 만 남기고(설정에서 채널을 빼면 카드·배치도 사라짐), 저장된 배치에 없는 새 카드는 Slack 카드 아래 첫 빈 칸(3×4)에 놓고 한 번 저장(`freeBelow`·`keepFresh`). 접힘 = 모델 요약(≤3줄) + 열린 needs_me, 펼침 = 하이라이트 전체(확인 완료는 접힘). Slack 소스 OFF 면 모두 숨김. false 면 예전처럼 Slack 카드 안 '채널 팔로업' 접힘. needs_me 는 어느 쪽이든 할 일 알약·인사말 집계에 포함.
 
 ## 카드 높이 (<1100px)
 

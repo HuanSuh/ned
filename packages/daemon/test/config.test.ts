@@ -4,6 +4,7 @@ import YAML from "yaml";
 import { CONFIG_PATH } from "../src/paths.js";
 import {
   DEFAULT_CONFIG,
+  DEFAULT_DASHBOARD,
   DEFAULT_LAYOUT,
   inQuietHours,
   jqlExclude,
@@ -101,6 +102,47 @@ describe("normalizers", () => {
     const d = normalizeDashboard({ layout: { jira: { x: 11, y: -3, w: 4.7, h: 1 }, cal: { x: 0, y: 0, w: 99, h: 99 }, bogus: { x: 0, y: 0, w: 1, h: 1 }, mail: { x: "a" } } });
     expect(d.layout).toEqual({ jira: { x: 8, y: 0, w: 4, h: 2 }, cal: { x: 0, y: 0, w: 12, h: 48 } });
     expect(normalizeDashboard({ layout: { bogus: {} } }).layout).toBeNull();
+  });
+  it("normalizeDashboard: watch:<ch> ids only for followed channels (order / span / layout), new ones appended", () => {
+    const watch = ["dev-ops", "release"];
+    const d = normalizeDashboard({
+      card_order: ["watch:release", "slack", "watch:gone", "WATCH:x", "watch:", "watch:#Dev-Ops", "mail"],
+      card_span: { "watch:release": 2, "watch:gone": 2, "watch:dev-ops": 7 },
+      layout: { slack: { x: 3, y: 0, w: 6, h: 4 }, "watch:release": { x: 3, y: 4, w: 1, h: 1 }, "watch:gone": { x: 0, y: 0, w: 3, h: 3 }, "watch:DEV-OPS": { x: 9, y: 0, w: 3, h: 4 } },
+    }, DEFAULT_DASHBOARD, watch);
+    // canonical spelling from the watch list; unknown / unfollowed / empty dropped; missing fixed cards appended
+    expect(d.card_order).toEqual(["watch:release", "slack", "watch:dev-ops", "mail", "jira", "github"]);
+    expect(d.card_span).toMatchObject({ "watch:release": 2, "watch:dev-ops": 1, slack: 2, mail: 1 });
+    expect(d.card_span).not.toHaveProperty("watch:gone");
+    expect(d.layout).toEqual({ slack: { x: 3, y: 0, w: 6, h: 4 }, "watch:release": { x: 3, y: 4, w: 2, h: 2 }, "watch:dev-ops": { x: 9, y: 0, w: 3, h: 4 } });
+    expect(d.watch_cards).toBe(true);
+    // a channel followed but not in card_order yet → appended after the fixed cards
+    expect(normalizeDashboard({ card_order: ["mail"] }, DEFAULT_DASHBOARD, watch).card_order).toEqual(["mail", "slack", "jira", "github", "watch:dev-ops", "watch:release"]);
+  });
+  it("normalizeDashboard: unfollowing a channel drops its card from base too; watch_cards boolean else base's", () => {
+    const base = normalizeDashboard({ layout: { ...DEFAULT_LAYOUT, "watch:release": { x: 3, y: 12, w: 3, h: 4 } }, watch_cards: false }, DEFAULT_DASHBOARD, ["release"]);
+    expect(base.card_order).toContain("watch:release");
+    expect(base.layout).toHaveProperty("watch:release");
+    expect(base.watch_cards).toBe(false);
+    const after = normalizeDashboard({}, base, []); // PUT with only filters: release no longer followed
+    expect(after.card_order).toEqual(["slack", "mail", "jira", "github"]);
+    expect(after.layout).toEqual(DEFAULT_LAYOUT);
+    expect(after.card_span).not.toHaveProperty("watch:release");
+    expect(after.watch_cards).toBe(false);
+    expect(normalizeDashboard({ watch_cards: true }, base, []).watch_cards).toBe(true);
+    expect(normalizeDashboard({ watch_cards: "no" }, base, []).watch_cards).toBe(false);
+    expect(normalizeDashboard({}).watch_cards).toBe(true);
+    // no watch list given → no watch ids at all
+    expect(normalizeDashboard({ card_order: ["watch:release"] }).card_order).toEqual(["slack", "mail", "jira", "github"]);
+  });
+  it("loadConfig keeps watch:<ch> only for followed, non-excluded channels", () => {
+    write({
+      filters: { slack: { watch_channels: ["release", "noise"], exclude_channels: ["noise"] } },
+      dashboard: { card_order: ["watch:noise", "watch:release", "slack"], layout: { "watch:noise": { x: 0, y: 0, w: 3, h: 3 }, "watch:release": { x: 3, y: 4, w: 3, h: 4 } } },
+    });
+    const d = loadConfig().dashboard;
+    expect(d.card_order).toEqual(["watch:release", "slack", "mail", "jira", "github"]);
+    expect(Object.keys(d.layout ?? {})).toEqual(["watch:release"]);
   });
   it("normalizeActions ignores non-objects", () => {
     expect(normalizeActions("x")).toEqual(DEFAULT_CONFIG.actions);
