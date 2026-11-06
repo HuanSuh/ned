@@ -171,6 +171,7 @@ export async function saveDash(patch, { quiet = false, okMsg = "", failMsg = "ë°
   try {
     const res = await api("/api/config", { method: "PUT", body: JSON.stringify(body) });
     confirmed = res?.dashboard || body.dashboard;
+    if (res?.updated_at != null) S.config.updated_at = res.updated_at; // keep the settings form's if_updated_at current (a partial dashboard PUT clobbers nothing)
     if (mine === seq) { S.config.dashboard = { ...confirmed }; applyLayout(); renderCardLayout(S.config.dashboard); }
     if (okMsg) toast(okMsg);
     return true;

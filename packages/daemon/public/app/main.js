@@ -3,6 +3,7 @@ import { api, postJson } from "./api.js";
 import { agendaActive, followAgenda, init as initAgStatus, loadCosts } from "./features/agstatus.js";
 import { init as initCalendar } from "./features/calendar.js";
 import { init as initCardLayout } from "./features/cardlayout.js";
+import { noteBuild } from "./features/build.js";
 import { init as initLayout } from "./features/layout.js";
 import { init as initCards } from "./features/cards.js";
 import { init as initComms } from "./features/comms.js";
@@ -109,6 +110,7 @@ export async function loadState() {
   try {
     const s = await api("/api/state");
     S.state = s; S.conn = true; S.connErrAt = 0;
+    noteBuild(s.build_id); // daemon restarted on new code → reload banner + settings save lock
     if (s.persona && s.persona !== persona) applyPersona(s.persona);
     const bid = s.last_briefing?.id ?? null;
     const tasks = [];
@@ -141,7 +143,7 @@ export async function loadTodos(render = true) {
   if (render) renderAll();
 }
 export async function loadConfig() {
-  try { S.config = await api("/api/config"); renderConfig(); } catch (e) { console.warn("config", e.message); }
+  try { S.config = await api("/api/config"); noteBuild(S.config?.build_id); renderConfig(); } catch (e) { console.warn("config", e.message); }
 }
 export function renderAll() {
   renderHeader();
