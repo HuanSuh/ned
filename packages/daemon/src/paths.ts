@@ -11,6 +11,8 @@ export const CURSOR_PATH = path.join(NED_HOME, "cursor.json");
 export const CONFIG_PATH = path.join(NED_HOME, "config.yaml");
 export const SENT_LOG = path.join(BRIEFINGS_DIR, "sent.log");
 export const AGENDA_PATH = path.join(NED_HOME, "agenda.json");
+/** Raw model reply of the last agenda run that parsed but came back empty (debugging aid). */
+export const AGENDA_RAW_PATH = path.join(NED_HOME, "agenda.raw.txt");
 /** Cached calendar ranges outside agenda.calendar_range: <from>_<to>.json. */
 export const CALENDAR_DIR = path.join(NED_HOME, "calendar");
 export const TODOS_PATH = path.join(NED_HOME, "todos.json");

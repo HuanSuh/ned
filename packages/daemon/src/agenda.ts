@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { extractJson, llmDisabled, runClaude } from "./claude.js";
+import { extractJson, llmDisabled, runClaude, type ClaudeRunResult } from "./claude.js";
 import { filtersPrompt, jqlExclude, watchChannels, type NedConfig } from "./config.js";
 import { personaPrompt } from "./persona.js";
-import { AGENDA_PATH, log, readJson, writeJsonAtomic } from "./paths.js";
+import { AGENDA_PATH, AGENDA_RAW_PATH, log, readJson, writeJsonAtomic } from "./paths.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PROMPTS_DIR = path.resolve(here, "../../../prompts");
@@ -508,6 +508,11 @@ export function buildPrompt(cfg: NedConfig, now = new Date()): string {
     .replaceAll("{{SLACK_SINCE}}", String(Math.floor(now.getTime() / 1000) - 24 * 3600));
 }
 
+/** True when no enabled source returned a single item (mail/slack summaries don't count). */
+export function isEmptyPayload(p: AgendaPayload): boolean {
+  return !p.calendar.length && !p.jira.length && !p.github.length && !p.mail?.items.length && !p.mail?.all.length && !p.slack?.items.length && !p.slack?.all.length;
+}
+
 let inflight: Promise<Agenda> | null = null;
 
 /** True while an agenda refresh is running. */
@@ -544,11 +549,40 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
   log(`agenda: asking claude${filtersPrompt(cfg.filters) !== "(없음)" ? ` (filters — ${filtersPrompt(cfg.filters).split("\n")[0]})` : ""}`);
   // 22 = the old 20 + one turn for the parallel get_thread reads that fill mail item context.
   // +2 when following Slack channels (filters.slack.watch_channels): the per-channel searches share the Slack turn.
-  const res = await runClaude(buildPrompt(cfg), { allowedTools: agendaTools(cfg), maxTurns: 22 + (cfg.sources.slack && watchChannels(cfg.filters).length ? 2 : 0), model: cfg.claude_model, timeoutMs: 5 * 60_000 });
-  const parsed = res.ok ? extractJson<Partial<Record<keyof AgendaPayload, unknown>>>(res.text) : null;
+  // The full payload is ~16K output tokens; a healthy run takes ~5 min, so a 5 min timeout was cutting it off.
+  const maxTurns = 22 + (cfg.sources.slack && watchChannels(cfg.filters).length ? 2 : 0);
+  const run = () => runClaude(buildPrompt(cfg), { allowedTools: agendaTools(cfg), maxTurns, model: cfg.claude_model, timeoutMs: 8 * 60_000 });
+  const parse = (r: ClaudeRunResult): AgendaPayload | null => {
+    const j = r.ok ? extractJson<Partial<Record<keyof AgendaPayload, unknown>>>(r.text) : null;
+    return j ? normalize(j, cfg, new Date(now).toISOString()) : null;
+  };
+  let res = await run();
+  let payload = parse(res);
+  if (payload && isEmptyPayload(payload)) {
+    // Seen live: the claude.ai connectors hadn't attached yet when ToolSearch ran (daemon start, alongside a
+    // heartbeat), so every source came back []. One delayed retry usually finds them connected.
+    log(`agenda: empty result on first try ($${res.cost_usd.toFixed(2)}, ${res.num_turns} turns) — retrying once in 30s`);
+    await new Promise((r) => setTimeout(r, 30_000));
+    const firstCost = res.cost_usd;
+    res = await run();
+    res = { ...res, cost_usd: firstCost + res.cost_usd };
+    payload = parse(res);
+  }
+  const parsed = payload;
   let agenda: Agenda;
-  if (parsed) {
-    agenda = { updated_at: Date.now(), cost_usd: res.cost_usd, calendar_range: calendarRange(new Date(now)), ...normalize(parsed, cfg, new Date(now).toISOString()) };
+  if (payload && !isEmptyPayload(payload)) {
+    agenda = { updated_at: Date.now(), cost_usd: res.cost_usd, calendar_range: calendarRange(new Date(now)), ...payload };
+  } else if (payload) {
+    // Every source came back empty — far likelier a model/tool hiccup than a truly empty fortnight.
+    // Keep the last good lists, flag it, and keep the raw reply so the cause is inspectable.
+    const prev = readAgenda();
+    agenda = { ...prev, updated_at: Date.now(), cost_usd: res.cost_usd, error: "empty result" };
+    try {
+      fs.writeFileSync(AGENDA_RAW_PATH, res.text.slice(0, 4000));
+    } catch {
+      /* ignore */
+    }
+    log(`agenda: empty result — kept previous lists; raw (${res.text.length} chars) → ${AGENDA_RAW_PATH}: ${res.text.slice(0, 300).replace(/\s+/g, " ")}`);
   } else {
     // Keep the last good lists so the dashboard doesn't blank out on a transient failure.
     const prev = readAgenda();
