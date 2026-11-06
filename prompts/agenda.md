@@ -9,9 +9,10 @@
 ## 규칙
 - **읽기만 한다.** RSVP 응답, 일정 수정, 이슈 수정, 리뷰·코멘트·머지, 메일 읽음 처리·라벨·답장·초안, Slack 메시지·리액션 등 어떤 쓰기도 하지 않는다.
 - 커넥터 도구는 지연 로드된다. 첫 턴에 `ToolSearch` 를 **한 번** 호출해 필요한 도구를 모두 로드한다:
-  `select:mcp__claude_ai_Google_Calendar__list_events,mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql,mcp__claude_ai_Gmail__search_threads,mcp__claude_ai_Slack__slack_search_public_and_private,mcp__claude_ai_Slack__slack_read_thread` (OFF 인 소스의 도구는 빼라).
+  `select:mcp__claude_ai_Google_Calendar__list_events,mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql,mcp__claude_ai_Gmail__search_threads,mcp__claude_ai_Gmail__get_thread,mcp__claude_ai_Slack__slack_search_public_and_private,mcp__claude_ai_Slack__slack_read_thread` (OFF 인 소스의 도구는 빼라).
 - 그다음 턴에 소스별 조회를 **병렬로 한 번에** 호출한다. 턴 수가 적으니 같은 조회를 반복하지 않는다.
 - 조회가 실패하거나 도구가 없으면 그 블록은 `[]` 로 두고 넘어간다. 데이터를 지어내지 않는다.
+- `context` (답장 초안용 맥락): 나중에 답장 초안을 **다시 조회 없이** 쓰도록, 이번에 **이미 본 원문**을 담는다. context 를 채우려고 추가 조회하지 않는다 (예외: 4. mail 의 `get_thread` 한 턴). 크기 제한을 지킨다 — 넘치면 자른다.
 - 최종 출력은 **JSON 객체 하나만**. 첫 글자는 `{`, 마지막 글자는 `}`. 설명 문장, 마크다운, 코드펜스 금지.
 
 ## 소스
@@ -46,7 +47,7 @@
 - `repo` 는 `repository.nameWithOwner`, `author` 는 `author.login`, `updated` 는 `updatedAt`. 같은 PR 이 중복되면 위 순서상 먼저 나온 reason 하나만.
 
 ## 4. mail — 메일함 요약 + 내가 확인해야 할 메일
-`search_threads` 두 번을 다른 소스 조회와 같은 턴에 병렬로 부른다. 스레드 본문(`get_thread`)은 열지 않는다. 검색 결과의 발신자·제목·스니펫으로 판단한다.
+`search_threads` 두 번을 다른 소스 조회와 같은 턴에 병렬로 부른다. 선별은 검색 결과의 발신자·제목·스니펫으로 한다. 선별이 끝나면 **`items` 로 고른 스레드만** `get_thread`(messageFormat `PLAIN_TEXT`)를 **한 턴에 병렬로 한 번씩** 불러 `context` 를 채운다 (다른 스레드는 열지 않는다).
 - `in:inbox is:unread newer_than:2d` (최대 50, 발신자·제목이 오도록 요약 보기) → 결과 스레드 수를 `unread` 에, 스레드 전부를 `all` 에 넣는다 (최신순, 최대 50, 고르지 말 것).
   - `all[]`: `id` thread id, `from` 표시 이름(없으면 주소), `subject`, `ts` 마지막 메시지 시각 ISO-8601, `url` `https://mail.google.com/mail/u/0/#all/<thread id>`, `unread` true.
 - `in:inbox newer_than:3d -category:promotions -category:social -category:updates -category:forums` (최대 30) → 이 중 **사람이 보낸 업무 메일로 내 행동이 필요한 것**만 골라 `items` 에 넣는다 (최대 10, 급한 순).
@@ -54,11 +55,12 @@
   - 뉴스레터, 자동 알림(CI, Jira·GitHub 알림, 캘린더 초대 메일), 광고, 내가 마지막으로 보낸 스레드는 제외.
   - `id`: thread id. `from`: 표시 이름 (없으면 주소). `received`: 마지막 메시지 시각 ISO-8601. `url`: `https://mail.google.com/mail/u/0/#all/<thread id>`.
   - `why`: 왜 봐야 하는지 한국어 한 줄 (25자 안팎, 예: `금요일까지 배포 가능 여부 회신`). `snippet`: 스니펫 앞부분 그대로.
+  - `context` (`get_thread` 로 읽은 것, 기준은 스레드의 마지막 **다른 사람이 보낸** 메시지): `from` 보낸 사람 `이름 <주소>`, `to` 받는 사람(쉼표 구분), `subject`, `body_excerpt` 그 메시지 본문 원문 — **인용된 이전 메일(`>` 줄, `On … wrote:`/`… 님이 작성:` 이하)과 서명·면책 문구는 지우고 최대 1500자**, `attachments` 첨부 파일 이름 배열(없으면 `[]`), `message_id` 그 메시지 id, `reply_to` 그 발신자 이메일 주소. `get_thread` 가 실패하면 `context` 를 빼라.
 - `summary`: 메일함 상태를 위 말투로 한국어 한 문장 (40자 안팎, Ned 라면 예: `안 읽은 거 12통인데 사람이 보낸 건 3통, 그중 회신 2건.`). 볼 게 없으면 `""`.
 
 ## 5. slack — 최근 24시간, 내가 아직 답하지 않은 것
 내 Slack user_id 는 `slack_search_public_and_private` 도구 설명에 나온다 (`Current logged in user's user_id is U…`). 아래 `<ME>` 자리에 넣는다.
-다른 소스 조회와 같은 턴에 `slack_search_public_and_private` 세 번을 병렬로 부른다 (모두 `after: "{{SLACK_SINCE}}"`, `sort: "timestamp"`, `limit: 20`, `include_bots: false`, `response_format: "detailed"`, `max_context_length: 200`):
+다른 소스 조회와 같은 턴에 `slack_search_public_and_private` 세 번을 병렬로 부른다 (모두 `after: "{{SLACK_SINCE}}"`, `sort: "timestamp"`, `limit: 20`, `include_bots: false`, `response_format: "detailed"`, `max_context_length: 300`):
 - 멘션: `keywords: ["<@ME>"]` → `"mention"`
 - DM: `filters: "is:dm"`, `channel_types: "im,mpim"` → `"dm"`
 - 스레드: `filters: "is:thread with:<@ME>"` → `"thread"`
@@ -72,8 +74,11 @@
 - `channel`: `#채널이름`, DM 은 `DM`, 그룹 DM 은 `그룹 DM`. `from`: 보낸 사람 표시 이름. `text`: 나에게 바라는 것 한국어 한 줄 (40자 안팎, 원문 인용 말고 요약). `url`: 메시지 permalink 그대로. `ts`: 메시지 시각 ISO-8601.
 - `all[]`: 세 검색 결과 중 **다른 사람이 나를 멘션했거나 DM 한 메시지 전부** (봇 제외, 같은 메시지는 하나만, 최신순, 최대 50). `items` 처럼 고르지 않는다. 필드: `channel`, `from`, `text`(원문 한 줄, 80자 안팎으로 자름), `url`, `ts`, `reason`(`mention|dm|thread`), `answered`(그 뒤에 내 답이 보이면 true, 아니면 false).
 - `items`(선별)와 `all`(전체)은 같은 검색 결과로 **같은 턴에** 만든다. 추가 조회를 하지 않는다.
+- `context` (답장 초안용, 이미 본 것만): 검색 결과의 context 메시지와(읽었다면) `slack_read_thread` 결과에서 그 대화를 그대로 옮긴다.
+  `{"participants":["표시 이름",…],"messages":[{"from":"표시 이름","ts":"ISO","text":"원문"}]}` — 메시지는 **대상 메시지까지 최근 최대 5개, 오래된 순, 각 `text` 원문 최대 300자**(요약·번역 금지, 넘치면 자름). 내가 보낸 메시지는 `from` 을 `나` 로.
+  - `items[]` 에는 모두 넣는다. `all[]` 은 `answered: false` 이고 `items` 에 없는 것만 넣는다 (`items` 에 있는 건 같은 url 이면 Ned 가 복사하니 빼고, `answered: true` 는 빼라).
 - `summary`: Slack 상태를 위 말투로 한국어 한 문장 (40자 안팎, Ned 라면 예: `멘션 3개 중 답할 건 2개, DM 하나는 오늘 안에.`). 볼 게 없으면 `""`.
 
 {{SLACK_WATCH}}
 ## 출력 스키마 (이 키만, 이 형태 그대로)
-{"calendar":[{"id":"","title":"","start":"ISO","end":"ISO","all_day":false,"location":"","url":"","meet_url":"","rsvp":"accepted|needsAction|declined|tentative|organizer","attendees":0}],"jira":[{"key":"","title":"","status":"","priority":"","due":"YYYY-MM-DD|null","url":"","updated":"ISO"}],"github":[{"repo":"owner/name","number":0,"title":"","url":"","author":"","updated":"ISO","reason":"review_requested|my_pr_changes_requested|my_pr_approved"}],"mail":{"summary":"","unread":0,"items":[{"id":"","from":"","subject":"","snippet":"","received":"ISO","url":"","reason":"reply|approval|deadline|request","why":""}],"all":[{"id":"","from":"","subject":"","ts":"ISO","url":"","unread":true}]},"slack":{"summary":"","items":[{"channel":"#채널|DM|그룹 DM","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread","count":1}],"all":[{"channel":"","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread","answered":false,"count":1}]}}
+{"calendar":[{"id":"","title":"","start":"ISO","end":"ISO","all_day":false,"location":"","url":"","meet_url":"","rsvp":"accepted|needsAction|declined|tentative|organizer","attendees":0}],"jira":[{"key":"","title":"","status":"","priority":"","due":"YYYY-MM-DD|null","url":"","updated":"ISO"}],"github":[{"repo":"owner/name","number":0,"title":"","url":"","author":"","updated":"ISO","reason":"review_requested|my_pr_changes_requested|my_pr_approved"}],"mail":{"summary":"","unread":0,"items":[{"id":"","from":"","subject":"","snippet":"","received":"ISO","url":"","reason":"reply|approval|deadline|request","why":"","context":{"from":"","to":"","subject":"","body_excerpt":"≤1500자","attachments":[],"message_id":"","reply_to":""}}],"all":[{"id":"","from":"","subject":"","ts":"ISO","url":"","unread":true}]},"slack":{"summary":"","items":[{"channel":"#채널|DM|그룹 DM","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread","count":1,"context":{"participants":[],"messages":[{"from":"","ts":"ISO","text":"≤300자"}]}}],"all":[{"channel":"","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread","answered":false,"count":1,"context":{"participants":[],"messages":[]}}]}}

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readAgenda, type Agenda, type MailContext, type SlackContext } from "./agenda.js";
 import { extractJson, llmDisabled, runClaude } from "./claude.js";
 import { normalizeReplyTone, type NedConfig } from "./config.js";
 import { readRecentEvents, type NedEvent } from "./events.js";
@@ -54,9 +55,15 @@ export interface DraftMeta {
   session_id?: string;
 }
 
+/** `fast` = no-tool run on context Ned already has (agenda excerpt / local transcript); `full` = claude reads the thread with tools. */
+export type DraftMode = "fast" | "full";
+
 export interface DraftResult {
   id: string;
   source: DraftSource;
+  mode: DraftMode;
+  /** Age of the agenda-collected context the fast path used (0 for sessions: read live); null on the full path. */
+  context_age_minutes: number | null;
   context: { summary: string; excerpt: string };
   drafts: { id: string; label: DraftLabel; text: string }[];
   cost_usd: number;
@@ -177,8 +184,83 @@ export function draftTools(source: DraftSource): string[] {
   return [];
 }
 
-function sourceGuide(req: DraftRequest): { guide: string; ref: string; context: string; meta: DraftMeta } {
+/** Agenda-collected context for a Slack / mail ref, with its age in minutes. */
+export type AgendaCtx = { kind: "slack"; ctx: SlackContext; age: number } | { kind: "email"; ctx: MailContext; age: number };
+
+/** Find the agenda item this ref points at (Slack: same channel + ts or permalink; mail: same thread id) and return its context. */
+export function agendaContext(req: Pick<DraftRequest, "source" | "ref">, agenda: Agenda = readAgenda(), now = Date.now()): AgendaCtx | null {
+  const age = (iso: string) => Math.max(0, Math.round((now - Date.parse(iso)) / 60_000));
+  if (req.source === "slack" && agenda.slack) {
+    const t = slackTarget(req.ref);
+    const hit = [...agenda.slack.items, ...agenda.slack.all].find((x) => {
+      if (!x.context) return false;
+      if (req.ref.url && x.url === req.ref.url) return true;
+      const u = parseSlackUrl(x.url);
+      return !!t.channel_id && !!t.ts && u.channel === t.channel_id && u.ts === t.ts;
+    });
+    return hit?.context && !Number.isNaN(Date.parse(hit.context.collected_at)) ? { kind: "slack", ctx: hit.context, age: age(hit.context.collected_at) } : null;
+  }
+  if (req.source === "email" && agenda.mail && req.ref.thread_id) {
+    const hit = agenda.mail.items.find((x) => x.context && x.id === req.ref.thread_id);
+    return hit?.context && !Number.isNaN(Date.parse(hit.context.collected_at)) ? { kind: "email", ctx: hit.context, age: age(hit.context.collected_at) } : null;
+  }
+  return null;
+}
+
+/** Fresh enough agenda context for the fast path, else null (→ full tool path). */
+export function fastContext(req: Pick<DraftRequest, "source" | "ref">, cfg: NedConfig): AgendaCtx | null {
+  if (req.source === "session") return null;
+  const c = agendaContext(req);
+  return c && c.age <= cfg.draft_context_max_age_minutes ? c : null;
+}
+
+function formatContext(c: AgendaCtx): string {
+  if (c.kind === "slack") {
+    return [
+      `참여자: ${c.ctx.participants.join(", ") || "(모름)"}`,
+      "대화 (오래된 순, 마지막이 답할 대상 근처):",
+      ...c.ctx.messages.map((m) => `- [${m.ts}] ${m.from}: ${m.text}`),
+    ].join("\n");
+  }
+  return [
+    `보낸 사람: ${c.ctx.from}`,
+    c.ctx.to && `받는 사람: ${c.ctx.to}`,
+    `제목: ${c.ctx.subject}`,
+    c.ctx.attachments.length ? `첨부: ${c.ctx.attachments.join(", ")}` : "",
+    "본문 (인용 제거):",
+    c.ctx.body_excerpt,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function sourceGuide(req: DraftRequest, fast: AgendaCtx | null = null): { guide: string; ref: string; context: string; meta: DraftMeta } {
   const { ref } = req;
+  if (fast) {
+    const preview = [ref.title && `제목: ${ref.title}`, ref.text && `미리보기: ${ref.text}`].filter(Boolean).join("\n");
+    const context = `${formatContext(fast)}${preview ? `\n\n(목록 미리보기)\n${preview}` : ""}`;
+    if (fast.kind === "slack") {
+      const t = slackTarget(ref);
+      const guide = [
+        "Slack 메시지에 대한 답장. 도구는 없다 — 아래 수집된 대화만 보고 쓴다.",
+        "- 답할 대상은 대화의 마지막 질문·요청이다 (`나` 가 이미 답한 부분은 반복하지 않는다).",
+        "- `reply_meta` 는 빈 문자열로 둔다.",
+      ].join("\n");
+      return { guide, ref: JSON.stringify({ url: ref.url, ...t }), context, meta: { channel_id: t.channel_id, thread_ts: t.thread_ts ?? (t.channel_id?.startsWith("D") ? undefined : t.ts) } };
+    }
+    const guide = [
+      "Gmail 메일에 대한 회신. 도구는 없다 — 아래 수집된 메일만 보고 쓴다.",
+      "- 답할 대상은 아래 메일(스레드의 마지막 다른 사람 메시지)이다. `reply_meta` 는 빈 문자열로 둔다 (Ned 가 채운다).",
+      "- 메일 초안은 인사(\"안녕하세요, ○○님.\")로 시작해도 되지만 서명은 넣지 않는다.",
+    ].join("\n");
+    const subject = fast.ctx.subject ? (/^re:/i.test(fast.ctx.subject) ? fast.ctx.subject : `Re: ${fast.ctx.subject}`) : undefined;
+    return {
+      guide,
+      ref: JSON.stringify({ url: ref.url, thread_id: ref.thread_id }),
+      context,
+      meta: { thread_id: ref.thread_id, message_id: ref.message_id ?? fast.ctx.message_id, reply_to: fast.ctx.reply_to, subject },
+    };
+  }
   const preview = [ref.title && `제목: ${ref.title}`, ref.text && `미리보기: ${ref.text}`].filter(Boolean).join("\n") || "(없음)";
   if (req.source === "slack") {
     const t = slackTarget(ref);
@@ -229,12 +311,29 @@ function sourceGuide(req: DraftRequest): { guide: string; ref: string; context: 
   return { guide, ref: JSON.stringify({ session_id: ref.session_id }), context, meta: { session_id: ref.session_id } };
 }
 
-export function buildDraftPrompt(req: DraftRequest, cfg: NedConfig): { prompt: string; meta: DraftMeta } {
+const TOOL_RULES = [
+  "- 커넥터 도구는 지연 로드된다. 필요한 도구는 먼저 `ToolSearch` 로 `select:<도구명>` 해서 로드한 뒤 쓴다.",
+  '- 조회는 2~3회 안에 끝낸다. 원문을 못 읽으면 아래 "참고 미리보기"만으로 쓰고, `summary` 에 그 사실을 짧게 적는다.',
+].join("\n");
+const NO_TOOL_RULES = "- 도구는 없다. 아래 맥락만으로 **한 번에** JSON 을 출력한다. 맥락이 모자라면 `[확인 필요: …]` 를 남긴다.";
+// Output tokens dominate fast-path latency (~100 tok/s): Ned fills excerpt / reply_meta from the agenda context itself.
+const FAST_OUTPUT_RULE = '- 출력에서 `excerpt` 는 `""`, `reply_meta` 는 `{}` 로 둔다 (Ned 가 채운다). JSON 은 공백·줄바꿈 없이 한 줄로.';
+
+/** The message the reply answers, from agenda context (fast path; the model is told not to repeat it). */
+function contextExcerpt(fast: AgendaCtx): string {
+  if (fast.kind === "email") return fast.ctx.body_excerpt.slice(0, 300);
+  const msgs = fast.ctx.messages;
+  return ([...msgs].reverse().find((m) => m.from !== "나") ?? msgs[msgs.length - 1])?.text ?? "";
+}
+
+/** `fast` (or a session) → no-tool prompt built from context Ned already has. */
+export function buildDraftPrompt(req: DraftRequest, cfg: NedConfig, fast: AgendaCtx | null = null): { prompt: string; meta: DraftMeta } {
   const template = fs.readFileSync(path.join(PROMPTS_DIR, "draft.md"), "utf8");
-  const s = sourceGuide(req);
+  const s = sourceGuide(req, fast);
   const tone = normalizeReplyTone(req.tone, cfg.reply_tone);
   const prompt = template
     .replace("{{NOW}}", () => new Date().toLocaleString("ko-KR"))
+    .replace("{{TOOL_RULES}}", () => (fast ? `${NO_TOOL_RULES}\n${FAST_OUTPUT_RULE}` : req.source === "session" ? NO_TOOL_RULES : TOOL_RULES))
     .replace("{{TONE}}", () => tone)
     .replace("{{HINT}}", () => req.hint ?? "(없음)")
     .replace("{{SOURCE_GUIDE}}", () => s.guide)
@@ -268,38 +367,62 @@ export function draftBusy(source: DraftSource, ref: DraftRef): boolean {
   return inflight.has(refKey(source, ref));
 }
 
+function validate(req: DraftRequest): DraftError | null {
+  if (req.source === "session" && !req.ref.session_id) return new DraftError("ref.session_id required", 400);
+  if (req.source === "slack" && !slackTarget(req.ref).channel_id && !req.ref.text) return new DraftError("ref.url / ref.channel or ref.text required", 400);
+  if (req.source === "email" && !req.ref.thread_id && !req.ref.message_id && !req.ref.text && !req.ref.title) return new DraftError("ref.thread_id or ref.title / ref.text required", 400);
+  return null;
+}
+
+/** A cached draft set for this exact request (same key, hint, tone, < 1h), or null. */
+function cachedDraft(req: DraftRequest, cfg: NedConfig): DraftResult | null {
+  const c = readJson<DraftResult | null>(draftFile(draftIdOf(refKey(req.source, req.ref))), null);
+  const tone = normalizeReplyTone(req.tone, cfg.reply_tone);
+  if (c && Date.now() - c.created_at < CACHE_MS && c.hint === (req.hint ?? "") && c.tone === tone && c.drafts.length) return { ...c, mode: c.mode ?? "full", context_age_minutes: c.context_age_minutes ?? null, cached: true }; // pre-fast-path cache files lack mode
+  return null;
+}
+
 /**
  * Reply drafts for one Slack thread / Gmail thread / agent session.
+ * Fast path (no tools, 1 turn, isolated claude -p) when the agenda already collected fresh context for the ref, and for sessions;
+ * otherwise the full path reads the thread with tools. hint / regenerate reuse the same agenda context.
  * Cached 1h per (source, ref key) unless hint/tone changed or `force`; concurrent calls for one key share a run.
  */
-export function generateDraft(req: DraftRequest, cfg: NedConfig): Promise<DraftResult> {
-  if (req.source === "session" && !req.ref.session_id) return Promise.reject(new DraftError("ref.session_id required", 400));
-  if (req.source === "slack" && !slackTarget(req.ref).channel_id && !req.ref.text) return Promise.reject(new DraftError("ref.url / ref.channel or ref.text required", 400));
-  if (req.source === "email" && !req.ref.thread_id && !req.ref.message_id && !req.ref.text && !req.ref.title) return Promise.reject(new DraftError("ref.thread_id or ref.title / ref.text required", 400));
+export function generateDraft(req: DraftRequest, cfg: NedConfig, opts: { fastOnly?: boolean } = {}): Promise<DraftResult> {
+  const bad = validate(req);
+  if (bad) return Promise.reject(bad);
   const key = refKey(req.source, req.ref);
   const id = draftIdOf(key);
   const tone = normalizeReplyTone(req.tone, cfg.reply_tone);
   const hint = req.hint ?? "";
 
   if (!req.force && !llmDisabled()) {
-    const c = readJson<DraftResult | null>(draftFile(id), null);
-    if (c && Date.now() - c.created_at < CACHE_MS && c.hint === hint && c.tone === tone && c.drafts.length) return Promise.resolve({ ...c, cached: true });
+    const c = cachedDraft(req, cfg);
+    if (c) return Promise.resolve(c);
   }
   const running = inflight.get(key);
   if (running) return running;
-  const p = runDraft(req, cfg, id, tone, hint).finally(() => inflight.delete(key));
+  const fast = fastContext(req, cfg);
+  if (opts.fastOnly && !fast && req.source !== "session") return Promise.reject(new DraftError("no fresh agenda context", 404));
+  const p = runDraft(req, cfg, id, tone, hint, fast, !opts.fastOnly).finally(() => inflight.delete(key));
   inflight.set(key, p);
   return p;
 }
 
-async function runDraft(req: DraftRequest, cfg: NedConfig, id: string, tone: string, hint: string): Promise<DraftResult> {
-  const { prompt, meta } = buildDraftPrompt(req, cfg);
+async function runDraft(req: DraftRequest, cfg: NedConfig, id: string, tone: string, hint: string, fast: AgendaCtx | null, fallback = true): Promise<DraftResult> {
+  const noTools = !!fast || req.source === "session";
+  const mode: DraftMode = noTools ? "fast" : "full";
+  const context_age_minutes = fast ? fast.age : req.source === "session" ? 0 : null;
+  const { prompt, meta } = buildDraftPrompt(req, cfg, fast);
   if (llmDisabled()) {
-    log(`draft: NED_NO_LLM=1 — stub for ${req.source} ${id}`);
+    log(`draft: NED_NO_LLM=1 — stub for ${req.source} ${id} (${mode})`);
+    const excerpt = fast ? contextExcerpt(fast) : req.ref.text ?? req.ref.title ?? "";
     return {
       id,
       source: req.source,
-      context: { summary: "(NED_NO_LLM stub)", excerpt: req.ref.text ?? req.ref.title ?? "" },
+      mode,
+      context_age_minutes,
+      context: { summary: "(NED_NO_LLM stub)", excerpt },
       drafts: DRAFT_LABELS.map((label, i) => ({ id: `${id}-${i}`, label, text: `[stub ${label}] ${hint || "확인했습니다. 곧 회신드리겠습니다."}` })),
       cost_usd: 0,
       cached: false,
@@ -309,32 +432,119 @@ async function runDraft(req: DraftRequest, cfg: NedConfig, id: string, tone: str
       meta,
     };
   }
-  const tools = draftTools(req.source);
-  log(`draft: asking claude (${req.source} ${id}, tools=${tools.join(",") || "none"})`);
-  // Read-only: plan mode + read tools only; built-ins narrowed to ToolSearch (or none for sessions).
-  const res = await runClaude(prompt, { allowedTools: tools, tools: tools.length ? ["ToolSearch"] : [], maxTurns: 8, model: cfg.claude_model, timeoutMs: 4 * 60_000 });
+  const started = Date.now();
+  let res;
+  if (noTools) {
+    // Everything is in the prompt: no tools, one turn, and none of the user's hooks / plugins / MCP servers (start-up ~4s instead of ~40s).
+    log(`draft: asking claude (${req.source} ${id}, fast${fast ? `, context ${fast.age}m old` : ""})`);
+    res = await runClaude(prompt, { allowedTools: [], tools: [], maxTurns: 1, isolated: true, effort: "low", model: cfg.draft_fast_model ?? cfg.claude_model, timeoutMs: 90_000 });
+  } else {
+    const tools = draftTools(req.source);
+    log(`draft: asking claude (${req.source} ${id}, full, tools=${tools.join(",")})`);
+    // Read-only: plan mode + read tools only; built-ins narrowed to ToolSearch.
+    res = await runClaude(prompt, { allowedTools: tools, tools: ["ToolSearch"], maxTurns: 8, model: cfg.claude_model, timeoutMs: 4 * 60_000 });
+  }
   const parsed = res.ok ? extractJson<LlmDraft>(res.text) : null;
   const drafts = parsed ? normalizeDrafts(id, parsed.drafts) : [];
   if (!drafts.length) {
-    log(`draft: failed ${req.source} ${id} — ${(res.error ?? res.text).slice(0, 300)}`);
+    log(`draft: failed ${req.source} ${id} (${mode}) — ${(res.error ?? res.text).slice(0, 300)}`);
+    if (fast && fallback) {
+      log(`draft: ${req.source} ${id} — fast path failed, falling back to full`);
+      return runDraft(req, cfg, id, tone, hint, null, false);
+    }
     throw new DraftError(`draft failed: ${(res.error ?? "unparseable model output").slice(0, 300)}`, 502);
   }
-  const rm = parsed?.reply_meta ?? {};
+  const rawMeta = parsed?.reply_meta ?? {};
   const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
   const result: DraftResult = {
     id,
     source: req.source,
-    context: { summary: String(parsed?.summary ?? "").slice(0, 200), excerpt: String(parsed?.excerpt ?? "").slice(0, 600) },
+    mode,
+    context_age_minutes,
+    context: { summary: String(parsed?.summary ?? "").slice(0, 200), excerpt: String(parsed?.excerpt || (fast ? contextExcerpt(fast) : "")).slice(0, 600) },
     drafts,
     cost_usd: res.cost_usd,
     cached: false,
     created_at: Date.now(),
     hint,
     tone,
-    meta: req.source === "email" ? { ...meta, message_id: meta.message_id ?? s(rm.message_id), reply_to: s(rm.reply_to), subject: s(rm.subject) } : meta,
+    meta: req.source === "email" ? { ...meta, message_id: meta.message_id ?? s(rawMeta.message_id), reply_to: meta.reply_to ?? s(rawMeta.reply_to), subject: meta.subject ?? s(rawMeta.subject) } : meta,
   };
   fs.mkdirSync(DRAFTS_DIR, { recursive: true });
   writeJsonAtomic(draftFile(id), result);
-  log(`draft: ${req.source} ${id} — ${drafts.length} drafts, $${res.cost_usd.toFixed(3)}, ${res.num_turns} turns`);
+  log(`draft: ${req.source} ${id} (${mode}) — ${drafts.length} drafts, $${res.cost_usd.toFixed(3)}, ${res.num_turns} turns, ${((Date.now() - started) / 1000).toFixed(1)}s`);
   return result;
+}
+
+// ---------- optional pre-generation after each agenda run (config.drafts_pregenerate) ----------
+
+export const PREGEN_MAX = 6;
+const PREGEN_MAIL_REASONS = new Set(["reply", "approval", "request"]);
+const PREGEN_FILE = path.join(DRAFTS_DIR, "_pregenerate.json");
+
+export interface PregenStatus {
+  /** Drafts generated by the last finished run (cache hits not counted). */
+  pregenerated: number;
+  /** Candidates the last run found already cached. */
+  skipped_cached: number;
+  failed: number;
+  cost_usd: number;
+  /** ms epoch the last run finished, 0 = never. */
+  last_run_ts: number;
+  running: boolean;
+}
+
+let pregenRunning = false;
+
+export function pregenStatus(): PregenStatus {
+  const s = readJson<Partial<PregenStatus>>(PREGEN_FILE, {});
+  return { pregenerated: s.pregenerated ?? 0, skipped_cached: s.skipped_cached ?? 0, failed: s.failed ?? 0, cost_usd: s.cost_usd ?? 0, last_run_ts: s.last_run_ts ?? 0, running: pregenRunning };
+}
+
+/** The refs the dashboard would send for agenda items that need a reply (same refKey → the modal hits this cache). */
+export function pregenCandidates(agenda: Agenda): DraftRequest[] {
+  const slack: DraftRequest[] = (agenda.slack?.items ?? [])
+    .filter((x) => x.context && x.url)
+    .map((x) => ({ source: "slack", ref: { url: x.url, title: [x.channel, x.from].filter(Boolean).join(" · "), text: x.text } }));
+  const mail: DraftRequest[] = (agenda.mail?.items ?? [])
+    .filter((x) => x.context && x.id && PREGEN_MAIL_REASONS.has(x.reason))
+    .map((x) => ({ source: "email", ref: { url: x.url, thread_id: x.id, title: [x.subject, x.from].filter(Boolean).join(" — "), text: x.why || x.snippet } }));
+  // Alternate so both sources get a share of the cap; each list is already most-urgent first.
+  const out: DraftRequest[] = [];
+  for (let i = 0; out.length < PREGEN_MAX && (i < slack.length || i < mail.length); i++) {
+    if (slack[i]) out.push(slack[i]);
+    if (mail[i] && out.length < PREGEN_MAX) out.push(mail[i]);
+  }
+  return out;
+}
+
+/** Sequentially pre-generate fast-path drafts (max PREGEN_MAX) for the agenda's reply-needing items. Never overlaps itself. */
+export async function pregenerateDrafts(agenda: Agenda, cfg: NedConfig): Promise<PregenStatus> {
+  if (pregenRunning) return pregenStatus();
+  pregenRunning = true;
+  const started = Date.now();
+  let n = 0, cached = 0, failed = 0, cost = 0;
+  try {
+    const list = pregenCandidates(agenda);
+    log(`pregenerate: ${list.length} candidates`);
+    for (const req of list) {
+      if (!fastContext(req, cfg)) continue; // stale context: the modal will take the full path
+      if (!llmDisabled() && cachedDraft(req, cfg)) { cached++; continue; }
+      try {
+        const r = await generateDraft(req, cfg, { fastOnly: true });
+        if (r.cached) cached++;
+        else { n++; cost += r.cost_usd; }
+      } catch (e) {
+        failed++;
+        log(`pregenerate: ${req.source} failed — ${String(e).slice(0, 200)}`);
+      }
+    }
+  } finally {
+    pregenRunning = false;
+  }
+  const status: PregenStatus = { pregenerated: n, skipped_cached: cached, failed, cost_usd: Math.round(cost * 10000) / 10000, last_run_ts: Date.now(), running: false };
+  fs.mkdirSync(DRAFTS_DIR, { recursive: true });
+  writeJsonAtomic(PREGEN_FILE, status);
+  log(`pregenerate: ${n} drafts (${cached} cached, ${failed} failed), total $${cost.toFixed(3)}, ${Math.round((Date.now() - started) / 1000)}s`);
+  return status;
 }

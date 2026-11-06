@@ -410,6 +410,17 @@
   .htop .bubble .lead { font-size: 14.5px; }
   .hmeta { display: flex; gap: 10px; align-items: center; font: 11px var(--mono); color: var(--faint); flex-wrap: wrap; justify-content: flex-end; padding-top: 4px; }
   .hmeta .err { color: var(--red); }
+  /* error badge: just the ⚠ (warning colour); details live in the popover */
+  .erri { appearance: none; display: inline-flex; align-items: center; gap: 5px; height: 22px; min-width: 22px; padding: 0 3px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--amber); cursor: pointer; font: 600 12px var(--sans); vertical-align: middle; }
+  .erri svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .erri:hover { background: color-mix(in srgb, var(--amber) 14%, transparent); border-color: color-mix(in srgb, var(--amber) 40%, transparent); }
+  .erri:focus-visible { outline: 2px solid var(--info); outline-offset: 1px; }
+  .errpop { position: fixed; z-index: 40; width: min(440px, calc(100vw - 16px)); padding: 10px 12px; background: var(--raise); color: var(--fg); border: 1px solid var(--edge); border-radius: 10px; box-shadow: 0 12px 36px rgba(0, 0, 0, .4); }
+  .errpop .eph { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+  .errpop .eph .sp { flex: 1; }
+  .errpop .eph .when { font: 11px var(--mono); color: var(--faint); white-space: nowrap; }
+  .errpop .epmsg { margin: 8px 0; max-height: 220px; overflow: auto; padding: 8px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); font: 11.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; color: var(--dim); }
+  .errpop .epf { display: flex; gap: 6px; justify-content: flex-end; }
   .hgrid { display: grid; grid-template-columns: clamp(360px, 26vw, 440px) minmax(0, 1fr); gap: 16px; align-items: stretch; }
   .hgrid.wk { grid-template-columns: clamp(540px, 38vw, 760px) minmax(0, 1fr); } /* week view needs room for 7 columns */
   .hcol { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
@@ -588,7 +599,7 @@
   .mconfirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border: 1px solid var(--hero); border-radius: 8px; background: color-mix(in srgb, var(--hero) 10%, var(--pane)); }
   .mconfirm .tgt { flex: 1 1 100%; font-size: 13px; font-weight: 600; }
   .mconfirm .pv { flex: 1 1 100%; color: var(--dim); font-size: 12px; white-space: pre-wrap; }
-  .merr { color: var(--red); font-size: 12.5px; }
+  .merr { color: var(--dim); font-size: 12.5px; }
   .merr:empty { display: none; }
   .mft { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--side); }
   .mft .btn.dis { opacity: .45; cursor: not-allowed; }
@@ -894,6 +905,7 @@
   </main>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="errpop" id="errpop" role="dialog" aria-label="오류 자세히" hidden></div>
 <div class="modal" id="draft-modal" hidden>
   <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="dm-title">
     <div class="mhd"><h3 id="dm-title">답장 초안</h3><span class="mt" id="dm-sub"></span><span class="sp"></span><button type="button" class="btn small" data-mclose="1" aria-label="닫기" title="닫기 (Esc)">✕</button></div>
@@ -1098,6 +1110,60 @@
     clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), ms);
   }
 
+  // ---------- error badge: ⚠ icon (tooltip = short summary) → popover with full message, time, retry, copy ----------
+  const ERRS = {};
+  /** "API Error: 400 {"type":"error","error":{"message":"…"}}" → "API 400 · …" ; other text → first line, trimmed. */
+  function errSummary(msg) {
+    const t = String(msg || "").trim();
+    const code = /\b(?:API Error|status|→)\s*:?\s*(\d{3})\b/i.exec(t)?.[1];
+    let inner = "";
+    const j = t.indexOf("{"), k = t.lastIndexOf("}");
+    if (j >= 0 && k > j) { try { const o = JSON.parse(t.slice(j, k + 1)); inner = o?.error?.message || o?.message || o?.error?.type || o?.error || ""; } catch { /* not JSON */ } }
+    const head = (inner || t.split("\n")[0].replace(/\{.*$/s, "")).replace(/\s+/g, " ").trim();
+    const s = [code && !head.includes(code) ? `HTTP ${code}` : "", head].filter(Boolean).join(" · ");
+    return s.length > 90 ? s.slice(0, 88) + "…" : s || "알 수 없는 오류";
+  }
+  /** Register an error and return its badge. `retry` is a function (re-runs the job) or null. */
+  function errBadge(id, { where, message, at = Date.now(), retry = null, label = "" }) {
+    ERRS[id] = { where, message: String(message || ""), at, retry, short: errSummary(message) };
+    const tip = `${where}: ${ERRS[id].short} — 눌러서 자세히`;
+    return `<button type="button" class="erri" data-err="${esc(id)}" title="${esc(tip)}" aria-label="${esc("오류 — " + tip)}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 2.8 19.5h18.4L12 3.5zM12 10v4.5M12 17.2v.3"/></svg>${label ? `<span>${esc(label)}</span>` : ""}</button>`;
+  }
+  function closeErrPop() { const p = $("errpop"); if (!p.hidden) { p.hidden = true; p._back?.focus?.(); } }
+  function openErrPop(btn) {
+    const e = ERRS[btn.dataset.err]; if (!e) return;
+    const p = $("errpop");
+    p.innerHTML = `<div class="eph"><span class="erri" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 2.8 19.5h18.4L12 3.5zM12 10v4.5M12 17.2v.3"/></svg></span><b>${esc(e.where)}</b><span class="sp"></span><span class="when">${esc(mdhm(e.at))} · ${esc(rel(e.at))}</span></div>
+      <pre class="epmsg">${esc(e.message)}</pre>
+      <div class="epf">${e.retry ? `<button type="button" class="btn small go" data-epretry="1">다시 시도</button>` : ""}<button type="button" class="btn small" data-epcopy="1">로그 복사</button><button type="button" class="btn small" data-epclose="1">닫기</button></div>`;
+    p._err = btn.dataset.err; p._back = btn;
+    p.hidden = false;
+    const r = btn.getBoundingClientRect(), w = p.offsetWidth, h = p.offsetHeight;
+    p.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w))}px`;
+    p.style.top = `${r.bottom + 6 + h > window.innerHeight ? Math.max(8, r.top - h - 6) : r.bottom + 6}px`;
+    p.querySelector("button")?.focus();
+  }
+  document.addEventListener("click", async (ev) => {
+    const b = ev.target.closest("[data-err]");
+    if (b) { ev.preventDefault(); ev.stopPropagation(); const p = $("errpop"); if (!p.hidden && p._err === b.dataset.err) closeErrPop(); else openErrPop(b); return; }
+    const p = $("errpop"); if (p.hidden) return;
+    if (!ev.target.closest("#errpop")) return closeErrPop();
+    const e = ERRS[p._err];
+    if (ev.target.closest("[data-epclose]")) return closeErrPop();
+    if (ev.target.closest("[data-epcopy]") && e) {
+      const text = `[${new Date(e.at).toISOString()}] ${e.where}\n${e.message}`;
+      let ok = false;
+      try { await navigator.clipboard.writeText(text); ok = true; } catch {
+        const ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select();
+        try { ok = document.execCommand("copy"); } catch { ok = false; } ta.remove();
+      }
+      toast(ok ? "오류 로그를 복사했어." : "복사하지 못했어 — 팝오버의 메시지를 직접 선택해 줘.");
+      return;
+    }
+    if (ev.target.closest("[data-epretry]") && e?.retry) { closeErrPop(); e.retry(); }
+  }, true);
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !$("errpop").hidden) { ev.stopImmediatePropagation(); closeErrPop(); } }, true);
+
   // ---------- persona ----------
   function mood() {
     if (S.busy || S.agBusy || S.drafting) return "scanning";
@@ -1138,7 +1204,10 @@
     const up = alive();
     const lb = s?.last_briefing;
     $("leds").innerHTML = `
-      <span title="${esc(s?.updated_at ? "갱신 " + mdhm(s.updated_at) + " · pid " + s.daemon_pid : "")}"><span class="led ${up ? "g" : "r"}"></span>daemon ${up ? "on" : "off"}</span>
+      <span title="${esc(s?.updated_at ? "갱신 " + mdhm(s.updated_at) + " · pid " + s.daemon_pid : "")}"><span class="led ${up ? "g" : "r"}"></span>daemon ${up ? "on" : "off"}</span>${S.conn === false
+        ? errBadge("daemon-conn", { where: "daemon 연결", message: `GET /api/state 가 실패했어 (${S.connErr || "network"}). daemon 이 꺼졌거나 포트가 바뀌었을 수 있어. 10초마다 다시 시도 중.`, at: S.connErrAt || Date.now(), retry: () => loadState() })
+        : !up && s ? errBadge("daemon-stale", { where: "daemon 응답 없음", message: `state.json 이 ${rel(s.updated_at)} (${mdhm(s.updated_at)}) 이후 갱신되지 않았어. pid ${s.daemon_pid} 가 멈췄거나 종료됐을 수 있어.`, at: s.updated_at, retry: () => loadState() }) : ""}${S.hbErr
+        ? errBadge("heartbeat", { where: S.hbErr.daily ? "아침 브리핑 실행" : "점검 실행", message: S.hbErr.message, at: S.hbErr.at, retry: () => runHeartbeat(S.hbErr.daily) }) : ""}
       <span><span class="led ${n ? "a" : ""}"></span>attn ${n}</span>
       <span class="opt"><span class="led ${s?.quiet ? "b" : ""}"></span>quiet</span>
       <span class="opt" title="${esc(lb ? `${lb.type === "daily" ? "아침" : "점검"} ${lb.status}${lb.headline ? " · " + lb.headline : ""}` : "")}">last ${s?.last_heartbeat_at ? rel(s.last_heartbeat_at) : "—"}</span>
@@ -1165,12 +1234,13 @@
     busyTick = setInterval(setBusyButtons, 1000);
     try {
       const b = await api(`/api/heartbeat${daily ? "?daily=1" : ""}`, { method: "POST" });
+      S.hbErr = null;
       if (b && b.status === "skipped") toast("볼 게 없어서 건너뛰었어.");
       else if (b && b.status === "NED_OK") toast(`이상 무. ${quip(Date.now())}`);
       else if (b && b.status) toast(b.headline ? b.headline : "새 소식 있어. 우선 탭 봐 줘.", 6000);
       else toast("끝났어.");
     } catch (e) {
-      console.warn(e); toast(`순찰 실패: ${e.message}`, 6000);
+      console.warn(e); S.hbErr = { message: e.message, at: Date.now(), daily }; toast(`순찰 실패 — ${errSummary(e.message)} (⚠ 를 눌러 자세히)`, 6000);
     } finally {
       clearInterval(busyTick);
       S.busy = null; setBusyButtons();
@@ -1190,7 +1260,7 @@
     for (const b of S.briefings) {
       if (b.status !== "UPDATE") continue;
       for (const [sec, label] of [["updates", "업데이트"], ["fyi", "참고"]]) (b[sec] || []).forEach((x, i) =>
-        other.push({ key: `${b.id}:${sec}:${i}`, kind: x.kind || "other", title: x.title, detail: x.detail, url: safeUrl(x.url), ts: b.ts, label, briefing: b }));
+        other.push({ key: `${b.id}:${sec}:${i}`, kind: x.kind || "other", title: x.title, detail: x.detail, url: safeUrl(x.url), ts: b.ts, label, briefing: b, rk: srcKey(x.kind, { url: x.url }) }));
     }
     other.sort((a, b) => b.ts - a.ts);
     // History: UPDATE briefings one per row; consecutive NED_OK runs fold into one row.
@@ -1203,10 +1273,13 @@
     }
     const ok = S.briefings.filter((b) => b.status === "NED_OK");
     const priOpen = pri.filter((x) => !x.att.reviewed_at), priRev = pri.filter((x) => x.att.reviewed_at);
-    return { pri, priOpen, priRev, other, hist, ok };
+    for (const x of other) x.rat = x.rk ? (S.agenda?.reviewed || {})[x.rk] || 0 : 0; // source items: same marks as the cards
+    const otherOpen = other.filter((x) => !x.rat), otherRev = other.filter((x) => x.rat);
+    return { pri, priOpen, priRev, other, otherOpen, otherRev, hist, ok };
   }
   // 우선: open items first; 확인 완료 ones only when their fold is open (so j/k walks the open ones).
-  const tabRaw = (m) => (ui.tab === "priority" ? [...m.priOpen, ...(ui.revOpenInbox ? m.priRev : [])] : ui.tab === "other" ? m.other : m.hist);
+  const isRevRow = (it) => !!(it.att ? it.att.reviewed_at : it.rat);
+  const tabRaw = (m) => (ui.tab === "priority" ? [...m.priOpen, ...(ui.revOpenInbox ? m.priRev : [])] : ui.tab === "other" ? [...m.otherOpen, ...(ui.revOpenOther ? m.otherRev : [])] : m.hist);
   const briefKinds = (b) => new Set([...(b.action_items || []), ...(b.updates || []), ...(b.fyi || [])].map((x) => x.kind).filter(Boolean));
   const rowKinds = (it) => (it.okrun ? [] : it.brief ? [...briefKinds(it.brief)] : [it.kind]);
   /** The current tab's rows after the inbox source pills — j/k, Enter and selection all use this list. */
@@ -1229,8 +1302,8 @@
       const b = it.brief, n = (b.action_items?.length || 0), u = (b.updates?.length || 0), f = (b.fyi?.length || 0);
       return `<div class="row ${sel}" data-i="${i}"><span class="ic">📝</span><span class="tt"><span class="stk ${b.type === "daily" ? "b" : ""} flat">${b.type === "daily" ? "아침" : "점검"}</span>&nbsp; ${esc(b.headline || `${n + u + f}건`)}</span><span class="tm">${hhmm(b.ts)}</span><span class="sb">행동 ${n} · 업데이트 ${u} · 참고 ${f}${b.cost_usd != null ? ` · $${Number(b.cost_usd).toFixed(2)}` : ""}</span></div>`;
     }
-    const acts = it.att ? `${openIcon(it.url)}${reviewIcon(it.att)}` : openIcon(it.url);
-    return `<div class="row ${sel} ${!it.att && ui.read.has(it.key) ? "read" : ""}${it.att?.reviewed_at ? " reviewed" : ""}${acts ? " has-acts" : ""}" data-i="${i}">
+    const acts = it.att ? `${openIcon(it.url)}${reviewIcon(it.att)}` : `${openIcon(it.url)}${it.rk ? reviewIcon({ id: it.rk, reviewed_at: it.rat }) : ""}`;
+    return `<div class="row ${sel} ${!it.att && ui.read.has(it.key) ? "read" : ""}${isRevRow(it) ? " reviewed" : ""}${acts ? " has-acts" : ""}" data-i="${i}">
       <span class="ic">${KIND_ICON[it.kind] || "·"}</span>
       <span class="tt">${it.led ? `<span class="led ${it.led}"></span>` : ""}${esc(it.title)}</span>
       <span class="tm">${rel(it.ts)}</span>
@@ -1248,11 +1321,12 @@
     ui.selKey = list[ui.sel]?.key ?? null;
 
     let html = "", lastDay = "";
-    const revN = ui.tab === "priority" ? (PF.inbox.size ? m.priRev.filter((it) => rowKinds(it).some((k) => PF.inbox.has(k))) : m.priRev).length : 0;
-    const fold = `<button type="button" class="revfold-row" id="revfold" aria-expanded="${!!ui.revOpenInbox}">${ui.revOpenInbox ? "▾" : "▸"} 확인 완료 ${revN}</button>`;
+    const revList = ui.tab === "priority" ? m.priRev : ui.tab === "other" ? m.otherRev : [], foldOpen = ui.tab === "other" ? !!ui.revOpenOther : !!ui.revOpenInbox;
+    const revN = (PF.inbox.size ? revList.filter((it) => rowKinds(it).some((k) => PF.inbox.has(k))) : revList).length;
+    const fold = `<button type="button" class="revfold-row" id="revfold" aria-expanded="${foldOpen}">${foldOpen ? "▾" : "▸"} 확인 완료 ${revN}</button>`;
     let folded = false;
     list.forEach((it, i) => {
-      if (revN && !folded && it.att?.reviewed_at) { html += fold; folded = true; lastDay = ""; }
+      if (revN && !folded && isRevRow(it)) { html += fold; folded = true; lastDay = ""; }
       const day = dayLabel(it.ts);
       if (day !== lastDay) { html += `<div class="grp">${esc(day)}</div>`; lastDay = day; }
       html += rowHtml(it, i);
@@ -1264,7 +1338,7 @@
     box.innerHTML = html;
     for (const r of box.querySelectorAll(".row")) r.onclick = () => { select(+r.dataset.i); openDetail(); };
     const ok = $("okrun"); if (ok) ok.onclick = () => setTab("history");
-    const rf = $("revfold"); if (rf) rf.onclick = () => { ui.revOpenInbox = !ui.revOpenInbox; renderInbox(); };
+    const rf = $("revfold"); if (rf) rf.onclick = () => { if (ui.tab === "other") ui.revOpenOther = !ui.revOpenOther; else ui.revOpenInbox = !ui.revOpenInbox; renderInbox(); };
     box.querySelector(".row.sel")?.scrollIntoView({ block: "nearest" });
     renderDetail(list[ui.sel], m);
     renderSessions();
@@ -1343,14 +1417,14 @@
       } else if (it.att) {
         ctx = `<h3>출처</h3><div class="body" style="font-size:13px">${esc(it.att.source)}</div>`;
       }
-      sig = `it:${it.key}:${it.title}:${it.detail}:${S.events.length}:${it.sess ? it.sess.status + it.sess.last_event_ts : ""}`;
+      sig = `it:${it.key}:${it.title}:${it.detail}:${S.events.length}:${it.sess ? it.sess.status + it.sess.last_event_ts : ""}:${it.att?.reviewed_at || it.rat || 0}`;
       html = `<div class="dwrap">${back}
         <div class="crumb"><span class="stk ${it.att ? "a" : it.label === "참고" ? "" : "b"}">${it.att ? "행동 필요" : esc(it.label)}</span><span>${KIND_ICON[it.kind] || ""} ${esc(KIND_KO[it.kind] || it.kind)}</span><span>· ${rel(it.ts)}</span></div>
         <h2>${esc(it.title)}</h2>
         ${it.detail ? `<div class="body">${esc(it.detail)}</div>` : ""}
         <div class="dacts">
           ${it.sess ? draftBtn("session", sessionRef(it.sess), it.att?.id) : it.kind === "slack" ? draftBtn("slack", slackRef(it), it.att?.id) : it.kind === "email" ? draftBtn("email", mailRef(it), it.att?.id) : ""}
-          ${openIcon(it.url)}${it.att ? reviewIcon(it.att) + iconBtn("close", "닫기 — 처리 완료로 치우기 (e)", { attrs: 'id="done"' }) : ""}
+          ${openIcon(it.url)}${it.att ? reviewIcon(it.att) + iconBtn("close", "닫기 — 처리 완료로 치우기 (e)", { attrs: 'id="done"' }) : it.rk ? reviewIcon({ id: it.rk, reviewed_at: it.rat }) : ""}
           <span class="dkeys">${it.url ? "<kbd>⏎</kbd> 열기 · " : ""}${it.att ? "<kbd>e</kbd> 닫기" : ""}</span>
         </div>
         <div class="ctx">${ctx}</div></div>`;
@@ -1609,6 +1683,44 @@
   const closeIcon = (a, attrs = "") => iconBtn("close", "닫기 — 처리 완료로 치우기", { attrs: `data-dismiss="${esc(a.id)}" ${attrs}` });
   /** attention items not marked 확인 완료 (counts, badges, greeting). */
   const openAtt = () => (S.state?.attention || []).filter((a) => !a.reviewed_at);
+  // 확인 완료 for source items (no attention id): stable keys per source, marks come with /api/agenda (`reviewed`).
+  // An item that changed after the mark (newer received / ts / updated) counts as open again.
+  const SRC_KEY_RE = /^(mail|slack|jira|github):/;
+  function srcKey(kind, x) {
+    if (!x) return "";
+    // Gmail view URLs look like #all/<hex> or #all/thread-f:<n> — keep everything after the folder, not just the first word.
+    if (kind === "email") { const t = x.id || /#[\w-]+\/([^|?&#\s]+)/.exec(x.url || "")?.[1]; return t ? `mail:${t}` : ""; }
+    if (kind === "slack") {
+      const m = /\/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})/.exec(x.url || "");
+      return m ? `slack:${m[1]}:${m[2]}.${m[3]}` : x.url ? `slack:${x.url}` : ""; // odd permalinks: the link itself is the stable key
+    }
+    if (kind === "jira") { const k = x.key || /\/browse\/([A-Z][A-Z0-9_]*-\d+)/.exec(x.url || "")?.[1]; return k ? `jira:${k}` : ""; }
+    if (kind === "github") {
+      if (x.repo && x.number) return `github:${x.repo}#${x.number}`;
+      const m = /github\.com\/([\w.-]+\/[\w.-]+)\/(?:pull|issues)\/(\d+)/.exec(x.url || ""); return m ? `github:${m[1]}#${m[2]}` : "";
+    }
+    return "";
+  }
+  const itemMs = (x) => toMs(x.received || x.ts || x.updated || 0);
+  const srcRevAt = (key, x) => { const at = key ? (S.agenda?.reviewed || {})[key] : 0; return at && at >= itemMs(x) ? at : 0; };
+  const revAt = (kind, x) => srcRevAt(srcKey(kind, x), x);
+  const isOpenSrc = (kind) => (x) => !revAt(kind, x);
+  const revCls = (kind, x) => (revAt(kind, x) ? " reviewed" : "");
+  const srcCheck = (kind, x) => { const k = srcKey(kind, x); return k ? reviewIcon({ id: k, reviewed_at: srcRevAt(k, x) }) : ""; };
+  /** A card list: open items, then a folded "확인 완료 N" with the reviewed ones (click the check again to bring one back). */
+  function withFold(cardId, kind, list, rowFn) {
+    const open = [], rev = [];
+    for (const x of list) (revAt(kind, x) ? rev : open).push(x);
+    if (!rev.length) return open.map(rowFn).join("");
+    return open.map(rowFn).join("") + `${open.length ? "" : `<div class="gnone">열린 항목 없음.</div>`}<details class="rvfold" data-rv="${esc(cardId)}" ${ui.revCard?.[cardId] ? "open" : ""}><summary>확인 완료 ${rev.length}</summary>${rev.map(rowFn).join("")}</details>`;
+  }
+  async function reviewSource(key, reviewed) {
+    S.agenda = S.agenda || {}; S.agenda.reviewed = { ...(S.agenda.reviewed || {}) };
+    if (reviewed) S.agenda.reviewed[key] = Date.now(); else delete S.agenda.reviewed[key];
+    renderAll();
+    try { await api(`/api/attention/${encodeURIComponent(key)}/review`, { method: "POST", body: JSON.stringify({ reviewed }) }); }
+    catch (e) { console.warn(e); toast(`확인 표시 실패 — ${e.message}`); }
+  }
   async function reviewAttention(id, reviewed) {
     const a = S.state?.attention.find((x) => x.id === id); if (!a) return;
     a.reviewed_at = reviewed ? Date.now() : undefined; // optimistic
@@ -1620,6 +1732,7 @@
   document.addEventListener("click", (e) => {
     const b = e.target.closest("[data-review]"); if (!b) return;
     e.preventDefault(); e.stopPropagation();
+    if (SRC_KEY_RE.test(b.dataset.review)) return reviewSource(b.dataset.review, b.getAttribute("aria-pressed") !== "true");
     const a = S.state?.attention.find((x) => x.id === b.dataset.review);
     reviewAttention(b.dataset.review, !a?.reviewed_at);
   }, true);
@@ -1638,7 +1751,7 @@
     const m = /\/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})/.exec(x.url || ""), tt = /[?&]thread_ts=([\d.]+)/.exec(x.url || "");
     return clean({ url: x.url, channel: m?.[1] || x.channel, ts: m ? `${m[2]}.${m[3]}` : undefined, thread_ts: tt?.[1], title: [x.channel, x.from].filter(Boolean).join(" · ") || x.title, text: x.text || x.detail });
   }
-  const mailRef = (x) => clean({ url: x.url, thread_id: x.id || /#all\/([\w-]+)/.exec(x.url || "")?.[1], title: [x.subject || x.title, x.from].filter(Boolean).join(" — "), text: x.why || x.snippet || x.detail });
+  const mailRef = (x) => clean({ url: x.url, thread_id: x.id || /#[\w-]+\/([^|?&#\s]+)/.exec(x.url || "")?.[1], title: [x.subject || x.title, x.from].filter(Boolean).join(" — "), text: x.why || x.snippet || x.detail });
   const sessionRef = (x) => clean({ session_id: x.id, title: x.worktree, text: x.last_summary || (x.last_prompt ? "» " + x.last_prompt : "") });
   /** Button that opens the draft modal; `small` for list rows. */
   const draftBtn = (source, ref, att = "") => iconBtn("draft", "답장 초안 — Ned 가 3가지 말투로 써 줘", { cls: "drb", attrs: `data-draft="${esc(JSON.stringify({ source, ref }))}"${att ? ` data-att="${esc(att)}"` : ""}` });
@@ -1671,10 +1784,13 @@
     if (r.ok && r.data) {
       DR.resp = r.data; DR.tab = (r.data.drafts?.[1] || r.data.drafts?.[0])?.id ?? null; DR.edits = {};
       // drafting a reply counts as having looked at it
-      const a = DR.att && S.state?.attention.find((x) => x.id === DR.att);
-      if (a && !a.reviewed_at) reviewAttention(DR.att, true);
+      if (DR.att && SRC_KEY_RE.test(DR.att)) { if (!(S.agenda?.reviewed || {})[DR.att]) reviewSource(DR.att, true); }
+      else { const a = DR.att && S.state?.attention.find((x) => x.id === DR.att); if (a && !a.reviewed_at) reviewAttention(DR.att, true); }
     }
-    else DR.error = r.status === 404 ? "초안 API 가 아직 없어 (daemon 업데이트가 필요해)." : `초안을 못 만들었어${r.data?.error ? `: ${r.data.error}` : ` (${r.status || "network"})`}.`;
+    else {
+      DR.error = r.status === 404 ? "초안 API 가 아직 없어 (daemon 업데이트가 필요해)." : `초안을 못 만들었어${r.data?.error ? `: ${r.data.error}` : ` (HTTP ${r.status || "network"})`}.`;
+      DR.errWhere = "답장 초안 생성"; DR.errLabel = "초안을 못 만들었어"; DR.errAt = Date.now(); DR.errRetry = () => requestDraft($("dm-hint").value.trim());
+    }
     DR.loading = false; S.drafting = false; renderHeader(); renderDraft();
     if (DR.resp) $("dm-text")?.focus();
   }
@@ -1712,7 +1828,7 @@
     if (document.activeElement !== ta || ta.dataset.tab !== String(DR.tab)) { ta.value = curText(); ta.dataset.tab = String(DR.tab); }
     ta.disabled = DR.loading || !r;
     $("dm-regen").disabled = $("dm-hint").disabled = DR.loading;
-    $("dm-err").textContent = DR.error;
+    $("dm-err").innerHTML = DR.error ? errBadge("draft", { where: DR.errWhere || "답장 초안", message: DR.error, at: DR.errAt || Date.now(), retry: DR.errRetry || null, label: DR.errLabel || "실패" }) : "";
     const acts = draftActions();
     $("dm-actions").innerHTML = acts.map((a) => {
       const title = a.off ? `설정 → 쓰기 액션에서 '${ACTION_KO[a.key]}' 을 허용해야 써` : a.confirm ? "누르면 보낼 대상을 한 번 더 보여 줘" : "";
@@ -1740,8 +1856,9 @@
     const r = await postJson("/api/send", { draft_id: curDraft()?.id, source: DR.source, ref: DR.ref, text: $("dm-text").value, mode: a.mode }).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
     DR.sending = null;
     if (r.ok && r.data?.ok !== false) { toast(r.data?.detail || `${a.label} 완료.`, 5000); closeDraft(); return; }
-    DR.error = r.status === 403 ? `'${a.label}' 은 설정에서 꺼져 있어 (daemon 이 거절함).` : `${a.label} 실패: ${r.data?.detail || r.data?.error || r.status}`;
-    toast(DR.error, 6000); renderDraft();
+    DR.error = r.status === 403 ? `'${a.label}' 은 설정에서 꺼져 있어 (daemon 이 거절함, HTTP 403).` : `${a.label} 실패: ${r.data?.detail || r.data?.error || `HTTP ${r.status}`}`;
+    DR.errWhere = a.label; DR.errLabel = `${a.label} 실패`; DR.errAt = Date.now(); DR.errRetry = r.status === 403 ? null : () => runAction(key);
+    toast(`${a.label} 실패 — ${errSummary(DR.error)}`, 6000); renderDraft();
   }
   $("draft-modal").addEventListener("click", (e) => {
     if (e.target === $("draft-modal") || e.target.closest("[data-mclose]")) return closeDraft();
@@ -1918,7 +2035,7 @@
     if (ui.cal.view === "week") renderWeek(box, days, src.cal); else renderDay(box, days[0], src.cal);
     // Days outside agenda.calendar_range: say we're fetching (or that it failed) above what we already have.
     const note = src.status === "loading" ? `<div class="calload"><span class="spin"></span>범위 밖 날짜 일정 가져오는 중… <span class="hint">처음 보는 기간이면 30초쯤 걸려.</span></div>`
-      : src.status === "error" ? `<div class="calload err">일부 날짜 일정을 못 가져왔어. <span class="hint">${esc(String(src.error || "").slice(0, 120))}</span> <button class="btn small" type="button" data-cretry="1">다시</button></div>` : "";
+      : src.status === "error" ? `<div class="calload err">${errBadge("calendar", { where: "캘린더 범위 조회 (/api/calendar)", message: src.error || "알 수 없는 오류", retry: () => { for (const k of Object.keys(S.calRanges)) if (S.calRanges[k].status === "error") delete S.calRanges[k]; renderAgenda(); packCards(); } })}<span>일부 날짜 일정을 못 가져왔어.</span></div>` : "";
     if (note) box.insertAdjacentHTML("afterbegin", note);
   }
 
@@ -2032,10 +2149,10 @@
   const cardMode = (id) => (lsGet(`ned.cardmode.${id}`) === "all" ? "all" : "need");
   const counts = (pairs, sep = ", ") => pairs.filter(([, k]) => k > 0).map(([label, k]) => `${label} ${k}`).join(sep);
 
-  /** 채널 팔로업 highlights that need me (agenda slack.watch[].highlights[].needs_me), one per url. */
+  /** Open (not 확인 완료) 채널 팔로업 highlights that need me (agenda slack.watch[].highlights[].needs_me), one per url. */
   function watchNeeds(slack) {
     const seen = new Set();
-    return (slack?.watch || []).flatMap((w) => (w.highlights || []).filter((h) => h.needs_me).map((h) => ({ ...h, channel: w.channel })))
+    return (slack?.watch || []).flatMap((w) => (w.highlights || []).filter((h) => h.needs_me && isOpenSrc("slack")(h)).map((h) => ({ ...h, channel: w.channel })))
       .filter((h) => !h.url || (!seen.has(h.url) && seen.add(h.url)));
   }
   /** Slack card's 채널 팔로업 fold: collapsed by default, per-channel summary + highlights; needs_me rows get the accent bar. */
@@ -2044,13 +2161,14 @@
     if (!watch.length) { el.innerHTML = ""; return; }
     const hl = (w, h) => {
       const u = safeUrl(h.url);
-      return `<div class="ti${h.needs_me ? " need" : ""}"><span class="ic">${h.needs_me ? "❗" : "·"}</span><div class="mn"><span class="tt">${u ? ext(u, esc(h.text || "(내용 없음)")) : esc(h.text || "(내용 없음)")}</span>
+      const rv = h.needs_me ? revCls("slack", h) : "";
+      return `<div class="ti${h.needs_me && !rv ? " need" : ""}${rv}"><span class="ic">${h.needs_me ? "❗" : "·"}</span><div class="mn"><span class="tt">${u ? ext(u, esc(h.text || "(내용 없음)")) : esc(h.text || "(내용 없음)")}</span>
         <div class="sb"><span class="from">${esc(h.from)}</span>${h.needs_me ? `<span class="chipx today">나한테</span>` : ""}${h.reason ? `<span class="d">${esc(h.reason)}</span>` : ""}${h.ts ? `<span>${rel(toMs(h.ts))}</span>` : ""}</div></div>
-        <div class="ra">${h.needs_me ? draftFor("slack", { ...h, channel: w.channel }) : ""}${openIcon(u)}</div></div>`;
+        <div class="ra">${h.needs_me ? draftFor("slack", { ...h, channel: w.channel }, srcKey("slack", h)) : ""}${openIcon(u)}${h.needs_me ? srcCheck("slack", h) : ""}</div></div>`;
     };
     el.innerHTML = `<details class="swatch" ${ui.watchOpen ? "open" : ""}><summary>채널 팔로업 ${watch.length}${needN ? `<span class="chipx today">나한테 ${needN}</span>` : ""}</summary>` +
       watch.map((w) => {
-        const n = (w.highlights || []).filter((h) => h.needs_me).length;
+        const n = (w.highlights || []).filter((h) => h.needs_me && isOpenSrc("slack")(h)).length;
         return `<div class="swch"><div class="swh">${esc(w.channel)}${n ? `<span class="chipx today">${n}</span>` : ""}</div>` +
           (w.summary ? `<div class="sws">${esc(w.summary)}</div>` : `<div class="gnone">지난 24시간 눈에 띄는 대화 없음.</div>`) +
           (w.highlights || []).map((h) => hl(w, h)).join("") + `</div>`;
@@ -2073,83 +2191,83 @@
 
     const unavailable = ag === null ? "agenda 연결 안 됨." : ag === undefined ? "불러오는 중…" : "";
     // Gmail/Slack source off → hide the card; mail/slack === null → agenda.json predates the block (not fetched yet).
-    const mailOn = srcOn("email") && ag?.mail_enabled !== false, mail = mailOn ? ag?.mail : null, mi = mail?.items || [];
+    const mailOn = srcOn("email") && ag?.mail_enabled !== false, mail = mailOn ? ag?.mail : null, miAll = mail?.items || [], mi = miAll.filter(isOpenSrc("email"));
     const unreadN = `${Number(mail?.unread) || 0}${mail?.unread_capped ? "+" : ""}`;
     $("mail-sum").innerHTML = mail?.summary ? `<span>${esc(mail.summary)}</span>` : "";
     const mr = (k) => mi.filter((x) => (MAIL_REASON[x.reason] ? x.reason : "request") === k).length;
     const mailRow = (x) => MAIL_REASON[x.reason] || MAIL_REASON.request;
-    const mailAll = mail?.all || [], mailNeed = new Set(mi.flatMap((x) => [x.id, x.url].filter(Boolean)));
-    const mailAllRows = mailAll.map((x) => {
+    const mailAll = mail?.all || [], mailNeed = new Set(miAll.flatMap((x) => [x.id, x.url].filter(Boolean)));
+    const mailAllRows = withFold("mail-all", "email", mailAll, (x) => {
       const u = safeUrl(x.url), need = mailNeed.has(x.id) || mailNeed.has(x.url);
-      return `<div class="ti${need ? " need" : ""}"><span class="ic" title="${x.unread ? "안 읽음" : "읽음"}">${x.unread ? "●" : "○"}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.subject || "(제목 없음)")) : esc(x.subject || "(제목 없음)")}</span>
+      return `<div class="ti${need ? " need" : ""}${revCls("email", x)}"><span class="ic" title="${x.unread ? "안 읽음" : "읽음"}">${x.unread ? "●" : "○"}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.subject || "(제목 없음)")) : esc(x.subject || "(제목 없음)")}</span>
         <div class="sb"><span class="from">${esc(x.from)}</span>${need ? `<span class="chipx today">확인 필요</span>` : ""}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div></div>
-        <div class="ra">${draftFor("email", x)}${openIcon(u)}</div></div>`;
-    }).join("");
+        <div class="ra">${draftFor("email", x, srcKey("email", x))}${openIcon(u)}${srcCheck("email", x)}</div></div>`;
+    });
     card("mail", {
       hidden: !mailOn, n: mi.length, hot: mi.some((x) => x.reason === "deadline" || x.reason === "approval"),
       mode: cardMode("mail"), allRows: mailAllRows, allEmpty: mail ? "최근 2일 안 읽은 메일 목록 없음 (다음 새로고침 때 채워져)." : "다음 새로고침 때 메일도 가져올게.",
-      rows: mi.map((x) => {
+      rows: withFold("mail", "email", miAll, (x) => {
         const u = safeUrl(x.url), r = mailRow(x);
-        return `<div class="ti"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.subject || "(제목 없음)")) : esc(x.subject || "(제목 없음)")}</span>
+        return `<div class="ti${revCls("email", x)}"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.subject || "(제목 없음)")) : esc(x.subject || "(제목 없음)")}</span>
           <div class="sb"><span class="from">${esc(x.from)}</span><span class="chipx ${r[0]}">${r[1]}</span>${x.why ? `<span class="d">${esc(x.why)}</span>` : ""}${x.received ? `<span>${rel(toMs(x.received))}</span>` : ""}</div></div>
-          <div class="ra">${draftFor("email", x)}${openIcon(u)}</div></div>`;
-      }).join(""),
+          <div class="ra">${draftFor("email", x, srcKey("email", x))}${openIcon(u)}${srcCheck("email", x)}</div></div>`;
+      }),
       empty: unavailable || (mail ? "확인할 메일 없음." : "다음 새로고침 때 메일도 가져올게."),
       sum: mail ? esc([counts([["결재", mr("approval")], ["마감", mr("deadline")], ["답장", mr("reply")], ["확인", mr("request")]], " · "), `안 읽은 ${unreadN}`].filter(Boolean).join(" · ")) : "",
       pv: mi[0] && preview(mailRow(mi[0])[2], mi[0].subject || "(제목 없음)", safeUrl(mi[0].url), `<span class="chipx ${mailRow(mi[0])[0]}">${mailRow(mi[0])[1]}</span>`),
     });
 
-    const jira = [...(ag?.jira || [])].sort((a, b) => byDue(a, b) || toMs(b.updated) - toMs(a.updated));
+    const jiraAll = [...(ag?.jira || [])].sort((a, b) => byDue(a, b) || toMs(b.updated) - toMs(a.updated)), jira = jiraAll.filter(isOpenSrc("jira"));
     const jDays = (j) => dueInfo(j.due)?.days;
     card("jira", {
       n: jira.length, hot: jira.some((j) => (jDays(j) ?? 1) <= 0),
-      rows: jira.map((j) => {
+      rows: withFold("jira", "jira", jiraAll, (j) => {
         const u = safeUrl(j.url);
-        return `<div class="ti"><span class="ic" title="${esc(j.priority || "")}"><span class="led ${PRIO_LED[String(j.priority || "").toLowerCase()] || ""}" style="margin:0"></span></span><div class="mn"><span class="tt">${u ? ext(u, esc(j.title)) : esc(j.title)}</span>
+        return `<div class="ti${revCls("jira", j)}"><span class="ic" title="${esc(j.priority || "")}"><span class="led ${PRIO_LED[String(j.priority || "").toLowerCase()] || ""}" style="margin:0"></span></span><div class="mn"><span class="tt">${u ? ext(u, esc(j.title)) : esc(j.title)}</span>
           <div class="sb"><span class="key">${esc(j.key)}</span><span class="chipx">${esc(j.status || "—")}</span>${dueChip(j.due)}</div></div>
-          <div class="ra">${openIcon(u)}</div></div>`;
-      }).join(""),
+          <div class="ra">${openIcon(u)}${srcCheck("jira", j)}</div></div>`;
+      }),
       empty: unavailable || "배정된 이슈 없음.",
       sum: jira.length ? esc(counts([["마감 지난", jira.filter((j) => jDays(j) < 0).length], ["오늘", jira.filter((j) => jDays(j) === 0).length], ["진행 중", jira.filter((j) => /진행|progress/i.test(j.status || "")).length]]).replace(/ (\d+)/g, " $1건") || `열린 이슈 ${jira.length}건`) : "",
       pv: jira[0] && preview(`<span class="key">${esc(jira[0].key)}</span>`, jira[0].title, safeUrl(jira[0].url), dueChip(jira[0].due) || `<span class="chipx">${esc(jira[0].status || "—")}</span>`),
     });
 
-    const slackOn = srcOn("slack") && ag?.slack_enabled !== false, slack = slackOn ? ag?.slack : null, si = collapseDMs(slack?.items || []);
+    const slackOn = srcOn("slack") && ag?.slack_enabled !== false, slack = slackOn ? ag?.slack : null, siAll = collapseDMs(slack?.items || []), si = siAll.filter(isOpenSrc("slack"));
     $("slack-sum").innerHTML = slack?.summary ? `<span>${esc(slack.summary)}</span>` : "";
     const slRow = (x) => SLACK_REASON[x.reason] || SLACK_REASON.thread;
-    const slackNeed = new Set(si.map((x) => x.url).filter(Boolean));
+    const slackNeed = new Set(siAll.map((x) => x.url).filter(Boolean));
     const watch = slack?.watch || [], wNeed = watchNeeds(slack).filter((h) => !slackNeed.has(h.url));
     renderSlackWatch(watch, wNeed.length);
-    const slackAllRows = collapseDMs(slack?.all || []).map((x) => {
+    const slackAllRows = withFold("slack-all", "slack", collapseDMs(slack?.all || []), (x) => {
       const u = safeUrl(x.url), r = slRow(x), need = slackNeed.has(x.url);
-      return `<div class="ti${need ? " need" : ""}${x.answered && !need ? " answered" : ""}"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
+      return `<div class="ti${need ? " need" : ""}${x.answered && !need ? " answered" : ""}${revCls("slack", x)}"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
         <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span>${need ? `<span class="chipx today">답 필요</span>` : x.answered ? `<span class="chipx ok">답함</span>` : `<span class="chipx ${r[0]}">${r[1]}</span>`}${moreBadge(x)}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div></div>
-        <div class="ra">${draftFor("slack", x)}${openIcon(u)}</div></div>`;
-    }).join("");
+        <div class="ra">${draftFor("slack", x, srcKey("slack", x))}${openIcon(u)}${srcCheck("slack", x)}</div></div>`;
+    });
     card("slack", {
       hidden: !slackOn, n: si.length + wNeed.length, hot: si.some((x) => x.reason === "dm" || x.reason === "mention") || wNeed.length > 0,
       mode: cardMode("slack"), allRows: slackAllRows, allEmpty: slack ? "최근 24시간 멘션·DM 목록 없음 (다음 새로고침 때 채워져)." : "다음 새로고침 때 Slack 도 가져올게.",
-      rows: si.map((x) => {
+      rows: withFold("slack", "slack", siAll, (x) => {
         const u = safeUrl(x.url), r = slRow(x);
-        return `<div class="ti"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
+        return `<div class="ti${revCls("slack", x)}"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
           <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span><span class="chipx ${r[0]}">${r[1]}</span>${moreBadge(x)}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div></div>
-          <div class="ra">${draftFor("slack", x)}${openIcon(u)}</div></div>`;
-      }).join(""),
+          <div class="ra">${draftFor("slack", x, srcKey("slack", x))}${openIcon(u)}${srcCheck("slack", x)}</div></div>`;
+      }),
       empty: unavailable || (slack ? "답할 Slack 없음." : "다음 새로고침 때 Slack 도 가져올게."),
       sum: si.length || wNeed.length ? esc([si.length ? `${counts([["멘션", si.filter((x) => x.reason === "mention").length], ["DM", si.filter((x) => x.reason === "dm").length], ["스레드", si.filter((x) => x.reason === "thread").length]])} 답 필요` : "", wNeed.length ? `팔로업 채널 ${wNeed.length}건 확인` : ""].filter(Boolean).join(" · ")) : "",
       pv: si[0] && preview(slRow(si[0])[2], si[0].text || "(내용 없음)", safeUrl(si[0].url), `<span class="chipx">${esc(si[0].channel)}</span>`),
     });
 
-    const gh = [...(ag?.github || [])].sort((a, b) => (a.reason === "review_requested" ? 0 : 1) - (b.reason === "review_requested" ? 0 : 1) || toMs(b.updated) - toMs(a.updated));
+    const ghAll = [...(ag?.github || [])].sort((a, b) => (a.reason === "review_requested" ? 0 : 1) - (b.reason === "review_requested" ? 0 : 1) || toMs(b.updated) - toMs(a.updated)), gh = ghAll.filter(isOpenSrc("github"));
     const ghR = (x) => GH_REASON[x.reason] || ["", x.reason || "", "🐙"];
     card("gh", {
       n: gh.length, hot: gh.some((x) => x.reason === "review_requested"),
-      rows: gh.map((x) => {
+      rows: withFold("gh", "github", ghAll, (x) => {
         const u = safeUrl(x.url), r = ghR(x);
-        return `<div class="ti"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.title)) : esc(x.title)}</span>
+        return `<div class="ti${revCls("github", x)}"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.title)) : esc(x.title)}</span>
           <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.repo)}#${esc(x.number)}</span><span class="chipx ${r[0]}">${esc(r[1])}</span>${x.author ? `<span>@${esc(x.author)}</span>` : ""}${x.updated ? `<span>${rel(toMs(x.updated))}</span>` : ""}</div></div>
-          <div class="ra">${openIcon(u)}</div></div>`;
-      }).join(""),
+          <div class="ra">${openIcon(u)}${srcCheck("github", x)}</div></div>`;
+      }),
       empty: unavailable || "기다리는 리뷰 없음.",
       sum: esc(counts(Object.keys(GH_REASON).map((k) => [GH_REASON[k][1], gh.filter((x) => x.reason === k).length]))),
       pv: gh[0] && preview(ghR(gh[0])[2], gh[0].title, safeUrl(gh[0].url), `<span class="chipx ${ghR(gh[0])[0]}">${esc(ghR(gh[0])[1])}</span>`),
@@ -2190,10 +2308,11 @@
       if (!mt.length) bits.push(v.noMeet);
       else if (!left.length) bits.push(v.allDone(mt.length));
       else bits.push(v.meet({ left: left.length, cur: cur?.title, next: next ? hhmm(next.s) : "", first: next === mt[0] }));
-      const jira = srcOn("jira") ? ag.jira?.length || 0 : 0, rv = srcOn("github") ? (ag.github || []).filter((g) => g.reason === "review_requested").length : 0;
-      const mails = srcOn("email") && ag.mail_enabled !== false ? ag.mail?.items?.length || 0 : 0;
+      // 확인 완료 items don't count
+      const jira = srcOn("jira") ? (ag.jira || []).filter(isOpenSrc("jira")).length : 0, rv = srcOn("github") ? (ag.github || []).filter((g) => g.reason === "review_requested" && !revAt("github", g)).length : 0;
+      const mails = srcOn("email") && ag.mail_enabled !== false ? (ag.mail?.items || []).filter(isOpenSrc("email")).length : 0;
       const slackItems = collapseDMs(ag.slack?.items || []), slackUrls = new Set(slackItems.map((x) => x.url).filter(Boolean));
-      const slacks = srcOn("slack") && ag.slack_enabled !== false ? slackItems.length + watchNeeds(ag.slack).filter((h) => !slackUrls.has(h.url)).length : 0; // one per DM conversation, like the card; + 팔로업 needs_me
+      const slacks = srcOn("slack") && ag.slack_enabled !== false ? slackItems.filter(isOpenSrc("slack")).length + watchNeeds(ag.slack).filter((h) => !slackUrls.has(h.url)).length : 0; // one per DM conversation, like the card; + open 팔로업 needs_me
       const c = V().count;
       const w = [jira ? c("Jira", jira, "건") : "", rv ? c("리뷰", rv, "건") : "", mails ? c("메일", mails, "통") : "", slacks ? c("Slack", slacks, "건") : ""].filter(Boolean);
       if (w.length) bits.push(V().wait(w));
@@ -2236,8 +2355,9 @@
     const o = homeLine();
     $("say-home").innerHTML = say(`ned · ${hhmm(Date.now())}`, esc(o.lead), esc(o.sub));
     const ag = S.agenda;
-    $("ag-meta").innerHTML = ag === null ? `<span class="err">agenda 연결 안 됨</span>`
-      : ag ? [ag.updated_at ? `<span title="${esc(mdhm(ag.updated_at))}">일정 갱신 ${esc(rel(ag.updated_at))}</span>` : "", ag.cost_usd != null ? `<span>$${Number(ag.cost_usd).toFixed(2)}</span>` : "", ag.error ? `<span class="err" title="${esc(ag.error)}">⚠ ${esc(String(ag.error).slice(0, 60))}</span>` : ""].filter(Boolean).join(" · ") : "";
+    $("ag-meta").innerHTML = ag === null ? errBadge("agenda-conn", { where: "agenda 연결", message: "GET /api/agenda 가 실패했어. daemon 이 꺼졌거나 이 버전에 agenda API 가 없어.", retry: () => loadAgenda() })
+      : ag ? [ag.updated_at ? `<span title="${esc(mdhm(ag.updated_at))}">일정 갱신 ${esc(rel(ag.updated_at))}</span>` : "", ag.cost_usd != null ? `<span>$${Number(ag.cost_usd).toFixed(2)}</span>` : "",
+        ag.error ? errBadge("agenda", { where: "일정·이슈 갱신 (agenda 잡)", message: ag.error, at: ag.updated_at || Date.now(), retry: () => refreshAgenda() }) : ""].filter(Boolean).join(" · ") : "";
     renderAgenda();
     renderTodoGroups();
     packCards();
@@ -2259,7 +2379,7 @@
     try {
       const a = await api("/api/agenda/refresh", { method: "POST" });
       if (a) S.agenda = a;
-      toast(a?.error ? `일부는 못 가져왔어: ${a.error}` : "일정이랑 이슈 새로 가져왔어.");
+      toast(a?.error ? `일부는 못 가져왔어 — ${errSummary(a.error)} (⚠ 를 눌러 자세히)` : "일정이랑 이슈 새로 가져왔어.");
     } catch (e) {
       if (e.status === 409) toast("이미 가져오는 중이야. 조금만 기다려.");
       else if (e.status === 404) toast("아직 agenda API 가 없어.");
@@ -2302,10 +2422,9 @@
 
   $("ag-refresh").addEventListener("click", refreshAgenda);
   $("cal-card").addEventListener("click", (e) => {
-    const v = e.target.closest("[data-cv]"), n = e.target.closest("[data-cn]"), r = e.target.closest("[data-cretry]");
+    const v = e.target.closest("[data-cv]"), n = e.target.closest("[data-cn]");
     if (v) calView(v.dataset.cv);
     else if (n) calMove(Number(n.dataset.cn));
-    else if (r) { for (const k of Object.keys(S.calRanges)) if (S.calRanges[k].status === "error") delete S.calRanges[k]; renderAgenda(); packCards(); }
   });
   $("tadd").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -2316,6 +2435,7 @@
   });
   $("tadd-t").addEventListener("keydown", (e) => { if (e.key === "Escape") e.target.blur(); });
   // Source card header (a <button>: click, Enter or Space) toggles shrink ⇄ expanded and remembers it per card.
+  $("sgrid").addEventListener("toggle", (e) => { const d = e.target; if (d.classList?.contains("rvfold")) { ui.revCard = ui.revCard || {}; ui.revCard[d.dataset.rv] = d.open; packCards(); } }, true);
   $("sgrid").addEventListener("click", (e) => {
     const vm = e.target.closest("[data-vm]");
     if (vm) {
@@ -2348,7 +2468,7 @@
   async function loadState() {
     try {
       const s = await api("/api/state");
-      S.state = s; S.conn = true;
+      S.state = s; S.conn = true; S.connErrAt = 0;
       if (s.persona && s.persona !== persona) applyPersona(s.persona);
       const bid = s.last_briefing?.id ?? null;
       const tasks = [];
@@ -2357,7 +2477,7 @@
       lastUpdated = s.updated_at; lastBriefId = bid;
       await Promise.all(tasks);
     } catch (e) {
-      console.warn("state", e.message); S.conn = false;
+      console.warn("state", e.message); S.conn = false; S.connErr = e.message; S.connErrAt = S.connErrAt || Date.now();
     }
     renderAll();
   }
