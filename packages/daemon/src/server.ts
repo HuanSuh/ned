@@ -11,13 +11,14 @@ import { contextStatus, requestContext } from "./agenda-context.js";
 import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runChatTurn, sseFrame, stopChat } from "./chat.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeDashboard, normalizeNotifications, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, restoreConfigBackup, saveConfig, sourceRefreshMinutes, watchChannels, type NedConfig, type PersonaId } from "./config.js";
+import { PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeDashboard, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, restoreConfigBackup, saveConfig, sourceRefreshMinutes, watchChannels, type NedConfig, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { checkStatus, dismissAttention, heartbeat, listBriefings, runCheck } from "./heartbeat.js";
 import { log } from "./paths.js";
 import { onMailReviewed, type MarkReadOutcome } from "./mail-read.js";
 import { SOURCE_KEY, readSourceReviewed, readState, setReviewed, writeState } from "./state.js";
+import { noteActivity, schedulerStatus } from "./scheduler.js";
 import { registerSearch } from "./search.js";
 import { markThreadSeen } from "./slack-threads.js";
 import { addTodo, deleteTodo, listTodos, updateTodo } from "./todos.js";
@@ -91,6 +92,8 @@ export function mergeConfigPatch(cur: NedConfig, body: Partial<NedConfig>): NedC
     reply_tone_by_source: normalizeReplyToneBySource(m.reply_tone_by_source, cur.reply_tone_by_source),
     filters: mergeFilters(cur.filters, filters),
     agenda_source_minutes: normalizeAgendaSourceMinutes(m.agenda_source_minutes, cur.agenda_source_minutes),
+    quiet_schedule: normalizeQuietSchedule(m.quiet_schedule, cur.quiet_schedule),
+    idle_schedule: normalizeIdleSchedule(m.idle_schedule, cur.idle_schedule),
   };
   // Re-normalized even without a dashboard patch: a 팔로업 channel added / removed in filters adds / drops its `watch:` card.
   merged.dashboard = normalizeDashboard(dashboard ?? {}, cur.dashboard, watchChannels(merged.filters));
@@ -119,7 +122,18 @@ export function startServer(getConfig: () => NedConfig): void {
     if (fs.existsSync(index)) return c.html(fs.readFileSync(index, "utf8"));
     return c.html("<!doctype html><title>Ned</title><p>Ned daemon is running. API: /api/state, /api/events, /api/briefings, /api/config</p>");
   });
-  app.get("/api/state", (c) => c.json({ ...readState(), build_id: BUILD_ID }));
+  // ?visible=1: the dashboard is visible + focused → counts as user activity (idle auto-slowdown, src/scheduler.ts).
+  // state.quiet stays a boolean (Ned.app decodes it); the scheduler's view is quiet_schedule / idle.
+  app.get("/api/state", (c) => {
+    if (c.req.query("visible") === "1") noteActivity();
+    const sch = schedulerStatus(loadConfig());
+    return c.json({ ...readState(), build_id: BUILD_ID, quiet_schedule: sch.quiet, idle: sch.idle });
+  });
+  // Dashboard activity ping (input / focus, ≤ once a minute): ends idle mode right away.
+  app.post("/api/activity", (c) => {
+    noteActivity();
+    return c.json({ ok: true });
+  });
   app.get("/api/events", (c) => c.json(readRecentEvents(Number(c.req.query("days") ?? 2))));
   app.get("/api/briefings", (c) => c.json(listBriefings(Number(c.req.query("limit") ?? 30))));
   app.get("/api/config", (c) => c.json(configView(loadConfig())));
@@ -205,6 +219,8 @@ export function startServer(getConfig: () => NedConfig): void {
       running_sources: live,
       // Effective auto-refresh interval per source (config.agenda_source_minutes ?? agenda_refresh_minutes).
       refresh_minutes: Object.fromEntries(AGENDA_SOURCES.map((k) => [k, sourceRefreshMinutes(cfg, k)])),
+      // Quiet hours / idle throttling of automatic runs (HOME status chip).
+      ...schedulerStatus(cfg),
       // A "running" left on disk by a daemon that died mid-run would spin forever: only trust it while that source's run is live.
       sources_status: Object.fromEntries(Object.entries(a.sources_status ?? {}).map(([k, s]) => [k, s?.status === "running" && !live.includes(k as AgendaSourceKey) ? { ...s, status: "error", error: "interrupted" } : s])),
       context_status: contextStatus(),

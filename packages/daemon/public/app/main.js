@@ -12,6 +12,7 @@ import { init as initReviewed } from "./features/reviewed.js";
 import { init as initSlackThread } from "./features/slackthread.js";
 import { emit, store } from "./state.js";
 import { init as initHome } from "./tabs/home.js";
+import { dashActive, initActivityPing } from "./features/autosched.js";
 import { init as initSettings } from "./tabs/settings.js";
 import { init as initChips } from "./ui/chips.js";
 import { init as initPopover } from "./ui/popover.js";
@@ -108,7 +109,7 @@ export async function runHeartbeat(daily) {
 export let lastUpdated = 0, lastBriefId; // undefined until the first poll
 export async function loadState() {
   try {
-    const s = await api("/api/state");
+    const s = await api(dashActive() ? "/api/state?visible=1" : "/api/state"); // visible+focused = user activity (idle mode)
     S.state = s; S.conn = true; S.connErrAt = 0;
     noteBuild(s.build_id); // daemon restarted on new code → reload banner + settings save lock
     if (s.persona && s.persona !== persona) applyPersona(s.persona);
@@ -175,7 +176,7 @@ window.NED = { store, api: { api, postJson }, nav };
 
 // Every module's listeners + one-time setup, in the order the single file ran them — listener order on document
 // matters (e.g. the error popover's Esc stopImmediatePropagation runs before the page keys in boot()).
-for (const init of [initChips, initPopover, initSettings, initCardLayout, initLayout, initReviewed, initDrafts, initCalendar, initCards, initSlackThread, initAgStatus, initHome, initComms]) init();
+for (const init of [initChips, initPopover, initSettings, initCardLayout, initLayout, initReviewed, initDrafts, initCalendar, initCards, initSlackThread, initAgStatus, initHome, initComms, initActivityPing]) init();
 boot();
 
 function boot() {

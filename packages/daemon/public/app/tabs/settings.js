@@ -9,6 +9,7 @@ import { readToneBySource, syncWriteActionGroups, writeActionsHtml } from "./set
 import { persona } from "../features/personas.js";
 import { applyTheme, normTheme, syncTheme, themeHtml } from "../features/theme.js";
 import { loadAgenda } from "../main.js";
+import { readAutoSched, renderAutoSched } from "../features/autosched.js";
 import { S } from "../state.js";
 import { KIND_ICON, KIND_KO, SOURCE_LABEL } from "../ui/icons.js";
 import { toast } from "../ui/toast.js";
@@ -193,6 +194,7 @@ export function renderConfig(c = S.config, { preview = false } = {}) {
   $("c-sig").value = c.signal_check_minutes ?? "";
   $("c-bt").value = c.briefing_time ?? "";
   renderIntervals(c);
+  renderAutoSched(c); // 조용한 시간 동작 / 유휴 시 동작
   $("c-qon").checked = !!c.quiet_hours;
   $("c-qs").value = c.quiet_hours?.start ?? "23:00";
   $("c-qe").value = c.quiet_hours?.end ?? "08:00";
@@ -236,6 +238,7 @@ export function readBody() {
     briefing_time: $("c-bt").value,
     agenda_refresh_minutes: Number($("c-agmin").value),
     agenda_source_minutes: readIntervals(),
+    ...readAutoSched(), // quiet_schedule, idle_schedule
     quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
     sources,
     filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack] }, jira: { exclude_projects: [...excl.jira] } },

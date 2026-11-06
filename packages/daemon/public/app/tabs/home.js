@@ -8,6 +8,7 @@ import { watchCardsOn } from "../features/cardlayout.js";
 import { draftFor } from "../features/drafts.js";
 import { renderWatchCards } from "../features/watchcards.js";
 import { V, greet, say } from "../features/personas.js";
+import { autoSchedChip } from "../features/autosched.js";
 import { isOpenSrc, openAtt, revAt, revCls, srcCheck, srcKey, withFold } from "../features/reviewed.js";
 import { loadAgenda, loadState, loadTodos, renderAll, renderHeader } from "../main.js";
 import { S, ui } from "../state.js";
@@ -180,12 +181,20 @@ export function homeLine() {
   return { lead: `${greet()} ${bits.join(" ")}`, sub: sub.join(" · ") };
 }
 
+/** 야간 / 유휴 모드 칩 (GET /api/state quiet_schedule · idle) — "" when automatic runs aren't throttled. */
+function schedChip() {
+  const t = autoSchedChip({ quiet: S.state?.quiet_schedule, idle: S.state?.idle });
+  if (!t) return "";
+  const tip = S.state?.idle?.active ? `자동 순찰·홈 갱신을 줄였어 — ${S.state.idle.reason || "활동 없음"}. 수동 새로고침은 바로 돼.` : "조용한 시간이라 자동 순찰·홈 갱신을 줄였어. 수동 새로고침·지금 점검은 바로 돼.";
+  return `<span class="aschip" title="${esc(tip)}">${S.state?.idle?.active ? "💤" : "🌙"} ${esc(t)}</span>`;
+}
+
 export function renderHome() {
   const o = homeLine();
   $("say-home").innerHTML = say(`ned · ${hhmm(Date.now())}`, esc(o.lead), esc(o.sub));
   const ag = S.agenda;
   $("ag-meta").innerHTML = ag === null ? errBadge("agenda-conn", { where: "agenda 연결", message: "GET /api/agenda 가 실패했어. daemon 이 꺼졌거나 이 버전에 agenda API 가 없어.", retry: () => loadAgenda() })
-    : ag ? [ag.updated_at ? `<span title="${esc(mdhm(ag.updated_at))}">일정 갱신 ${esc(rel(ag.updated_at))}</span>` : "", costHtml(ag),
+    : ag ? [schedChip(), ag.updated_at ? `<span title="${esc(mdhm(ag.updated_at))}">일정 갱신 ${esc(rel(ag.updated_at))}</span>` : "", costHtml(ag),
       ag.error ? errBadge("agenda", { where: "일정·이슈 갱신 (agenda 잡)", message: ag.error, at: ag.updated_at || Date.now(), retry: () => refreshAgenda() }) : ""].filter(Boolean).join(" · ") : "";
   renderAgenda();
   renderTodoGroups();
