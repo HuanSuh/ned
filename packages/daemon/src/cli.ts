@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-import { buildPrompt, refreshAgenda } from "./agenda.js";
-import { loadConfig } from "./config.js";
+import { buildPrompt, enabledSources, readAgenda, refreshAgenda, runningSources } from "./agenda.js";
+import { loadConfig, sourceRefreshMinutes } from "./config.js";
+import { dueSources, lastRuns, type SourceTimes } from "./schedule.js";
 import { todayCost } from "./costs.js";
 import { buildHeartbeatPrompt, heartbeat, listBriefings, refreshSessions } from "./heartbeat.js";
 import { readUnprocessedEvents } from "./events.js";
@@ -71,13 +72,32 @@ async function main(): Promise<void> {
         }
         return true;
       };
+      // Per-source schedule: tick every minute, refresh the sources whose interval
+      // (agenda_source_minutes[k] ?? agenda_refresh_minutes) has passed since their last run, all due ones in one call.
+      // The first tick (daemon start) refreshes every enabled source.
+      const scheduled: SourceTimes = {};
+      let firstAgenda = true;
       const agendaTick = () => {
-        const c = loadConfig();
-        if (overBudget(c, "agenda")) return;
-        refreshAgenda(c).catch((e) => log(`agenda failed: ${String(e)}`));
+        try {
+          const c = loadConfig();
+          if (overBudget(c, "agenda")) return;
+          const now = Date.now();
+          const enabled = enabledSources(c);
+          const live = runningSources();
+          const last = lastRuns(scheduled, readAgenda().sources_status, enabled);
+          const due = firstAgenda ? enabled.filter((k) => !live.includes(k)) : dueSources(c, enabled, last, now, live);
+          if (!due.length) return;
+          const why = firstAgenda ? "startup" : `due: ${due.map((k) => `${k} ${sourceRefreshMinutes(c, k)}m`).join(", ")}`;
+          firstAgenda = false;
+          for (const k of due) scheduled[k] = now;
+          log(`agenda: scheduled refresh [${due.join(",")}] (${why})`);
+          refreshAgenda(c, { sources: due }).catch((e) => log(`agenda failed: ${String(e)}`));
+        } catch (e) {
+          log(`agenda tick failed: ${String(e)}`);
+        }
       };
       agendaTick();
-      setInterval(agendaTick, Math.max(1, cfg.agenda_refresh_minutes) * 60_000);
+      setInterval(agendaTick, 60_000);
 
       await tick();
       setInterval(tick, cfg.heartbeat_minutes * 60_000);

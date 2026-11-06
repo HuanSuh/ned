@@ -5,11 +5,11 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { parseSendRequest, readActionLog } from "./actions.js";
 import { getSendJob, linkOf, startSendJob, viewJob } from "./send-jobs.js";
-import { agendaBusy, patchAgenda, readAgenda, refreshAgenda } from "./agenda.js";
+import { AGENDA_SOURCES, agendaBusy, enabledSources, patchAgenda, readAgenda, runningSources, startAgendaRefresh, type AgendaSourceKey } from "./agenda.js";
 import { contextStatus, requestContext } from "./agenda-context.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { PERSONAS, loadConfig, mergeFilters, normalizeActions, normalizeDashboard, normalizeNotifications, normalizeReplyTone, normalizePersona, saveConfig, watchChannels, type NedConfig, type PersonaId } from "./config.js";
+import { PERSONAS, loadConfig, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeDashboard, normalizeNotifications, normalizeReplyTone, normalizePersona, saveConfig, sourceRefreshMinutes, watchChannels, type NedConfig, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { checkStatus, dismissAttention, heartbeat, listBriefings, runCheck } from "./heartbeat.js";
@@ -81,7 +81,7 @@ export function startServer(getConfig: () => NedConfig): void {
     const cur = loadConfig();
     // filters is nested: merge it per source so a PUT carrying only filters.slack keeps filters.jira.
     // An unknown persona value keeps the current one.
-    const merged = { ...cur, ...body, persona: PERSONAS.includes(body.persona as PersonaId) ? normalizePersona(body.persona) : cur.persona, notifications: normalizeNotifications(body.notifications, cur.notifications), actions: normalizeActions(body.actions, cur.actions), reply_tone: normalizeReplyTone(body.reply_tone, cur.reply_tone), filters: mergeFilters(cur.filters, body.filters) };
+    const merged = { ...cur, ...body, persona: PERSONAS.includes(body.persona as PersonaId) ? normalizePersona(body.persona) : cur.persona, notifications: normalizeNotifications(body.notifications, cur.notifications), actions: normalizeActions(body.actions, cur.actions), reply_tone: normalizeReplyTone(body.reply_tone, cur.reply_tone), filters: mergeFilters(cur.filters, body.filters), agenda_source_minutes: normalizeAgendaSourceMinutes(body.agenda_source_minutes, cur.agenda_source_minutes) };
     // Re-normalized even without body.dashboard: a 팔로업 channel added / removed in filters adds / drops its `watch:` card.
     merged.dashboard = normalizeDashboard(body.dashboard ?? {}, cur.dashboard, watchChannels(merged.filters));
     saveConfig(merged);
@@ -127,9 +127,11 @@ export function startServer(getConfig: () => NedConfig): void {
   // HOME tab: agenda (calendar / jira / github), refreshed by a cheap structured claude -p job.
   // mail_enabled / slack_enabled (= sources.gmail / sources.slack) let HOME hide those cards even if agenda.json still has old data.
   app.get("/api/agenda", (c) => {
-    const { sources } = loadConfig();
+    const cfg = loadConfig();
+    const { sources } = cfg;
     // A source switched off disappears now, not at the next agenda run (which also stops fetching / writes it empty).
     const a = readAgenda();
+    const live = runningSources();
     return c.json({
       ...a,
       calendar: sources.calendar ? a.calendar : [],
@@ -138,8 +140,11 @@ export function startServer(getConfig: () => NedConfig): void {
       mail: sources.gmail ? a.mail : null,
       slack: sources.slack ? a.slack : null,
       busy: agendaBusy(),
-      // A "running" left on disk by a daemon that died mid-run would spin forever: only trust it while a run is live.
-      sources_status: agendaBusy() ? a.sources_status : Object.fromEntries(Object.entries(a.sources_status ?? {}).map(([k, s]) => [k, s?.status === "running" ? { ...s, status: "error", error: "interrupted" } : s])),
+      running_sources: live,
+      // Effective auto-refresh interval per source (config.agenda_source_minutes ?? agenda_refresh_minutes).
+      refresh_minutes: Object.fromEntries(AGENDA_SOURCES.map((k) => [k, sourceRefreshMinutes(cfg, k)])),
+      // A "running" left on disk by a daemon that died mid-run would spin forever: only trust it while that source's run is live.
+      sources_status: Object.fromEntries(Object.entries(a.sources_status ?? {}).map(([k, s]) => [k, s?.status === "running" && !live.includes(k as AgendaSourceKey) ? { ...s, status: "error", error: "interrupted" } : s])),
       context_status: contextStatus(),
       reviewed: readSourceReviewed(), // 확인 완료 marks for mail / slack / jira / github items (key → ms)
       mail_enabled: sources.gmail,
@@ -150,10 +155,24 @@ export function startServer(getConfig: () => NedConfig): void {
   app.post("/api/agenda/refresh", async (c) => {
     // Phase 1 only: returns once every source's list is merged (each lands in agenda.json as soon as its own call ends).
     // Phase 2 (reply context) keeps running in the background — see context_status.
-    // Concurrent refreshes share the in-flight run instead of spawning more claude -p.
+    // body { sources?: ["slack", ...] } — default every enabled source. Per-source concurrency: a requested source that is
+    // already running is not restarted; if *every* requested source is running → 409 { busy }. Otherwise the free ones
+    // start and the response (after phase 1) lists `started` and `busy`.
     const cfg = loadConfig();
-    const a = await refreshAgenda(cfg);
-    return c.json({ ...a, context_status: contextStatus(), mail_enabled: cfg.sources.gmail, slack_enabled: cfg.sources.slack });
+    let body: { sources?: unknown } = {};
+    try { body = ((await c.req.json()) ?? {}) as { sources?: unknown }; } catch { /* no body = all sources */ }
+    let sources: AgendaSourceKey[] | undefined;
+    if (body.sources !== undefined) {
+      if (!Array.isArray(body.sources) || body.sources.some((s) => !AGENDA_SOURCES.includes(s as AgendaSourceKey))) return c.json({ error: `sources must be an array of ${AGENDA_SOURCES.join("|")}` }, 400);
+      sources = [...new Set(body.sources as AgendaSourceKey[])];
+    }
+    const busyNow = runningSources();
+    const want = sources ? enabledSources(cfg).filter((k) => sources!.includes(k)) : enabledSources(cfg);
+    if (want.length && want.every((k) => busyNow.includes(k))) return c.json({ error: "already running", busy: want }, 409);
+    const run = startAgendaRefresh(cfg, { sources });
+    log(`agenda: manual refresh [${run.started.join(",") || "-"}]${run.busy.length ? ` (joined running: ${run.busy.join(",")})` : ""}`);
+    const a = await run.done;
+    return c.json({ ...a, started: run.started, busy: run.busy, context_status: contextStatus(), mail_enabled: cfg.sources.gmail, slack_enabled: cfg.sources.slack });
   });
   // Phase 2 on demand (background). ?force=1 re-collects even for sources whose list didn't change.
   app.post("/api/agenda/context", (c) => {

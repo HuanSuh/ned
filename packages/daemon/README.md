@@ -104,7 +104,10 @@ permalink(쿼리·해시 무시)로 같은 처리를 한 번 더 한다 — 확�
 설정 → "답 필요 해제 이모지" 칩 입력(쉼표·엔터로 추가).
 
 **Agenda 잡** (`src/agenda.ts`, `src/agenda-context.ts`, `prompts/agenda-lists.md`, `prompts/agenda-context.md`): 대시보드 HOME 탭용
-구조화 데이터. 시작 직후 1회, 이후 `agenda_refresh_minutes`(기본 60) 마다, 그리고 `POST /api/agenda/refresh` 때 돈다. 두 단계다 —
+구조화 데이터. 시작 직후 1회(전 소스), 이후 1분마다 틱을 돌며 **소스별 주기**(`agenda_source_minutes.<slack|mail|calendar|jira|github>`,
+null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 모아 한 번에 갱신한다(`src/schedule.ts`; 마지막 실행 =
+스케줄러가 돌린 시각과 `sources_status.started_at` 중 늦은 것이라 카드 ↻ 수동 갱신도 다음 자동 갱신을 미룬다; 일일 예산 hard stop 은 그대로).
+그리고 `POST /api/agenda/refresh` 때 돈다. 소스별 동시성 — 같은 소스는 한 번에 하나, 다른 소스는 나란히. 로그: `agenda: scheduled refresh [slack] (due: slack 15m)` / `(startup)` / `agenda: manual refresh [mail]`. 두 단계다 —
 "메시지 목록 먼저, 맥락은 백그라운드".
 
 - **1단계 — 목록 (소스별 병렬, 먼저 끝난 소스부터 반영)**: 소스마다 따로 `claude -p` 를 **동시에** 띄우고(시작 순서 = 우선순위:
@@ -158,7 +161,7 @@ permalink(쿼리·해시 무시)로 같은 처리를 한 번 더 한다 — 확�
 | GET | `/api/check` | 진행 중인 점검 단계 `{running, phase: "agenda"\|"judge"\|null, daily, started_at, phase_started_at}` |
 | POST | `/api/attention/:id/dismiss` | attention 항목 제거. 세션 항목은 `dismissed.json` 에 기억돼 같은 알림으로는 다시 안 뜬다 |
 | GET | `/api/agenda` | `agenda.json` (+ `busy`, `sources_status`, `context_status`). 없으면 빈 배열과 `updated_at: 0`. 실행 중이 아닌데 `running` 으로 남은 소스(데몬이 도중에 죽음)는 `error: "interrupted"` 로 보여 준다 |
-| POST | `/api/agenda/refresh` | 1단계(목록)가 끝나면 반환 (실행 중이면 그 결과를 기다림). 2단계는 백그라운드로 계속 — 응답의 `context_status.running` |
+| POST | `/api/agenda/refresh` | body `{ sources?: ["slack", …] }`(없으면 켜진 전 소스). 요청 소스가 **모두** 이미 갱신 중이면 409 `{ busy }`; 일부만이면 나머지만 시작하고 갱신 중인 것은 기다린다. 1단계(목록)가 끝나면 `started`·`busy` 와 함께 반환. 2단계는 백그라운드로 계속 — 응답의 `context_status.running` |
 | POST | `/api/agenda/context?force=1` | 2단계(답장 맥락)를 지금 백그라운드로 시작하고 `{context_status}` 를 바로 반환. `force=1` 은 "목록 변화 없음" 건너뛰기를 무시 (신선한 맥락이 있는 항목은 여전히 건너뜀) |
 | GET | `/api/costs?days=14` | `{ today, today_usd, budget_usd, over_budget, days: [{day, total_usd, runs, jobs: {<job>: {usd, runs}}}] }` — `~/.ned/costs.json` |
 | GET | `/api/todos` | 개인 할 일 목록 |

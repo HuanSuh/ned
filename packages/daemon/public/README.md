@@ -130,6 +130,7 @@ Slack·메일 항목(소스 카드 행, Ned 액션 아이템, 인박스 상세)�
 
 2단계 agenda(daemon README "agenda") 를 소스별로 보여 준다.
 - `GET /api/agenda` 의 `sources_status.<slack|mail|calendar|jira|github>.status`: `running` → 그 카드 헤더(일정은 패널 헤더, `#st-<key>`)에 스피너 + '갱신 중', `error` → ⚠ 배지(`errBadge`, 다시 시도 = 새로고침). `error: "interrupted"` 는 "가져오던 중에 끊겼어(이전 목록 표시 중)" 로 풀어 쓴다.
+- 갱신 중이 아니면 같은 자리(`#st-<key>`, 팔로업 채널 카드는 `.srcst[data-src="slack"]`)에 ↻ 버튼(`data-srefresh`) — 그 소스만 `POST /api/agenda/refresh {sources:[key]}`(`refreshSource`). 누르면 바로 '갱신 중' 으로 바뀌고 followAgenda 로 카드가 다시 그려진다. 409(이미 갱신 중)면 토스트만. title = '마지막 갱신 N분 전 · 주기 M분'(`GET /api/agenda` 의 `refresh_minutes`). ⚠ 의 다시 시도도 그 소스만.
 - 새로고침(`POST /api/agenda/refresh`)은 1단계가 끝나면 응답하지만 소스마다 끝나는 시점이 달라서, 응답 뒤(그리고 어떤 로드에서든 `busy` 나 `context_status.running` 이 보이면) `busy` 가 false 가 되고 2단계가 쉴 때까지 3초마다 `GET /api/agenda` 를 다시 읽는다 — 카드는 받은 데이터대로 바로 다시 그린다.
 - `context_status`(Slack·메일 공용 큐): 진행 중이면 두 카드 하단(`#ctx-slack`, `#ctx-mail`)에 '맥락 수집 done/(done+pending+failed)', `stopped === "budget"` 이면 '오늘 예산 소진' + `지금 수집`(`POST /api/agenda/context?force=1`, 이후 다시 따라 읽음).
 - 홈 상단 비용: `GET /api/costs` 의 `오늘 $today_usd / $budget_usd`(툴팁에 마지막 agenda 1단계 비용), `over_budget` 이면 경고색. `/api/costs` 가 없는 daemon 이면 예전처럼 `$cost_usd`.
