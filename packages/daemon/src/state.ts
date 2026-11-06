@@ -1,5 +1,5 @@
 import { DEFAULT_NOTIFICATIONS, type NedNotifications, type PersonaId } from "./config.js";
-import { STATE_PATH, readJson, writeJsonAtomic } from "./paths.js";
+import { REVIEWED_PATH, STATE_PATH, readJson, writeJsonAtomic } from "./paths.js";
 import type { SessionView } from "./sessions.js";
 
 export type AttentionKind = "session" | "email" | "slack" | "jira" | "github" | "sentry" | "calendar" | "other";
@@ -13,6 +13,8 @@ export interface AttentionItem {
   ts: number;
   /** Where it came from: a briefing id or "sessions". */
   source: string;
+  /** Marked 확인 완료 (ms). Still in `attention`, just not counted as open. Cleared when the item changes after it. */
+  reviewed_at?: number;
 }
 
 export interface BriefingSection {
@@ -49,6 +51,8 @@ export interface NedState {
   persona: PersonaId;
   /** config.notifications, mirrored for Ned.app (which posts the banners). */
   notifications: NedNotifications;
+  /** attention items not marked 확인 완료 — for the menu-bar badge / counts. */
+  attention_open_count: number;
 }
 
 export function readState(): NedState {
@@ -63,10 +67,32 @@ export function readState(): NedState {
     quiet: false,
     persona: "ned",
     notifications: DEFAULT_NOTIFICATIONS,
+    attention_open_count: 0,
   });
 }
 
+/** Attention id → reviewed at (ms). */
+export type Reviewed = Record<string, number>;
+export const readReviewed = (): Reviewed => readJson<Reviewed>(REVIEWED_PATH, {});
+
+/**
+ * Mark / unmark an attention item as 확인 완료 (persisted in reviewed.json, entries kept 7 days).
+ * Returns the item's new reviewed_at (or null).
+ */
+export function setReviewed(id: string, reviewed: boolean, now = Date.now()): number | null {
+  const r = Object.fromEntries(Object.entries(readReviewed()).filter(([, at]) => now - at < 7 * 24 * 60 * 60_000));
+  if (reviewed) r[id] = now; else delete r[id];
+  writeJsonAtomic(REVIEWED_PATH, r);
+  writeState(readState());
+  return reviewed ? now : null;
+}
+
 export function writeState(state: NedState): void {
+  // Re-apply 확인 완료 on every write, so attention rebuilt by refreshSessions / heartbeat keeps it.
+  // An item that changed after it was reviewed (ts later than the mark, e.g. a session's new alert) is open again.
+  const reviewed = readReviewed();
+  state.attention = state.attention.map(({ reviewed_at: _old, ...a }) => (reviewed[a.id] != null && reviewed[a.id] >= (a.ts || 0) ? { ...a, reviewed_at: reviewed[a.id] } : a));
+  state.attention_open_count = state.attention.filter((a) => !a.reviewed_at).length;
   state.updated_at = Date.now();
   state.daemon_pid = process.pid;
   writeJsonAtomic(STATE_PATH, state);

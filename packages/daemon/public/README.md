@@ -71,3 +71,7 @@ daemon 을 `NED_HOME=/some/fixture` 로 띄우거나, 같은 라우트를 흉내
 ## 답장 초안 팝업
 
 Slack·메일 항목(소스 카드 행, Ned 액션 아이템, 인박스 상세)과 세션(레일·인박스 상세)에 `✍ 답장 초안` 버튼. 누르면 모달: `POST /api/draft {source, ref, hint?, tone?}` (ref 는 permalink 에서 채널 id·ts·thread_ts, 메일은 thread id, 세션은 session_id 를 뽑아 보냄; tone = `config.reply_tone`) → 맥락 요약·발췌, 초안 탭 3개(짧게/보통/정중하게, 탭마다 편집 유지), 편집 가능한 textarea, `다시 생성`(힌트). 하단: 복사 · Slack/Gmail 에서 열기 · Slack 전송 · Gmail 초안 저장 · 메일 보내기 · 세션에 보내기 — `config.actions` (`slack_send` / `gmail_draft` / `gmail_send` / `session_send`, 화면 기본값: Slack 전송·메일 보내기 꺼짐)에 따라 꺼진 건 `aria-disabled` + "설정에서 허용" 툴팁·토스트. 보내는 동작(Slack 전송·메일 보내기·세션에 보내기)은 대상을 보여 주는 확인 단계를 거친다. `POST /api/send {draft_id, source, ref, text, mode}` 결과는 토스트, 403·실패는 모달 안 메시지 + 토스트. 초안을 받는 동안 헤더 안경은 '스캔 중'. 키: Esc 닫기(확인 단계에선 확인만 취소), ⌘⏎/Ctrl⏎ 주 액션(확인 단계에선 확인), Tab 은 모달 안에서 순환. 설정 → '쓰기 액션' 에 토글 4개 + 답장 말투.
+
+## 항목 아이콘 · 확인 완료
+
+항목 동작은 한 컴포넌트(`iconBtn`, 24px, 인라인 SVG, `title`/`aria-label` 이 라벨, hover 는 페르소나 포인트색): 초안(연필) · 열기(외부 링크) · 확인(체크) · 닫기(×). 홈 할 일·소스 카드·인박스 목록/상세·세션 레일에서 같은 모양. 체크를 누르거나 그 항목으로 초안을 만들면 확인 완료(`reviewed_at`) — 홈 Ned 액션은 그룹 아래 `확인 완료 N` 접힘 섹션으로, 인박스 '우선' 은 목록 끝 접힘 줄 아래로 간다(흐리게, 체크 켜짐; 다시 누르면 되돌림). 인사말·pill·배지·헤더 attn·탭 제목 카운트는 열린 항목만. 인박스 j/k 는 접힘을 펼쳤을 때만 확인 완료 항목까지 간다.
