@@ -4,631 +4,853 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ned</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%232563eb%27/%3E%3Ctext x=%2716%27 y=%2722%27 font-size=%2718%27 font-family=%27sans-serif%27 font-weight=%27700%27 fill=%27white%27 text-anchor=%27middle%27%3EN%3C/text%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%231c2430'/><g fill='none' stroke='%23f4f1e8' stroke-width='4.5' stroke-linecap='round'><circle cx='20' cy='34' r='10'/><circle cx='44' cy='34' r='10'/><path d='M30 33q2-3.5 4 0'/><path d='M10 31 5 26M54 31l5-5'/></g><path d='M14.5 30.5a6.5 6.5 0 0 1 5-4' stroke='%237fe0c4' stroke-width='2.6' stroke-linecap='round' fill='none'/><path d='M38.5 30.5a6.5 6.5 0 0 1 5-4' stroke='%237fe0c4' stroke-width='2.6' stroke-linecap='round' fill='none'/></svg>">
 <style>
+  /* Ned dashboard — inbox/triage body (direction C) wearing the sidekick identity (direction E).
+     Dark first; light via prefers-color-scheme. One accent (mint = Ned's lens glint); colour otherwise means status. */
   :root {
-    color-scheme: light dark;
-    --bg: #f6f7f9;
-    --card: #ffffff;
-    --fg: #1b1f24;
-    --muted: #6b7280;
-    --border: #e3e6ea;
-    --accent: #2563eb;
-    --accent-fg: #ffffff;
-    --ok: #16a34a;
-    --warn: #d97706;
-    --err: #dc2626;
-    --info: #0891b2;
-    --chip: #eef0f3;
-    --chip-on: #dbeafe;
-    --row-alt: #fafbfc;
-    --shadow: 0 1px 2px rgba(0,0,0,.04);
-    --radius: 10px;
+    color-scheme: dark light;
+    --bg: #101317; --side: #13171c; --pane: #171b21; --raise: #1d232b; --hover: #20262e; --sel: #1d2c2a; --line: #262d36;
+    --fg: #e7eaee; --dim: #9aa3ae; --faint: #5f6875; --edge: #3a4554;
+    --mint: #3ddbb0; --amber: #f5b03a; --red: #ff6b5f; --blue: #6c9cff; --lens: #3ddbb0;
+    --accent: var(--mint); --accent-ink: #062019; --bubble: #1c232c;
+    --sans: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", "Noto Sans KR", sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0f1216;
-      --card: #171b21;
-      --fg: #e6e8eb;
-      --muted: #8b949e;
-      --border: #272d35;
-      --accent: #3b82f6;
-      --accent-fg: #ffffff;
-      --ok: #22c55e;
-      --warn: #f59e0b;
-      --err: #ef4444;
-      --info: #22d3ee;
-      --chip: #20262e;
-      --chip-on: #1e3a5f;
-      --row-alt: #1b2027;
-      --shadow: none;
-    }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #eef0ea; --side: #f7f8f4; --pane: #ffffff; --raise: #ffffff; --hover: #eceee8; --sel: #dff4ec; --line: #dfe2da;
+      --fg: #1c2430; --dim: #5d6573; --faint: #9aa1ad; --edge: #1c2430;
+      --mint: #138a69; --amber: #b87700; --red: #d23a30; --blue: #2f6fe0; --lens: #18a57f;
+      --accent-ink: #ffffff; --bubble: #f6f7f2; }
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; }
-  body {
-    background: var(--bg);
-    color: var(--fg);
-    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
-    -webkit-font-smoothing: antialiased;
-  }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13.5px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
-  button {
-    font: inherit;
-    color: var(--fg);
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 6px 12px;
-    cursor: pointer;
-  }
-  button:hover { border-color: var(--muted); }
-  button:disabled { opacity: .55; cursor: progress; }
-  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
-  button.small { padding: 3px 8px; font-size: 12px; border-radius: 6px; }
-  button.ghost { background: transparent; border-color: transparent; color: var(--muted); }
-  button.ghost:hover { color: var(--fg); border-color: var(--border); }
-  input, select {
-    font: inherit;
-    color: var(--fg);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 5px 8px;
-  }
-  input[type=number] { width: 90px; }
-  input[type=time] { width: 110px; }
-  input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button, input, select { font: inherit; color: inherit; }
+  kbd { font: 11px var(--mono); background: var(--hover); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--dim); }
+  .mono { font-family: var(--mono); }
+  [hidden] { display: none !important; }
 
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 16px; }
-  header.top {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
-    padding: 12px 16px; margin-bottom: 16px;
-    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
-  }
-  header.top h1 { font-size: 20px; margin: 0; display: flex; align-items: center; gap: 8px; }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); display: inline-block; }
-  .dot.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
-  .dot.off { background: var(--err); }
-  .meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
-  .meta b { color: var(--fg); font-weight: 500; }
-  .spacer { flex: 1; }
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  .badge {
-    display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
-    background: var(--chip); color: var(--muted); border: 1px solid var(--border);
-  }
-  .badge.quiet { background: color-mix(in srgb, var(--info) 15%, transparent); color: var(--info); border-color: transparent; }
-  .busy-note { font-size: 12px; color: var(--muted); }
-  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px; }
+  /* ---------- shell ---------- */
+  .shell { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; }
+  header.hq { display: flex; align-items: center; gap: 12px 16px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--side); position: relative; flex-wrap: wrap; }
+  header.hq::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .035; background: repeating-linear-gradient(0deg, var(--fg) 0 1px, transparent 1px 3px); }
+  .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .who .nm { min-width: 92px; }
+  .who .nm b { font-size: 16px; letter-spacing: -.01em; display: block; line-height: 1.1; }
+  .who .mood { font: 600 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+  nav.views { display: flex; gap: 2px; }
+  nav.views a { padding: 4px 10px; border-radius: 6px; color: var(--dim); font-size: 13px; text-decoration: none; }
+  nav.views a:hover { background: var(--hover); color: var(--fg); }
+  nav.views a.on { background: var(--hover); color: var(--fg); font-weight: 600; }
+  .leds { display: flex; gap: 14px; margin-left: auto; font: 11px var(--mono); color: var(--dim); flex-wrap: wrap; align-items: center; }
+  .leds > span { white-space: nowrap; }
+  .led { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 0; background: var(--faint); opacity: .7; }
+  .led.g { background: var(--mint); box-shadow: 0 0 6px var(--mint); opacity: 1; }
+  .led.a { background: var(--amber); box-shadow: 0 0 6px var(--amber); opacity: 1; }
+  .led.r { background: var(--red); box-shadow: 0 0 6px var(--red); opacity: 1; }
+  .led.b { background: var(--blue); box-shadow: 0 0 6px var(--blue); opacity: 1; }
+  .acts-top { display: flex; gap: 8px; align-items: center; }
+  .btn { font: 600 12.5px var(--sans); border-radius: 7px; padding: 5px 11px; border: 1px solid var(--line); background: var(--raise); color: var(--fg); cursor: pointer; display: inline-flex; gap: 7px; align-items: center; white-space: nowrap; text-decoration: none; }
+  .btn:hover { border-color: var(--faint); text-decoration: none; }
+  .btn:disabled { opacity: .6; cursor: progress; }
+  .btn.go { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn.small { padding: 3px 8px; font-size: 12px; }
+  .btn kbd { background: transparent; border-color: currentColor; color: inherit; opacity: .65; }
+  .spin { width: 11px; height: 11px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  section.card {
-    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
-    margin-bottom: 16px; box-shadow: var(--shadow);
-  }
-  section.card > .hd {
-    display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border);
-  }
-  section.card > .hd h2 { font-size: 15px; margin: 0; font-weight: 600; }
-  section.card > .hd .count { color: var(--muted); font-size: 13px; }
-  section.card > .bd { padding: 12px 16px; }
-  .empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+  /* ---------- glasses mark (mood) ---------- */
+  .mark { display: block; }
+  .mark.hd { width: 52px; height: 33px; flex: none; }
+  .mark .frame { fill: none; stroke: var(--fg); stroke-width: 4; stroke-linecap: round; transition: stroke .3s; }
+  .mark .lens { fill: transparent; transition: fill .3s; }
+  .mark .glint { fill: none; stroke: var(--lens); stroke-width: 2.5; stroke-linecap: round; transition: stroke .3s, opacity .3s; }
+  .mark .sweep { fill: var(--lens); opacity: 0; }
+  .mark .bang { font: 900 14px var(--sans); fill: var(--amber); opacity: 0; }
+  .mark .moon { fill: var(--blue); opacity: 0; }
+  .mark .slash { stroke: var(--red); stroke-width: 3.5; stroke-linecap: round; opacity: 0; }
+  [data-mood="scanning"] .mark.hd .sweep { opacity: .55; animation: sweep 1.2s ease-in-out infinite; }
+  [data-mood="headsup"] .mark.hd .lens { fill: color-mix(in srgb, var(--amber) 22%, transparent); }
+  [data-mood="headsup"] .mark.hd .glint { stroke: var(--amber); }
+  [data-mood="headsup"] .mark.hd .bang { opacity: 1; animation: bob 1.6s ease-in-out infinite; }
+  [data-mood="quiet"] .mark.hd .glint { stroke: var(--faint); }
+  [data-mood="quiet"] .mark.hd .lens { fill: color-mix(in srgb, var(--blue) 14%, transparent); }
+  [data-mood="quiet"] .mark.hd .moon { opacity: 1; }
+  [data-mood="offline"] .mark.hd .frame { stroke: var(--faint); }
+  [data-mood="offline"] .mark.hd .glint { opacity: 0; }
+  [data-mood="offline"] .mark.hd .slash { opacity: .9; }
+  [data-mood="offline"] .mark.hd { opacity: .7; }
+  @keyframes sweep { 0% { transform: translateX(-22px); } 100% { transform: translateX(46px); } }
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+  @media (prefers-reduced-motion: reduce) { .mark *, .spin { animation: none !important; } }
 
-  /* attention */
-  .att { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); align-items: flex-start; }
-  .att:last-child { border-bottom: 0; }
-  .att .ic { font-size: 18px; width: 24px; text-align: center; flex: none; line-height: 1.3; }
-  .att .tx { flex: 1; min-width: 0; }
-  .att .tt { font-weight: 500; }
-  .att .dt { color: var(--muted); font-size: 13px; margin-top: 2px; white-space: pre-wrap; word-break: break-word; }
-  .att .ts { color: var(--muted); font-size: 12px; margin-top: 2px; }
-  .att .op { flex: none; display: flex; gap: 6px; }
+  /* ---------- stickers ---------- */
+  .stk { display: inline-block; font: 800 9.5px/1.5 var(--mono); letter-spacing: .06em; text-transform: uppercase; padding: 0 6px; border-radius: 4px; border: 1px solid color-mix(in srgb, var(--fg) 35%, transparent); background: var(--raise); color: var(--dim); white-space: nowrap; transform: rotate(-2deg); vertical-align: 1px; }
+  .stk.a { background: var(--amber); color: #1c2430; border-color: transparent; }
+  .stk.r { background: var(--red); color: #fff; border-color: transparent; }
+  .stk.g { background: var(--mint); color: #062019; border-color: transparent; }
+  .stk.b { background: var(--blue); color: #fff; border-color: transparent; }
+  .stk.flat { transform: none; }
 
-  /* sessions table */
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 7px 8px; vertical-align: top; border-bottom: 1px solid var(--border); }
-  th { color: var(--muted); font-weight: 500; font-size: 12px; white-space: nowrap; }
-  tr:last-child td { border-bottom: 0; }
-  td.wt { font-weight: 500; white-space: nowrap; }
-  td.sm { color: var(--muted); max-width: 520px; word-break: break-word; }
-  td.num { text-align: center; }
-  td.rel { white-space: nowrap; color: var(--muted); }
-  .st { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
-  .st.running { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
-  .st.waiting { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
-  .st.done { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
-  .st.error { background: color-mix(in srgb, var(--err) 15%, transparent); color: var(--err); }
-  .st.ended { background: var(--chip); color: var(--muted); }
-  .table-wrap { overflow-x: auto; }
+  /* ---------- inbox ---------- */
+  main.view { min-height: 0; }
+  .inbox { display: grid; grid-template-columns: 390px minmax(0, 1fr) 280px; height: 100%; }
+  .inbox.rail-off { grid-template-columns: 390px minmax(0, 1fr) 0; }
+  .inbox.rail-off .rail { display: none; }
+  .list { background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .say { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 9px; align-items: start; }
+  .av { width: 30px; height: 30px; border-radius: 50%; border: 1.5px solid var(--edge); background: var(--pane); display: grid; place-items: center; flex: none; }
+  .av svg { width: 22px; height: auto; }
+  .av .mark .frame { stroke-width: 5; }
+  .bubble { background: var(--bubble); border: 1px solid var(--line); border-radius: 3px 12px 12px 12px; padding: 7px 11px; min-width: 0; }
+  .bubble .meta { font: 10.5px var(--mono); color: var(--faint); margin-bottom: 1px; }
+  .bubble p { margin: 0; }
+  .bubble .lead { font-weight: 600; }
+  .bubble .sub { color: var(--dim); font-size: 12.5px; margin-top: 2px; }
+  .list .say-slot { padding: 12px 12px 10px; }
+  .tabs { display: flex; gap: 4px; padding: 0 10px 8px; border-bottom: 1px solid var(--line); }
+  .tab { padding: 4px 10px; border-radius: 6px; color: var(--dim); cursor: pointer; font-size: 13px; user-select: none; border: 0; background: none; }
+  .tab:hover { background: var(--hover); color: var(--fg); }
+  .tab.on { background: var(--hover); color: var(--fg); font-weight: 600; }
+  .tab .n { color: var(--faint); margin-left: 5px; font: 11px var(--mono); }
+  .tab.on .n.hot { color: var(--amber); }
+  .items { overflow: auto; flex: 1; padding: 4px 0 8px; outline: none; }
+  .grp { padding: 10px 16px 4px; font: 600 10.5px var(--mono); color: var(--faint); letter-spacing: .08em; }
+  .row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 1px 10px; padding: 7px 12px 7px 10px; margin: 0 6px; border-radius: 7px; cursor: pointer; align-items: baseline; border-left: 2px solid transparent; }
+  .row:hover { background: var(--hover); }
+  .row.sel { background: var(--sel); border-left-color: var(--accent); }
+  .row .ic { font-size: 14px; text-align: center; }
+  .row .tt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  .row .tm { font: 11px var(--mono); color: var(--faint); white-space: nowrap; }
+  .row .sb { grid-column: 2 / 4; color: var(--dim); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row.read .tt { color: var(--dim); font-weight: 400; }
+  .row.okr .tt { color: var(--dim); font-weight: 500; }
+  .row .led { margin-right: 6px; }
+  .okrun { display: block; width: calc(100% - 24px); text-align: left; margin: 8px 12px; padding: 7px 10px; border: 1px dashed var(--line); border-radius: 7px; color: var(--faint); font-size: 12px; background: none; cursor: pointer; }
+  .okrun:hover { color: var(--dim); border-color: var(--faint); }
+  .none { padding: 16px; color: var(--faint); font-size: 12.5px; }
+  .keys { border-top: 1px solid var(--line); padding: 7px 14px; color: var(--faint); font-size: 11.5px; display: flex; gap: 10px 12px; flex-wrap: wrap; }
+  details.msess { border-top: 1px solid var(--line); display: none; }
+  details.msess summary { padding: 8px 14px; cursor: pointer; font: 700 10.5px var(--mono); letter-spacing: .08em; color: var(--dim); list-style: none; }
+  details.msess summary::-webkit-details-marker { display: none; }
+  details.msess[open] .rack { max-height: 40vh; overflow: auto; }
 
-  /* briefings */
-  details.bf { border-bottom: 1px solid var(--border); }
-  details.bf:last-child { border-bottom: 0; }
-  details.bf summary {
-    display: flex; gap: 10px; align-items: center; padding: 9px 0; cursor: pointer; list-style: none;
-  }
-  details.bf summary::-webkit-details-marker { display: none; }
-  details.bf summary .caret { color: var(--muted); font-size: 11px; width: 10px; transition: transform .15s; }
-  details.bf[open] summary .caret { transform: rotate(90deg); }
-  details.bf.ok summary { opacity: .6; }
-  details.bf summary .hl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  details.bf summary .when { color: var(--muted); font-size: 12px; white-space: nowrap; }
-  .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--chip); color: var(--muted); white-space: nowrap; }
-  .tag.daily { background: color-mix(in srgb, var(--info) 15%, transparent); color: var(--info); }
-  .tag.update { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
-  .tag.ok { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
-  .bf-body { padding: 4px 0 12px 20px; }
-  .bf-body h4 { margin: 10px 0 4px; font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
-  .bf-body ul { margin: 0; padding-left: 18px; }
-  .bf-body li { margin: 3px 0; }
-  .bf-body li .d { color: var(--muted); font-size: 13px; }
-  .bf-body .cost { color: var(--muted); font-size: 12px; margin-top: 10px; }
-  pre.raw {
-    background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px;
-    font-size: 12px; white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; margin: 6px 0 0;
-  }
+  .detail { background: var(--pane); overflow: auto; min-height: 0; }
+  .dwrap { max-width: 760px; padding: 24px 32px 48px; }
+  .back { display: none; margin-bottom: 12px; }
+  .crumb { color: var(--faint); font-size: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .detail h2 { font-size: 20px; line-height: 1.35; margin: 10px 0 8px; font-weight: 650; letter-spacing: -.01em; word-break: break-word; }
+  .detail .body { color: var(--dim); font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+  .dacts { display: flex; gap: 8px; margin: 18px 0 24px; flex-wrap: wrap; }
+  .ctx h3 { font: 700 10.5px var(--mono); color: var(--faint); letter-spacing: .08em; margin: 22px 0 8px; text-transform: uppercase; }
+  .ctx .say { margin: 4px 0 10px; }
+  .ctx .tlx { border-left: 1px solid var(--line); margin-left: 4px; padding-left: 14px; }
+  .ctx .tlx div { position: relative; padding: 3px 0; color: var(--dim); font-size: 13px; word-break: break-word; }
+  .ctx .tlx div::before { content: ""; position: absolute; left: -18px; top: 10px; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+  .ctx .tlx div.hot::before { background: var(--amber); }
+  .ctx .tlx div.err::before { background: var(--red); }
+  .ctx .h { font: 11.5px var(--mono); color: var(--faint); margin-right: 8px; }
+  .ctx ul { margin: 0; padding-left: 18px; color: var(--dim); } .ctx li { margin: 4px 0; }
+  .ctx li .d { color: var(--faint); font-size: 12.5px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; font-size: 13px; color: var(--dim); }
+  .kv dt { color: var(--faint); } .kv dd { margin: 0; word-break: break-word; }
+  pre.raw { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: 12px var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; margin: 6px 0 0; color: var(--dim); }
+  .zero { min-height: 100%; display: grid; place-items: center; padding: 32px; }
+  .zero .say { max-width: 420px; }
+  .zero .say .av { width: 40px; height: 40px; } .zero .say .av svg { width: 30px; }
+  .zero .bubble { padding: 10px 14px; font-size: 14px; }
 
-  /* timeline */
+  .rail { background: var(--side); border-left: 1px solid var(--line); overflow: auto; min-height: 0; }
+  .rail h3, .panel-h { margin: 0; padding: 11px 14px 8px; font: 700 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); display: flex; gap: 8px; align-items: center; }
+  .rail h3 .n { color: var(--faint); margin-left: auto; }
+  .rack { padding: 0 6px 8px; }
+  .unit { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 0 8px; padding: 7px 8px; align-items: center; border-bottom: 1px dashed var(--line); }
+  .unit:last-child { border-bottom: 0; }
+  .unit .nm { font: 600 12.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .unit .nm .sa { color: var(--faint); font-weight: 400; }
+  .unit .r { font: 11px var(--mono); color: var(--faint); white-space: nowrap; }
+  .unit .s { grid-column: 2 / 4; font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
+  .unit .st { grid-column: 2 / 4; margin-top: 2px; }
+  .unit .led { margin: 0; }
+  .tape { padding: 0 14px 12px; display: grid; gap: 3px; }
+  .tape .tr { display: flex; gap: 8px; font: 11.5px var(--mono); color: var(--dim); align-items: baseline; min-width: 0; }
+  .tape .tr span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tape .tr .h { color: var(--faint); flex: none; }
+  .tape .tr.ok { color: var(--faint); }
+
+  /* ---------- timeline + settings views ---------- */
+  .page { height: 100%; overflow: auto; }
+  .pwrap { max-width: 920px; margin: 0 auto; padding: 18px 20px 48px; }
+  .card { background: var(--pane); border: 1px solid var(--line); border-radius: 10px; }
+  .card > .hd { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  .card > .hd h2 { font-size: 15px; margin: 0; font-weight: 650; }
+  .card > .hd .count { color: var(--faint); font: 12px var(--mono); }
+  .card > .hd .sp { flex: 1; }
+  .card > .bd { padding: 12px 16px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; align-items: center; }
-  .chips .lbl { color: var(--muted); font-size: 12px; margin-right: 2px; }
-  .chip {
-    font-size: 12px; padding: 2px 9px; border-radius: 999px; background: var(--chip); color: var(--fg);
-    border: 1px solid transparent; cursor: pointer; user-select: none;
-  }
-  .chip.on { background: var(--chip-on); border-color: var(--accent); color: var(--accent); }
-  .tl { list-style: none; margin: 0; padding: 0; }
-  .tl li { display: grid; grid-template-columns: 58px 1fr; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
-  .tl li:last-child { border-bottom: 0; }
-  .tl .t { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .tl .ev { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
-  .tl .kind { font-weight: 500; }
-  .tl .wt { color: var(--muted); }
-  .tl .msg { color: var(--muted); width: 100%; word-break: break-word; }
-  .tl li.brief .kind { color: var(--accent); }
-  .tl .day { grid-column: 1 / -1; color: var(--muted); font-size: 12px; font-weight: 600; padding-top: 6px; }
-
-  /* settings */
-  .form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; }
-  .form .f { display: flex; flex-direction: column; gap: 4px; }
-  .form .f label { font-size: 12px; color: var(--muted); }
-  .form .f .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .chips .lbl { color: var(--faint); font: 11px var(--mono); margin-right: 2px; min-width: 52px; }
+  .chip { font-size: 12px; padding: 2px 9px; border-radius: 999px; background: var(--hover); color: var(--fg); border: 1px solid transparent; cursor: pointer; user-select: none; }
+  .chip.on { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: var(--accent); color: var(--accent); }
+  ul.tl { list-style: none; margin: 0; padding: 0; }
+  ul.tl li { display: grid; grid-template-columns: 52px 1fr; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  ul.tl li:last-child { border-bottom: 0; }
+  ul.tl li.dayh { display: block; border: 0; padding: 10px 0 2px; font: 600 10.5px var(--mono); color: var(--faint); letter-spacing: .08em; }
+  ul.tl .t { color: var(--faint); font: 12px var(--mono); white-space: nowrap; padding-top: 1px; }
+  ul.tl .ev { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; min-width: 0; }
+  ul.tl .kind { font-weight: 600; }
+  ul.tl .wt { color: var(--dim); font: 12px var(--mono); }
+  ul.tl .msg { color: var(--dim); width: 100%; word-break: break-word; }
+  ul.tl li.brief .kind { color: var(--accent); }
+  ul.tl li.hot .kind { color: var(--amber); }
+  ul.tl li.err .kind { color: var(--red); }
+  .form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; }
+  .form .f { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .form .f > label, .form .f > .lab { font-size: 12px; color: var(--dim); }
+  .form .f .hint { font-size: 11.5px; color: var(--faint); }
+  .form .f .inl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .form .f.full { grid-column: 1 / -1; }
-  .toggles { display: flex; flex-wrap: wrap; gap: 6px 14px; }
-  .toggles label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--fg); cursor: pointer; }
-  .form-foot { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
-  .form-foot .msg { font-size: 13px; color: var(--muted); }
-  .form-foot .msg.ok { color: var(--ok); }
-  .form-foot .msg.err { color: var(--err); }
+  .form input[type=number], .form input[type=time], .form input[type=text] { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  .form input[type=number] { width: 100px; } .form input[type=time] { width: 116px; } .form input[type=text] { width: 100%; }
+  .form input:focus, .btn:focus-visible, .tab:focus-visible, .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .form input:disabled { opacity: .5; }
+  .toggles { display: flex; flex-wrap: wrap; gap: 8px; }
+  .toggles label { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; padding: 4px 10px 4px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); }
+  .toggles label:has(input:checked) { border-color: var(--accent); }
+  .toggles input { accent-color: var(--mint); margin: 0; }
+  .ck { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+  .ck input { accent-color: var(--mint); }
+  .form-foot { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
+  .form-foot .msg { font-size: 13px; color: var(--dim); }
+  .form-foot .msg.ok { color: var(--mint); } .form-foot .msg.err { color: var(--red); }
+  .pwrap .say-slot { margin-bottom: 14px; }
 
-  .toast {
-    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
-    background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px;
-    opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 10; max-width: 90vw;
+  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; gap: 9px; align-items: center; background: var(--raise); color: var(--fg); border: 1px solid var(--edge); padding: 8px 14px 8px 10px; border-radius: 10px; font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.25); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 20; max-width: min(560px, 92vw); }
+  .toast.show { opacity: 1; }
+  .toast svg { width: 24px; flex: none; }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 1180px) {
+    .inbox, .inbox.rail-off { grid-template-columns: 360px minmax(0, 1fr); }
+    .inbox .rail { display: none; }
+    details.msess { display: block; }
+    #rail-toggle { display: none; }
   }
-  .toast.show { opacity: .95; }
-
-  @media (max-width: 640px) {
-    .wrap { padding: 10px; }
-    header.top { padding: 10px 12px; }
-    section.card > .bd, section.card > .hd { padding-left: 12px; padding-right: 12px; }
+  @media (max-width: 1020px) { .leds .opt { display: none; } }
+  @media (max-width: 760px) {
+    header.hq { padding: 8px 12px; gap: 8px 10px; }
+    .who .mood { font-size: 9.5px; }
+    .leds { order: 3; width: 100%; margin-left: 0; gap: 12px; }
+    .acts-top { margin-left: auto; }
+    .acts-top .btn { padding: 5px 9px; }
+    nav.views { order: 4; width: 100%; }
+    nav.views a { flex: 1; text-align: center; }
+    .inbox, .inbox.rail-off { grid-template-columns: 1fr; }
+    .list { border-right: 0; }
+    .keys { display: none; }
+    .detail { display: none; }
+    .detail.open { display: block; position: fixed; inset: 0; z-index: 10; }
+    .back { display: inline-flex; }
+    .dwrap { padding: 16px 16px 40px; }
+    .pwrap { padding: 12px 12px 40px; }
     .form { grid-template-columns: 1fr; }
-    th.hide-sm, td.hide-sm { display: none; }
-    .tl li { grid-template-columns: 46px 1fr; }
+    ul.tl li { grid-template-columns: 44px 1fr; }
   }
 </style>
 </head>
-<body>
-<div class="wrap">
-  <header class="top">
-    <h1><span class="dot" id="alive-dot" title="daemon"></span>Ned</h1>
-    <div class="meta">
-      <span id="alive-text">—</span>
-      <span>마지막 점검 <b id="last-hb">—</b></span>
-      <span>다음 점검 <b id="next-hb">—</b></span>
-      <span id="quiet-badge" class="badge quiet" hidden>🌙 조용한 시간</span>
-      <span id="last-brief" class="badge" hidden></span>
+<body data-mood="idle">
+<div class="shell">
+  <header class="hq">
+    <div class="who">
+      <svg class="mark hd" viewBox="0 0 64 40" aria-hidden="true">
+        <defs><clipPath id="lc-hd"><circle cx="18" cy="22" r="10"/><circle cx="46" cy="22" r="10"/></clipPath></defs>
+        <circle class="lens" cx="18" cy="22" r="10"/><circle class="lens" cx="46" cy="22" r="10"/>
+        <g clip-path="url(#lc-hd)"><rect class="sweep" x="0" y="8" width="10" height="28" rx="3"/></g>
+        <circle class="frame" cx="18" cy="22" r="10"/><circle class="frame" cx="46" cy="22" r="10"/>
+        <path class="frame" d="M28 21q4-4.5 8 0M8 19 3 14M56 19l5-5"/>
+        <path class="glint" d="M12.5 18.5a6.5 6.5 0 0 1 5-4M40.5 18.5a6.5 6.5 0 0 1 5-4"/>
+        <text class="bang" x="29" y="12">!</text>
+        <path class="moon" d="M33.5 1.5a6 6 0 1 0 5.5 8.5a4.6 4.6 0 0 1-5.5-8.5z"/>
+        <path class="slash" d="M6 37 58 5"/>
+      </svg>
+      <div class="nm"><b>Ned</b><span class="mood" id="mood">—</span></div>
     </div>
-    <div class="spacer"></div>
-    <div class="actions">
-      <span class="busy-note" id="busy-note" hidden></span>
-      <button id="btn-hb" class="primary">지금 점검</button>
-      <button id="btn-daily">아침 브리핑 생성</button>
+    <nav class="views" id="views">
+      <a href="#inbox" data-v="inbox">인박스</a>
+      <a href="#timeline" data-v="timeline">타임라인</a>
+      <a href="#settings" data-v="settings">설정</a>
+    </nav>
+    <div class="leds" id="leds"></div>
+    <div class="acts-top">
+      <button class="btn go" id="btn-hb" title="지금 점검 (r) — 1~3분">지금 점검</button>
+      <button class="btn" id="btn-daily" title="아침 브리핑 생성 — 1~3분">아침 브리핑</button>
     </div>
   </header>
 
-  <section class="card" id="sec-attention">
-    <div class="hd"><h2>지금 봐야 할 것</h2><span class="count" id="att-count"></span></div>
-    <div class="bd" id="attention"></div>
-  </section>
-
-  <section class="card" id="sec-sessions">
-    <div class="hd"><h2>에이전트 세션</h2><span class="count" id="sess-count"></span></div>
-    <div class="bd table-wrap" id="sessions"></div>
-  </section>
-
-  <section class="card" id="sec-briefings">
-    <div class="hd">
-      <h2>브리핑 히스토리</h2><span class="count" id="bf-count"></span>
-      <span class="spacer"></span>
-      <button class="small ghost" data-refresh="briefings">새로 고침</button>
+  <main class="view" id="v-inbox">
+    <div class="inbox" id="inbox">
+      <section class="list">
+        <div class="say-slot" id="say"></div>
+        <div class="tabs" id="tabs" role="tablist"></div>
+        <div class="items" id="items" tabindex="0"></div>
+        <details class="msess" id="msess"><summary id="msess-sum">장비실 · 세션</summary><div class="rack" id="msess-rack"></div></details>
+        <div class="keys"><span><kbd>j</kbd><kbd>k</kbd> 이동</span><span><kbd>e</kbd> 완료</span><span><kbd>⏎</kbd> 열기</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 탭</span><span><kbd>r</kbd> 점검</span></div>
+      </section>
+      <section class="detail" id="detail"></section>
+      <aside class="rail" id="rail"></aside>
     </div>
-    <div class="bd" id="briefings"></div>
-  </section>
+  </main>
 
-  <section class="card" id="sec-timeline">
-    <div class="hd">
-      <h2>타임라인</h2><span class="count" id="tl-count"></span>
-      <span class="spacer"></span>
-      <button class="small ghost" data-refresh="events">새로 고침</button>
+  <main class="view page" id="v-timeline" hidden>
+    <div class="pwrap">
+      <section class="card">
+        <div class="hd"><h2>타임라인</h2><span class="count" id="tl-count"></span><span class="sp"></span><button class="btn small" data-refresh="events">새로 고침</button></div>
+        <div class="bd">
+          <div class="chips" id="chips-type"></div>
+          <div class="chips" id="chips-wt"></div>
+          <ul class="tl" id="timeline"></ul>
+        </div>
+      </section>
     </div>
-    <div class="bd">
-      <div class="chips" id="chips-type"></div>
-      <div class="chips" id="chips-wt"></div>
-      <ul class="tl" id="timeline"></ul>
-    </div>
-  </section>
+  </main>
 
-  <section class="card" id="sec-config">
-    <div class="hd">
-      <h2>설정</h2>
-      <span class="spacer"></span>
-      <button class="small ghost" data-refresh="config">다시 불러오기</button>
-    </div>
-    <div class="bd">
-      <form id="cfg" autocomplete="off">
-        <div class="form">
-          <div class="f">
-            <label for="c-hb">heartbeat 간격 (분)</label>
-            <input id="c-hb" name="heartbeat_minutes" type="number" min="1" step="1" required>
-          </div>
-          <div class="f">
-            <label for="c-sig">신호 조회 최소 간격 (분)</label>
-            <input id="c-sig" name="signal_check_minutes" type="number" min="1" step="1" required>
-          </div>
-          <div class="f">
-            <label for="c-bt">아침 브리핑 시각</label>
-            <input id="c-bt" name="briefing_time" type="time" required>
-          </div>
-          <div class="f">
-            <label>조용한 시간 (알림 없음)</label>
-            <div class="row">
-              <label style="display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--fg)"><input type="checkbox" id="c-qon"> 사용</label>
-              <input type="time" id="c-qs"> <span style="color:var(--muted)">~</span> <input type="time" id="c-qe">
+  <main class="view page" id="v-settings" hidden>
+    <div class="pwrap">
+      <div class="say-slot" id="say-settings"></div>
+      <section class="card">
+        <div class="hd"><h2>설정</h2><span class="count mono" id="cfg-port"></span><span class="sp"></span><button class="btn small" data-refresh="config">다시 불러오기</button></div>
+        <div class="bd">
+          <form id="cfg" autocomplete="off">
+            <div class="form">
+              <div class="f"><label for="c-hb">heartbeat 간격 (분)</label><input id="c-hb" type="number" min="1" step="1" required></div>
+              <div class="f"><label for="c-sig">신호 조회 최소 간격 (분)</label><input id="c-sig" type="number" min="1" step="1" required><span class="hint">세션 이벤트가 없을 때 LLM 으로 업무 신호를 보는 최소 간격</span></div>
+              <div class="f"><label for="c-bt">아침 브리핑 시각</label><input id="c-bt" type="time" required></div>
+              <div class="f"><span class="lab">조용한 시간 (알림 없음)</span>
+                <div class="inl"><label class="ck"><input type="checkbox" id="c-qon"> 사용</label><input type="time" id="c-qs" aria-label="시작"><span style="color:var(--faint)">~</span><input type="time" id="c-qe" aria-label="끝"></div></div>
+              <div class="f full"><span class="lab">업무 신호 소스</span><div class="toggles" id="c-sources"></div></div>
+              <div class="f"><label for="c-model">Claude 모델 (비우면 기본값)</label><input id="c-model" type="text" placeholder="예: claude-sonnet-5-5"></div>
+              <div class="f"><label for="c-turns">Claude 최대 턴</label><input id="c-turns" type="number" min="1" step="1" required></div>
             </div>
-          </div>
-          <div class="f full">
-            <label>업무 신호 소스</label>
-            <div class="toggles" id="c-sources"></div>
-          </div>
-          <div class="f">
-            <label for="c-model">Claude 모델 (비우면 기본값)</label>
-            <input id="c-model" name="claude_model" type="text" placeholder="예: claude-sonnet-5-5" style="width:100%">
-          </div>
-          <div class="f">
-            <label for="c-turns">Claude 최대 턴</label>
-            <input id="c-turns" name="claude_max_turns" type="number" min="1" step="1" required>
-          </div>
+            <div class="form-foot"><button type="submit" class="btn go" id="c-save">저장</button><span class="msg" id="c-msg"></span></div>
+          </form>
         </div>
-        <div class="form-foot">
-          <button type="submit" class="primary" id="c-save">저장</button>
-          <span class="msg" id="c-msg"></span>
-        </div>
-      </form>
+      </section>
     </div>
-  </section>
+  </main>
 </div>
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
 (() => {
   "use strict";
-  const $ = (s, el = document) => el.querySelector(s);
-  const ALIVE_MS = 20 * 60 * 1000;
-  const POLL_MS = 10 * 1000;
+  const $ = (id) => document.getElementById(id);
+  const ALIVE_MS = 20 * 60 * 1000, POLL_MS = 10 * 1000;
 
   const KIND_ICON = { session: "🖥", email: "✉️", slack: "💬", jira: "📋", github: "🐙", sentry: "🐞", calendar: "📅", other: "🔔" };
-  const KIND_KO = { session: "세션", email: "이메일", slack: "Slack", jira: "Jira", github: "GitHub", sentry: "Sentry", calendar: "캘린더", other: "기타" };
+  const KIND_KO = { session: "세션", email: "메일", slack: "Slack", jira: "Jira", github: "GitHub", sentry: "Sentry", calendar: "캘린더", other: "기타" };
   const SOURCE_LABEL = { gmail: "Gmail", slack: "Slack", jira: "Jira", github: "GitHub", sentry: "Sentry", calendar: "캘린더" };
   const STATUS_KO = { running: "실행 중", waiting: "입력 대기", done: "완료", error: "오류", ended: "종료" };
-  const EVENT_KO = {
-    SessionStart: "세션 시작", SessionEnd: "세션 종료", UserPromptSubmit: "프롬프트",
-    SubagentStart: "서브에이전트 시작", SubagentStop: "서브에이전트 종료",
-    Notification: "알림", Stop: "응답 완료", StopFailure: "오류", PreCompact: "컨텍스트 압축",
-  };
+  const STATUS_LED = { running: "b", waiting: "a", error: "r", done: "g" };
+  const EVENT_KO = { SessionStart: "세션 시작", SessionEnd: "세션 종료", UserPromptSubmit: "프롬프트", SubagentStart: "서브에이전트 시작", SubagentStop: "서브에이전트 종료", Notification: "알림", Stop: "응답 완료", StopFailure: "오류", PreCompact: "컨텍스트 압축" };
+  const MOOD_KO = { scanning: "스캔 중", offline: "자리 비움", headsup: "헤이, 이거 봐", quiet: "조용한 시간", idle: "지켜보는 중" };
+  const QUIPS = [
+    "새 소식 없음. 모니터만 반짝이고 있어.",
+    "받은편지함 평화로움. 키보드 소리만 들려.",
+    "이상 무. 커피 식기 전에 하던 거 마저 해.",
+    "레이더 깨끗함. 내가 계속 보고 있을게.",
+  ];
 
-  const state = { state: null, events: [], briefings: [], config: null, busy: false, filterType: new Set(), filterWt: new Set() };
+  const S = { state: null, events: [], briefings: [], config: null, conn: null, busy: null, filterType: new Set(), filterWt: new Set() };
+  const ui = { view: "inbox", tab: "priority", selKey: null, sel: 0, read: loadRead(), railOff: lsGet("ned.railOff") === "1", detailSig: "" };
 
   // ---------- utils ----------
-  const el = (tag, attrs = {}, ...children) => {
-    const n = document.createElement(tag);
-    for (const [k, v] of Object.entries(attrs)) {
-      if (v == null || v === false) continue;
-      if (k === "class") n.className = v;
-      else if (k === "html") n.innerHTML = v;
-      else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
-      else if (k === "hidden" || k === "checked" || k === "disabled" || k === "open") n[k] = !!v;
-      else n.setAttribute(k, v === true ? "" : v);
-    }
-    for (const c of children.flat()) {
-      if (c == null || c === false) continue;
-      n.append(c.nodeType ? c : document.createTextNode(String(c)));
-    }
-    return n;
-  };
-  const basename = (p) => (p ? String(p).replace(/\/+$/, "").split("/").pop() : "");
+  function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } }
+  function loadRead() { try { return new Set(JSON.parse(lsGet("ned.read") || "[]")); } catch { return new Set(); } }
+  function saveRead() { lsSet("ned.read", JSON.stringify([...ui.read].slice(-400))); }
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c]);
+  const safeUrl = (u) => (typeof u === "string" && /^https?:\/\//i.test(u) ? u : null);
   const pad = (n) => String(n).padStart(2, "0");
-  const fmtTime = (ts) => { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
-  const fmtDateTime = (ts) => { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()} ${fmtTime(ts)}`; };
-  const fmtDay = (ts) => {
+  const hhmm = (ts) => { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const mdhm = (ts) => { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()} ${hhmm(ts)}`; };
+  const basename = (p) => (p ? String(p).replace(/\/+$/, "").split("/").pop() : "");
+  function dayLabel(ts) {
     const d = new Date(ts), t = new Date(), y = new Date(); y.setDate(t.getDate() - 1);
-    const same = (a, b) => a.toDateString() === b.toDateString();
-    if (same(d, t)) return "오늘"; if (same(d, y)) return "어제";
+    if (d.toDateString() === t.toDateString()) return "오늘";
+    if (d.toDateString() === y.toDateString()) return "어제";
     return `${d.getMonth() + 1}월 ${d.getDate()}일`;
-  };
-  const rel = (ts) => {
+  }
+  function rel(ts) {
     if (!ts) return "—";
-    const diff = Date.now() - ts, s = Math.round(Math.abs(diff) / 1000);
-    const f = diff >= 0 ? (x) => `${x} 전` : (x) => `${x} 후`;
-    if (s < 45) return f(`${s}초`);
+    const diff = Date.now() - ts, s = Math.round(Math.abs(diff) / 1000), f = (x) => (diff >= 0 ? `${x} 전` : `${x} 후`);
+    if (s < 45) return diff >= 0 ? "방금" : f(`${s}초`);
     const m = Math.round(s / 60); if (m < 60) return f(`${m}분`);
     const h = Math.round(m / 60); if (h < 36) return f(`${h}시간`);
     return f(`${Math.round(h / 24)}일`);
-  };
-  const toast = (msg, ms = 2600) => { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), ms); };
+  }
+  const alive = () => S.conn !== false && !!S.state?.updated_at && Date.now() - S.state.updated_at < ALIVE_MS;
 
   async function api(path, opts) {
     const r = await fetch(path, { headers: { accept: "application/json", ...(opts && opts.body ? { "content-type": "application/json" } : {}) }, ...opts });
-    if (!r.ok) throw new Error(`${opts?.method ?? "GET"} ${path} → ${r.status}`);
+    if (!r.ok) throw new Error(`${(opts && opts.method) || "GET"} ${path} → ${r.status}`);
     return r.json();
+  }
+
+  /** Small glasses for Ned's avatar (no mood effects; the header mark carries the mood). */
+  const MINI = `<svg class="mark" viewBox="0 0 64 40" aria-hidden="true"><circle class="frame" cx="18" cy="22" r="10"/><circle class="frame" cx="46" cy="22" r="10"/><path class="frame" d="M28 21q4-4.5 8 0M8 19 3 14M56 19l5-5"/><path class="glint" d="M12.5 18.5a6.5 6.5 0 0 1 5-4M40.5 18.5a6.5 6.5 0 0 1 5-4"/></svg>`;
+  /** Ned speaking: avatar + bubble. `lead` is HTML-escaped by the caller. */
+  const say = (meta, leadHtml, subHtml = "") =>
+    `<div class="say"><span class="av">${MINI}</span><div class="bubble">${meta ? `<div class="meta">${meta}</div>` : ""}<p class="lead">${leadHtml}</p>${subHtml ? `<div class="sub">${subHtml}</div>` : ""}</div></div>`;
+
+  let toastTimer = 0;
+  function toast(msg, ms = 3200) {
+    const t = $("toast");
+    t.innerHTML = `${MINI}<span>${esc(msg)}</span>`;
+    t.classList.add("show");
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), ms);
+  }
+
+  // ---------- persona ----------
+  function mood() {
+    if (S.busy) return "scanning";
+    if (!alive()) return "offline";
+    if (S.state.attention.length) return "headsup";
+    if (S.state.quiet) return "quiet";
+    return "idle";
+  }
+  const greet = () => { const h = new Date().getHours(); return h < 5 ? "늦게까지 하네." : h < 12 ? "좋은 아침." : h < 18 ? "오후 체크인." : "저녁 체크인."; };
+  const quip = (ts) => QUIPS[Math.floor((ts || Date.now()) / 600000) % QUIPS.length];
+
+  /** The one line Ned opens with — what needs you, in one breath. */
+  function opener() {
+    const s = S.state;
+    if (S.busy) return { lead: S.busy.daily ? "아침 브리핑 정리하는 중. 1~3분이면 돌아올게." : "순찰 도는 중. 1~3분이면 돌아올게.", sub: "그동안 하던 거 해도 돼." };
+    if (S.conn === false) return { lead: "연결이 끊겼어.", sub: "daemon 이 꺼졌는지 확인해 줘. 10초마다 다시 불러볼게." };
+    if (!s) return { lead: "불러오는 중…", sub: "" };
+    if (!alive()) return { lead: "나 잠깐 졸았나 봐.", sub: `마지막 갱신 ${rel(s.updated_at)}. daemon 이 멈췄을 수 있어.` };
+    const sess = s.attention.filter((a) => a.source === "sessions").length, sig = s.attention.length - sess;
+    if (s.attention.length) {
+      const bits = [];
+      if (sess) bits.push(`에이전트 ${sess}명이 너를 찾아`);
+      if (sig) bits.push(`챙길 신호 ${sig}건`);
+      const latest = S.briefings.find((b) => b.status === "UPDATE");
+      return { lead: `${greet()} ${bits.join(", ")}.`, sub: latest?.headline ? `요약하면: ${latest.headline}` : "" };
+    }
+    if (s.quiet) return { lead: "조용한 시간이야. 급한 것만 깨울게.", sub: `다음 순찰 ${rel(s.next_heartbeat_at)}.` };
+    return { lead: `${greet()} ${quip(s.last_heartbeat_at)}`, sub: `다음 순찰 ${rel(s.next_heartbeat_at)}.` };
   }
 
   // ---------- header ----------
   function renderHeader() {
-    const s = state.state; if (!s) return;
-    const alive = s.updated_at && Date.now() - s.updated_at < ALIVE_MS;
-    const dot = $("#alive-dot"); dot.className = `dot ${alive ? "on" : "off"}`;
-    $("#alive-text").textContent = alive ? `daemon 실행 중 · 갱신 ${rel(s.updated_at)}` : s.updated_at ? `daemon 응답 없음 (마지막 갱신 ${rel(s.updated_at)})` : "daemon 상태 없음";
-    $("#last-hb").textContent = s.last_heartbeat_at ? `${rel(s.last_heartbeat_at)} (${fmtTime(s.last_heartbeat_at)})` : "없음";
-    $("#next-hb").textContent = s.next_heartbeat_at ? `${rel(s.next_heartbeat_at)} (${fmtTime(s.next_heartbeat_at)})` : "—";
-    $("#quiet-badge").hidden = !s.quiet;
-    const lb = $("#last-brief");
-    if (s.last_briefing) {
-      lb.hidden = false;
-      lb.textContent = `마지막 브리핑 ${s.last_briefing.status === "NED_OK" ? "NED_OK" : "UPDATE"} · ${fmtDateTime(s.last_briefing.ts)}`;
-      lb.title = s.last_briefing.headline ?? "";
-    } else lb.hidden = true;
+    const m = mood(), s = S.state;
+    document.body.dataset.mood = m;
+    $("mood").textContent = MOOD_KO[m];
+    const n = s?.attention.length ?? 0;
+    document.title = n ? `(${n}) Ned` : "Ned";
+    const up = alive();
+    const lb = s?.last_briefing;
+    $("leds").innerHTML = `
+      <span title="${esc(s?.updated_at ? "갱신 " + mdhm(s.updated_at) + " · pid " + s.daemon_pid : "")}"><span class="led ${up ? "g" : "r"}"></span>daemon ${up ? "on" : "off"}</span>
+      <span><span class="led ${n ? "a" : ""}"></span>attn ${n}</span>
+      <span class="opt"><span class="led ${s?.quiet ? "b" : ""}"></span>quiet</span>
+      <span class="opt" title="${esc(lb ? `${lb.type === "daily" ? "아침" : "점검"} ${lb.status}${lb.headline ? " · " + lb.headline : ""}` : "")}">last ${s?.last_heartbeat_at ? rel(s.last_heartbeat_at) : "—"}</span>
+      <span>next ${s?.next_heartbeat_at ? rel(s.next_heartbeat_at) : "—"}</span>`;
+    const o = opener();
+    $("say").innerHTML = say(`ned · ${hhmm(Date.now())}`, esc(o.lead), esc(o.sub));
+    $("say-settings").innerHTML = say("ned", "여기서 내 근무 시간이랑 볼 곳을 정해 줘.", "저장하면 다음 순찰부터 적용돼. 쓰기 권한은 어차피 없으니 걱정 마.");
   }
 
+  function setBusyButtons() {
+    const b1 = $("btn-hb"), b2 = $("btn-daily");
+    b1.disabled = b2.disabled = !!S.busy;
+    if (!S.busy) { b1.textContent = "지금 점검"; b2.textContent = "아침 브리핑"; return; }
+    const secs = Math.round((Date.now() - S.busy.t0) / 1000);
+    const target = S.busy.daily ? b2 : b1;
+    target.innerHTML = `<span class="spin"></span>${S.busy.daily ? "정리 중" : "스캔 중"} ${secs}초`;
+  }
+
+  let busyTick = 0;
   async function runHeartbeat(daily) {
-    if (state.busy) return;
-    state.busy = true;
-    const b1 = $("#btn-hb"), b2 = $("#btn-daily"), note = $("#busy-note");
-    b1.disabled = b2.disabled = true;
-    note.hidden = false;
-    note.innerHTML = `<span class="spin"></span>${daily ? "아침 브리핑 생성 중" : "점검 중"}… (1~3분 소요)`;
-    const t0 = Date.now();
-    const tick = setInterval(() => { note.innerHTML = `<span class="spin"></span>${daily ? "아침 브리핑 생성 중" : "점검 중"}… ${Math.round((Date.now() - t0) / 1000)}초`; }, 1000);
+    if (S.busy) return;
+    S.busy = { daily, t0: Date.now() };
+    setBusyButtons(); renderHeader();
+    busyTick = setInterval(setBusyButtons, 1000);
     try {
       const b = await api(`/api/heartbeat${daily ? "?daily=1" : ""}`, { method: "POST" });
-      if (b && b.status === "skipped") toast("점검할 새 내용이 없어 건너뜀");
-      else if (b && b.status) toast(`${b.status}${b.headline ? " · " + b.headline : ""}`, 5000);
-      else toast("완료");
-      await Promise.all([loadState(), loadBriefings(), loadEvents()]);
+      if (b && b.status === "skipped") toast("볼 게 없어서 건너뛰었어.");
+      else if (b && b.status === "NED_OK") toast(`이상 무. ${quip(Date.now())}`);
+      else if (b && b.status) toast(b.headline ? b.headline : "새 소식 있어. 우선 탭 봐 줘.", 6000);
+      else toast("끝났어.");
     } catch (e) {
-      console.error(e); toast(`실패: ${e.message}`, 5000);
+      console.warn(e); toast(`순찰 실패: ${e.message}`, 6000);
     } finally {
-      clearInterval(tick);
-      state.busy = false; b1.disabled = b2.disabled = false; note.hidden = true;
+      clearInterval(busyTick);
+      S.busy = null; setBusyButtons();
+      await Promise.all([loadState(), loadBriefings(), loadEvents()]);
     }
   }
 
-  // ---------- attention ----------
-  function renderAttention() {
-    const box = $("#attention"); box.replaceChildren();
-    const items = state.state?.attention ?? [];
-    $("#att-count").textContent = items.length ? `${items.length}건` : "";
-    if (!items.length) { box.append(el("div", { class: "empty" }, "지금은 조용합니다. 봐야 할 것이 없어요.")); return; }
-    for (const a of items) {
-      box.append(el("div", { class: "att", "data-id": a.id },
-        el("div", { class: "ic", title: KIND_KO[a.kind] ?? a.kind }, KIND_ICON[a.kind] ?? KIND_ICON.other),
-        el("div", { class: "tx" },
-          el("div", { class: "tt" }, a.title),
-          a.detail ? el("div", { class: "dt" }, a.detail) : null,
-          el("div", { class: "ts" }, rel(a.ts), a.url ? [" · ", el("a", { href: a.url, target: "_blank", rel: "noopener" }, "열기 ↗")] : null, a.source && a.source !== "sessions" ? ` · 브리핑 ${a.source.slice(0, 16)}` : null),
-        ),
-        el("div", { class: "op" },
-          el("button", { class: "small", onclick: async (ev) => {
-            ev.currentTarget.disabled = true;
-            try { await api(`/api/attention/${encodeURIComponent(a.id)}/dismiss`, { method: "POST" }); await loadState(); }
-            catch (e) { console.error(e); toast(`실패: ${e.message}`); ev.currentTarget.disabled = false; }
-          } }, "닫기"),
-        ),
-      ));
-    }
-  }
-
-  // ---------- sessions ----------
-  function renderSessions() {
-    const box = $("#sessions"); box.replaceChildren();
-    const ss = state.state?.sessions ?? [];
-    $("#sess-count").textContent = ss.length ? `${ss.length}개` : "";
-    if (!ss.length) { box.append(el("div", { class: "empty" }, "활성 세션이 없습니다.")); return; }
-    const tbl = el("table", {},
-      el("thead", {}, el("tr", {},
-        el("th", {}, "워크트리"), el("th", {}, "상태"), el("th", {}, "마지막 요약 / 프롬프트"),
-        el("th", { class: "num hide-sm", title: "활성 서브에이전트" }, "서브"), el("th", {}, "최근"))),
-      el("tbody", {}, ss.map((s) => el("tr", {},
-        el("td", { class: "wt", title: s.cwd }, s.worktree, s.orca_worktree && s.orca_worktree !== s.worktree ? el("div", { style: "color:var(--muted);font-size:11px;font-weight:400" }, s.orca_worktree) : null),
-        el("td", {}, el("span", { class: `st ${s.status}` }, STATUS_KO[s.status] ?? s.status)),
-        el("td", { class: "sm" }, s.last_summary ?? (s.last_prompt ? el("span", { style: "font-style:italic" }, "» ", s.last_prompt) : "—")),
-        el("td", { class: "num hide-sm" }, s.subagents_active || ""),
-        el("td", { class: "rel", title: `시작 ${fmtDateTime(s.since)}` }, rel(s.last_event_ts)),
-      ))),
-    );
-    box.append(tbl);
-  }
-
-  // ---------- briefings ----------
-  function sectionList(title, xs) {
-    if (!xs || !xs.length) return null;
-    return [el("h4", {}, title), el("ul", {}, xs.map((x) => el("li", {},
-      x.kind ? [KIND_ICON[x.kind] ?? "", " "] : null,
-      x.url ? el("a", { href: x.url, target: "_blank", rel: "noopener" }, x.title) : x.title,
-      x.detail ? el("div", { class: "d" }, x.detail) : null,
-    )))];
-  }
-  function renderBriefings() {
-    const box = $("#briefings"); box.replaceChildren();
-    const bs = [...state.briefings].sort((a, b) => b.ts - a.ts);
-    $("#bf-count").textContent = bs.length ? `${bs.length}개` : "";
-    if (!bs.length) { box.append(el("div", { class: "empty" }, "아직 브리핑이 없습니다.")); return; }
-    bs.forEach((b, i) => {
-      const ok = b.status === "NED_OK";
-      const n = (b.action_items?.length ?? 0) + (b.updates?.length ?? 0) + (b.fyi?.length ?? 0);
-      const d = el("details", { class: `bf ${ok ? "ok" : ""}`, open: !ok && i < 3 },
-        el("summary", {},
-          el("span", { class: "caret" }, "▶"),
-          el("span", { class: `tag ${b.type === "daily" ? "daily" : ""}` }, b.type === "daily" ? "아침" : "점검"),
-          el("span", { class: `tag ${ok ? "ok" : "update"}` }, ok ? "NED_OK" : "UPDATE"),
-          el("span", { class: "hl" }, b.headline ?? (ok ? "변화 없음" : `${n}건`)),
-          el("span", { class: "when", title: new Date(b.ts).toLocaleString("ko-KR") }, fmtDateTime(b.ts)),
-        ),
-        el("div", { class: "bf-body" },
-          b.headline ? el("div", { style: "font-weight:500" }, b.headline) : null,
-          sectionList("Action Items", b.action_items),
-          sectionList("Updates", b.updates),
-          sectionList("FYI", b.fyi),
-          sectionList("세션", b.sessions),
-          !b.headline && n === 0 && !(b.sessions?.length) ? el("div", { class: "empty" }, "내용 없음") : null,
-          el("div", { class: "cost" }, `id ${b.id}`, b.cost_usd != null ? ` · $${Number(b.cost_usd).toFixed(3)}` : ""),
-          b.raw ? [el("h4", {}, "raw"), el("pre", { class: "raw" }, b.raw)] : null,
-        ),
-      );
-      box.append(d);
+  // ---------- inbox model ----------
+  function model() {
+    const s = S.state || { attention: [], sessions: [] };
+    const sessBy = Object.fromEntries(s.sessions.map((x) => [x.id, x]));
+    const pri = s.attention.map((a) => {
+      const sess = a.source === "sessions" ? sessBy[a.id.replace(/^session:/, "")] : null;
+      return { key: a.id, att: a, kind: a.kind, title: a.title, detail: a.detail, url: safeUrl(a.url), ts: a.ts, led: sess ? STATUS_LED[sess.status] : "a", sess, briefing: S.briefings.find((b) => b.id === a.source) };
     });
+    const other = [];
+    for (const b of S.briefings) {
+      if (b.status !== "UPDATE") continue;
+      for (const [sec, label] of [["updates", "업데이트"], ["fyi", "참고"]]) (b[sec] || []).forEach((x, i) =>
+        other.push({ key: `${b.id}:${sec}:${i}`, kind: x.kind || "other", title: x.title, detail: x.detail, url: safeUrl(x.url), ts: b.ts, label, briefing: b }));
+    }
+    other.sort((a, b) => b.ts - a.ts);
+    // History: UPDATE briefings one per row; consecutive NED_OK runs fold into one row.
+    const hist = [];
+    for (const b of [...S.briefings].sort((a, z) => z.ts - a.ts)) {
+      const last = hist[hist.length - 1];
+      if (b.status === "NED_OK" && last && last.okrun) { last.okrun.push(b); continue; }
+      if (b.status === "NED_OK") hist.push({ key: `ok:${b.id}`, okrun: [b], ts: b.ts });
+      else hist.push({ key: `bf:${b.id}`, brief: b, ts: b.ts });
+    }
+    const ok = S.briefings.filter((b) => b.status === "NED_OK");
+    return { pri, other, hist, ok };
+  }
+  const listOf = (m) => (ui.tab === "priority" ? m.pri : ui.tab === "other" ? m.other : m.hist);
+
+  function renderTabs(m) {
+    const t = (id, label, n, hot) => `<button class="tab ${ui.tab === id ? "on" : ""}" role="tab" aria-selected="${ui.tab === id}" data-t="${id}">${label}<span class="n ${hot ? "hot" : ""}">${n}</span></button>`;
+    $("tabs").innerHTML = t("priority", "우선", m.pri.length, m.pri.length > 0) + t("other", "기타", m.other.length) + t("history", "기록", S.briefings.length);
+    for (const b of $("tabs").children) b.onclick = () => setTab(b.dataset.t);
+  }
+  function setTab(t) { ui.tab = t; ui.sel = 0; ui.selKey = null; renderInbox(); }
+
+  function rowHtml(it, i) {
+    const sel = i === ui.sel ? "sel" : "";
+    if (it.okrun) {
+      const r = it.okrun, first = r[r.length - 1];
+      return `<div class="row okr ${sel}" data-i="${i}"><span class="ic">✓</span><span class="tt"><span class="stk g flat">ned_ok ×${r.length}</span>&nbsp; 이상 무</span><span class="tm">${hhmm(it.ts)}</span><span class="sb">${r.length > 1 ? `${hhmm(first.ts)}–${hhmm(it.ts)} 순찰 ${r.length}번, 전부 조용` : "순찰 한 번, 조용"}</span></div>`;
+    }
+    if (it.brief) {
+      const b = it.brief, n = (b.action_items?.length || 0), u = (b.updates?.length || 0), f = (b.fyi?.length || 0);
+      return `<div class="row ${sel}" data-i="${i}"><span class="ic">📝</span><span class="tt"><span class="stk ${b.type === "daily" ? "b" : ""} flat">${b.type === "daily" ? "아침" : "점검"}</span>&nbsp; ${esc(b.headline || `${n + u + f}건`)}</span><span class="tm">${hhmm(b.ts)}</span><span class="sb">행동 ${n} · 업데이트 ${u} · 참고 ${f}${b.cost_usd != null ? ` · $${Number(b.cost_usd).toFixed(2)}` : ""}</span></div>`;
+    }
+    return `<div class="row ${sel} ${!it.att && ui.read.has(it.key) ? "read" : ""}" data-i="${i}">
+      <span class="ic">${KIND_ICON[it.kind] || "·"}</span>
+      <span class="tt">${it.led ? `<span class="led ${it.led}"></span>` : ""}${esc(it.title)}</span>
+      <span class="tm">${rel(it.ts)}</span>
+      <span class="sb">${esc(it.label ? it.label + " · " : "")}${esc(it.detail || KIND_KO[it.kind] || "")}</span></div>`;
+  }
+
+  function renderInbox() {
+    const m = model(), list = listOf(m);
+    renderTabs(m);
+    if (ui.selKey) { const i = list.findIndex((x) => x.key === ui.selKey); if (i >= 0) ui.sel = i; }
+    ui.sel = Math.max(0, Math.min(ui.sel, list.length - 1));
+    ui.selKey = list[ui.sel]?.key ?? null;
+
+    let html = "", lastDay = "";
+    list.forEach((it, i) => {
+      const day = dayLabel(it.ts);
+      if (day !== lastDay) { html += `<div class="grp">${esc(day)}</div>`; lastDay = day; }
+      html += rowHtml(it, i);
+    });
+    if (!list.length) html += `<div class="none">${ui.tab === "priority" ? "결정할 것 없음." : ui.tab === "other" ? "읽을 것 없음." : "아직 순찰 기록이 없어."}</div>`;
+    if (ui.tab !== "history" && m.ok.length) html += `<button class="okrun" id="okrun">✓ NED_OK ×${m.ok.length} · 마지막 ${rel(m.ok[0].ts)} — 조용한 순찰은 접어 뒀어</button>`;
+    const box = $("items");
+    box.innerHTML = html;
+    for (const r of box.querySelectorAll(".row")) r.onclick = () => { select(+r.dataset.i); openDetail(); };
+    const ok = $("okrun"); if (ok) ok.onclick = () => setTab("history");
+    box.querySelector(".row.sel")?.scrollIntoView({ block: "nearest" });
+    renderDetail(list[ui.sel], m);
+    renderSessions();
+  }
+
+  function select(i) {
+    const list = listOf(model());
+    ui.sel = Math.max(0, Math.min(i, list.length - 1));
+    ui.selKey = list[ui.sel]?.key ?? null;
+    renderInbox();
+  }
+  function openDetail() { $("detail").classList.add("open"); }
+  function closeDetail() { $("detail").classList.remove("open"); }
+
+  // ---------- detail ----------
+  function sectionList(title, xs) {
+    if (!xs || !xs.length) return "";
+    return `<h3>${esc(title)}</h3><ul>${xs.map((x) => {
+      const u = safeUrl(x.url);
+      return `<li>${KIND_ICON[x.kind] ? KIND_ICON[x.kind] + " " : ""}${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(x.title)}</a>` : esc(x.title)}${x.detail ? `<div class="d">${esc(x.detail)}</div>` : ""}</li>`;
+    }).join("")}</ul>`;
+  }
+  const bfLabel = (b) => `${b.type === "daily" ? "아침 브리핑" : "점검"} · ${dayLabel(b.ts)} ${hhmm(b.ts)}`;
+  const costLine = (b) => `<dl class="kv"><dt>id</dt><dd class="mono">${esc(b.id)}</dd>${b.cost_usd != null ? `<dt>비용</dt><dd class="mono">$${Number(b.cost_usd).toFixed(3)}</dd>` : ""}</dl>${b.raw ? `<h3>raw</h3><pre class="raw">${esc(b.raw)}</pre>` : ""}`;
+
+  function briefingSay(b) {
+    const ok = b.status === "NED_OK";
+    const lead = b.headline || (ok ? quip(b.ts) : "몇 가지 챙겨 왔어.");
+    return say(`ned · ${esc(bfLabel(b))} · <span class="stk ${ok ? "g" : "a"} flat">${ok ? "ned_ok" : "update"}</span>`, esc(lead));
+  }
+
+  function renderDetail(it, m) {
+    const box = $("detail");
+    const back = `<button class="btn small back" id="back">← 목록</button>`;
+    let sig, html;
+    if (!it) {
+      const o = opener();
+      sig = `zero:${ui.tab}:${o.lead}:${o.sub}:${m.ok.length}`;
+      const lead = ui.tab === "priority" ? (S.state?.attention.length === 0 && alive() ? `처리할 거 없어. ${quip(S.state?.last_heartbeat_at)}` : o.lead) : ui.tab === "other" ? "읽을 거 없어. 조용한 하루." : "아직 순찰 기록이 없어.";
+      html = `<div class="zero">${say("ned", esc(lead), `다음 순찰 ${esc(rel(S.state?.next_heartbeat_at))} · NED_OK ${m.ok.length}회`)}</div>`;
+      if (sig !== ui.detailSig) { box.innerHTML = html; ui.detailSig = sig; }
+      closeDetail();
+      return;
+    }
+    if (it.okrun) {
+      const r = it.okrun;
+      sig = `ok:${r.map((b) => b.id).join(",")}`;
+      html = `<div class="dwrap">${back}
+        <div class="crumb"><span class="stk g">ned_ok ×${r.length}</span><span>${esc(dayLabel(it.ts))} ${hhmm(r[r.length - 1].ts)}–${hhmm(it.ts)}</span></div>
+        <h2>조용한 순찰 ${r.length}번</h2>
+        <div class="ctx">${say(`ned · ${hhmm(it.ts)}`, esc(quip(it.ts)), "변화 없는 순찰은 한 줄로 접어 둬.")}
+        <h3>순찰</h3><div class="tlx">${r.map((b) => `<div><span class="h">${hhmm(b.ts)}</span>${b.type === "daily" ? "아침 브리핑" : "점검"} · $${Number(b.cost_usd || 0).toFixed(3)}${b.raw ? " · raw 있음" : ""}</div>`).join("")}</div>
+        ${r.some((b) => b.raw) ? `<h3>raw</h3>${r.filter((b) => b.raw).map((b) => `<pre class="raw">${esc(b.raw)}</pre>`).join("")}` : ""}</div></div>`;
+    } else if (it.brief) {
+      const b = it.brief;
+      sig = `bf:${b.id}`;
+      html = `<div class="dwrap">${back}
+        <div class="crumb"><span class="stk ${b.type === "daily" ? "b" : ""}">${b.type === "daily" ? "아침" : "점검"}</span><span class="stk a">update</span><span>${esc(dayLabel(b.ts))} ${hhmm(b.ts)} · ${rel(b.ts)}</span></div>
+        <div class="ctx">${briefingSay(b)}
+        ${sectionList("행동 필요", b.action_items)}${sectionList("업데이트", b.updates)}${sectionList("참고", b.fyi)}${sectionList("세션", b.sessions)}
+        <h3>메타</h3>${costLine(b)}</div></div>`;
+    } else {
+      if (!it.att && !ui.read.has(it.key)) { ui.read.add(it.key); saveRead(); }
+      let ctx = "";
+      if (it.sess) {
+        const x = it.sess;
+        const evs = S.events.filter((e) => e.session_id === x.id).slice(-10).reverse();
+        ctx = say(`ned · ${hhmm(it.ts)}`, esc(x.status === "waiting" ? `${x.worktree} 가 네 허락을 기다리는 중.` : x.status === "error" ? `${x.worktree} 가 넘어졌어.` : `${x.worktree} 상태 바뀜.`), esc(x.status === "waiting" ? "터미널로 가서 답해 주면 바로 이어서 갈 거야." : x.status === "error" ? "다시 돌릴지 봐 줘." : ""))
+          + `<h3>세션 · ${esc(x.worktree)}</h3><dl class="kv"><dt>상태</dt><dd><span class="led ${STATUS_LED[x.status] || ""}"></span>${esc(STATUS_KO[x.status] || x.status)}</dd><dt>시작</dt><dd>${rel(x.since)} (${mdhm(x.since)})</dd><dt>서브에이전트</dt><dd>${x.subagents_active}</dd><dt>경로</dt><dd class="mono" style="font-size:12px">${esc(x.cwd)}</dd>${x.last_prompt ? `<dt>프롬프트</dt><dd>» ${esc(x.last_prompt)}</dd>` : ""}</dl>
+          <h3>최근 이벤트</h3>${evs.length ? `<div class="tlx">${evs.map((e) => `<div class="${e.event === "Notification" ? "hot" : e.event === "StopFailure" ? "err" : ""}"><span class="h">${hhmm(e.ts)}</span>${esc(EVENT_KO[e.event] || e.event)}${e.message || e.prompt ? ` — ${esc(String(e.message || e.prompt).slice(0, 140))}` : e.agent_type ? ` — ${esc(e.agent_type)}` : ""}</div>`).join("")}</div>` : `<div class="body" style="font-size:13px">이벤트 없음</div>`}`;
+      } else if (it.briefing) {
+        const b = it.briefing, rest = [...(b.action_items || []), ...(b.updates || []), ...(b.fyi || [])].filter((x) => x.title !== it.title);
+        ctx = `<h3>출처 · ${esc(bfLabel(b))}</h3>${briefingSay(b)}
+          ${rest.length ? `<h3>같은 브리핑의 다른 항목</h3><ul>${rest.map((x) => `<li>${KIND_ICON[x.kind] || ""} ${esc(x.title)}</li>`).join("")}</ul>` : ""}
+          <h3>메타</h3>${costLine(b)}`;
+      } else if (it.att) {
+        ctx = `<h3>출처</h3><div class="body" style="font-size:13px">${esc(it.att.source)}</div>`;
+      }
+      sig = `it:${it.key}:${it.title}:${it.detail}:${S.events.length}:${it.sess ? it.sess.status + it.sess.last_event_ts : ""}`;
+      html = `<div class="dwrap">${back}
+        <div class="crumb"><span class="stk ${it.att ? "a" : it.label === "참고" ? "" : "b"}">${it.att ? "행동 필요" : esc(it.label)}</span><span>${KIND_ICON[it.kind] || ""} ${esc(KIND_KO[it.kind] || it.kind)}</span><span>· ${rel(it.ts)}</span></div>
+        <h2>${esc(it.title)}</h2>
+        ${it.detail ? `<div class="body">${esc(it.detail)}</div>` : ""}
+        <div class="dacts">
+          ${it.url ? `<a class="btn go" href="${esc(it.url)}" target="_blank" rel="noopener">열기 <kbd>⏎</kbd></a>` : ""}
+          ${it.att ? `<button class="btn" id="done">완료 <kbd>e</kbd></button>` : ""}
+        </div>
+        <div class="ctx">${ctx}</div></div>`;
+    }
+    if (sig === ui.detailSig) return;
+    ui.detailSig = sig;
+    box.innerHTML = html;
+    box.scrollTop = 0;
+    $("done")?.addEventListener("click", dismissSelected);
+    $("back")?.addEventListener("click", closeDetail);
+  }
+
+  async function dismissSelected() {
+    const it = listOf(model())[ui.sel];
+    if (!it?.att) return;
+    const id = it.att.id;
+    S.state.attention = S.state.attention.filter((a) => a.id !== id); // optimistic
+    renderInbox(); renderHeader();
+    try {
+      await api(`/api/attention/${encodeURIComponent(id)}/dismiss`, { method: "POST" });
+      toast(it.att.source === "sessions" ? "닫았어. 세션이 또 부르면 다시 올라올 거야." : "처리 완료로 표시했어.");
+    } catch (e) { console.warn(e); toast(`닫기 실패: ${e.message}`); }
+    await loadState();
+  }
+
+  // ---------- sessions (rail + phone drawer) ----------
+  function renderSessions() {
+    const ss = S.state?.sessions ?? [];
+    const units = ss.map((x) => `<div class="unit" title="${esc(x.cwd)}"><span class="led ${STATUS_LED[x.status] || ""}"></span><span class="nm">${esc(x.worktree)}${x.subagents_active ? ` <span class="sa">+${x.subagents_active}</span>` : ""}</span><span class="r">${rel(x.last_event_ts)}</span><span class="s">${esc(x.last_summary || (x.last_prompt ? "» " + x.last_prompt : ""))}</span></div>`).join("");
+    const rack = units ? `<div class="rack">${units}</div>` : `<div class="none">출동 중인 에이전트 없음.</div>`;
+    const tape = [...S.briefings].sort((a, b) => b.ts - a.ts).slice(0, 8).map((b) => `<div class="tr ${b.status === "NED_OK" ? "ok" : ""}"><span class="h">${dayLabel(b.ts) === "오늘" ? "" : esc(dayLabel(b.ts)) + " "}${hhmm(b.ts)}</span><span>${b.status === "NED_OK" ? "· 이상 무" : `▲ ${esc(b.headline || "업데이트")}`}</span></div>`).join("");
+    $("rail").innerHTML = `<h3>장비실 · 세션 <span class="n">${ss.length}</span><button class="btn small" id="rail-toggle" title="세션 패널 접기">접기</button></h3>${rack}<h3>순찰 기록 <span class="n">${S.briefings.length}</span></h3>${tape ? `<div class="tape">${tape}</div>` : `<div class="none">아직 기록 없음.</div>`}`;
+    $("rail-toggle").onclick = () => setRail(true);
+    const waiting = ss.filter((x) => x.status === "waiting" || x.status === "error").length;
+    $("msess-sum").innerHTML = `▸ 장비실 · 세션 ${ss.length}${waiting ? ` &nbsp;<span class="stk a flat">대기 ${waiting}</span>` : ""}`;
+    $("msess-rack").innerHTML = units || `<div class="none">출동 중인 에이전트 없음.</div>`;
+    syncRailButton();
+  }
+  function setRail(off) { ui.railOff = off; lsSet("ned.railOff", off ? "1" : "0"); $("inbox").classList.toggle("rail-off", off); syncRailButton(); }
+  function syncRailButton() {
+    let b = $("rail-open");
+    if (ui.railOff && ui.view === "inbox") {
+      if (!b) { b = document.createElement("button"); b.id = "rail-open"; b.className = "btn small"; b.onclick = () => setRail(false); $("leds").after(b); }
+      b.textContent = `세션 ${S.state?.sessions.length ?? 0}`;
+      b.hidden = window.matchMedia("(max-width: 1180px)").matches;
+    } else if (b) b.remove();
   }
 
   // ---------- timeline ----------
   function timelineItems() {
-    const evs = state.events.map((e) => ({
-      ts: e.ts, type: e.event, wt: e.orca_worktree || basename(e.cwd) || "", brief: false,
-      msg: e.prompt ?? e.message ?? e.reason ?? (e.agent_type ? `agent ${e.agent_type}` : ""), raw: e,
-    }));
-    const bfs = state.briefings.map((b) => ({
-      ts: b.ts, type: "브리핑", wt: "", brief: true,
-      msg: `${b.type === "daily" ? "아침" : "점검"} · ${b.status}${b.headline ? " · " + b.headline : ""}`, raw: b,
-    }));
+    const evs = S.events.map((e) => ({ ts: e.ts, type: e.event, wt: e.orca_worktree ? basename(String(e.orca_worktree).split("::").pop()) : basename(e.cwd), brief: false,
+      msg: e.prompt ?? e.message ?? e.reason ?? (e.agent_type ? `agent ${e.agent_type}` : ""), raw: e }));
+    const bfs = S.briefings.map((b) => ({ ts: b.ts, type: "브리핑", wt: "", brief: true, msg: `${b.type === "daily" ? "아침" : "점검"} · ${b.status}${b.headline ? " · " + b.headline : ""}`, raw: b }));
     return [...evs, ...bfs].sort((a, b) => b.ts - a.ts);
-  }
-  function chip(label, set, key, onchange) {
-    return el("span", { class: `chip ${set.has(key) ? "on" : ""}`, onclick: () => { set.has(key) ? set.delete(key) : set.add(key); onchange(); } }, label);
   }
   function renderTimeline() {
     const all = timelineItems();
     const types = [...new Set(all.map((x) => x.type))].sort((a, b) => (a === "브리핑" ? -1 : b === "브리핑" ? 1 : a.localeCompare(b)));
     const wts = [...new Set(all.map((x) => x.wt).filter(Boolean))].sort();
-    const ct = $("#chips-type"); ct.replaceChildren(el("span", { class: "lbl" }, "유형"),
-      el("span", { class: `chip ${state.filterType.size === 0 ? "on" : ""}`, onclick: () => { state.filterType.clear(); renderTimeline(); } }, "전체"),
-      ...types.map((t) => chip(EVENT_KO[t] ?? t, state.filterType, t, renderTimeline)));
-    const cw = $("#chips-wt"); cw.replaceChildren(el("span", { class: "lbl" }, "워크트리"),
-      el("span", { class: `chip ${state.filterWt.size === 0 ? "on" : ""}`, onclick: () => { state.filterWt.clear(); renderTimeline(); } }, "전체"),
-      ...wts.map((w) => chip(w, state.filterWt, w, renderTimeline)));
-    cw.hidden = wts.length === 0;
-
-    const rows = all.filter((x) => (!state.filterType.size || state.filterType.has(x.type)) && (!state.filterWt.size || x.brief || state.filterWt.has(x.wt))).slice(0, 300);
-    $("#tl-count").textContent = rows.length ? `${rows.length}건${all.length > rows.length ? ` / ${all.length}` : ""}` : "";
-    const ul = $("#timeline"); ul.replaceChildren();
-    if (!rows.length) { ul.append(el("li", { class: "empty", style: "display:block;border:0" }, "표시할 이벤트가 없습니다.")); return; }
-    let lastDay = null;
+    const chips = (label, set, keys, name) => `<span class="lbl">${label}</span><button class="chip ${set.size === 0 ? "on" : ""}" data-f="${name}" data-k="">전체</button>` +
+      keys.map((k) => `<button class="chip ${set.has(k) ? "on" : ""}" data-f="${name}" data-k="${esc(k)}">${esc(EVENT_KO[k] || k)}</button>`).join("");
+    $("chips-type").innerHTML = chips("유형", S.filterType, types, "type");
+    $("chips-wt").innerHTML = chips("워크트리", S.filterWt, wts, "wt");
+    $("chips-wt").hidden = !wts.length;
+    for (const c of document.querySelectorAll("[data-f]")) c.onclick = () => {
+      const set = c.dataset.f === "type" ? S.filterType : S.filterWt, k = c.dataset.k;
+      if (!k) set.clear(); else if (set.has(k)) set.delete(k); else set.add(k);
+      renderTimeline();
+    };
+    const rows = all.filter((x) => (!S.filterType.size || S.filterType.has(x.type)) && (!S.filterWt.size || x.brief || S.filterWt.has(x.wt))).slice(0, 300);
+    $("tl-count").textContent = rows.length ? `${rows.length}건${all.length > rows.length ? ` / ${all.length}` : ""}` : "";
+    if (!rows.length) { $("timeline").innerHTML = `<li class="dayh" style="letter-spacing:0;font-family:var(--sans);font-size:13px">표시할 이벤트가 없어.</li>`; return; }
+    let html = "", lastDay = "";
     for (const x of rows) {
-      const day = fmtDay(x.ts);
-      if (day !== lastDay) { ul.append(el("li", { style: "border:0;padding:0" }, el("div", { class: "day" }, day))); lastDay = day; }
-      ul.append(el("li", { class: x.brief ? "brief" : "", title: new Date(x.ts).toLocaleString("ko-KR") },
-        el("span", { class: "t" }, fmtTime(x.ts)),
-        el("div", { class: "ev" },
-          el("span", { class: "kind" }, x.brief ? "📝 브리핑" : (EVENT_KO[x.type] ?? x.type)),
-          x.wt ? el("span", { class: "wt" }, x.wt) : null,
-          x.raw.notification_type ? el("span", { class: "tag" }, x.raw.notification_type) : null,
-          x.msg ? el("span", { class: "msg" }, String(x.msg).slice(0, 300)) : null,
-        ),
-      ));
+      const day = dayLabel(x.ts);
+      if (day !== lastDay) { html += `<li class="dayh">${esc(day)}</li>`; lastDay = day; }
+      const cls = x.brief ? "brief" : x.type === "Notification" ? "hot" : x.type === "StopFailure" ? "err" : "";
+      html += `<li class="${cls}" title="${esc(new Date(x.ts).toLocaleString("ko-KR"))}"><span class="t">${hhmm(x.ts)}</span><div class="ev">
+        <span class="kind">${x.brief ? "📝 브리핑" : esc(EVENT_KO[x.type] || x.type)}</span>${x.wt ? `<span class="wt">${esc(x.wt)}</span>` : ""}
+        ${x.raw.notification_type ? `<span class="stk flat">${esc(x.raw.notification_type)}</span>` : ""}${x.raw.status === "NED_OK" ? `<span class="stk g flat">ned_ok</span>` : x.raw.status === "UPDATE" ? `<span class="stk a flat">update</span>` : ""}
+        ${x.msg ? `<span class="msg">${esc(String(x.msg).slice(0, 300))}</span>` : ""}</div></li>`;
     }
+    $("timeline").innerHTML = html;
   }
 
-  // ---------- config ----------
+  // ---------- settings ----------
   function renderConfig() {
-    const c = state.config; if (!c) return;
-    $("#c-hb").value = c.heartbeat_minutes ?? "";
-    $("#c-sig").value = c.signal_check_minutes ?? "";
-    $("#c-bt").value = c.briefing_time ?? "";
-    $("#c-qon").checked = !!c.quiet_hours;
-    $("#c-qs").value = c.quiet_hours?.start ?? "23:00";
-    $("#c-qe").value = c.quiet_hours?.end ?? "08:00";
-    $("#c-qs").disabled = $("#c-qe").disabled = !c.quiet_hours;
-    // Toggles come from the keys of config.sources, so new sources appear automatically.
-    const box = $("#c-sources"); box.replaceChildren();
-    for (const [k, v] of Object.entries(c.sources ?? {})) {
-      box.append(el("label", {}, el("input", { type: "checkbox", "data-src": k, checked: !!v }), " ", SOURCE_LABEL[k] ?? k));
-    }
-    if (!box.children.length) box.append(el("span", { class: "empty" }, "소스 없음"));
-    $("#c-model").value = c.claude_model ?? "";
-    $("#c-turns").value = c.claude_max_turns ?? "";
-    $("#c-msg").textContent = ""; $("#c-msg").className = "msg";
+    const c = S.config; if (!c) return;
+    $("cfg-port").textContent = c.port ? `port ${c.port}` : "";
+    $("c-hb").value = c.heartbeat_minutes ?? "";
+    $("c-sig").value = c.signal_check_minutes ?? "";
+    $("c-bt").value = c.briefing_time ?? "";
+    $("c-qon").checked = !!c.quiet_hours;
+    $("c-qs").value = c.quiet_hours?.start ?? "23:00";
+    $("c-qe").value = c.quiet_hours?.end ?? "08:00";
+    $("c-qs").disabled = $("c-qe").disabled = !c.quiet_hours;
+    // Toggles come from config.sources keys, so new sources appear without touching this page.
+    const keys = Object.keys(c.sources || {});
+    $("c-sources").innerHTML = keys.length ? keys.map((k) => `<label><input type="checkbox" data-src="${esc(k)}" ${c.sources[k] ? "checked" : ""}>${esc(SOURCE_LABEL[k] || k)}</label>`).join("") : `<span class="hint">소스 없음</span>`;
+    $("c-model").value = c.claude_model ?? "";
+    $("c-turns").value = c.claude_max_turns ?? "";
+    $("c-msg").textContent = ""; $("c-msg").className = "msg";
   }
-  $("#c-qon").addEventListener("change", (e) => { $("#c-qs").disabled = $("#c-qe").disabled = !e.target.checked; });
-  $("#cfg").addEventListener("submit", async (e) => {
+  $("c-qon").addEventListener("change", (e) => { $("c-qs").disabled = $("c-qe").disabled = !e.target.checked; });
+  $("cfg").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const msg = $("#c-msg"), btn = $("#c-save");
+    const msg = $("c-msg"), btn = $("c-save");
     const sources = {};
     for (const cb of document.querySelectorAll("[data-src]")) sources[cb.dataset.src] = cb.checked;
     const body = {
-      heartbeat_minutes: Number($("#c-hb").value),
-      signal_check_minutes: Number($("#c-sig").value),
-      briefing_time: $("#c-bt").value,
-      quiet_hours: $("#c-qon").checked ? { start: $("#c-qs").value || "23:00", end: $("#c-qe").value || "08:00" } : null,
+      heartbeat_minutes: Number($("c-hb").value),
+      signal_check_minutes: Number($("c-sig").value),
+      briefing_time: $("c-bt").value,
+      quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
       sources,
-      claude_model: $("#c-model").value.trim() || null,
-      claude_max_turns: Number($("#c-turns").value),
+      claude_model: $("c-model").value.trim() || null,
+      claude_max_turns: Number($("c-turns").value),
     };
     btn.disabled = true; msg.className = "msg"; msg.textContent = "저장 중…";
     try {
-      state.config = await api("/api/config", { method: "PUT", body: JSON.stringify(body) });
-      renderConfig(); msg.className = "msg ok"; msg.textContent = "저장됨 (다음 heartbeat 부터 적용)";
+      S.config = await api("/api/config", { method: "PUT", body: JSON.stringify(body) });
+      renderConfig(); msg.className = "msg ok"; msg.textContent = "저장했어. 다음 순찰부터 적용.";
     } catch (err) {
-      console.error(err); msg.className = "msg err"; msg.textContent = `저장 실패: ${err.message}`;
+      console.warn(err); msg.className = "msg err"; msg.textContent = `저장 실패: ${err.message}`;
     } finally { btn.disabled = false; }
   });
 
   // ---------- loaders ----------
+  let lastUpdated = 0, lastBriefId; // undefined until the first poll
   async function loadState() {
-    try { state.state = await api("/api/state"); renderHeader(); renderAttention(); renderSessions(); }
-    catch (e) { console.warn("state", e.message); $("#alive-dot").className = "dot off"; $("#alive-text").textContent = "서버에 연결할 수 없음"; }
+    try {
+      const s = await api("/api/state");
+      S.state = s; S.conn = true;
+      const bid = s.last_briefing?.id ?? null;
+      const tasks = [];
+      if (lastUpdated && s.updated_at !== lastUpdated) tasks.push(loadEvents(false));
+      if (lastBriefId !== undefined && bid !== lastBriefId) tasks.push(loadBriefings(false));
+      lastUpdated = s.updated_at; lastBriefId = bid;
+      await Promise.all(tasks);
+    } catch (e) {
+      console.warn("state", e.message); S.conn = false;
+    }
+    renderAll();
   }
-  async function loadEvents() {
-    try { state.events = await api("/api/events?days=2"); renderTimeline(); }
-    catch (e) { console.warn("events", e.message); }
+  async function loadEvents(render = true) {
+    try { S.events = await api("/api/events?days=2"); } catch (e) { console.warn("events", e.message); }
+    if (render) renderAll();
   }
-  async function loadBriefings() {
-    try { state.briefings = await api("/api/briefings?limit=30"); renderBriefings(); renderTimeline(); }
-    catch (e) { console.warn("briefings", e.message); }
+  async function loadBriefings(render = true) {
+    try { S.briefings = (await api("/api/briefings?limit=30")).sort((a, b) => b.ts - a.ts); } catch (e) { console.warn("briefings", e.message); }
+    if (render) renderAll();
   }
   async function loadConfig() {
-    try { state.config = await api("/api/config"); renderConfig(); }
-    catch (e) { console.warn("config", e.message); }
+    try { S.config = await api("/api/config"); renderConfig(); } catch (e) { console.warn("config", e.message); }
+  }
+  function renderAll() {
+    renderHeader();
+    if (ui.view === "inbox") renderInbox();
+    if (ui.view === "timeline") renderTimeline();
   }
 
-  $("#btn-hb").addEventListener("click", () => runHeartbeat(false));
-  $("#btn-daily").addEventListener("click", () => runHeartbeat(true));
-  for (const b of document.querySelectorAll("[data-refresh]")) {
-    b.addEventListener("click", () => ({ briefings: loadBriefings, events: loadEvents, config: loadConfig })[b.dataset.refresh]?.());
+  // ---------- views + keys ----------
+  function setView() {
+    const v = (location.hash || "#inbox").slice(1);
+    ui.view = ["inbox", "timeline", "settings"].includes(v) ? v : "inbox";
+    for (const id of ["inbox", "timeline", "settings"]) $("v-" + id).hidden = ui.view !== id;
+    for (const a of $("views").children) a.classList.toggle("on", a.dataset.v === ui.view);
+    if (ui.view === "settings" && !S.config) loadConfig();
+    renderAll();
   }
+  window.addEventListener("hashchange", setView);
 
-  loadState(); loadEvents(); loadBriefings(); loadConfig();
-  setInterval(loadState, POLL_MS);
-  // Relative times drift; re-render cheap views each minute.
-  setInterval(() => { renderHeader(); renderAttention(); renderSessions(); }, 60 * 1000);
+  document.addEventListener("keydown", (ev) => {
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    const t = ev.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if (ev.key === "r") { runHeartbeat(false); return; }
+    if (ui.view !== "inbox") return;
+    const list = listOf(model());
+    if (ev.key === "j" || ev.key === "ArrowDown") { select(ui.sel + 1); ev.preventDefault(); }
+    else if (ev.key === "k" || ev.key === "ArrowUp") { select(ui.sel - 1); ev.preventDefault(); }
+    else if (ev.key === "e") dismissSelected();
+    else if (ev.key === "Enter") {
+      if (t && t.tagName === "BUTTON" || t && t.tagName === "A") return;
+      const it = list[ui.sel];
+      if (it?.url) window.open(it.url, "_blank", "noopener"); else if (it) openDetail();
+    }
+    else if (ev.key === "1") setTab("priority");
+    else if (ev.key === "2") setTab("other");
+    else if (ev.key === "3") setTab("history");
+    else if (ev.key === "Escape") closeDetail();
+  });
+
+  $("btn-hb").addEventListener("click", () => runHeartbeat(false));
+  $("btn-daily").addEventListener("click", () => runHeartbeat(true));
+  for (const b of document.querySelectorAll("[data-refresh]")) b.addEventListener("click", () => (b.dataset.refresh === "events" ? Promise.all([loadEvents(), loadBriefings()]) : loadConfig()));
+  if (ui.railOff) $("inbox").classList.add("rail-off");
+  window.addEventListener("resize", syncRailButton);
+
+  setView();
+  Promise.all([loadBriefings(false), loadEvents(false), loadConfig()]).then(loadState);
+  setInterval(() => { if (!document.hidden) loadState(); }, POLL_MS);
+  setInterval(renderAll, 60 * 1000); // relative times drift
   document.addEventListener("visibilitychange", () => { if (!document.hidden) loadState(); });
 })();
 </script>
