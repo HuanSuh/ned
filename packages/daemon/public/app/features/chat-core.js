@@ -4,7 +4,7 @@ import { esc, safeUrl } from "../util.js";
 
 // ---------- persona wording (structure is shared; only words + theme tokens change) ----------
 export const COMMS_VOICE = {
-  ned: { tag: "NED · 통신", title: "Ned 통신", live: "수신 중", idle: "연결됨", off: "신호 끊김", calling: (n) => `Ned: 새 메시지 ${n}건`, quiet: "새 소식 없음", thinking: "찾아보는 중…", placeholder: "Ned 에게 물어봐…", empty: "뭐든 물어봐. 오늘 일정, 답할 거, PR 상태 — 아는 건 바로, 모르는 건 찾아볼게.", noMsgs: "새로 온 건 없어.", ask: "Ned 에게 묻기" },
+  ned: { tag: "NED · NET", title: "Ned Net", live: "수신 중", idle: "연결됨", off: "신호 끊김", calling: (n) => `Ned: 새 메시지 ${n}건`, quiet: "새 소식 없음", thinking: "찾아보는 중…", placeholder: "Ned 에게 물어봐…", empty: "뭐든 물어봐. 오늘 일정, 답할 거, PR 상태 — 아는 건 바로, 모르는 건 찾아볼게.", noMsgs: "새로 온 건 없어.", ask: "Ned 에게 묻기" },
   alfred: { tag: "ALFRED · 인터폰", title: "인터폰", live: "호출 중", idle: "대기 중", off: "연결 끊김", calling: (n) => `호출 ${n}건`, quiet: "새 호출 없음", thinking: "알아보는 중입니다…", placeholder: "말씀하십시오…", empty: "무엇이든 여쭈어 주십시오. 일정, 회신할 일, PR 현황을 바로 아뢰겠습니다.", noMsgs: "새로 들어온 소식은 없습니다.", ask: "Alfred 에게 묻기" },
   oracle: { tag: "ORACLE · LINK", title: "CLOCKTOWER LINK", live: "RX", idle: "LINK OK", off: "NO SIGNAL", calling: (n) => `신호 ${n}`, quiet: "신호 없음", thinking: "조회 중…", placeholder: "질의 입력 >", empty: "질의 대기. 일정 · 답할 것 · PR 상태 즉시 응답.", noMsgs: "수신 신호 없음.", ask: "Oracle 에게 질의" },
   jarvis: { tag: "JARVIS · 링크", title: "Jarvis 링크", live: "수신", idle: "온라인", off: "오프라인", calling: (n) => `알림 ${n}건`, quiet: "새 알림 0건", thinking: "분석 중…", placeholder: "무엇을 확인할까요?", empty: "무엇이든 물어보세요. 일정 · 응답 대기 · PR 현황을 바로 정리해 드릴게요.", noMsgs: "새 알림이 없어요.", ask: "Jarvis 에게 묻기" },

@@ -1,13 +1,13 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`panel > shell: dock + panel with 대화 / 메시지 tabs (snapshot) 1`] = `
-"<div class="cm-dock" id="cm-dock" role="button" tabindex="0" aria-label="Ned 통신 열기 (⌘J)" aria-expanded="false" aria-controls="cm-panel" title="Ned 통신 — 클릭 또는 ⌘J · 끌어서 옮기기">
+"<div class="cm-dock" id="cm-dock" role="button" tabindex="0" aria-label="Ned Net 열기 (⌘J)" aria-expanded="false" aria-controls="cm-panel" title="Ned Net — 클릭 또는 ⌘J · 끌어서 옮기기">
   <span class="cm-ring"><span class="cm-mk" id="cm-mk1"><svg class="mark"></svg></span><span class="cm-led" id="cm-led"></span></span>
   <span class="cm-tx"><b id="cm-st"></b><span class="cm-tk" id="cm-tk"></span></span>
   <span class="cm-badge" id="cm-badge" hidden></span>
 </div>
-<section class="cm-panel" id="cm-panel" role="dialog" aria-label="Ned 통신" hidden>
-  <header class="cm-hd"><span class="cm-ring sm"><span class="cm-mk" id="cm-mk2"><svg class="mark"></svg></span></span><span class="cm-ti"><i class="cm-tag" id="cm-tag">NED · 통신</i><b id="cm-title">Ned 통신</b><span id="cm-sub"></span></span><span class="sp"></span>
+<section class="cm-panel" id="cm-panel" role="dialog" aria-label="Ned Net" hidden>
+  <header class="cm-hd"><span class="cm-ring sm"><span class="cm-mk" id="cm-mk2"><svg class="mark"></svg></span></span><span class="cm-ti"><i class="cm-tag" id="cm-tag">NED · NET</i><b id="cm-title">Ned Net</b><span id="cm-sub"></span></span><span class="sp"></span>
     <span class="cm-cost" id="cm-cost" title="이 대화 비용 · 오늘 claude -p 합계"></span>
     <button type="button" class="btn small" id="cm-new" title="새 대화">새 대화</button>
     <button type="button" class="btn small cm-x" id="cm-close" aria-label="접기" title="접기 (Esc)">▾</button></header>
