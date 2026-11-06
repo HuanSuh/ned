@@ -31,6 +31,34 @@ export interface NedConfig {
   notify: NotifyMode;
   /** What deserves a banner (read by Ned.app from state.json, and by the daemon's osascript fallback). */
   notifications: NedNotifications;
+  /**
+   * Outbound actions (POST /api/send). Ned is read-only except here, and only for switches that are on.
+   * session_send types into a local Orca terminal (reversible) so it defaults on; the rest default off/draft-only.
+   */
+  actions: NedActions;
+  /** Voice for reply drafts (POST /api/draft) — the USER's own voice, not the persona's. */
+  reply_tone: string;
+}
+
+export interface NedActions {
+  slack_send: boolean;
+  gmail_draft: boolean;
+  gmail_send: boolean;
+  session_send: boolean;
+}
+export const DEFAULT_ACTIONS: NedActions = { slack_send: false, gmail_draft: true, gmail_send: false, session_send: true };
+export const DEFAULT_REPLY_TONE = "간결하고 정중한 존댓말, 핵심 먼저";
+
+/** Merge a (partial) actions patch over `base`; only real booleans are taken. */
+export function normalizeActions(raw: unknown, base: NedActions = DEFAULT_ACTIONS): NedActions {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const pick = (k: keyof NedActions) => (typeof r[k] === "boolean" ? (r[k] as boolean) : base[k]);
+  return { slack_send: pick("slack_send"), gmail_draft: pick("gmail_draft"), gmail_send: pick("gmail_send"), session_send: pick("session_send") };
+}
+
+/** A non-empty string (trimmed, max 200 chars), else `fallback`. */
+export function normalizeReplyTone(v: unknown, fallback = DEFAULT_REPLY_TONE): string {
+  return typeof v === "string" && v.trim() ? v.trim().slice(0, 200) : fallback;
 }
 
 export const PERSONAS = ["ned", "alfred", "oracle", "jarvis"] as const;
@@ -135,6 +163,8 @@ export const DEFAULT_CONFIG: NedConfig = {
   agenda_refresh_minutes: 60,
   notify: "auto",
   notifications: DEFAULT_NOTIFICATIONS,
+  actions: DEFAULT_ACTIONS,
+  reply_tone: DEFAULT_REPLY_TONE,
 };
 
 export function loadConfig(): NedConfig {
@@ -150,6 +180,8 @@ export function loadConfig(): NedConfig {
       sources: { ...DEFAULT_CONFIG.sources, ...(parsed.sources ?? {}) },
       persona: normalizePersona(parsed.persona),
       notifications: normalizeNotifications(parsed.notifications),
+      actions: normalizeActions(parsed.actions),
+      reply_tone: normalizeReplyTone(parsed.reply_tone),
       filters: mergeFilters(normalizeFilters(DEFAULT_CONFIG.filters), parsed.filters),
     };
   }
