@@ -1,4 +1,4 @@
-import type { PersonaId } from "./config.js";
+import { DEFAULT_NOTIFICATIONS, type NedNotifications, type PersonaId } from "./config.js";
 import { STATE_PATH, readJson, writeJsonAtomic } from "./paths.js";
 import type { SessionView } from "./sessions.js";
 
@@ -47,6 +47,8 @@ export interface NedState {
   quiet: boolean;
   /** config.persona, mirrored here so the menu-bar app and dashboard can follow it. */
   persona: PersonaId;
+  /** config.notifications, mirrored for Ned.app (which posts the banners). */
+  notifications: NedNotifications;
 }
 
 export function readState(): NedState {
@@ -60,6 +62,7 @@ export function readState(): NedState {
     next_heartbeat_at: null,
     quiet: false,
     persona: "ned",
+    notifications: DEFAULT_NOTIFICATIONS,
   });
 }
 

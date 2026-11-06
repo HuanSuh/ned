@@ -17,7 +17,7 @@ export function notifyBackend(mode: NotifyMode = "auto", env = process.env): "os
 }
 
 /** Banner for a briefing. Ned.app notifies from state.json itself, so under it this only logs. */
-export function notify(title: string, body: string, mode: NotifyMode = "auto"): void {
+export function notify(title: string, body: string, mode: NotifyMode = "auto", opts: { sound?: boolean } = {}): void {
   const backend = notifyBackend(mode);
   if (backend !== "osascript") {
     log(`notify: ${backend === "app" ? "delegated to Ned.app (NED_NOTIFY=app)" : "off (config.notify)"} — no osascript: ${body.slice(0, 80)}`);
@@ -26,5 +26,5 @@ export function notify(title: string, body: string, mode: NotifyMode = "auto"): 
   if (process.platform !== "darwin") return;
   const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').slice(0, 200);
   log(`notify: osascript — ${body.slice(0, 80)}`);
-  execFile("osascript", ["-e", `display notification "${esc(body)}" with title "${esc(title)}"`], () => {});
+  execFile("osascript", ["-e", `display notification "${esc(body)}" with title "${esc(title)}"${opts.sound ? ' sound name "Glass"' : ""}`], () => {});
 }

@@ -29,11 +29,52 @@ export interface NedConfig {
   agenda_refresh_minutes: number;
   /** Briefing banners: `auto` = Ned.app when it spawned the daemon (`NED_NOTIFY=app`), else osascript. */
   notify: NotifyMode;
+  /** What deserves a banner (read by Ned.app from state.json, and by the daemon's osascript fallback). */
+  notifications: NedNotifications;
 }
 
 export const PERSONAS = ["ned", "alfred", "oracle", "jarvis"] as const;
 export type PersonaId = (typeof PERSONAS)[number];
 export const normalizePersona = (v: unknown): PersonaId => (PERSONAS.includes(v as PersonaId) ? (v as PersonaId) : "ned");
+
+export const NOTIFY_KINDS = ["session", "email", "slack", "jira", "github", "sentry", "calendar"] as const;
+export type NotifyKind = (typeof NOTIFY_KINDS)[number];
+export interface NedNotifications {
+  enabled: boolean;
+  kinds: Record<NotifyKind, boolean>;
+  /** Banner for the morning briefing. */
+  briefing: boolean;
+  /** More than this many items at once → one summary banner instead of one per item. */
+  summary_threshold: number;
+  /** During quiet_hours: drop banners, or deliver them without sound. */
+  quiet_delivery: "skip" | "silent";
+  sound: boolean;
+}
+export const DEFAULT_NOTIFICATIONS: NedNotifications = {
+  enabled: true,
+  kinds: { session: true, email: true, slack: true, jira: true, github: true, sentry: true, calendar: true },
+  briefing: true,
+  summary_threshold: 3,
+  quiet_delivery: "skip",
+  sound: true,
+};
+
+/** Merge a (partial) notifications patch over `base` and coerce every field to its type. */
+export function normalizeNotifications(raw: unknown, base: NedNotifications = DEFAULT_NOTIFICATIONS): NedNotifications {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Partial<Record<keyof NedNotifications, unknown>>;
+  const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
+  const kr = (r.kinds && typeof r.kinds === "object" ? r.kinds : {}) as Record<string, unknown>;
+  const kinds = Object.fromEntries(NOTIFY_KINDS.map((k) => [k, bool(kr[k], base.kinds[k])])) as Record<NotifyKind, boolean>;
+  const th = Number(r.summary_threshold);
+  return {
+    enabled: bool(r.enabled, base.enabled),
+    kinds,
+    briefing: bool(r.briefing, base.briefing),
+    summary_threshold: Number.isFinite(th) ? Math.max(0, Math.min(50, Math.trunc(th))) : base.summary_threshold,
+    quiet_delivery: r.quiet_delivery === "silent" || r.quiet_delivery === "skip" ? r.quiet_delivery : base.quiet_delivery,
+    sound: bool(r.sound, base.sound),
+  };
+}
 
 export interface NedFilters {
   /** Channel names without "#", e.g. ["random", "mobile_dev_casual"]. */
@@ -93,6 +134,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   session_stale_minutes: 180,
   agenda_refresh_minutes: 60,
   notify: "auto",
+  notifications: DEFAULT_NOTIFICATIONS,
 };
 
 export function loadConfig(): NedConfig {
@@ -107,6 +149,7 @@ export function loadConfig(): NedConfig {
       ...parsed,
       sources: { ...DEFAULT_CONFIG.sources, ...(parsed.sources ?? {}) },
       persona: normalizePersona(parsed.persona),
+      notifications: normalizeNotifications(parsed.notifications),
       filters: mergeFilters(normalizeFilters(DEFAULT_CONFIG.filters), parsed.filters),
     };
   }

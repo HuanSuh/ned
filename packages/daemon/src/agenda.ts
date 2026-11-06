@@ -67,6 +67,17 @@ export interface MailBlock {
   unread_capped: boolean;
   /** Mails that need my action, most urgent first (max 10). */
   items: MailItem[];
+  /** Every unread inbox thread of the last 2 days, newest first (max 50) — the card's "전체" view. */
+  all: MailAllItem[];
+}
+
+export interface MailAllItem {
+  id: string;
+  from: string;
+  subject: string;
+  ts: string;
+  url: string;
+  unread: boolean;
 }
 
 export type SlackReason = "mention" | "dm" | "thread";
@@ -89,6 +100,13 @@ export interface SlackBlock {
   summary: string;
   /** Last 24h: mentions / DMs / thread asks I haven't answered, max 10. */
   items: SlackItem[];
+  /** Every mention / DM to me in the last 24h, newest first (max 50) — the card's "전체" view. */
+  all: SlackAllItem[];
+}
+
+export interface SlackAllItem extends SlackItem {
+  /** I already replied after it. */
+  answered: boolean;
 }
 
 export interface AgendaPayload {
@@ -124,13 +142,13 @@ function readMail(m: unknown): MailBlock | null {
   if (!m || typeof m !== "object") return null;
   const b = m as Partial<MailBlock>;
   const unread = Math.max(0, Math.trunc(Number(b.unread) || 0));
-  return { summary: str(b.summary), unread, unread_capped: b.unread_capped ?? unread >= MAIL_UNREAD_CAP, items: Array.isArray(b.items) ? b.items : [] };
+  return { summary: str(b.summary), unread, unread_capped: b.unread_capped ?? unread >= MAIL_UNREAD_CAP, items: Array.isArray(b.items) ? b.items : [], all: Array.isArray(b.all) ? b.all : [] };
 }
 
 function readSlack(m: unknown): SlackBlock | null {
   if (!m || typeof m !== "object") return null;
   const b = m as Partial<SlackBlock>;
-  return { summary: str(b.summary), items: Array.isArray(b.items) ? b.items : [] };
+  return { summary: str(b.summary), items: Array.isArray(b.items) ? b.items : [], all: Array.isArray(b.all) ? b.all : [] };
 }
 
 /** Read tools for the agenda job only — narrower than the heartbeat's set. */
@@ -251,6 +269,16 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
             reason: MAIL_REASONS.includes(e.reason as MailReason) ? (e.reason as MailReason) : "request",
             why: str(e.why).slice(0, 120),
           })),
+        all: arr(m.all)
+          .slice(0, 50)
+          .map((e) => ({
+            id: str(e.id),
+            from: str(e.from).slice(0, 80),
+            subject: str(e.subject).slice(0, 200),
+            ts: str(e.ts || e.received),
+            url: str(e.url) || (e.id ? `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(str(e.id))}` : ""),
+            unread: e.unread !== false,
+          })),
       }
     : null;
   const sl = raw.slack && typeof raw.slack === "object" ? (raw.slack as Record<string, unknown>) : {};
@@ -268,13 +296,25 @@ function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cfg: NedC
             ts: slackTs(e.ts),
             reason: e.reason as SlackReason,
           })),
+        all: arr(sl.all)
+          .slice(0, 50)
+          .map((e) => ({
+            channel: str(e.channel).slice(0, 80),
+            from: str(e.from).slice(0, 80),
+            text: str(e.text).replace(/\s+/g, " ").trim().slice(0, 200),
+            url: str(e.url),
+            ts: slackTs(e.ts),
+            reason: SLACK_REASONS.includes(e.reason as SlackReason) ? (e.reason as SlackReason) : "mention",
+            answered: e.answered === true,
+          })),
       }
     : null;
   // Belt and braces for tracking exclusions: drop anything the model let through.
   const exProjects = new Set(cfg.filters.jira.exclude_projects);
   const exChannels = new Set(cfg.filters.slack.exclude_channels.map((c) => c.toLowerCase()));
   const jiraKept = jira.filter((j) => !exProjects.has(j.key.split("-")[0].toUpperCase()));
-  if (slack) slack.items = slack.items.filter((x) => !exChannels.has(x.channel.replace(/^#/, "").toLowerCase()));
+  const keepCh = (x: { channel: string }) => !exChannels.has(x.channel.replace(/^#/, "").toLowerCase());
+  if (slack) { slack.items = slack.items.filter(keepCh); slack.all = slack.all.filter(keepCh); }
   return { calendar, jira: jiraKept, github, mail, slack };
 }
 
@@ -334,7 +374,7 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
   }
 
   log(`agenda: asking claude${filtersPrompt(cfg.filters) !== "(없음)" ? ` (filters — ${filtersPrompt(cfg.filters).split("\n")[0]})` : ""}`);
-  const res = await runClaude(buildPrompt(cfg), { allowedTools: agendaTools(cfg), maxTurns: 18, model: cfg.claude_model, timeoutMs: 5 * 60_000 });
+  const res = await runClaude(buildPrompt(cfg), { allowedTools: agendaTools(cfg), maxTurns: 20, model: cfg.claude_model, timeoutMs: 5 * 60_000 });
   const parsed = res.ok ? extractJson<Partial<Record<keyof AgendaPayload, unknown>>>(res.text) : null;
   let agenda: Agenda;
   if (parsed) {

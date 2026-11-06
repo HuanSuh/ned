@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { agendaBusy, readAgenda, refreshAgenda } from "./agenda.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { PERSONAS, loadConfig, mergeFilters, normalizePersona, saveConfig, type NedConfig, type PersonaId } from "./config.js";
+import { PERSONAS, loadConfig, mergeFilters, normalizeNotifications, normalizePersona, saveConfig, type NedConfig, type PersonaId } from "./config.js";
 import { readRecentEvents } from "./events.js";
 import { dismissAttention, heartbeat, listBriefings } from "./heartbeat.js";
 import { log } from "./paths.js";
@@ -74,11 +74,16 @@ export function startServer(getConfig: () => NedConfig): void {
     const cur = loadConfig();
     // filters is nested: merge it per source so a PUT carrying only filters.slack keeps filters.jira.
     // An unknown persona value keeps the current one.
-    const merged = { ...cur, ...body, persona: PERSONAS.includes(body.persona as PersonaId) ? normalizePersona(body.persona) : cur.persona, filters: mergeFilters(cur.filters, body.filters) };
+    const merged = { ...cur, ...body, persona: PERSONAS.includes(body.persona as PersonaId) ? normalizePersona(body.persona) : cur.persona, notifications: normalizeNotifications(body.notifications, cur.notifications), filters: mergeFilters(cur.filters, body.filters) };
     saveConfig(merged);
     // Mirror the persona into state.json right away so the dashboard / menu-bar app switch without waiting a tick.
     const st = readState();
-    if (st.persona !== merged.persona) { st.persona = merged.persona; writeState(st); }
+    // …and the notification settings, which Ned.app reads from state.json.
+    if (st.persona !== merged.persona || JSON.stringify(st.notifications) !== JSON.stringify(merged.notifications)) {
+      st.persona = merged.persona;
+      st.notifications = merged.notifications;
+      writeState(st);
+    }
     return c.json(merged);
   });
   app.post("/api/heartbeat", async (c) => {

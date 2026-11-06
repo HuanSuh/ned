@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractJson, llmDisabled, noLlmResult, runClaude } from "./claude.js";
-import { filtersPrompt, inQuietHours, type NedConfig } from "./config.js";
+import { filtersPrompt, inQuietHours, type NedConfig, type NotifyKind } from "./config.js";
 import { personaPrompt } from "./persona.js";
 import { readRecentEvents, readUnprocessedEvents, type NedEvent } from "./events.js";
 import { notify } from "./notify.js";
@@ -84,6 +84,7 @@ export function refreshSessions(cfg: NedConfig): void {
   state.attention = [...sessionAttention, ...state.attention.filter((a) => a.source !== "sessions")];
   state.quiet = inQuietHours(cfg);
   state.persona = cfg.persona;
+  state.notifications = cfg.notifications;
   writeState(state);
 }
 
@@ -178,11 +179,37 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
       source: id,
     }));
     next.attention = [...next.attention.filter((a) => a.source === "sessions"), ...items, ...next.attention.filter((a) => a.source !== "sessions")].slice(0, 30);
-    if (!inQuietHours(cfg)) notify("Ned", briefing.headline ?? `${briefing.action_items.length}건 확인 필요`, cfg.notify);
+    notifyBriefing(cfg, briefing);
   }
   writeState(next);
   log(`heartbeat: ${briefing.status} (${briefing.action_items.length} action / ${briefing.updates.length} updates / ${briefing.fyi.length} fyi, $${res.cost_usd.toFixed(2)}, ${res.num_turns} turns)`);
   return briefing;
+}
+
+/**
+ * Daemon-side banners (osascript fallback; under Ned.app notify() only logs). Honours config.notifications:
+ * enabled, per-kind switches, morning-briefing switch, summary_threshold (more items → one summary banner),
+ * quiet_delivery (skip / silent during quiet hours) and sound.
+ */
+export function notifyBriefing(cfg: NedConfig, briefing: Briefing): void {
+  const n = cfg.notifications;
+  if (!n.enabled) return log("notify: off (notifications.enabled = false)");
+  const quiet = inQuietHours(cfg);
+  if (quiet && n.quiet_delivery === "skip") return log("notify: quiet hours — skipped (quiet_delivery = skip)");
+  const sound = n.sound && !quiet;
+  if (briefing.type === "daily") {
+    if (n.briefing) notify("Ned · 아침 브리핑", briefing.headline ?? "오늘 브리핑이 준비됐어.", cfg.notify, { sound });
+    else log("notify: morning briefing banner off (notifications.briefing = false)");
+    return;
+  }
+  const kindOn = (k: string) => (k in n.kinds ? n.kinds[k as NotifyKind] : true); // "other" etc. follow the master switch
+  const items = briefing.action_items.filter((a) => kindOn(a.kind ?? "other"));
+  if (!items.length) return log(`notify: no banner — ${briefing.action_items.length ? "all action kinds switched off" : "no action items"}`);
+  if (items.length > n.summary_threshold) {
+    notify("Ned", `${items.length}건 확인 필요${briefing.headline ? ` — ${briefing.headline}` : ""}`, cfg.notify, { sound });
+  } else {
+    items.forEach((a, i) => notify(`Ned · ${a.kind ?? "other"}`, a.title, cfg.notify, { sound: sound && i === 0 }));
+  }
 }
 
 export function listBriefings(limit = 50): Briefing[] {

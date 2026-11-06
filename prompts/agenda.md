@@ -47,7 +47,8 @@
 
 ## 4. mail — 메일함 요약 + 내가 확인해야 할 메일
 `search_threads` 두 번을 다른 소스 조회와 같은 턴에 병렬로 부른다. 스레드 본문(`get_thread`)은 열지 않는다. 검색 결과의 발신자·제목·스니펫으로 판단한다.
-- `in:inbox is:unread newer_than:2d` (최대 50) → 결과 스레드 수를 `unread` 에 넣는다.
+- `in:inbox is:unread newer_than:2d` (최대 50, 발신자·제목이 오도록 요약 보기) → 결과 스레드 수를 `unread` 에, 스레드 전부를 `all` 에 넣는다 (최신순, 최대 50, 고르지 말 것).
+  - `all[]`: `id` thread id, `from` 표시 이름(없으면 주소), `subject`, `ts` 마지막 메시지 시각 ISO-8601, `url` `https://mail.google.com/mail/u/0/#all/<thread id>`, `unread` true.
 - `in:inbox newer_than:3d -category:promotions -category:social -category:updates -category:forums` (최대 30) → 이 중 **사람이 보낸 업무 메일로 내 행동이 필요한 것**만 골라 `items` 에 넣는다 (최대 10, 급한 순).
   - `reason`: `reply` 답장·회신 요청 / `approval` 결재·승인 / `deadline` 마감·기한 있음 / `request` 그 밖의 확인·검토 요청.
   - 뉴스레터, 자동 알림(CI, Jira·GitHub 알림, 캘린더 초대 메일), 광고, 내가 마지막으로 보낸 스레드는 제외.
@@ -68,7 +69,9 @@
 - 같은 대화가 여러 검색에 걸리면 하나만 (우선순위 dm > mention > thread).
 - 최대 10개, 급한 순 (명시적 기한·질문 > 요청 > 확인).
 - `channel`: `#채널이름`, DM 은 `DM`, 그룹 DM 은 `그룹 DM`. `from`: 보낸 사람 표시 이름. `text`: 나에게 바라는 것 한국어 한 줄 (40자 안팎, 원문 인용 말고 요약). `url`: 메시지 permalink 그대로. `ts`: 메시지 시각 ISO-8601.
+- `all[]`: 세 검색 결과 중 **다른 사람이 나를 멘션했거나 DM 한 메시지 전부** (봇 제외, 같은 메시지는 하나만, 최신순, 최대 50). `items` 처럼 고르지 않는다. 필드: `channel`, `from`, `text`(원문 한 줄, 80자 안팎으로 자름), `url`, `ts`, `reason`(`mention|dm|thread`), `answered`(그 뒤에 내 답이 보이면 true, 아니면 false).
+- `items`(선별)와 `all`(전체)은 같은 검색 결과로 **같은 턴에** 만든다. 추가 조회를 하지 않는다.
 - `summary`: Slack 상태를 위 말투로 한국어 한 문장 (40자 안팎, Ned 라면 예: `멘션 3개 중 답할 건 2개, DM 하나는 오늘 안에.`). 볼 게 없으면 `""`.
 
 ## 출력 스키마 (이 키만, 이 형태 그대로)
-{"calendar":[{"id":"","title":"","start":"ISO","end":"ISO","all_day":false,"location":"","url":"","meet_url":"","rsvp":"accepted|needsAction|declined|tentative|organizer","attendees":0}],"jira":[{"key":"","title":"","status":"","priority":"","due":"YYYY-MM-DD|null","url":"","updated":"ISO"}],"github":[{"repo":"owner/name","number":0,"title":"","url":"","author":"","updated":"ISO","reason":"review_requested|my_pr_changes_requested|my_pr_approved"}],"mail":{"summary":"","unread":0,"items":[{"id":"","from":"","subject":"","snippet":"","received":"ISO","url":"","reason":"reply|approval|deadline|request","why":""}]},"slack":{"summary":"","items":[{"channel":"#채널|DM|그룹 DM","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread"}]}}
+{"calendar":[{"id":"","title":"","start":"ISO","end":"ISO","all_day":false,"location":"","url":"","meet_url":"","rsvp":"accepted|needsAction|declined|tentative|organizer","attendees":0}],"jira":[{"key":"","title":"","status":"","priority":"","due":"YYYY-MM-DD|null","url":"","updated":"ISO"}],"github":[{"repo":"owner/name","number":0,"title":"","url":"","author":"","updated":"ISO","reason":"review_requested|my_pr_changes_requested|my_pr_approved"}],"mail":{"summary":"","unread":0,"items":[{"id":"","from":"","subject":"","snippet":"","received":"ISO","url":"","reason":"reply|approval|deadline|request","why":""}],"all":[{"id":"","from":"","subject":"","ts":"ISO","url":"","unread":true}]},"slack":{"summary":"","items":[{"channel":"#채널|DM|그룹 DM","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread"}],"all":[{"channel":"","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread","answered":false}]}}
