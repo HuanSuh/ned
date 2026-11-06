@@ -23,4 +23,8 @@ enum AppConfig {
     static var daemonLogPath: String { logsDir + "/app-daemon.log" }
 
     static let repoPathKey = "nedRepoPath"
+
+    /// Where ToolResolver keeps its node/claude cache: the app's defaults, or `NED_TOOL_CACHE_SUITE` (selftests,
+    /// so a test run never rewrites the real cache).
+    static let toolCacheDefaults: UserDefaults = env["NED_TOOL_CACHE_SUITE"].flatMap { UserDefaults(suiteName: $0) } ?? .standard
 }

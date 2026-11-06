@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import WebKit
 import os
 
@@ -17,6 +18,10 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     /// When the boot screen went up (nil = not showing it).
     private var bootShownAt: Date?
     private var finishing = false
+    /// Bumped by every waitForDaemon(): stale timers / tasks from an earlier boot screen do nothing.
+    private var bootGen = 0
+    private var probing = false
+    private var statusSub: AnyCancellable?
 
     /// The boot screen stays at least this long, even when the daemon answers at once (cache hit ≈ <1 s),
     /// so it never flashes; then it fades out (0.32 s, BootScreen CSS) into the dashboard.
@@ -31,14 +36,26 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         if !loaded { waitForDaemon() }
     }
 
-    private func build() {
+    private func makeWebView(frame: NSRect) {
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .default()
         cfg.userContentController.add(BootMessageHandler(), name: "ned")
-        webView = WKWebView(frame: .zero, configuration: cfg)
+        webView = WKWebView(frame: frame, configuration: cfg)
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
+    }
+
+    /// `--boot-transition-selftest`: the same boot screen → dashboard flow in a web view with no window (no UI;
+    /// also the worst case for JS round-trips). `onDashboardLoad` reports the switch.
+    var onDashboardLoad: ((String) -> Void)?
+    func startHeadless() {
+        makeWebView(frame: NSRect(x: 0, y: 0, width: 1200, height: 820))
+        waitForDaemon()
+    }
+
+    private func build() {
+        makeWebView(frame: .zero)
 
         let w = DashboardWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 820),
@@ -61,10 +78,18 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     }
 
     /// Daemon already healthy → load the dashboard straight away (no boot animation). Otherwise put up the boot
-    /// screen, push progress into it every 0.5 s via `nedBoot(...)`, and once `/api/state` answers (and the screen
-    /// has been up ≥ minBootScreenSeconds) fade it out and load the dashboard.
+    /// screen and move on as soon as the daemon is healthy (≥ minBootScreenSeconds on screen, then a fade).
+    ///
+    /// Nothing here ever *waits* on the web view: `await evaluateJavaScript` can take many seconds while the
+    /// WebContent process is cold or the window is occluded (measured 18.5 s for the first call in a hidden
+    /// web view). The old poll awaited it before every probe, so the switch landed ~13 s after the daemon was
+    /// healthy (seen live: healthy at +4.3 s, dashboard at +17.2 s). Now JS updates are fire-and-forget, the
+    /// switch is driven by DaemonManager's own health (its `$status`, no polling delay), with our own probe only
+    /// as a fallback, and the min-time / fade delays are plain timers.
     private func waitForDaemon() {
         waitTimer?.invalidate()
+        statusSub = nil
+        bootGen += 1
         finishing = false
         let daemon = DaemonManager.shared
         if daemon.isHealthy {
@@ -76,28 +101,55 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         let s = Self.bootSnapshot()
         webView.loadHTMLString(BootScreen.html(theme: Self.theme(), step: s.step, text: s.text, elapsed: s.elapsed, failed: s.failed), baseURL: nil)
         daemon.note("dashboard window: boot screen (persona \(Self.theme().id.rawValue), step \(s.step) \(s.text))")
-        let poll: () -> Void = { [weak self] in
-            _ = Task { @MainActor in
-                guard let self, !self.loaded, !self.finishing else { return }
-                let s = Self.bootSnapshot()
-                _ = try? await self.webView.evaluateJavaScript(BootScreen.update(step: s.step, text: s.text, elapsed: s.elapsed, failed: s.failed))
-                guard !s.failed, await DaemonManager.probe(timeout: 1) != nil, !self.loaded, !self.finishing else { return }
-                self.finishing = true
-                self.waitTimer?.invalidate()
-                let last = BootScreen.update(step: DaemonManager.BootStage.dashboard.rawValue, text: "대시보드 불러오는 중…", elapsed: DaemonManager.shared.bootElapsed, failed: false)
-                _ = try? await self.webView.evaluateJavaScript(last)
-                let shown = Date().timeIntervalSince(self.bootShownAt ?? Date())
-                if shown < Self.minBootScreenSeconds {
-                    try? await Task.sleep(nanoseconds: UInt64((Self.minBootScreenSeconds - shown) * 1_000_000_000))
-                }
-                _ = try? await self.webView.evaluateJavaScript("window.nedBootDone && nedBootDone();")
-                try? await Task.sleep(nanoseconds: UInt64(Self.fadeSeconds * 1_000_000_000))
-                guard self.finishing, !self.loaded else { return }
-                self.loadDashboard(reason: String(format: "daemon answered — boot screen shown %.1fs", Date().timeIntervalSince(self.bootShownAt ?? Date())))
-            }
+        let gen = bootGen
+        // @Published fires in willSet: re-check on the next main-actor turn, when `status` holds the new value.
+        statusSub = daemon.$status.sink { [weak self] _ in Task { @MainActor in self?.bootTick(gen) } }
+        waitTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.bootTick(gen) }
         }
-        poll()
-        waitTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in poll() }
+        bootTick(gen)
+    }
+
+    /// Push progress (fire-and-forget) and switch once healthy.
+    private func bootTick(_ gen: Int) {
+        guard gen == bootGen, !loaded, !finishing else { return }
+        let s = Self.bootSnapshot()
+        runJS(BootScreen.update(step: s.step, text: s.text, elapsed: s.elapsed, failed: s.failed))
+        if s.failed { return }
+        if DaemonManager.shared.isHealthy { finishBoot(gen, via: "daemon healthy"); return }
+        // Fallback for a daemon DaemonManager has not adopted yet: our own probe, one at a time.
+        guard !probing else { return }
+        probing = true
+        Task { @MainActor [weak self] in
+            let ok = await DaemonManager.probe(timeout: 2) != nil
+            guard let self else { return }
+            self.probing = false
+            if ok { self.finishBoot(gen, via: "/api/state answered") }
+        }
+    }
+
+    private func finishBoot(_ gen: Int, via: String) {
+        guard gen == bootGen, !loaded, !finishing else { return }
+        finishing = true
+        waitTimer?.invalidate()
+        statusSub = nil
+        let healthyAt = Date()
+        runJS(BootScreen.update(step: DaemonManager.BootStage.dashboard.rawValue, text: "대시보드 불러오는 중…", elapsed: DaemonManager.shared.bootElapsed, failed: false))
+        let hold = max(0, Self.minBootScreenSeconds - healthyAt.timeIntervalSince(bootShownAt ?? healthyAt))
+        Task { @MainActor [weak self] in
+            if hold > 0 { try? await Task.sleep(nanoseconds: UInt64(hold * 1_000_000_000)) }
+            guard let self, gen == self.bootGen, self.finishing, !self.loaded else { return }
+            self.runJS("window.nedBootDone && nedBootDone();")
+            try? await Task.sleep(nanoseconds: UInt64(Self.fadeSeconds * 1_000_000_000))
+            guard gen == self.bootGen, self.finishing, !self.loaded else { return }
+            let shown = Date().timeIntervalSince(self.bootShownAt ?? healthyAt)
+            self.loadDashboard(reason: String(format: "%@ — boot screen shown %.1fs, switching %.2fs after healthy", via, shown, Date().timeIntervalSince(healthyAt)))
+        }
+    }
+
+    /// Never awaited (see waitForDaemon).
+    private func runJS(_ js: String) {
+        webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
     private func loadDashboard(reason: String) {
@@ -107,6 +159,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         wlog.info("\(reason, privacy: .public) — loading dashboard")
         DaemonManager.shared.note("dashboard window: \(reason) — loading \(AppConfig.baseURL.absoluteString)/")
         webView.load(URLRequest(url: AppConfig.baseURL))
+        onDashboardLoad?(reason)
     }
 
     /// What the boot screen shows for the daemon's current state.
@@ -126,6 +179,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
     func windowWillClose(_ notification: Notification) {
         waitTimer?.invalidate()
+        statusSub = nil
         // Back to a pure menu bar app (no Dock icon) once the dashboard is gone.
         NSApp.setActivationPolicy(.accessory)
     }
