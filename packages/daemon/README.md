@@ -369,6 +369,10 @@ pnpm --filter @ned/daemon test:watch
 - 격리: `setup.ts` 가 **테스트 파일마다** 새 임시 `NED_HOME`(`$TMPDIR/ned-test-*`, 끝나면 삭제)을 만들고 `NED_NO_LLM=1`,
   `NED_SEND_DRY_RUN=1`, `NED_NOTIFY=app`(osascript 배너 없음), `NED_PORT=7791` 을 건다. `paths.ts` 가 import 시점에 `NED_HOME` 을
   읽으므로 파일 단위 격리(`isolate: true`, forks)가 필요하다. `claude` 는 절대 spawn 되지 않고 `~/.ned` 는 건드리지 않는다.
+- **실제 `~/.ned` 보호(워커·개발 검증 공통)**: `VITEST`·`NODE_ENV=test`·`NED_NO_LLM=1` 중 하나라도 켜진 실행에서 `NED_HOME` 이 비어 있거나
+  `~/.ned` 로 해석되면 `paths.ts` 가 import 즉시 throw 한다("refusing to use the real ~/.ned in a test/stub run"). vitest 는 항상
+  `pnpm test`(또는 `--config test/vitest.config.ts`; `packages/daemon/vitest.config.ts` 가 같은 설정을 다시 내보내 맨 `vitest run` 도
+  setup 을 탄다)로, 데몬 스모크는 `NED_HOME=$(mktemp -d) NED_PORT=779x NED_NO_LLM=1` 로 — 시작 전에 `echo $NED_HOME` 확인.
 - HTTP 라우트(`test/server.test.ts`): `@hono/node-server` 의 `serve` 를 `vi.mock` 으로 바꿔 `startServer` 가 넘기는 Hono `fetch` 를
   받아 `Request` 를 직접 넣는다 — 포트를 열지 않는다.
 - 다루는 것: sessions 상태 머신 · events(parseLines, lastAssistantText) · claude(extractJson, argv) · notify · config(loadConfig 병합,
@@ -380,9 +384,9 @@ pnpm --filter @ned/daemon test:watch
 ## Smoke test (LLM 호출 없이)
 
 ```sh
-export NED_HOME=/tmp/ned-test NED_NO_LLM=1
+export NED_HOME=$(mktemp -d) NED_PORT=7797 NED_NO_LLM=1   # never ~/.ned or 7777 — paths.ts refuses ~/.ned with NED_NO_LLM=1
 echo '{"hook_event_name":"Notification","session_id":"s1","cwd":"/x/wt","message":"needs permission"}' \
   | sh ../hook/ned-hook.sh                       # prints {} and appends to $NED_HOME/events/<today>.jsonl
 node dist/cli.js state                            # sessions[0].status == "waiting"
-node dist/cli.js run &  curl 127.0.0.1:7777/api/state;  kill %1
+node dist/cli.js run &  curl 127.0.0.1:$NED_PORT/api/state;  kill %1
 ```

@@ -2,7 +2,11 @@
 
 export async function api(path, opts) {
   const r = await fetch(path, { headers: { accept: "application/json", ...(opts && opts.body ? { "content-type": "application/json" } : {}) }, ...opts });
-  if (!r.ok) { const e = new Error(`${(opts && opts.method) || "GET"} ${path} → ${r.status}`); e.status = r.status; throw e; }
+  if (!r.ok) {
+    const e = new Error(`${(opts && opts.method) || "GET"} ${path} → ${r.status}`); e.status = r.status;
+    try { e.data = JSON.parse(await r.text()); } catch { e.data = null; } // e.g. 409 { current } from PUT /api/config
+    throw e;
+  }
   const text = await r.text(); // DELETE may answer 204 with no body
   return text ? JSON.parse(text) : null;
 }

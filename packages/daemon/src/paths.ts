@@ -3,6 +3,23 @@ import path from "node:path";
 import fs from "node:fs";
 
 export const NED_HOME = process.env.NED_HOME ?? path.join(os.homedir(), ".ned");
+
+/**
+ * Tests (vitest sets VITEST, or NODE_ENV=test) and LLM-less stub runs (NED_NO_LLM=1) must never touch the user's real
+ * ~/.ned: test runs that skipped test/setup.ts once overwrote the real config.yaml. In such a run NED_HOME has to be
+ * set explicitly and must not resolve to <homedir>/.ned — else throw at import, before anything under it is read or
+ * written. The production daemon (Ned.app sets NED_HOME=<home>/.ned, no NED_NO_LLM) is unaffected.
+ */
+export function assertSafeNedHome(explicit: string | undefined, env: NodeJS.ProcessEnv = process.env, homedir: string = os.homedir()): void {
+  const guarded = !!env.VITEST || env.NODE_ENV === "test" || env.NED_NO_LLM === "1";
+  if (!guarded) return;
+  const real = (p: string) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  const userHome = path.resolve(homedir, ".ned");
+  if (!explicit || path.resolve(explicit) === userHome || real(explicit) === real(userHome)) {
+    throw new Error("refusing to use the real ~/.ned in a test/stub run — set NED_HOME to a temp dir");
+  }
+}
+assertSafeNedHome(process.env.NED_HOME);
 export const EVENTS_DIR = path.join(NED_HOME, "events");
 export const BRIEFINGS_DIR = path.join(NED_HOME, "briefings");
 export const LOGS_DIR = path.join(NED_HOME, "logs");

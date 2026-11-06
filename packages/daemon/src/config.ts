@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import YAML from "yaml";
 import type { NotifyMode } from "./notify.js";
 import { CONFIG_PATH } from "./paths.js";
@@ -467,7 +468,104 @@ export function saveConfig(cfg: NedConfig): void {
     const onDisk = (YAML.parse(fs.readFileSync(CONFIG_PATH, "utf8")) ?? {}) as Partial<NedConfig>;
     out = { ...cfg, port: onDisk.port ?? DEFAULT_CONFIG.port };
   }
+  backupConfigFile();
   fs.writeFileSync(CONFIG_PATH, YAML.stringify(out));
+  stampConfig();
+}
+
+// ---------- updated_at: the version token for PUT /api/config's if_updated_at ----------
+let lastStamp = 0;
+/**
+ * After a save: set the file's mtime to a fresh, strictly increasing whole ms, so configUpdatedAt() changes on every
+ * save (even two within one ms) while a hand edit of config.yaml (new mtime) still reads as a change.
+ */
+function stampConfig(): void {
+  const now = Math.max(Date.now(), lastStamp + 1, Math.floor(configUpdatedAt()) + 1);
+  lastStamp = now;
+  try { fs.utimesSync(CONFIG_PATH, new Date(now), new Date(now)); } catch { /* the mtime still moved with the write */ }
+}
+/** config.yaml's mtime in whole ms (0 when missing). Changes on every saveConfig and on any hand edit. */
+export function configUpdatedAt(): number {
+  try { return Math.floor(fs.statSync(CONFIG_PATH).mtimeMs); } catch { return 0; }
+}
+
+// ---------- backups: ~/.ned/config-backups/config-<ISO>.yaml, newest CONFIG_BACKUP_KEEP kept ----------
+export const CONFIG_BACKUP_KEEP = 10;
+const BACKUP_RE = /^config-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(?:-\d+)?\.yaml$/;
+export const configBackupDir = () => path.join(path.dirname(CONFIG_PATH), "config-backups");
+export interface ConfigBackup { name: string; at: number; size: number }
+
+/** Copy the current config.yaml (if any) into the backup dir, then drop all but the newest CONFIG_BACKUP_KEEP. */
+export function backupConfigFile(): string | null {
+  if (!fs.existsSync(CONFIG_PATH)) return null;
+  const dir = configBackupDir();
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const stem = `config-${new Date().toISOString().replace(/:/g, "-").replace(".", "-")}`;
+    let name = `${stem}.yaml`;
+    for (let i = 1; fs.existsSync(path.join(dir, name)); i++) name = `${stem}-${i}.yaml`;
+    fs.copyFileSync(CONFIG_PATH, path.join(dir, name));
+    for (const old of listConfigBackups().slice(CONFIG_BACKUP_KEEP)) fs.rmSync(path.join(dir, old.name), { force: true });
+    return name;
+  } catch {
+    return null; // a backup failure never blocks the save itself
+  }
+}
+
+/** Newest first (by the time in the name, then file mtime). */
+export function listConfigBackups(): ConfigBackup[] {
+  const dir = configBackupDir();
+  let names: string[];
+  try { names = fs.readdirSync(dir).filter((n) => BACKUP_RE.test(n)); } catch { return []; }
+  return names
+    .map((name) => {
+      const st = fs.statSync(path.join(dir, name));
+      const iso = name.replace(/^config-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z.*$/, "$1T$2:$3:$4.$5Z");
+      const at = Date.parse(iso);
+      return { name, at: Number.isFinite(at) ? at : Math.floor(st.mtimeMs), size: st.size };
+    })
+    .sort((a, b) => b.at - a.at || b.name.localeCompare(a.name, "en", { numeric: true }));
+}
+
+/** Restore a backup (by exact name from listConfigBackups) over config.yaml — the current file is backed up first. */
+export function restoreConfigBackup(name: unknown): NedConfig {
+  if (typeof name !== "string" || !BACKUP_RE.test(name)) throw new Error("bad backup name");
+  const file = path.join(configBackupDir(), name);
+  if (!fs.existsSync(file)) throw new Error("no such backup");
+  const parsed = YAML.parse(fs.readFileSync(file, "utf8")) ?? {};
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("backup is not a config");
+  saveConfig(parsed as NedConfig); // backs up the current file, keeps the file's port under NED_PORT
+  return loadConfig();
+}
+
+// ---------- PUT /api/config: deep merge + change log ----------
+const isPlain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/** `patch` over `base`: plain objects merge key by key (recursively), anything else (arrays, null, scalars) replaces. Keys absent from `patch` are kept. */
+export function deepMerge<T>(base: T, patch: unknown): T {
+  if (!isPlain(base) || !isPlain(patch)) return (patch === undefined ? base : patch) as T;
+  const out: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined || UNSAFE_KEYS.has(k)) continue; // a JSON body can carry "__proto__" as an own key
+    out[k] = isPlain(out[k]) && isPlain(v) ? deepMerge(out[k], v) : v;
+  }
+  return out as T;
+}
+
+/** Leaf-level differences (`a.b.c`), arrays compared whole. */
+export function configChanges(before: unknown, after: unknown, prefix = ""): Array<{ key: string; from: unknown; to: unknown }> {
+  if (isPlain(before) && isPlain(after)) {
+    const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])];
+    return keys.flatMap((k) => configChanges(before[k], after[k], prefix ? `${prefix}.${k}` : k));
+  }
+  return JSON.stringify(before) === JSON.stringify(after) ? [] : [{ key: prefix, from: before, to: after }];
+}
+
+/** One log value: strings as-is, the rest as JSON; clamped to 200 chars. */
+export function logValue(v: unknown): string {
+  const s = v === undefined ? "(없음)" : typeof v === "string" ? v : JSON.stringify(v);
+  return s.length > 200 ? `${s.slice(0, 199)}…` : s;
 }
 
 export function inQuietHours(cfg: NedConfig, now = new Date()): boolean {
