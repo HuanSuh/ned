@@ -27,6 +27,8 @@ export interface NedConfig {
   session_stale_minutes: number;
   /** Minutes between agenda (calendar/jira/github) refreshes for the dashboard HOME tab. */
   agenda_refresh_minutes: number;
+  /** Per-source auto-refresh interval (minutes, 1..1440); null = agenda_refresh_minutes. */
+  agenda_source_minutes: AgendaSourceMinutes;
   /** Briefing banners: `auto` = Ned.app when it spawned the daemon (`NED_NOTIFY=app`), else osascript. */
   notify: NotifyMode;
   /** What deserves a banner (read by Ned.app from state.json, and by the daemon's osascript fallback). */
@@ -322,6 +324,29 @@ export function watchPrompt(f: NedFilters): string {
   ].join("\n");
 }
 
+export const AGENDA_SOURCE_KEYS = ["slack", "mail", "calendar", "jira", "github"] as const;
+export type AgendaSourceMinutes = Record<(typeof AGENDA_SOURCE_KEYS)[number], number | null>;
+export const DEFAULT_AGENDA_SOURCE_MINUTES: AgendaSourceMinutes = { slack: null, mail: null, calendar: null, jira: null, github: null };
+
+/** null / missing / non-numeric / ≤0 → null (= agenda_refresh_minutes); numbers clamp to 1..1440 (integer). */
+function normalizeSourceMinute(v: unknown): number | null {
+  if (v == null || v === "" || typeof v === "boolean") return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.max(1, Math.min(1440, Math.round(n)));
+}
+
+/** `patch` keys override `base` (a key missing from patch keeps base's value; an explicit null resets it). */
+export function normalizeAgendaSourceMinutes(raw: unknown, base: AgendaSourceMinutes = DEFAULT_AGENDA_SOURCE_MINUTES): AgendaSourceMinutes {
+  const o = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  return Object.fromEntries(AGENDA_SOURCE_KEYS.map((k) => [k, k in o ? normalizeSourceMinute(o[k]) : base[k]])) as AgendaSourceMinutes;
+}
+
+/** Effective auto-refresh interval for one source (minutes ≥ 1). */
+export function sourceRefreshMinutes(cfg: Pick<NedConfig, "agenda_refresh_minutes" | "agenda_source_minutes">, k: keyof AgendaSourceMinutes): number {
+  return cfg.agenda_source_minutes?.[k] ?? Math.max(1, cfg.agenda_refresh_minutes || DEFAULT_CONFIG.agenda_refresh_minutes);
+}
+
 export const DEFAULT_CONFIG: NedConfig = {
   heartbeat_minutes: 10,
   signal_check_minutes: 60,
@@ -335,6 +360,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   claude_max_turns: 25,
   session_stale_minutes: 180,
   agenda_refresh_minutes: 60,
+  agenda_source_minutes: DEFAULT_AGENDA_SOURCE_MINUTES,
   notify: "auto",
   notifications: DEFAULT_NOTIFICATIONS,
   actions: DEFAULT_ACTIONS,
@@ -377,6 +403,7 @@ export function loadConfig(): NedConfig {
       draft_context_max_age_minutes: Number.isFinite(Number(parsed.draft_context_max_age_minutes)) && Number(parsed.draft_context_max_age_minutes) >= 0 ? Number(parsed.draft_context_max_age_minutes) : DEFAULT_CONFIG.draft_context_max_age_minutes,
       drafts_pregenerate: parsed.drafts_pregenerate === true,
       dashboard: normalizeDashboard(parsed.dashboard, DEFAULT_DASHBOARD, watchChannels(filters)),
+      agenda_source_minutes: normalizeAgendaSourceMinutes(parsed.agenda_source_minutes),
       agenda_all_limit: numIn(parsed.agenda_all_limit, 1, 50, DEFAULT_CONFIG.agenda_all_limit),
       agenda_context_batch: numIn(parsed.agenda_context_batch, 1, 10, DEFAULT_CONFIG.agenda_context_batch),
       agenda_thread_batch: numIn(parsed.agenda_thread_batch, 0, 20, DEFAULT_CONFIG.agenda_thread_batch),

@@ -613,7 +613,7 @@ export function buildPrompt(cfg: NedConfig, now = new Date()): string {
     .join("\n\n");
 }
 
-interface ListCall {
+export interface ListCall {
   id: "slack" | "mail" | "jira" | "calendar";
   keys: AgendaSourceKey[];
   model: string | null;
@@ -625,17 +625,19 @@ interface ListCall {
  * light model. All run in parallel; each merges its own keys into agenda.json the moment it finishes. Calendar is its own
  * call because its 2-week list is the biggest output (~9K tokens, ~60-90s): measured, jira alone lands in ~30s instead.
  */
-function listCalls(cfg: NedConfig, githubDirect: boolean): ListCall[] {
+export function listCalls(cfg: NedConfig, githubDirect: boolean, want: readonly AgendaSourceKey[] = AGENDA_SOURCES): ListCall[] {
   const out: ListCall[] = [];
   const light = cfg.agenda_light_model ?? cfg.claude_model;
+  const on = (k: AgendaSourceKey) => want.includes(k) && (k === "mail" ? cfg.sources.gmail : cfg.sources[k]);
   // Measured: slack/mail on sonnet take the same wall time as the default model at ~half the cost ($0.38 vs $0.79, $0.24 vs $0.50).
-  if (cfg.sources.slack) out.push({ id: "slack", keys: ["slack"], model: light, maxTurns: 6 });
-  if (cfg.sources.gmail) out.push({ id: "mail", keys: ["mail"], model: light, maxTurns: 6 });
+  if (on("slack")) out.push({ id: "slack", keys: ["slack"], model: light, maxTurns: 6 });
+  if (on("mail")) out.push({ id: "mail", keys: ["mail"], model: light, maxTurns: 6 });
+  // jira (+github when gh isn't usable) share one call, carrying only the requested keys of the two.
   const jira: AgendaSourceKey[] = [];
-  if (cfg.sources.jira) jira.push("jira");
-  if (cfg.sources.github && !githubDirect) jira.push("github");
+  if (on("jira")) jira.push("jira");
+  if (on("github") && !githubDirect) jira.push("github");
   if (jira.length) out.push({ id: "jira", keys: jira, model: light, maxTurns: 6 });
-  if (cfg.sources.calendar) out.push({ id: "calendar", keys: ["calendar"], model: light, maxTurns: 6 });
+  if (on("calendar")) out.push({ id: "calendar", keys: ["calendar"], model: light, maxTurns: 6 });
   return out;
 }
 
@@ -762,33 +764,72 @@ async function stubList(keys: AgendaSourceKey[], order: number): Promise<{ raw: 
   return { raw: Object.fromEntries(keys.map((k) => [k, fx[k]])), cost: 0 };
 }
 
-let inflight: Promise<Agenda> | null = null;
+/** Per-source in-flight runs: a source is refreshed by at most one run at a time, different sources run side by side. */
+const running = new Map<AgendaSourceKey, Promise<Agenda>>();
 
-/** True while an agenda refresh is running. */
+/** True while any agenda source refresh is running. */
 export function agendaBusy(): boolean {
-  return inflight !== null;
+  return running.size > 0;
+}
+
+/** Sources whose phase-1 list call is in flight right now. */
+export function runningSources(): AgendaSourceKey[] {
+  return AGENDA_SOURCES.filter((k) => running.has(k));
+}
+
+/** Sources switched on in config (mail = sources.gmail). */
+export function enabledSources(cfg: NedConfig): AgendaSourceKey[] {
+  return AGENDA_SOURCES.filter((k) => (k === "mail" ? cfg.sources.gmail : cfg.sources[k]));
+}
+
+export interface RefreshOptions {
+  /** Only these sources (default: every enabled source). Disabled ones are ignored. */
+  sources?: readonly AgendaSourceKey[];
+}
+
+export interface RefreshStart {
+  /** Sources this call started. */
+  started: AgendaSourceKey[];
+  /** Requested sources already running in another refresh (joined, not restarted). */
+  busy: AgendaSourceKey[];
+  /** Resolves once the started and joined sources are merged (phase 1). */
+  done: Promise<Agenda>;
 }
 
 /**
- * Refresh ~/.ned/agenda.json. Concurrent callers share the in-flight run (busy guard),
- * so a POST during a scheduled refresh never spawns a second `claude -p`.
+ * Start a phase-1 refresh for the requested sources. A source already running is joined instead of re-run, so a
+ * POST during a scheduled refresh never spawns a second `claude -p` for it; other sources start right away.
  */
-export function refreshAgenda(cfg: NedConfig): Promise<Agenda> {
-  if (inflight) return inflight;
-  inflight = doRefresh(cfg).finally(() => {
-    inflight = null;
-  });
-  return inflight;
+export function startAgendaRefresh(cfg: NedConfig, opts: RefreshOptions = {}): RefreshStart {
+  const enabled = enabledSources(cfg);
+  if (!enabled.length) {
+    // Nothing on: the agenda is empty (dashboard hides every card).
+    const a = emptyAgenda(Date.now());
+    writeJsonAtomic(AGENDA_PATH, a);
+    return { started: [], busy: [], done: Promise.resolve(a) };
+  }
+  const want = opts.sources ? enabled.filter((k) => opts.sources!.includes(k)) : enabled;
+  const busy = want.filter((k) => running.has(k));
+  const started = want.filter((k) => !running.has(k));
+  const waits: Promise<unknown>[] = [...new Set(busy.map((k) => running.get(k)!))];
+  if (started.length) {
+    const p: Promise<Agenda> = doRefresh(cfg, started).finally(() => {
+      for (const k of started) if (running.get(k) === p) running.delete(k);
+    });
+    for (const k of started) running.set(k, p);
+    waits.push(p);
+  }
+  return { started, busy, done: Promise.all(waits).then(() => readAgenda()) };
 }
 
-async function doRefresh(cfg: NedConfig): Promise<Agenda> {
+/** Refresh agenda.json (all enabled sources, or `opts.sources`) and resolve after phase 1. */
+export function refreshAgenda(cfg: NedConfig, opts: RefreshOptions = {}): Promise<Agenda> {
+  return startAgendaRefresh(cfg, opts).done;
+}
+
+async function doRefresh(cfg: NedConfig, want: AgendaSourceKey[]): Promise<Agenda> {
   const now = Date.now();
   if (llmDisabled()) log(`agenda: NED_NO_LLM=1 — stub lists${process.env.NED_NO_LLM_AGENDA ? ` from ${process.env.NED_NO_LLM_AGENDA}` : " (empty)"}`);
-  if (!cfg.sources.calendar && !cfg.sources.jira && !cfg.sources.github && !cfg.sources.gmail && !cfg.sources.slack) {
-    const a = emptyAgenda(now);
-    writeJsonAtomic(AGENDA_PATH, a);
-    return a;
-  }
 
   if (filtersPrompt(cfg.filters) !== "(없음)") log(`agenda: filters — ${filtersPrompt(cfg.filters).split("\n")[0]}`);
   const t0 = Date.now();
@@ -797,9 +838,8 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
   let total = 0;
   const finished: string[] = [];
 
-  // Mark everything enabled as running up front so every card shows "갱신 중" immediately.
-  const enabled = AGENDA_SOURCES.filter((k) => (k === "mail" ? cfg.sources.gmail : cfg.sources[k]));
-  setSourceStatus(enabled, { status: "running", updated_at: Date.now(), started_at: t0 });
+  // Mark the requested sources as running up front so their cards show "갱신 중" immediately.
+  setSourceStatus(want, { status: "running", updated_at: Date.now(), started_at: t0 });
 
   const runCall = async (c: ListCall, order: number): Promise<void> => {
     const started = Date.now();
@@ -862,8 +902,9 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
   };
 
   // github: straight from `gh` (no LLM) while the claude calls start; only if gh fails does it join the light call.
-  const ghP: Promise<GithubItem[] | null> = cfg.sources.github && !stub ? fetchGithubDirect() : Promise.resolve(null);
-  const calls = listCalls(cfg, cfg.sources.github && !stub); // optimistic: assume gh works
+  const wantGh = want.includes("github");
+  const ghP: Promise<GithubItem[] | null> = wantGh && !stub ? fetchGithubDirect() : Promise.resolve(null);
+  const calls = listCalls(cfg, wantGh && !stub, want); // optimistic: assume gh works
   const jobs: Promise<void>[] = [];
   // Start order = priority (slack, mail, calendar); the jira call waits for gh's answer (~1s) to know whether to carry github.
   calls.filter((c) => c.id !== "jira").forEach((c, i) => jobs.push(runCall(c, i)));
@@ -875,7 +916,7 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
         finished.push(`github+${Math.round((Date.now() - t0) / 1000)}s`);
         log(`agenda[github]: ${gh.length} prs via gh (no LLM), merged at +${Math.round((Date.now() - t0) / 1000)}s`);
       }
-      const jira = listCalls(cfg, !!gh).find((c) => c.id === "jira");
+      const jira = listCalls(cfg, !!gh, want).find((c) => c.id === "jira");
       if (jira) await runCall(jira, 2);
     })(),
   );
@@ -883,10 +924,12 @@ async function doRefresh(cfg: NedConfig): Promise<Agenda> {
 
   const agenda = patchAgenda((a) => {
     a.cost_usd = Math.round(total * 10000) / 10000;
-    a.error = errors.length ? errors.join(" | ") : undefined;
+    // Errors of every source as they stand now: a slack-only run neither clears nor hides a failing jira.
+    const errs = AGENDA_SOURCES.filter((k) => a.sources_status?.[k]?.status === "error" && enabledSources(cfg).includes(k)).map((k) => `${k}: ${(a.sources_status![k]!.error ?? "").slice(0, 200)}`);
+    a.error = errs.length ? errs.join(" | ") : undefined;
     a.updated_at = Date.now();
   });
-  log(`agenda: phase 1 done in ${Math.round((Date.now() - t0) / 1000)}s, $${total.toFixed(2)} — order ${finished.join(", ")}${errors.length ? ` — errors: ${errors.join(" | ").slice(0, 300)}` : ""}`);
+  log(`agenda: phase 1 [${want.join(",")}] done in ${Math.round((Date.now() - t0) / 1000)}s, $${total.toFixed(2)} — order ${finished.join(", ")}${errors.length ? ` — errors: ${errors.join(" | ").slice(0, 300)}` : ""}`);
   return agenda;
 }
 

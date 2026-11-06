@@ -27,7 +27,7 @@ export function watchRow(channel, h) {
 function cardHtml(id) {
   const k = cardKeyOf(id), ch = watchCh(id), eid = esc(id);
   return `<section class="card scard g-slack g-watch" id="sc-${k}" data-watch="${esc(ch)}">
-    <div class="shw"><button class="sh" type="button" data-card="${eid}" aria-expanded="false" aria-controls="sl-${k}" title="팔로업 채널 #${esc(ch)}"><span class="ico">${WATCH_ICON}</span><span class="wch">#${esc(ch)}</span><span class="wme" id="wme-${k}"></span><span class="n" id="n-${k}">0</span><span class="chev" aria-hidden="true">▼</span></button></div>
+    <div class="shw"><button class="sh" type="button" data-card="${eid}" aria-expanded="false" aria-controls="sl-${k}" title="팔로업 채널 #${esc(ch)}"><span class="ico">${WATCH_ICON}</span><span class="wch">#${esc(ch)}</span><span class="wme" id="wme-${k}"></span><span class="n" id="n-${k}">0</span><span class="chev" aria-hidden="true">▼</span></button><span class="srcst" data-src="slack"></span></div>
     <div class="wbody" id="sl-${k}">
       <ul class="wsum" id="ss-${k}"></ul>
       <div class="gl wneed" id="pv-${k}"></div>

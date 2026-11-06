@@ -183,6 +183,9 @@ details.tdone summary::before { content: "▸ "; } details.tdone[open] summary::
 .scard > .shw > .srcst:not(:empty) { margin-right: 8px; }
 .srun { display: inline-flex; align-items: center; gap: 5px; font: 11px var(--mono); color: var(--info); white-space: nowrap; }
 .srun .spin { width: 9px; height: 9px; }
+.srefresh { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; margin-left: 2px; border: 0; border-radius: 6px; background: transparent; color: var(--faint); font: 14px/1 var(--mono); cursor: pointer; }
+.srefresh:hover { color: var(--info); background: color-mix(in srgb, var(--info) 12%, transparent); }
+.srefresh:focus-visible { outline: 2px solid var(--info); outline-offset: 0; }
 .ctxst { display: flex; align-items: center; gap: 6px; padding: 5px 14px; border-top: 1px dashed var(--line); font: 11px var(--mono); color: var(--faint); flex: none; }
 .ctxst[hidden] { display: none; }
 .ctxst .spin { width: 9px; height: 9px; }
