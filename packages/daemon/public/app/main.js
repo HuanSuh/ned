@@ -3,6 +3,7 @@ import { api, postJson } from "./api.js";
 import { agendaActive, followAgenda, init as initAgStatus, loadCosts } from "./features/agstatus.js";
 import { init as initCalendar } from "./features/calendar.js";
 import { init as initCardLayout } from "./features/cardlayout.js";
+import { init as initLayout } from "./features/layout.js";
 import { init as initCards } from "./features/cards.js";
 import { init as initDrafts } from "./features/drafts.js";
 import { init as initReviewed } from "./features/reviewed.js";
@@ -170,7 +171,7 @@ window.NED = { store, api: { api, postJson }, nav };
 
 // Every module's listeners + one-time setup, in the order the single file ran them — listener order on document
 // matters (e.g. the error popover's Esc stopImmediatePropagation runs before the page keys in boot()).
-for (const init of [initChips, initPopover, initSettings, initCardLayout, initReviewed, initDrafts, initCalendar, initCards, initAgStatus, initHome]) init();
+for (const init of [initChips, initPopover, initSettings, initCardLayout, initLayout, initReviewed, initDrafts, initCalendar, initCards, initAgStatus, initHome]) init();
 boot();
 
 function boot() {

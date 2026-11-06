@@ -4,6 +4,7 @@ import YAML from "yaml";
 import { CONFIG_PATH } from "../src/paths.js";
 import {
   DEFAULT_CONFIG,
+  DEFAULT_LAYOUT,
   inQuietHours,
   jqlExclude,
   loadConfig,
@@ -88,6 +89,18 @@ describe("normalizers", () => {
     expect(d.card_order).toEqual(["jira", "mail", "slack", "github"]);
     expect(d.card_span.jira).toBe(2);
     expect(d.card_span.mail).toBe(1);
+  });
+  it("normalizeDashboard: layout absent keeps base, null clears, cells clamped to the grid + min sizes; locked boolean", () => {
+    expect(normalizeDashboard({}).layout).toBeNull();
+    expect(normalizeDashboard({}).locked).toBe(false);
+    const base = normalizeDashboard({ layout: DEFAULT_LAYOUT, locked: true });
+    expect(base.layout).toEqual(DEFAULT_LAYOUT);
+    expect(normalizeDashboard({ card_order: ["mail"] }, base).layout).toEqual(DEFAULT_LAYOUT);
+    expect(normalizeDashboard({ card_order: ["mail"] }, base).locked).toBe(true);
+    expect(normalizeDashboard({ layout: null, locked: "yes" }, base)).toMatchObject({ layout: null, locked: true });
+    const d = normalizeDashboard({ layout: { jira: { x: 11, y: -3, w: 4.7, h: 1 }, cal: { x: 0, y: 0, w: 99, h: 99 }, bogus: { x: 0, y: 0, w: 1, h: 1 }, mail: { x: "a" } } });
+    expect(d.layout).toEqual({ jira: { x: 8, y: 0, w: 4, h: 2 }, cal: { x: 0, y: 0, w: 12, h: 48 } });
+    expect(normalizeDashboard({ layout: { bogus: {} } }).layout).toBeNull();
   });
   it("normalizeActions ignores non-objects", () => {
     expect(normalizeActions("x")).toEqual(DEFAULT_CONFIG.actions);

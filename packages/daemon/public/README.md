@@ -22,7 +22,8 @@ daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙�
 | `app/tabs/home.js` · `inbox.js` · `timeline.js` · `settings.js` | 탭별 렌더와 그 탭 안 이벤트 |
 | `app/features/calendar.js` | 일정 패널(일/주, `/api/calendar` 범위, `ned.cal`) |
 | `app/features/cards.js` | 소스 카드(메일·Jira·Slack·GitHub), `packCards`(행 배치), `unionAll`(전체 뷰) |
-| `app/features/cardlayout.js` | 홈 카드 배치: `config.dashboard` 정규화·기본값, 설정 섹션(↑/↓, 1열/2열, 미리보기) |
+| `app/features/cardlayout.js` | 홈 카드 배치: `config.dashboard` 순서·폭 정규화·기본값, 설정 섹션(↑/↓, 1열/2열, 잠금, 배치 초기화, 12열 미리보기) |
+| `app/features/layout.js` | 홈 자유 배치(≥1100px): 12열 그리드 모델(`settle` 밀어내기+위로 채우기, `deriveLayout`), 드래그 이동·크기 조절(pointer events), 키보드, 잠금, 디바운스 저장 |
 | `app/features/drafts.js` | 답장 초안 모달 |
 | `app/features/reviewed.js` | 확인 완료(attention·소스 항목) |
 | `app/features/personas.js` | `VOICE`, 마크, `applyPersona`, 말풍선 `say`, mood·opener |
@@ -81,10 +82,21 @@ daemon 을 `NED_HOME=/some/fixture` 로 띄우거나, 같은 라우트를 흉내
 
 헤더의 `[일|주]` 토글과 `[◀ 오늘 ▶]`. 일 뷰는 하루 타임라인(지금 선·"N분 후"는 오늘만), 주 뷰는 월~일 7열(오늘 열 강조, 종일 행 상단, 기본 08–20시·이벤트에 맞춰 확장, 지금 선은 오늘 열에만). 주 뷰일 때 일정 칸이 540~760px 로 넓어지고 소스 카드 열 수가 줄어든다. 패널에 포커스가 있으면 ←/→ 이동(일 1일·주 7일), t 오늘, d/w 전환. 상태는 `localStorage` `ned.cal`(다른 날에 열면 날짜는 오늘로). 데이터: `agenda.calendar_range` 안은 agenda 의 calendar, 밖의 날짜 구간만 `/api/calendar` 로 받아 합친다(받는 동안 위에 "가져오는 중" 표시, 실패 시 "다시").
 
-## 카드 높이
+## 홈 자유 배치 (`app/features/layout.js`)
+
+≥1100px 에서 홈의 모든 패널(일정 · Slack · 메일 · Jira · GitHub · 할 일)은 12열 그리드 위의 칸 — `config.dashboard.layout = { cal|slack|mail|jira|github|todo: { x, y, w, h } }` (x·w 는 열, y·h 는 행 단위). `#hgrid.free` 가 되고 `.hcol`·`.sgrid` 는 `display: contents` 로 풀려 패널마다 인라인 `grid-column`/`grid-row`. 행 높이 `--rowh` = 그리드 높이를 12행으로 나눈 값(최소 40px) — 12행보다 긴 배치는 그리드 안에서 스크롤. 패널은 자기 h 만큼 늘어나고 안의 목록이 스크롤.
+- 기본값(`DEFAULT_LAYOUT`, `src/config.ts` 와 같음): 일정 x0 w3 h12 · Slack x3 w6 h4 · 메일 x3 w3 + Jira x6 w3 (같은 줄) · GitHub x3 w6 · 할 일 x9 w3 h12 — 예전 3열 화면과 같은 비율. `layout` 이 없으면(`null`) `card_order`/`card_span` 에서 한 번 만들어(`deriveLayout`) 저장.
+- 마우스: 패널 머리(호버 시 ⠿ 그립)를 끌면 이동 — 끄는 동안 패널이 포인터를 따라가고 점선 자리표시(`.lghost`)가 놓일 칸을 보여 줌. 오른쪽 끝 = 폭, 오른쪽 아래 모서리 = 폭+높이. 칸에 맞춰 스냅, 겹치면 아래로 밀어내고 전체가 위로 채워짐(`settle`). 최소 크기: 일정 2×4, 할 일 2×3, 소스 카드 2×2. 카드 머리 클릭(펼치기)은 5px 이상 끌지 않으면 그대로.
+- 키보드: 그립에 포커스 → 방향키 이동(위/아래는 실제로 자리가 바뀌는 다음 줄까지), Shift+방향키 크기, Enter 저장, Esc 취소(포커스를 떠나면 저장). 그립에서는 일정 ←/→ 같은 페이지 키가 안 먹음.
+- 저장: 놓으면 바로 화면에 반영하고 400ms 뒤 `PUT /api/config { dashboard }` — 실패하면 마지막으로 서버가 확인한 배치로 되돌리고 토스트.
+- 잠금: `config.dashboard.locked` — 홈 상단 오른쪽 자물쇠 아이콘(`#lay-lock`) 또는 설정 → 홈 카드 배치의 체크박스. 잠기면 그립·핸들이 사라지고 드래그가 안 됨. 설정의 `배치 초기화` 는 기본 배치로 바로 저장.
+- <1100px: 예전 쌓기 흐름(아래 '카드 높이') 그대로 — 배치는 무시하고 소스 카드 순서만 배치의 위→아래(y, 그다음 x). 폰 그대로.
+- 설정의 ↑/↓·1열/2열은 간단한 대안으로 남아 있어서, 바꿔서 저장하면 그 순서·폭으로 배치를 다시 짠다(`deriveLayout`).
+
+## 카드 높이 (<1100px)
 
 홈 그리드는 `align-items: stretch`. 소스 카드는 **행 단위** 그리드(`--cols` 1 또는 2열): `packCards()` 가 `config.dashboard` 순서대로 놓고 카드마다 `grid-column: span 1|2`(열 수보다 크면 줄임), 현재 행에 안 들어가는 카드는 다음 행으로. 같은 행 카드는 높이를 맞추고, 마지막 행이 남는 높이를 받는다(`grid-template-rows: … minmax(auto, 1fr)`, `.last`).
-기본 배치(`DEFAULT_DASHBOARD`, `src/config.ts`): Slack(2열) → 메일·Jira(1열씩, 같은 행) → GitHub(2열). 설정 → **홈 카드 배치** 에서 ↑/↓ 로 순서, `1열/2열` 로 폭을 바꾸고 오른쪽 미리보기로 행을 확인 → 저장 = `PUT /api/config` 의 `dashboard: { card_order: ['slack','mail','jira','github'], card_span: { slack, mail, jira, github: 1|2 } }` (서버가 모르는 id·중복을 버리고 빠진 카드는 뒤에 붙이며, 폭은 1|2 아니면 이전 값). DOM id 는 `sc-gh` 이지만 설정 id 는 `github`. ≥1600 3열에서는 할 일 열이 `contain: size` 로 행 높이를 정하지 않고 안에서 스크롤한다.
+기본 배치(`DEFAULT_DASHBOARD`, `src/config.ts`): Slack(2열) → 메일·Jira(1열씩, 같은 행) → GitHub(2열). 설정 → **홈 카드 배치** 에서 ↑/↓ 로 순서, `1열/2열` 로 폭을 바꾸고 오른쪽 미리보기로 행을 확인 → 저장 = `PUT /api/config` 의 `dashboard: { card_order: ['slack','mail','jira','github'], card_span: { slack, mail, jira, github: 1|2 }, layout?, locked? }` (서버가 모르는 id·중복을 버리고 빠진 카드는 뒤에 붙이며, 폭은 1|2 아니면 이전 값; `layout` 은 없으면 이전 값, `null` 이면 지움, 칸은 그리드 안으로·최소 크기로 맞춤 — `normalizeLayout`). DOM id 는 `sc-gh` 이지만 설정 id 는 `github`. ≥1600 3열에서는 할 일 열이 `contain: size` 로 행 높이를 정하지 않고 안에서 스크롤한다.
 
 ## 소스 pill 필터
 
