@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { extractJson, llmDisabled, noLlmResult, runClaude } from "./claude.js";
-import { filtersPrompt, inQuietHours, watchPrompt, type NedConfig, type NotifyKind } from "./config.js";
+import { agendaBusy, readAgenda, refreshAgenda, type Agenda } from "./agenda.js";
+import { extractJson, llmDisabled, noLlmResult, runClaude, type ClaudeRunOptions } from "./claude.js";
+import { inQuietHours, watchChannels, type NedConfig, type NotifyKind } from "./config.js";
 import { personaPrompt } from "./persona.js";
 import { readRecentEvents, readUnprocessedEvents, type NedEvent } from "./events.js";
 import { notify } from "./notify.js";
@@ -15,16 +16,18 @@ type State = ReturnType<typeof readState>;
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PROMPTS_DIR = path.resolve(here, "../../../prompts");
 
-/** Read tools Ned may use. Connector tools are deferred, so ToolSearch must be allowed to load them. */
-function allowedTools(cfg: NedConfig): string[] {
-  const t = ["ToolSearch"];
-  if (cfg.sources.gmail) t.push("mcp__claude_ai_Gmail__search_threads", "mcp__claude_ai_Gmail__get_thread");
-  if (cfg.sources.slack) t.push("mcp__claude_ai_Slack__slack_search_public_and_private", "mcp__claude_ai_Slack__slack_read_thread", "mcp__claude_ai_Slack__slack_read_channel");
-  if (cfg.sources.jira) t.push("mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql", "mcp__claude_ai_Atlassian__getJiraIssue");
-  if (cfg.sources.sentry) t.push("mcp__Sentry__search_issues", "mcp__Sentry__get_issue_details");
-  if (cfg.sources.github) t.push("Bash(gh pr list:*)", "Bash(gh search prs:*)", "Bash(gh api:*)");
-  if (cfg.sources.calendar) t.push("mcp__claude_ai_Google_Calendar__list_events", "mcp__claude_ai_Google_Calendar__search_events");
-  return t;
+/**
+ * Heartbeat / briefing read Gmail·Slack·Jira·GitHub·Calendar from agenda.json (agenda phase 1 already fetched them).
+ * Sentry is the only source agenda doesn't cover, so it is the only connector the model may load (via ToolSearch).
+ */
+const SENTRY_TOOLS = ["mcp__Sentry__search_issues", "mcp__Sentry__get_issue_details"];
+export const HEARTBEAT_MAX_TURNS = 6;
+
+/** claude -p options for a heartbeat: Sentry on → ToolSearch + Sentry reads; off → no tools at all, isolated (fast start). */
+export function heartbeatRunOptions(cfg: NedConfig): Pick<ClaudeRunOptions, "allowedTools" | "tools" | "maxTurns" | "isolated"> {
+  return cfg.sources.sentry
+    ? { allowedTools: ["ToolSearch", ...SENTRY_TOOLS], tools: ["ToolSearch"], maxTurns: HEARTBEAT_MAX_TURNS }
+    : { allowedTools: [], tools: [], maxTurns: 1, isolated: true };
 }
 
 interface LlmBriefing {
@@ -91,24 +94,190 @@ export function refreshSessions(cfg: NedConfig): void {
 export interface HeartbeatOptions {
   force?: boolean;
   daily?: boolean;
+  /**
+   * Agenda phase 1 before judging: "stale" (default) refreshes only when agenda.json is older than
+   * signal_check_minutes (a refresh already running is awaited either way); "always" = POST /api/check; "skip" = use as is.
+   */
+  agenda?: "stale" | "always" | "skip";
 }
 
-/** Render briefing.md / heartbeat.md with live inputs. Pure apart from reading the template and sent log. */
-export function buildHeartbeatPrompt(cfg: NedConfig, daily: boolean, state: State, events: NedEvent[]): string {
+/** Orca worker sessions (SessionView.is_worker, added elsewhere) are driven by another session — not the user's to watch. */
+const isWorker = (s: object) => (s as { is_worker?: unknown }).is_worker === true;
+
+const hm = (ms: number) => new Date(ms).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
+const when = (iso: string | null | undefined) => {
+  const t = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(t) ? `${new Date(t).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" })} ${hm(t)}` : (iso ?? "");
+};
+const clip = (s: string | undefined | null, n: number) => {
+  const t = String(s ?? "").replace(/\s+/g, " ").trim();
+  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+};
+
+/**
+ * agenda.json → the {{AGENDA}} block: compact text lists the model judges from (no connector calls).
+ * Heartbeat drops entries whose url was already sent (sent.log) so they can't come back; the daily briefing keeps them.
+ */
+export function agendaDigest(cfg: NedConfig, a: Agenda, opts: { daily: boolean; sent: Set<string>; now?: number }): string {
+  const now = opts.now ?? Date.now();
+  let skipped = 0;
+  const keep = (url: string | undefined) => {
+    if (opts.daily || !url || !opts.sent.has(url.trim().toLowerCase())) return true;
+    skipped++;
+    return false;
+  };
+  const out: string[] = [];
+  if (!a.updated_at) out.push("(agenda 아직 없음 — 세션·Sentry 만으로 판단)");
+  else out.push(`agenda 갱신: ${when(new Date(a.updated_at).toISOString())} (${Math.round((now - a.updated_at) / 60_000)}분 전)`);
+  const failed = Object.entries(a.sources_status ?? {}).filter(([, s]) => s?.status === "error").map(([k]) => k);
+  if (failed.length) out.push(`갱신 실패 소스(이전 목록일 수 있음): ${failed.join(", ")}`);
+
+  if (cfg.sources.calendar) {
+    const timed = a.calendar.filter((e) => !e.all_day && e.rsvp !== "declined");
+    const soon = timed.filter((e) => {
+      const s = Date.parse(e.start), end = Date.parse(e.end);
+      if (opts.daily) return new Date(s).toDateString() === new Date(now).toDateString();
+      return s <= now + 2 * 3600_000 && (Number.isFinite(end) ? end > now : s > now - 15 * 60_000);
+    });
+    const allDay = opts.daily ? a.calendar.filter((e) => e.all_day && new Date(Date.parse(e.start)).toDateString() === new Date(now).toDateString()) : [];
+    const rsvp = a.calendar.filter((e) => e.rsvp === "needsAction" && Date.parse(e.start) > now && !soon.includes(e)).sort((x, y) => Date.parse(x.start) - Date.parse(y.start));
+    out.push(`\n#### 캘린더 — ${opts.daily ? "오늘 일정" : "앞으로 2시간"}`);
+    if (!soon.length && !allDay.length) out.push("(없음)");
+    for (const e of allDay) out.push(`- [종일] ${e.title}${e.rsvp === "needsAction" ? " · RSVP 안 함" : ""} ${e.url}`);
+    for (const e of soon) out.push(`- ${when(e.start)}–${hm(Date.parse(e.end))} ${e.title}${e.location ? ` @${clip(e.location, 40)}` : ""}${e.meet_url ? ` meet ${e.meet_url}` : ""} · 참석 ${e.attendees}명${e.rsvp === "needsAction" ? " · RSVP 안 함" : ""} ${e.url}`);
+    if (rsvp.length) {
+      out.push("응답 안 한 초대:");
+      for (const e of rsvp.slice(0, 8)) if (keep(e.url)) out.push(`- ${when(e.start)} ${e.title} ${e.url}`);
+    }
+  }
+  if (cfg.sources.slack) {
+    out.push("\n#### Slack (최근 24h, 나를 멘션·DM)");
+    const s = a.slack;
+    if (!s) out.push("(아직 안 가져옴)");
+    else {
+      if (s.summary) out.push(`요약: ${s.summary}`);
+      const items = s.items.filter((x) => keep(x.url));
+      out.push(items.length ? "답 필요:" : "답 필요: (없음)");
+      for (const x of items) out.push(`- [${x.reason}] ${x.channel} ${x.from}${x.count && x.count > 1 ? ` (+${x.count - 1})` : ""}: ${clip(x.text, 160)} (${when(x.ts)}) ${x.url}`);
+      const seen = new Set(s.items.map((x) => x.url));
+      const rest = s.all.filter((x) => !x.answered && !seen.has(x.url) && keep(x.url)).slice(0, 8);
+      if (rest.length) {
+        out.push("그 밖에 답 안 한 멘션·DM:");
+        for (const x of rest) out.push(`- [${x.reason}] ${x.channel} ${x.from}: ${clip(x.text, 120)} (${when(x.ts)}) ${x.url}`);
+      }
+      for (const w of s.watch) {
+        const hs = w.highlights.filter((h) => keep(h.url));
+        if (!w.summary && !hs.length) continue;
+        out.push(`팔로업 채널 ${w.channel}: ${clip(w.summary, 240) || "(요약 없음)"}`);
+        for (const h of hs) out.push(`  - ${h.needs_me ? "[나 필요] " : ""}${h.from}: ${clip(h.text, 160)} — ${clip(h.reason, 80)} (${when(h.ts)}) ${h.url}`);
+      }
+    }
+  }
+  if (cfg.sources.gmail) {
+    out.push("\n#### 메일");
+    const m = a.mail;
+    if (!m) out.push("(아직 안 가져옴)");
+    else {
+      out.push(`안 읽은 메일(최근 2일): ${m.unread}${m.unread_capped ? "+" : ""}통${m.summary ? ` · 요약: ${m.summary}` : ""}`);
+      const items = m.items.filter((x) => keep(x.url));
+      out.push(items.length ? "내 행동 필요:" : "내 행동 필요: (없음)");
+      for (const x of items) out.push(`- [${x.reason}] ${x.from} — ${clip(x.subject, 100)} · ${clip(x.why, 80)} (${when(x.received)}) ${x.url}`);
+    }
+  }
+  if (cfg.sources.jira) {
+    out.push("\n#### Jira (나에게 할당, 열린 것)");
+    const js = a.jira.filter((x) => keep(x.url));
+    if (!js.length) out.push("(없음)");
+    for (const x of js.slice(0, 20)) out.push(`- ${x.key} [${x.status}${x.priority ? `/${x.priority}` : ""}] ${clip(x.title, 100)}${x.due ? ` · 마감 ${x.due}` : ""} · 갱신 ${when(x.updated)} ${x.url}`);
+  }
+  if (cfg.sources.github) {
+    out.push("\n#### GitHub PR");
+    const gs = a.github.filter((x) => keep(x.url));
+    if (!gs.length) out.push("(없음)");
+    for (const x of gs.slice(0, 15)) out.push(`- [${x.reason}] ${x.repo}#${x.number} ${clip(x.title, 100)} · ${x.author} · 갱신 ${when(x.updated)} ${x.url}`);
+  }
+  if (skipped) out.push(`\n(이미 알린 항목 ${skipped}건은 뺐다)`);
+  return out.join("\n");
+}
+
+/** {{FILTERS}}: agenda already applied the exclusions; this only guards Sentry and leftovers. */
+function filtersLine(cfg: NedConfig): string {
+  const ch = cfg.filters.slack.exclude_channels, pj = cfg.filters.jira.exclude_projects, w = cfg.sources.slack ? watchChannels(cfg.filters) : [];
+  const parts: string[] = [];
+  if (ch.length || pj.length) parts.push(`제외 채널 ${ch.map((c) => `#${c}`).join(", ") || "(없음)"} / 제외 Jira 프로젝트 ${pj.join(", ") || "(없음)"} — 섞여 있어도 보고하지 않는다`);
+  if (w.length) parts.push(`팔로업 채널 ${w.map((c) => `#${c}`).join(", ")} — 위 Slack 의 "[나 필요]" 는 action_items, 채널에서 정해진 것은 updates (채널당 1줄)`);
+  return parts.join("\n") || "(없음)";
+}
+
+/** Render briefing.md / heartbeat.md with live inputs. Pure apart from reading the template, agenda.json and the sent log. */
+export function buildHeartbeatPrompt(cfg: NedConfig, daily: boolean, state: State, events: NedEvent[], agenda: Agenda = readAgenda()): string {
   const template = fs.readFileSync(path.join(PROMPTS_DIR, daily ? "briefing.md" : "heartbeat.md"), "utf8");
   const sent = sentKeys();
+  const workers = new Set(state.sessions.filter(isWorker).map((s) => s.id));
+  const sessions = state.sessions.filter((s) => !workers.has(s.id));
   // Function replacers: inputs may contain "$&"-style sequences that a string replacement would expand.
   return template
     .replace("{{NOW}}", () => new Date().toLocaleString("ko-KR"))
     .replace("{{SOURCES}}", () => Object.entries(cfg.sources).filter(([, v]) => v).map(([k]) => k).join(", "))
     .replace("{{PERSONA}}", () => personaPrompt(cfg.persona))
-    .replace("{{FILTERS}}", () => {
-      const f = filtersPrompt(cfg.filters), w = cfg.sources.slack ? watchPrompt(cfg.filters) : "";
-      return w ? (f === "(없음)" ? `\n${w}` : `${f}\n${w}`) : f;
-    })
-    .replace("{{SESSIONS}}", () => (state.sessions.length ? state.sessions.map((s) => `- [${s.status}] ${s.worktree} — ${s.last_summary ?? s.last_prompt ?? ""}`).join("\n") : "(활성 세션 없음)"))
-    .replace("{{EVENTS}}", () => summarizeEvents(events))
+    .replace("{{FILTERS}}", () => filtersLine(cfg))
+    .replace("{{SENTRY}}", () => (cfg.sources.sentry ? "켜짐 — 아래 체크리스트대로 직접 조회" : "꺼짐 — 조회하지 않는다 (도구도 없음)"))
+    .replace("{{AGENDA}}", () => agendaDigest(cfg, agenda, { daily, sent }))
+    .replace("{{SESSIONS}}", () => (sessions.length ? sessions.map((s) => `- [${s.status}] ${s.worktree} — ${s.last_summary ?? s.last_prompt ?? ""}`).join("\n") : "(활성 세션 없음)"))
+    .replace("{{EVENTS}}", () => summarizeEvents(events.filter((e) => !e.session_id || !workers.has(e.session_id))))
     .replace("{{ALREADY_SENT}}", () => [...sent].slice(-60).join("\n") || "(없음)");
+}
+
+// ---------- check progress (POST /api/check, GET /api/check) ----------
+
+export type CheckPhase = "agenda" | "judge";
+export interface CheckStatus {
+  running: boolean;
+  phase: CheckPhase | null;
+  daily: boolean;
+  started_at: number | null;
+  phase_started_at: number | null;
+}
+let progress: CheckStatus = { running: false, phase: null, daily: false, started_at: null, phase_started_at: null };
+const setPhase = (phase: CheckPhase | null, daily = false) => {
+  const t = Date.now();
+  progress = phase
+    ? { running: true, phase, daily, started_at: progress.running ? progress.started_at : t, phase_started_at: t }
+    : { running: false, phase: null, daily: false, started_at: null, phase_started_at: null };
+};
+/** Where the running heartbeat is: "agenda" (waiting for agenda phase 1) → "judge" (claude -p). */
+export function checkStatus(): CheckStatus {
+  return { ...progress };
+}
+
+let checkInflight: Promise<Briefing | null> | null = null;
+/** POST /api/check: agenda phase 1 (always) → heartbeat. Concurrent calls share one run. */
+export function runCheck(cfg: NedConfig, opts: { daily?: boolean } = {}): Promise<Briefing | null> {
+  if (checkInflight) return checkInflight;
+  checkInflight = heartbeat(cfg, { force: true, daily: !!opts.daily, agenda: "always" }).finally(() => {
+    checkInflight = null;
+  });
+  return checkInflight;
+}
+
+/** Make agenda.json fresh enough to judge from. Never throws: a failed refresh leaves the previous lists. */
+async function ensureAgenda(cfg: NedConfig, mode: NonNullable<HeartbeatOptions["agenda"]>, daily: boolean): Promise<{ agenda: Agenda; refreshed: string }> {
+  const prev = readAgenda();
+  const age = Date.now() - (prev.updated_at || 0);
+  const stale = age > cfg.signal_check_minutes * 60_000;
+  const anySource = cfg.sources.calendar || cfg.sources.jira || cfg.sources.github || cfg.sources.gmail || cfg.sources.slack;
+  const go = anySource && mode !== "skip" && (mode === "always" || stale || agendaBusy());
+  if (!go) return { agenda: prev, refreshed: `reused (${Math.round(age / 60_000)}m old)` };
+  setPhase("agenda", daily);
+  const t0 = Date.now();
+  const joined = agendaBusy();
+  try {
+    const a = await refreshAgenda(cfg);
+    return { agenda: a, refreshed: `${joined ? "joined running refresh" : mode === "always" ? "refreshed" : `refreshed (was ${Math.round(age / 60_000)}m old)`} in ${Math.round((Date.now() - t0) / 1000)}s, $${(a.cost_usd ?? 0).toFixed(2)}` };
+  } catch (e) {
+    log(`heartbeat: agenda refresh failed — ${String(e).slice(0, 200)} (using previous lists)`);
+    return { agenda: readAgenda(), refreshed: "refresh failed, reused" };
+  }
 }
 
 /** One heartbeat: decide whether to think, then (maybe) ask Claude and publish a briefing. */
@@ -126,18 +295,29 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
     return null;
   }
 
-  const sent = sentKeys();
-  const prompt = buildHeartbeatPrompt(cfg, !!opts.daily, state, events);
-  if (filtersPrompt(cfg.filters) !== "(없음)") log(`heartbeat: filters — ${filtersPrompt(cfg.filters).split("\n")[0]}`);
-
+  const t0 = Date.now();
   let res;
-  if (llmDisabled()) {
-    log(`heartbeat: NED_NO_LLM=1 — skipping claude, recording ${process.env.NED_NO_LLM_RESULT ? "NED_NO_LLM_RESULT" : "NED_OK"}`);
-    res = noLlmResult();
-  } else {
-    log(`heartbeat: asking claude (${opts.daily ? "daily" : "heartbeat"}, ${events.length} new events, signalDue=${signalDue})`);
-    res = await runClaude(prompt, { allowedTools: allowedTools(cfg), maxTurns: cfg.claude_max_turns, model: cfg.claude_model, job: "heartbeat" });
+  let refreshed = "";
+  try {
+    const ag = await ensureAgenda(cfg, opts.agenda ?? "stale", !!opts.daily);
+    refreshed = ag.refreshed;
+    setPhase("judge", !!opts.daily);
+    // State again: the agenda wait may have taken a minute and sessions moved on.
+    const prompt = buildHeartbeatPrompt(cfg, !!opts.daily, readState(), events, ag.agenda);
+    if (llmDisabled()) {
+      log(`heartbeat: NED_NO_LLM=1 — skipping claude, recording ${process.env.NED_NO_LLM_RESULT ? "NED_NO_LLM_RESULT" : "NED_OK"} (agenda ${refreshed}, prompt ${prompt.length} chars)`);
+      const delay = Number(process.env.NED_NO_LLM_DELAY_MS) || 0; // lets tests see the "judge" step
+      if (delay) await new Promise((r) => setTimeout(r, delay));
+      res = noLlmResult();
+    } else {
+      const ro = heartbeatRunOptions(cfg);
+      log(`heartbeat: asking claude (${opts.daily ? "daily" : "heartbeat"}, ${events.length} new events, signalDue=${signalDue}, agenda ${refreshed}, prompt ${prompt.length} chars, tools ${ro.allowedTools.length ? ro.allowedTools.join(",") : "none"})`);
+      res = await runClaude(prompt, { ...ro, model: cfg.claude_model, timeoutMs: 5 * 60_000, job: "heartbeat" });
+    }
+  } finally {
+    setPhase(null);
   }
+  const sent = sentKeys();
   const id = new Date().toISOString().replace(/[:.]/g, "-");
 
   const parsed = res.ok ? extractJson<LlmBriefing>(res.text) : null;
@@ -185,7 +365,7 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
     notifyBriefing(cfg, briefing);
   }
   writeState(next);
-  log(`heartbeat: ${briefing.status} (${briefing.action_items.length} action / ${briefing.updates.length} updates / ${briefing.fyi.length} fyi, $${res.cost_usd.toFixed(2)}, ${res.num_turns} turns)`);
+  log(`heartbeat: ${briefing.status} (${briefing.action_items.length} action / ${briefing.updates.length} updates / ${briefing.fyi.length} fyi, $${res.cost_usd.toFixed(2)}, ${res.num_turns} turns, judge ${Math.round(res.duration_ms / 1000)}s, total ${Math.round((Date.now() - t0) / 1000)}s, agenda ${refreshed})`);
   return briefing;
 }
 

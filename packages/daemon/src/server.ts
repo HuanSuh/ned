@@ -11,7 +11,7 @@ import { checkRange, fetchCalendarRange } from "./calendar.js";
 import { PERSONAS, loadConfig, mergeFilters, normalizeActions, normalizeDashboard, normalizeNotifications, normalizeReplyTone, normalizePersona, saveConfig, type NedConfig, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
-import { dismissAttention, heartbeat, listBriefings } from "./heartbeat.js";
+import { checkStatus, dismissAttention, heartbeat, listBriefings, runCheck } from "./heartbeat.js";
 import { log } from "./paths.js";
 import { SOURCE_KEY, readSourceReviewed, readState, setReviewed, writeState } from "./state.js";
 import { registerSearch } from "./search.js";
@@ -96,6 +96,13 @@ export function startServer(getConfig: () => NedConfig): void {
     const b = await heartbeat(loadConfig(), { force: true, daily });
     return c.json(b ?? { status: "skipped" });
   });
+  // '지금 점검': agenda phase 1 (always) → heartbeat judging from agenda.json (+ Sentry). Concurrent calls share one run.
+  // GET /api/check tells the dashboard which step it is on (phase "agenda" → "judge").
+  app.post("/api/check", async (c) => {
+    const b = await runCheck(loadConfig(), { daily: c.req.query("daily") === "1" });
+    return c.json(b ?? { status: "skipped" });
+  });
+  app.get("/api/check", (c) => c.json(checkStatus()));
   // 확인 완료 toggle: body {reviewed: boolean} (default true). The item stays in attention; counts skip it.
   app.post("/api/attention/:id/review", async (c) => {
     const id = c.req.param("id");
