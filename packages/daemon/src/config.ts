@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import YAML from "yaml";
+import type { NotifyMode } from "./notify.js";
 import { CONFIG_PATH } from "./paths.js";
 
 export interface NedConfig {
@@ -22,6 +23,8 @@ export interface NedConfig {
   session_stale_minutes: number;
   /** Minutes between agenda (calendar/jira/github) refreshes for the dashboard HOME tab. */
   agenda_refresh_minutes: number;
+  /** Briefing banners: `auto` = Ned.app when it spawned the daemon (`NED_NOTIFY=app`), else osascript. */
+  notify: NotifyMode;
 }
 
 export const DEFAULT_CONFIG: NedConfig = {
@@ -35,6 +38,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   claude_max_turns: 25,
   session_stale_minutes: 180,
   agenda_refresh_minutes: 60,
+  notify: "auto",
 };
 
 export function loadConfig(): NedConfig {

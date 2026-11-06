@@ -156,6 +156,7 @@ final class StateStore: ObservableObject {
             let decoded = try JSONDecoder().decode(NedState.self, from: data)
             state = decoded
             lastError = nil
+            Notifier.shared.stateDidLoad(decoded, store: self)
             log.info("decoded state: sessions=\(decoded.sessions.count) attention=\(decoded.attention.count) briefing=\(decoded.last_briefing?.status ?? "nil", privacy: .public) quiet=\(decoded.quiet)")
         } catch {
             // Partial write or garbage: keep the last good state instead of blanking the UI.
