@@ -94,6 +94,15 @@ needs_me, reason}](채널당 최대 5)}` 를 돌려준다. `needs_me` = 나를 �
 heartbeat / briefing 의 `{{FILTERS}}` 에도 팔로업 목록이 붙어 needs_me 는 `action_items`(kind slack), 채널 결정은 `updates` 로 간다.
 대시보드: 설정 → "팔로업 채널" 칩 입력, 홈 Slack 카드의 "채널 팔로업" 접힘 섹션(needs_me 는 강조 바), 카드·소스 pill·인사말 카운트에 needs_me 포함.
 
+**답 필요 해제 이모지** (`config.filters.slack.ack_reactions`, 기본 `["white_check_mark","eyes","+1","heavy_check_mark"]`, 최대 8, `[]` 면 끔):
+멘션·DM·참여 스레드에서 **내 답글이 보이거나 내가 이 이모지 중 하나로 리액션하면 확인 완료**다. Slack 검색 결과엔 리액션 목록이 없고
+스레드 읽기에도 누가 달았는지는 안 나오므로, agenda-lists.md 의 `<!--@ack-->` 섹션이 다른 검색과 같은 턴에 이모지마다
+`slack_search_public_and_private`(`filters: "hasmy::<이모지>:"`, 최근 24h, 20개, `response_format: "concise"`, `include_context: false`)를 한 번씩 부른다
+(`has`/`hasmy` 는 반복하면 AND 라 이모지마다 따로; `hasmy:reaction` 같은 "아무 이모지" 필터는 Slack 이 무시한다). 그 permalink 들 = `acked` →
+`items` 에서 빼고, `all` 은 `answered: true`, `watch` 하이라이트는 `needs_me: false`. 모델은 `slack.acked_urls[]` 도 내고, 정규화(`normalize`)가
+permalink(쿼리·해시 무시)로 같은 처리를 한 번 더 한다 — 확인한 DM 은 그 대화의 그 이전 메시지까지 닫는다. 이름은 콜론 제거·소문자, 한글 커스텀 이모지 가능.
+설정 → "답 필요 해제 이모지" 칩 입력(쉼표·엔터로 추가).
+
 **Agenda 잡** (`src/agenda.ts`, `src/agenda-context.ts`, `prompts/agenda-lists.md`, `prompts/agenda-context.md`): 대시보드 HOME 탭용
 구조화 데이터. 시작 직후 1회, 이후 `agenda_refresh_minutes`(기본 60) 마다, 그리고 `POST /api/agenda/refresh` 때 돈다. 두 단계다 —
 "메시지 목록 먼저, 맥락은 백그라운드".
@@ -181,7 +190,7 @@ Agenda 응답 형태:
 - jira: `assignee = currentUser() AND statusCategory != Done`, 마감 오름차순 → 갱신 내림차순, 최대 25
 - github: 내 리뷰 요청 PR + 변경 요청/승인된 내 열린 PR, 최대 20
 - mail: `unread` 는 최근 2일 안 읽은 받은편지함 스레드 수(최대 50, 50 에 닿으면 `unread_capped: true` → 홈은 "50+통"), `items` 는 최근 3일 중 사람이 보낸 업무 메일로 내 행동이 필요한 것(최대 10, 급한 순). 선별은 검색 결과의 발신자·제목·스니펫으로 한다(1단계는 스레드를 열지 않음). 답장 초안용 `context: { from, to, subject, body_excerpt(인용 제거, ≤1500자), attachments[], message_id, reply_to, collected_at }` 는 2단계가 reason `reply|approval|request` 항목만 `get_thread`(PLAIN_TEXT)로 읽어 채운다. 읽음 처리 등 쓰기는 하지 않는다. `mail: null` 은 아직 안 가져옴(mail 도입 전 agenda.json) 또는 gmail 소스 꺼짐. `GET /api/agenda`·`POST /api/agenda/refresh` 응답에는 `mail_enabled`(= `sources.gmail`)가 붙고, false 면 홈은 메일 묶음을 숨긴다
-- slack: 최근 24시간, 나를 멘션했거나 DM/스레드에서 질문·요청했고 내가 아직 답하지 않은 것(최대 10, 급한 순). 1단계는 검색 3번(멘션 `<@me>` / `is:dm` / `is:thread with:<@me>`)뿐이고 스레드를 열지 않는다(답했는지는 검색 context 로 판단, 애매하면 넣음). Slack epoch ts 는 ISO 로 바꾼다. `items[]` 와 `watch` 의 `needs_me` 하이라이트에는 2단계가 `slack_read_thread`/`slack_read_channel` 로 읽은 `context: { participants[], messages[{from,ts,text}](최근 5개, 각 ≤300자), collected_at }` 가 붙는다(같은 permalink 의 `all[]` 행에도 같이). 응답에는 `slack_enabled`(= `sources.slack`)가 붙고, false 면 홈은 Slack 카드를 숨긴다
+- slack: 최근 24시간, 나를 멘션했거나 DM/스레드에서 질문·요청했고 내가 아직 답하지 않은 것(최대 10, 급한 순). 1단계는 검색 3번(멘션 `<@me>` / `is:dm` / `is:thread with:<@me>`)뿐이고 스레드를 열지 않는다(답했는지는 검색 context 로 판단, 애매하면 넣음; 해제 이모지로 내가 리액션한 메시지도 답한 것 — 위 "답 필요 해제 이모지"). Slack epoch ts 는 ISO 로 바꾼다. `items[]` 와 `watch` 의 `needs_me` 하이라이트에는 2단계가 `slack_read_thread`/`slack_read_channel` 로 읽은 `context: { participants[], messages[{from,ts,text}](최근 5개, 각 ≤300자), collected_at }` 가 붙는다(같은 permalink 의 `all[]` 행에도 같이). 응답에는 `slack_enabled`(= `sources.slack`)가 붙고, false 면 홈은 Slack 카드를 숨긴다
 
 ### 답장 초안 · 보내기 (`src/drafts.ts`, `src/actions.ts`, `prompts/draft.md`)
 
@@ -310,7 +319,7 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
 ~/.ned/
   config.yaml            설정 (없으면 기본값으로 생성). heartbeat_minutes, signal_check_minutes,
                          briefing_time, quiet_hours, sources.{gmail,slack,jira,github,sentry,calendar},
-                         persona (ned|alfred|oracle|jarvis), filters.{slack.exclude_channels, slack.watch_channels, jira.exclude_projects} (트래킹 제외 / 팔로업 채널, 기본 []),
+                         persona (ned|alfred|oracle|jarvis), filters.{slack.exclude_channels, slack.watch_channels, slack.ack_reactions, jira.exclude_projects} (트래킹 제외 / 팔로업 채널 / 답 필요 해제 이모지, ack_reactions 외 기본 []),
                          port, claude_model, claude_max_turns, session_stale_minutes, agenda_refresh_minutes, notify,
                          actions.{slack_send=false, gmail_draft=true, gmail_send=false, session_send=true,
                                   jira_comment=false, jira_transition=false, github_review=false, calendar_rsvp=false} (POST /api/send 허용),

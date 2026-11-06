@@ -240,12 +240,31 @@ export interface NedFilters {
     exclude_channels: string[];
     /** Channels followed even without a mention (agenda `slack.watch`, heartbeat). Excluded channels win. */
     watch_channels: string[];
+    /**
+     * Emoji names (no colons, lower-case, e.g. "white_check_mark", "+1"): a mention / DM / thread message I reacted to
+     * with one of these counts as handled — out of agenda `slack.items`, `answered: true` in `all`, `needs_me: false`
+     * in watch highlights. [] turns the check off (no extra `hasmy::emoji:` searches).
+     */
+    ack_reactions: string[];
   };
   /** Jira project keys, e.g. ["MNT", "IP2"]. */
   jira: { exclude_projects: string[] };
 }
 
 const uniq = (xs: string[]) => [...new Set(xs)];
+
+/** Default `filters.slack.ack_reactions` (used when the key is absent; an explicit [] stays empty). */
+export const DEFAULT_ACK_REACTIONS = ["white_check_mark", "eyes", "+1", "heavy_check_mark"];
+/** At most this many ack emoji — each one is an extra Slack search per agenda run. */
+export const ACK_REACTIONS_MAX = 8;
+
+/** ":White_Check_Mark:" → "white_check_mark"; drops anything that can't be a Slack emoji name. */
+export function normalizeAckReactions(v: unknown): string[] {
+  if (v === undefined || v === null) return [...DEFAULT_ACK_REACTIONS];
+  const list = typeof v === "string" ? v.split(/[,\s]+/) : strs(v);
+  const names = list.map((e) => e.trim().replace(/^:+|:+$/g, "").toLowerCase()).filter((e) => /^[\p{Ll}\p{Lo}\p{N}_+'.-]{1,64}$/u.test(e));
+  return uniq(names).slice(0, ACK_REACTIONS_MAX);
+}
 const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
 /**
@@ -253,12 +272,12 @@ const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is st
  * Jira keys are upper-cased and must look like a project key (they are pasted into JQL verbatim).
  */
 export function normalizeFilters(raw: unknown): NedFilters {
-  const f = (raw && typeof raw === "object" ? raw : {}) as { slack?: { exclude_channels?: unknown; watch_channels?: unknown }; jira?: { exclude_projects?: unknown } };
+  const f = (raw && typeof raw === "object" ? raw : {}) as { slack?: { exclude_channels?: unknown; watch_channels?: unknown; ack_reactions?: unknown }; jira?: { exclude_projects?: unknown } };
   const chans = (v: unknown) => strs(v).map((c) => c.trim().replace(/^#+/, "").replace(/\s+/g, "")).filter((c) => c && c.length <= 80);
   const channels = chans(f.slack?.exclude_channels);
   const watch = chans(f.slack?.watch_channels);
   const projects = strs(f.jira?.exclude_projects).map((k) => k.trim().toUpperCase()).filter((k) => /^[A-Z][A-Z0-9_]{0,19}$/.test(k));
-  return { slack: { exclude_channels: uniq(channels), watch_channels: uniq(watch).slice(0, 20) }, jira: { exclude_projects: uniq(projects) } };
+  return { slack: { exclude_channels: uniq(channels), watch_channels: uniq(watch).slice(0, 20), ack_reactions: normalizeAckReactions(f.slack?.ack_reactions) }, jira: { exclude_projects: uniq(projects) } };
 }
 
 /** Deep-merge a partial filters patch over the current filters (a key that is present replaces that list). */
@@ -308,7 +327,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   quiet_hours: { start: "23:00", end: "08:00" },
   sources: { gmail: true, slack: true, jira: true, github: true, sentry: true, calendar: true },
   persona: "ned",
-  filters: { slack: { exclude_channels: [], watch_channels: [] }, jira: { exclude_projects: [] } },
+  filters: { slack: { exclude_channels: [], watch_channels: [], ack_reactions: [...DEFAULT_ACK_REACTIONS] }, jira: { exclude_projects: [] } },
   port: 7777,
   claude_model: null,
   claude_max_turns: 25,

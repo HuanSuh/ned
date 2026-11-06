@@ -484,6 +484,21 @@ export function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cf
   const jiraKept = jira.filter((j) => !exProjects.has(j.key.split("-")[0].toUpperCase()));
   const keepCh = (x: { channel: string }) => !exChannels.has(x.channel.replace(/^#/, "").toLowerCase());
   if (slack) {
+    // Messages I reacted to with an ack emoji (filters.slack.ack_reactions) count as handled even if the model missed it.
+    const acked = ackedSet(sl.acked_urls);
+    if (acked.size) {
+      const isAcked = (x: { url: string }) => acked.has(slackUrlKey(x.url));
+      // A DM I acked closes that conversation up to the acked message (older asks there collapse into it anyway).
+      const dmAck = new Map<string, number>();
+      for (const k of acked) {
+        const m = /\/archives\/(D[A-Z0-9]+)\/p(\d{10})(\d{6})/.exec(k);
+        if (m) dmAck.set(m[1], Math.max(dmAck.get(m[1]) ?? 0, Number(m[2]) * 1000 + Math.floor(Number(m[3]) / 1000)));
+      }
+      const dmClosed = (x: SlackItem) => x.reason === "dm" && dmAck.has(slackConvKey(x)) && (Date.parse(x.ts) || 0) <= dmAck.get(slackConvKey(x))!;
+      slack.items = slack.items.filter((x) => !isAcked(x) && !dmClosed(x));
+      for (const x of slack.all) if (isAcked(x)) x.answered = true;
+      for (const w of slack.watch) for (const h of w.highlights) if (isAcked(h)) h.needs_me = false;
+    }
     slack.items = collapseDMs(slack.items.filter(keepCh));
     slack.all = supersetSlack(slack.items, collapseDMs(slack.all.filter(keepCh)));
     // The prompt lets all[] skip context for rows already in items[]: share it by permalink, both ways.
@@ -493,6 +508,23 @@ export function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cf
   }
   if (mail) mail.all = supersetMail(mail.items, mail.all);
   return { calendar, jira: jiraKept, github, mail, slack };
+}
+
+/** Same Slack message ⇔ same key: permalink without query/hash (`?thread_ts=…&cid=…` varies), host lower-cased. */
+export function slackUrlKey(url: string): string {
+  const u = url.trim();
+  try {
+    const p = new URL(u);
+    return `${p.host.toLowerCase()}${p.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return u.split(/[?#]/)[0];
+  }
+}
+
+/** Model `slack.acked_urls` → set of slackUrlKey()s (strings only, max 200). */
+export function ackedSet(raw: unknown): Set<string> {
+  const list = Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string" && x.trim() !== "") : [];
+  return new Set(list.slice(0, 200).map(slackUrlKey));
 }
 
 const byTsDesc = (a: { ts: string }, b: { ts: string }) => (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0);
@@ -547,6 +579,8 @@ export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = 
   const keep = new Set<string>(keys);
   if (keys.includes("slack") || keys.includes("mail")) keep.add("voice");
   if (watch.length) keep.add("watch");
+  const ack = keys.includes("slack") ? cfg.filters.slack.ack_reactions ?? [] : [];
+  if (ack.length) keep.add("ack");
   const select = `select:${keys.flatMap((k) => LIST_TOOLS[k]).join(",")}`;
   const since = String(Math.floor(now.getTime() / 1000) - 24 * 3600);
   return pickSections(fs.readFileSync(path.join(PROMPTS_DIR, "agenda-lists.md"), "utf8"), keep)
@@ -559,6 +593,9 @@ export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = 
     .replaceAll("{{CAL_END}}", cb.end)
     .replaceAll("{{ALL_LIMIT}}", String(cfg.agenda_all_limit))
     .replaceAll("{{WATCH_CHANNELS}}", watch.map((c) => `#${c}`).join(", "))
+    .replaceAll("{{ACK_EMOJIS}}", ack.map((e) => `:${e}:`).join(" "))
+    .replaceAll("{{ACK_EXAMPLE}}", ack.length ? `\`hasmy::${ack[0]}:\`` : "")
+    .replaceAll("{{ACK_KEY}}", ack.length ? ',"acked_urls":[]' : "")
     .replaceAll("{{WATCH_KEY}}", watch.length ? ',"watch":[{"channel":"#채널","summary":"","highlights":[{"from":"","text":"","ts":"ISO","url":"","needs_me":false,"reason":""}]}]' : "")
     .replaceAll("{{PERSONA}}", () => personaPrompt(cfg.persona))
     .replaceAll("{{FILTERS}}", () => filtersPrompt(cfg.filters))

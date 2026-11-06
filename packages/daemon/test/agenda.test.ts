@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  ackedSet,
+  buildListsPrompt,
   collapseDMs,
   isEmptyPayload,
   normalize,
@@ -8,6 +10,7 @@ import {
   normalizeSlackContext,
   pickSections,
   slackConvKey,
+  slackUrlKey,
   sourceSignature,
   supersetMail,
   supersetSlack,
@@ -173,5 +176,64 @@ describe("sourceSignature / pickSections", () => {
   it("pickSections keeps only requested sections", () => {
     const t = "head\n<!--@slack-->\nS\n<!--@/slack--><!--@mail-->\nM\n<!--@/mail-->tail";
     expect(pickSections(t, new Set(["mail"]))).toBe("head\nM\ntail");
+  });
+});
+
+describe("slack ack reactions (filters.slack.ack_reactions)", () => {
+  const u1 = slackUrl("C1", "1762390000000100"), u2 = slackUrl("C2", "1762390000000200"), u3 = slackUrl("C3", "1762390000000300");
+  const raw = {
+    slack: {
+      items: [
+        { channel: "#dev", reason: "mention", url: u1, ts: "1762390000.000100", text: "봐줘" },
+        { channel: "#ops", reason: "thread", url: u2, ts: "1762390000.000200", text: "확인?" },
+      ],
+      all: [
+        { channel: "#dev", reason: "mention", url: u1, ts: "1762390000.000100", text: "봐줘" },
+        { channel: "#ops", reason: "thread", url: u2, ts: "1762390000.000200", text: "확인?" },
+      ],
+      watch: [{ channel: "#ops", summary: "s", highlights: [{ from: "a", text: "t", ts: "1762390000.000300", url: u3, needs_me: true, reason: "r" }] }],
+      // thread permalink variant: query string must not matter
+      acked_urls: [`${u2}?thread_ts=1762380000.000001&cid=C2`, u3, 42],
+    },
+  };
+  const c = cfg({ filters: normalizeFilters({ slack: { watch_channels: ["ops"] } }) });
+
+  it("acked urls leave items, mark all[] answered, clear watch needs_me", () => {
+    const p = normalize(raw, c, AT);
+    expect(p.slack!.items.map((x) => x.url)).toEqual([u1]);
+    expect(p.slack!.all.find((x) => x.url === u2)!.answered).toBe(true);
+    expect(p.slack!.all.find((x) => x.url === u1)!.answered).toBe(false);
+    expect(p.slack!.watch[0].highlights[0].needs_me).toBe(false);
+  });
+
+  it("no acked_urls → unchanged", () => {
+    const p = normalize({ slack: { ...raw.slack, acked_urls: undefined } }, c, AT);
+    expect(p.slack!.items).toHaveLength(2);
+    expect(p.slack!.watch[0].highlights[0].needs_me).toBe(true);
+  });
+
+  it("an acked DM closes older asks in the same conversation, not newer ones", () => {
+    const d = (p: string, ts: string) => ({ channel: "DM", from: "kim", reason: "dm", url: slackUrl("D9", p), ts, text: "q" });
+    const p = normalize({ slack: { items: [d("1762390000000100", "1762390000.000100"), d("1762390100000000", "1762390100.000000")], all: [], acked_urls: [slackUrl("D9", "1762390050000000")] } }, c, AT);
+    expect(p.slack!.items.map((x) => x.url)).toEqual([slackUrl("D9", "1762390100000000")]);
+  });
+
+  it("slackUrlKey / ackedSet ignore query, hash, host case, non-strings", () => {
+    expect(slackUrlKey("https://X.slack.com/archives/C1/p1?thread_ts=1&cid=C1#x")).toBe("x.slack.com/archives/C1/p1");
+    expect([...ackedSet(["https://x.slack.com/archives/C1/p1", null, ""])]).toEqual(["x.slack.com/archives/C1/p1"]);
+    expect(ackedSet("nope").size).toBe(0);
+  });
+
+  it("prompt adds one hasmy search per emoji (concise, no context) and the acked_urls key; none when the list is empty", () => {
+    const on = buildListsPrompt(cfg({ filters: normalizeFilters({ slack: { ack_reactions: ["eyes", "+1"] } }) }), ["slack"]);
+    expect(on).toContain("hasmy::eyes:");
+    expect(on).toContain(":eyes: :+1:");
+    expect(on).toContain('`response_format: "concise"`');
+    expect(on).toContain("`include_context: false`");
+    expect(on).toContain('"acked_urls":[]');
+    const off = buildListsPrompt(cfg({ filters: normalizeFilters({ slack: { ack_reactions: [] } }) }), ["slack"]);
+    expect(off).not.toContain("hasmy");
+    expect(off).not.toContain("acked_urls");
+    expect(off).not.toContain("{{");
   });
 });
