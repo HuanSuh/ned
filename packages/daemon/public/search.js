@@ -154,7 +154,8 @@
       for (const x of [...(a.slack.items || []), ...(a.slack.all || [])]) {
         const id = x.url || `${x.channel}:${x.ts}`;
         if (seen.has(id)) continue; seen.add(id);
-        out.push({ type: "slack", id, title: x.text || "(내용 없음)", detail: `${x.channel} · ${x.from}`, ts: isoTs(x.ts), url: safeUrl(x.url), kind: "slack", tab: "home", anchor: "card:slack", fields: [[x.text, 3], [x.channel, 2], [x.from, 2]] });
+        const th = x.thread || {}; // followed thread: summary + latest reply are searchable too
+        out.push({ type: "slack", id, title: x.text || "(내용 없음)", detail: [`${x.channel} · ${x.from}`, th.thread_summary].filter(Boolean).join(" — "), ts: isoTs(x.ts), url: safeUrl(x.url), kind: "slack", tab: "home", anchor: "card:slack", fields: [[x.text, 3], [x.channel, 2], [x.from, 2], [th.thread_summary, 2], [th.last_reply_text, 1], [th.last_reply_from, 1]] });
       }
       // 팔로업 channel highlights → their own card (card:watch:<channel>), or the Slack card's fold when dashboard.watch_cards is off.
       const wOff = d.config && d.config.dashboard && d.config.dashboard.watch_cards === false;

@@ -9,6 +9,7 @@ import { readRecentEvents, readUnprocessedEvents, type NedEvent } from "./events
 import { notify } from "./notify.js";
 import { BRIEFINGS_DIR, DISMISSED_PATH, SENT_LOG, log, readJson, writeJsonAtomic } from "./paths.js";
 import { reduceSessions } from "./sessions.js";
+import { THREAD_FOLLOW_HOURS, hasNewSinceMe, threadActivity, threadKeyOf } from "./slack-threads.js";
 import { readState, writeState, type AttentionItem, type Briefing, type BriefingSection } from "./state.js";
 
 type State = ReturnType<typeof readState>;
@@ -52,6 +53,28 @@ export function markSent(keys: string[]): void {
 }
 
 export const keyOf = (s: BriefingSection) => (s.url || s.title || "").trim().toLowerCase();
+
+/**
+ * Followed Slack threads where someone replied after my last message → action items, once per (thread, last_reply_ts):
+ * the sent key carries the reply ts, so the next new reply raises it again. Threads marked seen at that reply are skipped.
+ */
+export function threadAttention(a: Agenda, sent: Set<string>, now = Date.now()): { items: BriefingSection[]; keys: string[] } {
+  const since = now / 1000 - THREAD_FOLLOW_HOURS * 3600;
+  const items: BriefingSection[] = [], keys: string[] = [];
+  for (const t of a.slack?.threads ?? []) {
+    if (!hasNewSinceMe(t) || threadActivity(t) < since) continue;
+    const key = `slack-thread:${t.key}@${t.last_reply_ts}`.toLowerCase();
+    if (sent.has(key)) continue;
+    keys.push(key);
+    items.push({
+      kind: "slack",
+      title: clip(`${t.channel || "Slack"} 스레드 · 내 답 이후 새 답글 ${t.new_since_me}건 — ${t.last_reply_from ?? ""}: ${t.last_reply_text ?? ""}`, 160),
+      detail: clip(t.thread_summary || t.root_text || "", 200) || undefined,
+      url: t.url,
+    });
+  }
+  return { items, keys };
+}
 
 function summarizeEvents(events: NedEvent[]): string {
   if (!events.length) return "(없음)";
@@ -341,9 +364,22 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
   briefing.action_items = fresh(briefing.action_items);
   briefing.updates = fresh(briefing.updates);
   briefing.fyi = fresh(briefing.fyi);
+  const sentNow = [...briefing.action_items, ...briefing.updates, ...briefing.fyi].map(keyOf);
+  if (!opts.daily && cfg.sources.slack) {
+    // Deterministic, not left to the model: a reply after mine in a followed thread is always surfaced (once per reply).
+    const th = threadAttention(readAgenda(), sent);
+    // Same thread already reported by the model (any permalink into it) → don't add a second row.
+    const reported = new Set(briefing.action_items.flatMap((x) => [(x.url ?? "").trim().toLowerCase(), threadKeyOf(x.url).toLowerCase()]).filter(Boolean));
+    briefing.action_items.push(...th.items.filter((x) => !reported.has((x.url ?? "").trim().toLowerCase()) && !reported.has(threadKeyOf(x.url).toLowerCase())));
+    sentNow.push(...th.keys); // the thread key only — not its url, so the model may still mention the thread later
+    if (th.items.length && briefing.status !== "UPDATE") {
+      briefing.status = "UPDATE";
+      briefing.headline ??= `Slack 스레드에 내 답 이후 새 답글 ${th.items.length}건`;
+    }
+  }
   const hasContent = briefing.action_items.length + briefing.updates.length + briefing.fyi.length > 0;
   if (briefing.status === "UPDATE" && !hasContent && !opts.daily) briefing.status = "NED_OK";
-  markSent([...briefing.action_items, ...briefing.updates, ...briefing.fyi].map(keyOf));
+  markSent(sentNow);
 
   writeJsonAtomic(path.join(BRIEFINGS_DIR, `${id}.json`), briefing);
   commit();

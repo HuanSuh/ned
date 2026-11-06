@@ -7,12 +7,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { normalizeMailContext, normalizeSlackContext, patchAgenda, readAgenda, sourceSignature, type Agenda, type ContextStatus } from "./agenda.js";
+import { normalizeMailContext, normalizeSlackContext, patchAgenda, pickSections, readAgenda, sourceSignature, type Agenda, type ContextStatus } from "./agenda.js";
 import { extractJson, llmDisabled, runClaude } from "./claude.js";
 import { loadConfig, type NedConfig } from "./config.js";
 import { recordCost, todayCost } from "./costs.js";
 import { parseSlackUrl } from "./drafts.js";
-import { log } from "./paths.js";
+import { log, readJson } from "./paths.js";
+import { personaPrompt } from "./persona.js";
+import { applyThreadState, mergeThreadReads, threadCandidates, type SlackThread } from "./slack-threads.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PROMPT = path.resolve(here, "../../../prompts/agenda-context.md");
@@ -80,8 +82,7 @@ export function buildContextPrompt(src: CtxSource, batch: CtxCandidate[]): strin
     src === "slack"
       ? '{"contexts":[{"key":"<항목 key 그대로>","participants":["이름"],"messages":[{"from":"이름|나","ts":"ISO","text":"원문 ≤300자"}]}]}'
       : '{"contexts":[{"key":"<항목 key 그대로>","from":"","to":"","subject":"","body_excerpt":"≤1500자","attachments":[],"message_id":"","reply_to":""}]}';
-  return fs
-    .readFileSync(PROMPT, "utf8")
+  return pickSections(fs.readFileSync(PROMPT, "utf8"), new Set(["context"]))
     .replace("{{TOOL_SELECT}}", `select:${TOOLS[src].join(",")}`)
     .replace("{{GUIDE}}", () => guide)
     .replace("{{ITEMS}}", () => items.map((i) => JSON.stringify(i)).join("\n"))
@@ -110,6 +111,79 @@ export function mergeContexts(src: CtxSource, raw: unknown[], collectedAt = new 
     }
   });
   return n;
+}
+
+// ---------- Slack thread follow-up (slack-threads.ts) ----------
+
+const THREAD_TOOLS = ["mcp__claude_ai_Slack__slack_read_thread"];
+const THREAD_SCHEMA = '{"threads":[{"key":"<항목 key 그대로>","reply_count":0,"my_last_reply_ts":"","new_since_me":0,"thread_summary":"한 줄 ≤60자 (다시 쓸 필요 없으면 빈 문자열)","participants":["이름"],"messages":[{"from":"이름|나","ts":"1730860000.123456","text":"원문 ≤300자"}]}]}';
+
+/** The batch prompt that re-reads followed threads (prompts/agenda-context.md, `threads` section). */
+export function buildThreadPrompt(batch: SlackThread[], cfg: NedConfig): string {
+  // known_last_reply_ts + has_summary: the model writes thread_summary only when the thread moved (or has none yet).
+  const items = batch.map((t) => ({ key: t.key, channel_id: t.channel_id, thread_ts: t.thread_ts, channel: t.channel, known_last_reply_ts: t.last_reply_ts ?? "", has_summary: !!t.thread_summary }));
+  return pickSections(fs.readFileSync(PROMPT, "utf8"), new Set(["threads"]))
+    .replace("{{TOOL_SELECT}}", `select:${THREAD_TOOLS.join(",")}`)
+    .replace("{{PERSONA}}", () => personaPrompt(cfg.persona))
+    .replace("{{ITEMS}}", () => items.map((i) => JSON.stringify(i)).join("\n"))
+    .replace("{{SCHEMA}}", () => THREAD_SCHEMA);
+}
+
+/** Merge one thread-read batch into agenda.json (thread records → rows: thread view, draft context, reopen). */
+export function mergeThreads(raw: unknown[], now = Date.now()): string[] {
+  let keys: string[] = [];
+  patchAgenda((a) => {
+    if (!a.slack?.threads) return;
+    keys = mergeThreadReads(a.slack.threads, raw, now);
+    applyThreadState(a.slack);
+  });
+  return keys;
+}
+
+/**
+ * Re-read up to agenda_thread_batch followed threads (one narrow `claude -p`). Runs on every Slack pass, even when
+ * the list signature is unchanged: new replies don't change the list. Returns "budget" when the day's spend is used up.
+ */
+export async function processThreads(cfg: NedConfig, now = Date.now()): Promise<"ok" | "none" | "budget"> {
+  const a = readAgenda();
+  const batch = threadCandidates(a.slack?.threads, cfg.agenda_thread_batch, now);
+  if (!batch.length) return "none";
+  if (overBudget(cfg)) {
+    log(`agenda-threads: today's spend $${todayCost().toFixed(2)} ≥ budget $${cfg.agenda_daily_budget_usd} — not reading ${batch.length} thread(s)`);
+    setStatus({ stopped: "budget" });
+    return "budget";
+  }
+  const t = Date.now();
+  let raw: unknown[] = [], cost = 0, turns = 0, err = "";
+  const keys = new Set(batch.map((x) => x.key));
+  if (llmDisabled()) {
+    // NED_NO_LLM_THREADS = path to {"threads":[…]} (model-shaped); only the batch's keys are applied.
+    const file = process.env.NED_NO_LLM_THREADS;
+    const fx = file ? readJson<{ threads?: unknown }>(file, {}) : {};
+    raw = (Array.isArray(fx.threads) ? fx.threads : []).filter((r) => keys.has(String((r as { key?: unknown })?.key ?? "")));
+    // Unknown to the fixture: count it as read (nothing new) so it waits for the recheck interval.
+    for (const k of keys) if (!raw.some((r) => (r as { key?: unknown }).key === k)) raw.push({ key: k, messages: [] });
+  } else {
+    const res = await runClaude(buildThreadPrompt(batch, cfg), {
+      allowedTools: ["ToolSearch", ...THREAD_TOOLS],
+      tools: ["ToolSearch"],
+      maxTurns: 6,
+      model: cfg.agenda_light_model ?? cfg.claude_model,
+      timeoutMs: 3 * 60_000,
+      job: "agenda_context",
+    });
+    cost = res.cost_usd;
+    turns = res.num_turns;
+    const j = res.ok ? extractJson<{ threads?: unknown }>(res.text) : null;
+    if (j && Array.isArray(j.threads)) raw = j.threads;
+    else err = res.ok ? `invalid JSON: ${res.text.slice(0, 200)}` : (res.error ?? "claude failed").slice(0, 300);
+  }
+  // A failed call leaves checked_at alone, so the same threads are first in line next time.
+  const done = err ? [] : mergeThreads(raw, now);
+  setStatus({ cost_usd: Math.round((status.cost_usd + cost) * 10000) / 10000 });
+  const fresh = readAgenda().slack?.threads?.filter((x) => done.includes(x.key) && x.new_since_me > 0).length ?? 0;
+  log(`agenda-threads: ${done.length}/${batch.length} threads read${fresh ? `, ${fresh} with replies after mine` : ""} — $${cost.toFixed(3)}, ${turns} turns, ${((Date.now() - t) / 1000).toFixed(1)}s${err ? ` — ${err}` : ""}`);
+  return "ok";
 }
 
 // ---------- worker: one at a time, Slack before mail ----------
@@ -176,7 +250,8 @@ async function work(): Promise<void> {
       // Fresh config per source: a budget / batch-size change via PUT /api/config applies to the running worker.
       let cfg = latestCfg as NedConfig;
       try { cfg = loadConfig(); } catch { /* keep the queued one */ }
-      const r = await processSource(src, cfg, force);
+      let r: string = await processSource(src, cfg, force);
+      if (src === "slack" && r !== "budget") r = await processThreads(cfg);
       if (r === "budget") {
         queue.clear();
         forced.clear();

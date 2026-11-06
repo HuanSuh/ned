@@ -16,7 +16,10 @@ export function srcKey(kind, x) {
   if (kind === "email") { const t = x.id || /#[\w-]+\/([^|?&#\s]+)/.exec(x.url || "")?.[1]; return t ? `mail:${t}` : ""; }
   if (kind === "slack") {
     const m = /\/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})/.exec(x.url || "");
-    return m ? `slack:${m[1]}:${m[2]}.${m[3]}` : x.url ? `slack:${x.url}` : ""; // odd permalinks: the link itself is the stable key
+    if (!m) return x.url ? `slack:${x.url}` : ""; // odd permalinks: the link itself is the stable key
+    // Followed thread: the key carries its latest reply, so a newer reply makes the row open (미확인) again.
+    const base = `slack:${m[1]}:${m[2]}.${m[3]}`, lr = x.thread?.last_reply_ts;
+    return lr && lr !== `${m[2]}.${m[3]}` ? `${base}@${lr}` : base;
   }
   if (kind === "jira") { const k = x.key || /\/browse\/([A-Z][A-Z0-9_]*-\d+)/.exec(x.url || "")?.[1]; return k ? `jira:${k}` : ""; }
   if (kind === "github") {
@@ -26,7 +29,13 @@ export function srcKey(kind, x) {
   return "";
 }
 export const itemMs = (x) => toMs(x.received || x.ts || x.updated || 0);
-export const srcRevAt = (key, x) => { const at = key ? (S.agenda?.reviewed || {})[key] : 0; return at && at >= itemMs(x) ? at : 0; };
+export const srcRevAt = (key, x) => {
+  const marks = S.agenda?.reviewed || {};
+  let at = key ? marks[key] : 0;
+  // A mark made before the thread was followed (key without `@…`) still counts if it came after the latest reply.
+  if (!at && key.includes("@")) { const b = marks[key.split("@")[0]], lr = Number(key.split("@")[1]) * 1000; if (b && b >= lr) at = b; }
+  return at && at >= itemMs(x) ? at : 0;
+};
 export const revAt = (kind, x) => srcRevAt(srcKey(kind, x), x);
 export const isOpenSrc = (kind) => (x) => !revAt(kind, x);
 export const revCls = (kind, x) => (revAt(kind, x) ? " reviewed" : "");
