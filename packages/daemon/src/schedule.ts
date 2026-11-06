@@ -25,10 +25,11 @@ export function lastRuns(scheduled: SourceTimes, status: Partial<Record<AgendaSo
   return out;
 }
 
-/** next_due_at per source (ms). A source never run is due now. */
-export function nextDueAt(cfg: Pick<NedConfig, "agenda_refresh_minutes" | "agenda_source_minutes">, keys: readonly AgendaSourceKey[], last: SourceTimes, now: number): SourceTimes {
+/** next_due_at per source (ms). A source never run is due now.
+ *  `factor` stretches every interval (quiet hours / idle "slow" mode); 1 = as configured. */
+export function nextDueAt(cfg: Pick<NedConfig, "agenda_refresh_minutes" | "agenda_source_minutes">, keys: readonly AgendaSourceKey[], last: SourceTimes, now: number, factor = 1): SourceTimes {
   const out: SourceTimes = {};
-  for (const k of keys) out[k] = last[k] == null ? now : last[k]! + sourceRefreshMinutes(cfg, k) * 60_000;
+  for (const k of keys) out[k] = last[k] == null ? now : last[k]! + sourceRefreshMinutes(cfg, k) * factor * 60_000;
   return out;
 }
 
@@ -39,7 +40,8 @@ export function dueSources(
   last: SourceTimes,
   now: number,
   running: readonly AgendaSourceKey[] = [],
+  factor = 1,
 ): AgendaSourceKey[] {
-  const next = nextDueAt(cfg, enabled, last, now);
+  const next = nextDueAt(cfg, enabled, last, now, factor);
   return enabled.filter((k) => !running.includes(k) && now + DUE_SLACK_MS >= next[k]!);
 }

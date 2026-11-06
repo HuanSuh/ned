@@ -257,3 +257,6 @@ button.chipx.hist-tg:focus-visible { outline: 2px solid var(--info); outline-off
 .skel i:nth-child(1) { width: 78%; } .skel i:nth-child(2) { width: 92%; animation-delay: .12s; } .skel i:nth-child(3) { width: 56%; animation-delay: .24s; }
 @keyframes skel { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
 @media (prefers-reduced-motion: reduce) { .skel i { animation: none; } }
+
+/* 야간 / 유휴 모드 칩 (autosched.js) */
+.hmeta .aschip { color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }

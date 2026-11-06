@@ -249,6 +249,28 @@
                     <label class="intf" data-intsrc="github"><span>GitHub</span><input id="c-int-github" type="number" min="1" step="1" data-int="github"></label>
                   </div></div>
               </div>
+              <div class="agint autos">
+                <div class="f asblk" id="qs-blk"><span class="lab" id="qs-lab">조용한 시간 동작</span>
+                  <div class="inl" role="radiogroup" aria-labelledby="qs-lab" aria-describedby="qs-h">
+                    <label class="ck"><input type="radio" name="qs-mode" value="normal"> 평소대로</label>
+                    <label class="ck"><input type="radio" name="qs-mode" value="slow"> 느리게 ×</label><input id="qs-factor" type="number" min="2" max="24" step="1" aria-label="느리게 배수">
+                    <label class="ck"><input type="radio" name="qs-mode" value="pause"> 멈춤</label>
+                  </div>
+                  <span class="hint" id="qs-h">알림의 조용한 시간과 같은 시간대. 자동 순찰·홈 갱신만 바뀌고, 수동 새로고침·지금 점검은 늘 바로 돌아. 끝나면 전 소스를 한 번 새로 읽어.</span>
+                </div>
+                <div class="f asblk" id="is-blk"><span class="lab" id="is-lab">유휴 시 동작</span>
+                  <div class="inl" role="group" aria-labelledby="is-lab" aria-describedby="is-h">
+                    <label class="ck"><input type="checkbox" id="is-on"> 사용</label>
+                    <input id="is-after" type="number" min="10" max="1440" step="1" aria-label="활동 없음 기준 (분)"><span class="hint">분 활동 없고</span>
+                    <input id="is-runs" type="number" min="1" max="50" step="1" aria-label="연속 무변경 횟수"><span class="hint">회 연속 변화 없으면</span>
+                  </div>
+                  <div class="inl" role="radiogroup" aria-label="유휴일 때">
+                    <label class="ck"><input type="radio" name="is-mode" value="slow"> 느리게 ×</label><input id="is-factor" type="number" min="2" max="24" step="1" aria-label="유휴 느리게 배수">
+                    <label class="ck"><input type="radio" name="is-mode" value="pause"> 멈춤</label>
+                  </div>
+                  <span class="hint" id="is-h">활동 = 대시보드 사용 · Claude Code 세션 · Mac 키보드/마우스 입력. 다시 활동하면 바로 풀리고 전 소스를 한 번 새로 읽어.</span>
+                </div>
+              </div>
             </div>
           </section>
 
