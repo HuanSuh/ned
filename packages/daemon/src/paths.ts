@@ -11,6 +11,12 @@ export const CURSOR_PATH = path.join(NED_HOME, "cursor.json");
 export const CONFIG_PATH = path.join(NED_HOME, "config.yaml");
 export const SENT_LOG = path.join(BRIEFINGS_DIR, "sent.log");
 
+/** Local calendar date as YYYY-MM-DD (matches the hook, which uses local time too). */
+export function localDay(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 export function ensureDirs(): void {
   for (const d of [NED_HOME, EVENTS_DIR, BRIEFINGS_DIR, LOGS_DIR]) fs.mkdirSync(d, { recursive: true });
 }

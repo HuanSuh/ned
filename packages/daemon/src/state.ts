@@ -1,7 +1,7 @@
 import { STATE_PATH, readJson, writeJsonAtomic } from "./paths.js";
 import type { SessionView } from "./sessions.js";
 
-export type AttentionKind = "session" | "email" | "slack" | "jira" | "github" | "sentry" | "other";
+export type AttentionKind = "session" | "email" | "slack" | "jira" | "github" | "sentry" | "calendar" | "other";
 
 export interface AttentionItem {
   id: string;

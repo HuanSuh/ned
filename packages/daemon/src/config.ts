@@ -12,7 +12,7 @@ export interface NedConfig {
   /** Quiet hours: no notifications (heartbeats still run). */
   quiet_hours: { start: string; end: string } | null;
   /** Which work-signal sources Ned may consult. */
-  sources: { gmail: boolean; slack: boolean; jira: boolean; github: boolean; sentry: boolean };
+  sources: { gmail: boolean; slack: boolean; jira: boolean; github: boolean; sentry: boolean; calendar: boolean };
   /** Dashboard port. */
   port: number;
   /** Extra args for `claude -p`. */
@@ -27,7 +27,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   signal_check_minutes: 30,
   briefing_time: "09:00",
   quiet_hours: { start: "23:00", end: "08:00" },
-  sources: { gmail: true, slack: true, jira: true, github: true, sentry: true },
+  sources: { gmail: true, slack: true, jira: true, github: true, sentry: true, calendar: true },
   port: 7777,
   claude_model: null,
   claude_max_turns: 25,

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { CURSOR_PATH, EVENTS_DIR, readJson, writeJsonAtomic } from "./paths.js";
+import { CURSOR_PATH, EVENTS_DIR, localDay, readJson, writeJsonAtomic } from "./paths.js";
 
 export interface NedEvent {
   ts: number;
@@ -21,7 +21,7 @@ export interface NedEvent {
 }
 
 function dayFile(d: Date): string {
-  return path.join(EVENTS_DIR, `${d.toISOString().slice(0, 10)}.jsonl`);
+  return path.join(EVENTS_DIR, `${localDay(d)}.jsonl`);
 }
 
 function parseLines(text: string): NedEvent[] {
@@ -29,7 +29,8 @@ function parseLines(text: string): NedEvent[] {
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
     try {
-      out.push(JSON.parse(line) as NedEvent);
+      const e = JSON.parse(line) as NedEvent;
+      if (typeof e.ts === "number" && typeof e.event === "string") out.push(e);
     } catch {
       /* skip corrupt line */
     }
