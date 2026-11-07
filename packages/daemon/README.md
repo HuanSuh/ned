@@ -28,6 +28,14 @@ node dist/cli.js prompt agenda       # dry-run: heartbeat | briefing | agenda �
 새 세션 이벤트도 없고 `signal_check_minutes` 가 지나지 않았으면 LLM 을 부르지 않고 침묵한다.
 `briefing_time` 이 지난 첫 tick 은 `prompts/briefing.md` 로 아침 브리핑을 만든다 (하루 1회).
 
+**무변경 skip** (`heartbeat_skip_unchanged`, 기본 true — `src/scheduler.ts`): 스케줄러가 자동 heartbeat 를 돌리기 직전, 아침 브리핑이 아니고
+(a) 켜진 소스 전부의 `sources_status[k].signature`, (b) `heartbeatWatchKey`(앞으로 2시간 안 일정 id + 아직 안 알린 "내 답 이후 새 답글" 스레드 키 —
+시간이 흐르거나 2단계가 스레드를 읽어도 목록 서명은 그대로라 따로 본다), (c) 처리 안 된 세션 알림 이벤트(Stop/StopFailure/Notification,
+`pendingSessionNews` — heartbeat.ts 가 즉시 판단하는 기준과 같다; 프롬프트 입력 같은 일반 이벤트는 보지 않는다) 가 **마지막으로 판단한**
+heartbeat 이후 그대로면 claude 를 부르지 않는다. `state.next_heartbeat_at` 은 다음 주기로 정상 갱신, 로그 `heartbeat: skipped — unchanged (…)`.
+heartbeat.ts 가 침묵(null, `signalDue`·세션 알림 없음)으로 끝난 회차는 기준점이 되지 않는다. Sentry 는 heartbeat 만 읽으므로 켜져 있으면
+`HEARTBEAT_SKIP_MAX_MINUTES`(180분)마다 한 번은 실제로 돈다. 수동 `POST /api/check`·`/api/heartbeat`·`ned heartbeat` 는 스케줄러를 거치지 않아 늘 실행.
+
 **heartbeat = agenda 재사용** (`src/heartbeat.ts`, `prompts/heartbeat.md` · `briefing.md`): heartbeat 는 Gmail·Slack·Jira·GitHub·캘린더를
 직접 읽지 않는다. 흐름 — (a) `agenda.json` 이 `signal_check_minutes` 보다 오래됐으면 agenda 1단계(`refreshAgenda`)를 돌리고 기다린다
 (이미 돌고 있으면 그 실행에 합류; 실패하면 이전 목록으로 진행) → (b) 프롬프트 `{{AGENDA}}` 에 agenda 목록을 압축한 텍스트를 넣는다:
@@ -357,7 +365,7 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
 
 ```
 ~/.ned/
-  config.yaml            설정 (없으면 기본값으로 생성). heartbeat_minutes, signal_check_minutes,
+  config.yaml            설정 (없으면 기본값으로 생성). heartbeat_minutes, signal_check_minutes, heartbeat_skip_unchanged(true),
                          briefing_time, quiet_hours, sources.{gmail,slack,jira,github,sentry,calendar},
                          persona (ned|alfred|oracle|jarvis), filters.{slack.exclude_channels, slack.watch_channels, slack.ack_reactions, slack.ack_check_max, jira.exclude_projects} (트래킹 제외 / 팔로업 채널 / 답 필요 해제 이모지 / 한 run 에 검색할 이모지 수(3), ack_reactions·ack_check_max 외 기본 []),
                          port, claude_model, claude_max_turns, session_stale_minutes, agenda_refresh_minutes, notify,

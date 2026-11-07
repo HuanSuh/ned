@@ -4,7 +4,7 @@ import { buildPrompt, enabledSources, readAgenda, refreshAgenda, runningSources 
 import { loadConfig, type NedConfig } from "./config.js";
 import { createScheduler, eventsActivityAt, hidIdleMs } from "./scheduler.js";
 import { todayCost } from "./costs.js";
-import { buildHeartbeatPrompt, heartbeat, listBriefings, refreshSessions } from "./heartbeat.js";
+import { buildHeartbeatPrompt, heartbeat, heartbeatWatchKey, listBriefings, pendingSessionNews, refreshSessions } from "./heartbeat.js";
 import { readUnprocessedEvents } from "./events.js";
 import { EVENTS_DIR, STATE_PATH, ensureDirs, localDay, log } from "./paths.js";
 import { startServer } from "./server.js";
@@ -59,6 +59,8 @@ async function main(): Promise<void> {
         sourcesStatus: () => readAgenda().sources_status,
         refreshAgenda: (c, sources) => refreshAgenda(c, { sources }),
         heartbeat: (c, o) => heartbeat(c, o),
+        pendingEvents: pendingSessionNews,
+        heartbeatWatchKey: (c) => heartbeatWatchKey(c),
         activityAt: async () => {
           const hid = await hidIdleMs();
           return Math.max(eventsActivityAt(), hid == null ? 0 : Date.now() - hid);

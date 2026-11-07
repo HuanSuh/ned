@@ -9,6 +9,11 @@ export interface NedConfig {
   heartbeat_minutes: number;
   /** Minimum minutes between two LLM-backed signal checks when no session events arrived. */
   signal_check_minutes: number;
+  /**
+   * Automatic heartbeats skip the claude call when nothing they judge from changed since the last one that ran (source list
+   * signatures, calendar 2h window, unraised thread replies, session news) — src/scheduler.ts. Daily briefing / manual runs never skip.
+   */
+  heartbeat_skip_unchanged: boolean;
   /** Local time "HH:MM" for the daily briefing. */
   briefing_time: string;
   /** Quiet hours: no notifications (heartbeats still run). */
@@ -450,6 +455,7 @@ export function sourceRefreshMinutes(cfg: Pick<NedConfig, "agenda_refresh_minute
 export const DEFAULT_CONFIG: NedConfig = {
   heartbeat_minutes: 10,
   signal_check_minutes: 60,
+  heartbeat_skip_unchanged: true,
   briefing_time: "09:00",
   quiet_hours: { start: "23:00", end: "08:00" },
   quiet_schedule: DEFAULT_QUIET_SCHEDULE,
@@ -507,6 +513,7 @@ export function loadConfig(): NedConfig {
       reply_tone_by_source: normalizeReplyToneBySource(parsed.reply_tone_by_source),
       draft_context_max_age_minutes: Number.isFinite(Number(parsed.draft_context_max_age_minutes)) && Number(parsed.draft_context_max_age_minutes) >= 0 ? Number(parsed.draft_context_max_age_minutes) : DEFAULT_CONFIG.draft_context_max_age_minutes,
       drafts_pregenerate: parsed.drafts_pregenerate === true,
+      heartbeat_skip_unchanged: parsed.heartbeat_skip_unchanged !== false,
       chat_ignore_budget: parsed.chat_ignore_budget === true,
       dashboard: normalizeDashboard(parsed.dashboard, DEFAULT_DASHBOARD, watchChannels(filters)),
       agenda_source_minutes: normalizeAgendaSourceMinutes(parsed.agenda_source_minutes),

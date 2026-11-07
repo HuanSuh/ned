@@ -197,6 +197,7 @@ export function renderConfig(c = S.config, { preview = false } = {}) {
   $("cfg-port").textContent = c.port ? `port ${c.port}` : "";
   $("c-hb").value = c.heartbeat_minutes ?? "";
   $("c-sig").value = c.signal_check_minutes ?? "";
+  $("c-hbskip").checked = c.heartbeat_skip_unchanged !== false;
   $("c-bt").value = c.briefing_time ?? "";
   renderIntervals(c);
   renderAutoSched(c); // 조용한 시간 동작 / 유휴 시 동작
@@ -240,6 +241,7 @@ export function readBody() {
   return {
     heartbeat_minutes: Number($("c-hb").value),
     signal_check_minutes: Number($("c-sig").value),
+    heartbeat_skip_unchanged: $("c-hbskip").checked,
     briefing_time: $("c-bt").value,
     agenda_refresh_minutes: Number($("c-agmin").value),
     agenda_source_minutes: readIntervals(),

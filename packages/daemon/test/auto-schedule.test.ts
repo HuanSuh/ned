@@ -151,7 +151,8 @@ describe("scheduler tick", () => {
     const calls: Call[] = [];
     const logs: string[] = [];
     const status: Partial<Record<AgendaSourceKey, { started_at?: number; unchanged?: boolean }>> = {};
-    let cfg = cfgWith({ heartbeat_minutes: 10, agenda_refresh_minutes: 60, briefing_time: "09:00", quiet_hours: { start: "23:00", end: "08:00" }, ...cfgO });
+    // Timing tests: every due heartbeat must reach d.heartbeat (skip-unchanged has its own file, heartbeat-skip.test.ts).
+    let cfg = cfgWith({ heartbeat_skip_unchanged: false, heartbeat_minutes: 10, agenda_refresh_minutes: 60, briefing_time: "09:00", quiet_hours: { start: "23:00", end: "08:00" }, ...cfgO });
     const unchanged = { v: opts.unchanged ?? false };
     const sched = S.createScheduler({
       now: () => t,
