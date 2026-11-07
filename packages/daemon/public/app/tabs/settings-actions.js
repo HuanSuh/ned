@@ -8,7 +8,7 @@ import { esc } from "../util.js";
 export const WA_GROUPS = [
   { id: "slack", label: "Slack", icon: KIND_ICON.slack, src: "slack", tone: "slack", keys: ["slack_send"] },
   { id: "gmail", label: "Gmail", icon: KIND_ICON.email, src: "gmail", tone: "email", keys: ["gmail_draft", "gmail_send", "gmail_mark_read"] },
-  { id: "session", label: "세션", icon: KIND_ICON.session, src: null, tone: "session", keys: ["session_send"] },
+  { id: "session", label: "세션", icon: KIND_ICON.session, src: null, tone: "session", keys: ["session_send", "chat_session_create"] },
   { id: "jira", label: "Jira", icon: KIND_ICON.jira, src: "jira", tone: null, keys: ["jira_comment", "jira_transition"] },
   { id: "github", label: "GitHub", icon: KIND_ICON.github, src: "github", tone: null, keys: ["github_review"] },
   { id: "calendar", label: "캘린더", icon: KIND_ICON.calendar, src: "calendar", tone: null, keys: ["calendar_rsvp", "calendar_create"] },
@@ -23,6 +23,7 @@ const ACTION_HINT = {
   calendar_rsvp: "일정 ⋯ → 수락 / 미정 / 거절",
   gmail_mark_read: "메일 카드의 ✓(확인 완료)를 누르면 Gmail 에서도 그 스레드를 읽음 처리 (백그라운드, 실패해도 확인 완료는 유지). 확인을 취소해도 안 읽음으로 되돌리지 않아",
   chat_write: "Ned Net 대화창이 쓰기(보내기·만들기·할 일 추가)를 제안하면 확인 카드로 보여 줌 → 텍스트만 고쳐 [실행]. 각 동작은 위 스위치도 켜져 있어야 해",
+  chat_session_create: "Ned 대화창이 새 에이전트 세션(레포·워크트리·모델·첫 프롬프트)을 제안하면 확인 카드에서 [실행] → Orca 워크트리 + Claude 시작 후 첫 프롬프트 전송. 대화창 출처로 살아 있는 세션은 2개까지",
   calendar_create: "일정 카드 ＋ / 주 보기 드래그 / 일 보기 빈 시간 클릭 → 새 일정 팝업 → 확인 후 Google Calendar 에 생성",
 };
 

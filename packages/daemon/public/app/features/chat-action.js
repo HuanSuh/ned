@@ -12,8 +12,13 @@ export const CHAT_KIND_KO = {
   todo_add: "할 일 추가", slack_send: "Slack 보내기", gmail_draft: "Gmail 답장 초안 저장", gmail_send: "메일 답장 보내기",
   jira_comment: "Jira 코멘트", jira_transition: "Jira 상태 변경", github_review: "GitHub PR 리뷰·코멘트",
   calendar_create: "캘린더 일정 만들기", calendar_rsvp: "캘린더 참석 응답", session_send: "세션에 보내기",
+  session_create: "새 에이전트 세션 만들기",
 };
-const TEXT_KO = { jira_transition: "옮길 상태", calendar_create: "일정 제목", todo_add: "할 일", calendar_rsvp: "응답 코멘트 (선택)" };
+const TEXT_KO = { jira_transition: "옮길 상태", calendar_create: "일정 제목", todo_add: "할 일", calendar_rsvp: "응답 코멘트 (선택)", session_create: "첫 프롬프트 (전문)" };
+/** Longest editable text per kind (server: chat-actions.ts MAX_TEXT / session-create.ts MAX_PROMPT). */
+const TEXT_MAX = { session_create: 8000 };
+/** session_create job stages (GET /api/sessions/create/:id → stage). */
+export const STAGE_KO = { worktree_create: "워크트리 만드는 중", agent_launch: "에이전트 시작 중", agent_boot: "에이전트 기동 대기", prompt_send: "첫 프롬프트 전송", submit_confirm: "제출 확인" };
 
 const FENCE_RE = /```ned-action[^\n]*\n([\s\S]*?)\n?```/g;
 
@@ -37,13 +42,22 @@ export function parseActionBlock(answer) {
   try { j = JSON.parse(all[all.length - 1][1]); } catch { return { text, block: null, error: "실행 제안(ned-action)을 읽지 못했어 — JSON 형식 오류", pending: false }; }
   if (!j || typeof j !== "object" || Array.isArray(j) || !CHAT_KIND_KO[j.kind])
     return { text, block: null, error: `실행 제안(ned-action)의 kind 를 모르겠어: ${String(j?.kind ?? "").slice(0, 40)}`, pending: false };
-  const target = j.target && typeof j.target === "object" && !Array.isArray(j.target) ? j.target : {};
-  return { text, block: { kind: j.kind, target, text: typeof j.text === "string" ? j.text.trim() : "", summary: typeof j.summary === "string" ? j.summary.trim().slice(0, 200) : "" }, error: "", pending: false };
+  let target = j.target && typeof j.target === "object" && !Array.isArray(j.target) ? j.target : {};
+  let btext = typeof j.text === "string" ? j.text.trim() : "";
+  if (j.kind === "session_create") { // also the flat form {repo, worktree, model, prompt}
+    target = { ...Object.fromEntries(["repo", "worktree", "model"].filter((k) => j[k] !== undefined).map((k) => [k, j[k]])), ...target };
+    if (!btext && typeof j.prompt === "string") btext = j.prompt.trim();
+  }
+  return { text, block: { kind: j.kind, target, text: btext, summary: typeof j.summary === "string" ? j.summary.trim().slice(0, 200) : "" }, error: "", pending: false };
 }
 
 /** Best-effort target line before the server has checked it (validate's target_label replaces it). */
 export function targetGuess(block) {
   const t = block?.target || {};
+  if (block?.kind === "session_create") {
+    const w = t.worktree && typeof t.worktree === "object" ? t.worktree : {};
+    return [t.repo && `레포 ${String(t.repo).split("/").filter(Boolean).pop()} (${t.repo})`, w.name && `${w.mode === "existing" ? "기존 워크트리" : "새 워크트리"} ${w.name}`, `모델 ${t.model || "opus"}`].filter(Boolean).join(" · ");
+  }
   const parts = [t.url, t.key, t.event_id && `event ${t.event_id}`, t.response, t.session_id && `session ${String(t.session_id).slice(0, 8)}`, t.event,
     t.date && [t.date, t.start_time && `${t.start_time}–${t.end_time || ""}`, t.all_day && "종일"].filter(Boolean).join(" "), t.due && `마감 ${t.due}`,
     Array.isArray(t.attendees) && t.attendees.length && `참석자 ${t.attendees.join(", ")}`].filter(Boolean);
@@ -70,7 +84,7 @@ export function renderActionCard(block, state = {}, { id = "" } = {}) {
     : `${status === "failed" && r?.detail ? `<div class="ca-st bad">⚠ ${esc(r.detail)}</div>` : ""}${state.previewError ? `<div class="ca-st bad">⚠ ${esc(state.previewError)}</div>` : ""}
     <div class="ca-btns"><button type="button" class="btn small go" data-ca-run>${status === "failed" ? "다시 실행" : "실행"}</button><button type="button" class="btn small" data-ca-cancel>취소</button></div>`;
   const tx = editable
-    ? `<textarea class="ca-tx" data-ca-text rows="${Math.min(8, Math.max(2, text.split("\n").length + 1))}" maxlength="4000" aria-label="${esc(TEXT_KO[block.kind] || "보낼 텍스트")}" placeholder="${esc(TEXT_KO[block.kind] || "보낼 텍스트")}">${esc(text)}</textarea>`
+    ? `<textarea class="ca-tx" data-ca-text rows="${Math.min(block.kind === "session_create" ? 14 : 8, Math.max(2, text.split("\n").length + 1))}" maxlength="${TEXT_MAX[block.kind] || 4000}" aria-label="${esc(TEXT_KO[block.kind] || "보낼 텍스트")}" placeholder="${esc(TEXT_KO[block.kind] || "보낼 텍스트")}">${esc(text)}</textarea>`
     : `<div class="ca-tx ro">${text ? esc(text).replace(/\n/g, "<br>") : "<i>(텍스트 없음)</i>"}</div>`;
   return `<div class="cm-act s-${esc(status)}" ${da} role="group" aria-label="실행 제안: ${esc(label)}">
   <div class="ca-hd"><span class="ca-k">⚡ 실행 제안 · ${esc(label)}</span></div>
@@ -88,6 +102,8 @@ const linkOf = (s) => /https:\/\/[^\s"')]+/.exec(String(s || ""))?.[0];
 export function outcomeOf(r) {
   const d = r?.data || {};
   if (r?.status === 409 && d.already_sent) return { ok: true, final: true, detail: `이미 실행됨${d.sent_at ? ` (${d.sent_at})` : ""}${d.detail ? ` · ${d.detail}` : ""}`, link: safeUrl(d.link) || linkOf(d.detail) };
+  // 세션 만들기: a session already exists past this point (worktree / terminal) — never offer a blind retry.
+  if (!d.ok && d.session?.handle) return { ok: false, final: true, detail: String(d.error || d.detail || "세션은 만들어졌지만 끝까지 확인하지 못했어").slice(0, 300) };
   if (r?.ok && d.ok) return { ok: true, final: true, detail: String(d.detail || "완료").slice(0, 300), link: safeUrl(d.link) || safeUrl(d.event?.html_link) || linkOf(d.detail) };
   if (r?.unknown) return { ok: false, final: true, detail: d.error || "결과를 확인하지 못했어 — 설정 → 오늘 한 액션에서 확인해 줘" };
   return { ok: false, final: false, detail: String(d.error || d.detail || `HTTP ${r?.status ?? "?"}`).slice(0, 300) };
@@ -124,6 +140,7 @@ export async function runChatAction(block, text, { postJson, sendAndWait, onTick
   }
   const opts = { label: `대화창 · ${d.label}`, onTick };
   if (d.endpoint === "/api/calendar/events") Object.assign(opts, { endpoint: d.endpoint, match: { source: "calendar", mode: "create", ref: { title: payload.title, calendar_id: "primary" } } });
+  else if (d.endpoint && d.endpoint !== "/api/send") Object.assign(opts, { endpoint: d.endpoint, ...(d.match ? { match: d.match } : {}), ...(d.max_wait_ms ? { maxWaitMs: d.max_wait_ms } : {}) });
   return outcomeOf(await sendAndWait(payload, opts));
 }
 
@@ -162,7 +179,7 @@ export function wireActionCards(root, h) {
       h.set(id, { status: "running", text, result: null, tick: "" });
       const claim = await h.persist(id, { state: "running", text }).catch(() => ({ ok: false, status: 0 }));
       if (claim?.status === 409) { h.set(id, { status: "executed", result: { ok: false, detail: claim.data?.error || "이미 처리된 카드야" } }); return; }
-      const res = await runChatAction(cur.block, text, { ...h.deps, onTick: (ms) => h.set(id, { tick: `${Math.round(ms / 1000)}초` }) });
+      const res = await runChatAction(cur.block, text, { ...h.deps, onTick: (ms, stage) => h.set(id, { tick: `${STAGE_KO[stage] ? `${STAGE_KO[stage]} · ` : ""}${Math.round(ms / 1000)}초` }) });
       const status = res.ok || res.final ? "executed" : "failed";
       const result = { ok: res.ok, detail: res.detail, ...(res.link ? { link: res.link } : {}) };
       await h.persist(id, { state: status, text, result }).catch(() => null);

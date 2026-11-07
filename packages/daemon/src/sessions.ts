@@ -23,6 +23,10 @@ export interface SessionView {
    * worktree, i.e. one of the user's own agent workers. Shown (dimmed) but never an attention item.
    */
   is_worker: boolean;
+  /** "chat" = Ned 대화창에서 시작한 세션 (session-create.ts — cwd 가 기록된 워크트리 경로). */
+  origin?: "chat";
+  /** origin "chat": the Orca terminal handle Ned started it in. */
+  origin_terminal?: string;
 }
 
 const TERMINAL: SessionStatus[] = ["ended"];

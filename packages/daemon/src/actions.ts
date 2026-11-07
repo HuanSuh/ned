@@ -82,6 +82,8 @@ export interface SendResult {
   transitions?: JiraTransition[];
   /** calendar `create`: the new event's id + htmlLink. */
   event?: CreatedEvent;
+  /** session `create`: the new agent's worktree + terminal handle, and the stage that failed (if any). */
+  session?: { worktree_path?: string; worktree_id?: string; handle?: string; stage?: string };
 }
 
 export interface JiraTransition {
@@ -108,6 +110,8 @@ export interface ActionLogEntry {
   event?: CreatedEvent;
   /** "chat" when the Ned Net 확인 카드 ran it (설정 → 오늘 한 액션 shows a 대화창 badge). */
   origin?: ActionOrigin;
+  /** session `create` (대화창에서 세션 만들기): what was started — see session-create.ts. */
+  session_create?: { repo: string; worktree_mode: string; worktree_name: string; model: string; worktree_path?: string; handle?: string; stage?: string };
 }
 
 const MAX_TEXT = 4000;
@@ -487,7 +491,15 @@ function orcaBin(): string {
   return onPath ?? (fs.existsSync(ORCA_FALLBACK) ? ORCA_FALLBACK : "orca");
 }
 
-function orca(args: string[], timeoutMs = 20_000): Promise<{ ok: boolean; json: unknown; err: string }> {
+export interface OrcaResult {
+  ok: boolean;
+  json: unknown;
+  err: string;
+}
+/** `orca <args>` (JSON stdout parsed when it is JSON). Injectable wherever Orca writes happen (see session-create.ts). */
+export type OrcaExec = (args: string[], timeoutMs?: number) => Promise<OrcaResult>;
+
+export const orca: OrcaExec = (args, timeoutMs = 20_000) => {
   return new Promise((resolve) => {
     execFile(orcaBin(), args, { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
       let json: unknown = null;
@@ -499,7 +511,7 @@ function orca(args: string[], timeoutMs = 20_000): Promise<{ ok: boolean; json: 
       resolve({ ok: !error, json, err: (stderr || error?.message || "").slice(0, 400) });
     });
   });
-}
+};
 
 interface OrcaTerminal {
   handle: string;

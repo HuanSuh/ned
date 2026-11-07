@@ -33,10 +33,11 @@ async function fromActionLog(p) {
   return { ok: false, status: 0, unknown: true, data: { error: "daemon 이 재시작돼 결과를 알 수 없어 — 설정 → '오늘 한 액션' 이나 대상 앱에서 확인해 줘" } };
 }
 
-/** Poll one job until done / lost / deadline (default: 4 min after it started). `onTick(elapsedMs)` every poll. */
+/** Poll one job until done / lost / deadline (default: p.max_wait_ms or 4 min after it started). `onTick(elapsedMs, stage)` every poll. */
 async function poll(p, onTick, deadline) {
   const t0 = Date.parse(p.started_at) || Date.now();
-  deadline ??= t0 + MAX_WAIT_MS;
+  const maxWait = p.max_wait_ms || MAX_WAIT_MS;
+  deadline ??= t0 + maxWait;
   for (;;) {
     let r = null;
     try {
@@ -45,8 +46,8 @@ async function poll(p, onTick, deadline) {
     } catch { /* daemon briefly unreachable — keep trying until the deadline */ }
     if (r?.status === 404) return fromActionLog(p);
     if (r?.status === 200 && r.data?.state === "done" && r.data.result) return fromResult(r.data.result);
-    onTick?.(r?.data?.elapsed_ms ?? Date.now() - t0);
-    if (Date.now() >= deadline) return { ok: false, status: 0, unknown: true, timedOut: true, data: { error: "4분 넘게 끝나지 않아 확인을 멈췄어 — 설정 → '오늘 한 액션' 이나 대상 앱에서 결과를 확인해 줘" } };
+    onTick?.(r?.data?.elapsed_ms ?? Date.now() - t0, r?.data?.stage);
+    if (Date.now() >= deadline) return { ok: false, status: 0, unknown: true, timedOut: true, data: { error: `${Math.round(maxWait / 60_000)}분 넘게 끝나지 않아 확인을 멈췄어 — 설정 → '오늘 한 액션' 이나 대상 앱에서 결과를 확인해 줘` } };
     await sleep(POLL_MS);
   }
 }
@@ -59,13 +60,14 @@ async function poll(p, onTick, deadline) {
  * `opts.label` is kept with the pending job so a reload can say what finished.
  * `opts.endpoint` (default /api/send): another job route with the same shape (POST → 202, GET <endpoint>/:id), e.g.
  * /api/calendar/events with `opts.match` = {source, mode, ref} for the action-log fallback.
+ * `opts.maxWaitMs`: a longer job (세션 만들기 — worktree + agent boot, a few minutes) than the 4-min default.
  */
-export async function sendAndWait(body, { onTick, label, endpoint = "/api/send", match } = {}) {
+export async function sendAndWait(body, { onTick, label, endpoint = "/api/send", match, maxWaitMs } = {}) {
   // A POST that never got an answer is safe to retry: the daemon joins a running job / answers 409 for a sent draft.
   const r = await postJson(endpoint, body).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
   if (r.status !== 202 || !r.data?.job_id) return r;
   const m = match || body;
-  const p = { job_id: r.data.job_id, started_at: r.data.started_at || new Date().toISOString(), label, endpoint, source: m.source, mode: m.mode, draft_id: m.draft_id, ref: m.ref, text: (m.text || "").trim() };
+  const p = { job_id: r.data.job_id, started_at: r.data.started_at || new Date().toISOString(), label, endpoint, source: m.source, mode: m.mode, draft_id: m.draft_id, ref: m.ref, text: (m.text || "").trim(), ...(maxWaitMs ? { max_wait_ms: maxWaitMs } : {}) };
   if (body.mode !== "transitions") addPending(p); // a read-only listing isn't worth reporting after a reload
   const out = await poll(p, onTick);
   if (!out.timedOut) dropPending(p.job_id); // a timed-out job stays: the next page load checks once more
@@ -81,9 +83,9 @@ export function waitJob(p, onTick) {
 export function resumePending(report) {
   const now = Date.now();
   for (const p of readPending()) {
-    if (now - (Date.parse(p.started_at) || 0) > KEEP_PENDING_MS) { dropPending(p.job_id); continue; }
+    if (now - (Date.parse(p.started_at) || 0) > Math.max(KEEP_PENDING_MS, p.max_wait_ms || 0)) { dropPending(p.job_id); continue; }
     // still inside its 4 minutes → keep polling; past them → one look (deadline = now)
-    poll(p, null, Math.max(now, (Date.parse(p.started_at) || now) + MAX_WAIT_MS))
+    poll(p, null, Math.max(now, (Date.parse(p.started_at) || now) + (p.max_wait_ms || MAX_WAIT_MS)))
       .then((r) => { dropPending(p.job_id); report(p, r); });
   }
 }

@@ -10,8 +10,9 @@ import type { Agenda } from "./agenda.js";
 import { parseCalendarCreate } from "./calendar-create.js";
 import type { NedActions, NedConfig } from "./config.js";
 import type { NedState } from "./state.js";
+import { MAX_PROMPT, PLAN_FIRST, knownRepoPaths, parseSessionCreate, sessionLogRef } from "./session-create.js";
 
-export const CHAT_ACTION_KINDS = ["todo_add", "slack_send", "gmail_draft", "gmail_send", "jira_comment", "jira_transition", "github_review", "calendar_create", "calendar_rsvp", "session_send"] as const;
+export const CHAT_ACTION_KINDS = ["todo_add", "slack_send", "gmail_draft", "gmail_send", "jira_comment", "jira_transition", "github_review", "calendar_create", "calendar_rsvp", "session_send", "session_create"] as const;
 export type ChatActionKind = (typeof CHAT_ACTION_KINDS)[number];
 
 /** The config.actions switch each kind also needs (todo_add is local — chat_write alone). */
@@ -26,6 +27,7 @@ export const CHAT_KIND_GATE: Record<ChatActionKind, keyof NedActions | null> = {
   calendar_create: "calendar_create",
   calendar_rsvp: "calendar_rsvp",
   session_send: "session_send",
+  session_create: "chat_session_create",
 };
 
 export const CHAT_KIND_KO: Record<ChatActionKind, string> = {
@@ -39,6 +41,7 @@ export const CHAT_KIND_KO: Record<ChatActionKind, string> = {
   calendar_create: "캘린더 일정 만들기",
   calendar_rsvp: "캘린더 참석 응답",
   session_send: "세션에 보내기",
+  session_create: "새 에이전트 세션 만들기",
 };
 
 /** One line per kind for the prompt: what `target` holds and what `text` is. */
@@ -53,6 +56,7 @@ const KIND_SPEC: Record<ChatActionKind, string> = {
   calendar_create: '`target`: {"date": "YYYY-MM-DD", "start_time": "HH:MM", "end_time": "HH:MM", "all_day": false, "location": "", "attendees": ["메일 주소"], "meet": false} · `text`: 일정 제목',
   calendar_rsvp: '`target`: {"event_id": "<맥락의 event_id>", "response": "accepted"|"declined"|"tentative"} · `text`: 응답 코멘트(선택)',
   session_send: '`target`: {"session_id": "<맥락의 session_id>"} · `text`: 세션 터미널에 입력할 말',
+  session_create: `\`target\`: {"repo": "<아래 등록 레포 경로 그대로>", "worktree": {"mode": "new"|"existing", "name": "<새 워크트리 이름(영문·숫자·._-) 또는 기존 워크트리 이름>"}, "model": "opus"|"sonnet"(기본 opus)} · \`text\`: 새 Claude 세션에 보낼 첫 프롬프트 **전문**(맥락·할 일·완료 조건까지 자기완결적으로). 반드시 "${PLAN_FIRST}" 로 시작`,
 };
 
 export const isChatKind = (k: unknown): k is ChatActionKind => typeof k === "string" && (CHAT_ACTION_KINDS as readonly string[]).includes(k);
@@ -81,10 +85,19 @@ export function chatWriteBlock(cfg: Pick<NedConfig, "actions">): string {
     "",
     "- 지금 허용된 kind 는 이것뿐이다 (목록에 없는 동작은 제안하지 말고 \"설정 → 쓰기 액션에서 켜야 해\" 라고 안내):",
     ...kinds.map((k) => `  - \`${k}\` (${CHAT_KIND_KO[k]}): ${KIND_SPEC[k]}`),
+    ...(kinds.includes("session_create") ? [sessionCreateRepoLine()] : []),
     "- `target` 의 url·event_id·session_id 는 아래 \"Ned 가 아는 것\" 에 있는 값만 그대로 쓴다. 지어내거나 고치지 않는다. 맥락에 없는 대상이면 제안하지 말고 대시보드에서 하라고 안내한다.",
     "- JSON 은 유효해야 한다(따옴표·쉼표). 블록 밖 답변은 평소처럼 짧게 — 무엇을 제안했는지 한 줄. 블록은 한 답변에 하나만.",
     "- 사용자가 확인 없이 바로 하라고 해도 블록으로 제안만 한다.",
   ].join("\n");
+}
+
+/** session_create: the repos the proposal may name (Orca 등록 레포 — cached, refreshed in the background). */
+function sessionCreateRepoLine(): string {
+  const repos = knownRepoPaths();
+  return repos.length
+    ? `- \`session_create\` 의 repo 는 이 Orca 등록 레포 경로 중 하나만: ${repos.map((r) => `\`${r}\``).join(", ")}. 어느 레포인지 애매하면 제안 전에 물어본다. 세션은 대화창 출처로 동시에 2개까지.`
+    : "- `session_create` 의 repo 는 Orca 에 등록된 레포의 절대 경로만 된다(목록을 아직 못 읽었으니 사용자에게 경로를 물어본다). 세션은 대화창 출처로 동시에 2개까지.";
 }
 
 // ---------- validate ----------
@@ -96,7 +109,7 @@ export interface ChatActionBlock {
   summary: string;
 }
 
-export type ChatEndpoint = "/api/send" | "/api/calendar/events" | "/api/todos";
+export type ChatEndpoint = "/api/send" | "/api/calendar/events" | "/api/todos" | "/api/sessions/create";
 
 export interface ChatActionOk {
   ok: true;
@@ -114,6 +127,10 @@ export interface ChatActionOk {
   text_optional: boolean;
   /** jira_transition: list transitions with this payload first, then match `text` against name / to. */
   lookup?: Record<string, unknown>;
+  /** Job routes other than /api/send: {source, mode, ref, text} of the action-log line (reload / restart fallback). */
+  match?: Record<string, unknown>;
+  /** Longest the card waits for the job (ms) — session_create runs up to a few minutes. */
+  max_wait_ms?: number;
 }
 export interface ChatActionErr {
   ok: false;
@@ -144,8 +161,13 @@ export function parseChatActionBlock(raw: unknown): ChatActionBlock | string {
   if (!b || typeof b !== "object" || Array.isArray(b)) return "ned-action 블록이 객체가 아니야";
   const o = b as Record<string, unknown>;
   if (!isChatKind(o.kind)) return `알 수 없는 kind: ${clip(o.kind, 40)} (${CHAT_ACTION_KINDS.join(" | ")})`;
-  const target = o.target && typeof o.target === "object" && !Array.isArray(o.target) ? (o.target as Record<string, unknown>) : {};
-  const text = typeof o.text === "string" ? o.text.trim() : "";
+  let target = o.target && typeof o.target === "object" && !Array.isArray(o.target) ? (o.target as Record<string, unknown>) : {};
+  let text = typeof o.text === "string" ? o.text.trim() : "";
+  if (o.kind === "session_create") {
+    // also the flat form {repo, worktree, model, prompt}
+    target = { ...Object.fromEntries(["repo", "worktree", "model"].filter((k) => o[k] !== undefined).map((k) => [k, o[k]])), ...target };
+    if (!text && typeof o.prompt === "string") text = o.prompt.trim();
+  }
   return { kind: o.kind, target, text, summary: clip(o.summary, 200) };
 }
 
@@ -211,7 +233,8 @@ export function validateChatAction(cfg: Pick<NedConfig, "actions">, raw: unknown
   const g = CHAT_KIND_GATE[kind];
   if (g && cfg.actions[g] !== true) return err(403, `'${CHAT_KIND_KO[kind]}' 이 꺼져 있어 — 설정 → 쓰기 액션에서 actions.${g} 를 켜야 해`, kind);
   const text = typeof textOverride === "string" ? textOverride.trim() : b.text;
-  if (text.length > MAX_TEXT) return err(400, `텍스트는 ${MAX_TEXT}자까지야 (지금 ${text.length}자)`, kind);
+  const maxText = kind === "session_create" ? MAX_PROMPT : MAX_TEXT;
+  if (text.length > maxText) return err(400, `텍스트는 ${maxText}자까지야 (지금 ${text.length}자)`, kind);
   const t = b.target;
   const label = CHAT_KIND_KO[kind];
   const base = { ok: true as const, kind, label, summary: b.summary || label, text };
@@ -297,6 +320,17 @@ export function validateChatAction(cfg: Pick<NedConfig, "actions">, raw: unknown
         origin: "chat",
       };
       return { ...base, endpoint: "/api/calendar/events" as const, payload, target_label: `새 일정 · ${when}${extra ? ` · ${extra}` : ""}`, text_optional: false };
+    }
+    case "session_create": {
+      if (!text) return err(400, "첫 프롬프트가 비어 있어", kind);
+      const w = t.worktree && typeof t.worktree === "object" ? (t.worktree as Record<string, unknown>) : {};
+      const input = parseSessionCreate({ repo: t.repo, worktree: { mode: w.mode, name: w.name }, model: t.model, prompt: text });
+      if (typeof input === "string") return err(400, `세션 정보가 이상해: ${input}`, kind);
+      const name = input.repo.split("/").pop() || input.repo;
+      const added = input.prompt !== text ? " · 첫 문장 '먼저 계획을 제시하고 승인받은 뒤 구현한다.' 자동 포함" : "";
+      const target_label = `레포 ${name} (${input.repo}) · ${input.worktree.mode === "new" ? "새 워크트리" : "기존 워크트리"} ${input.worktree.name} · 모델 ${input.model}${added}`;
+      const payload = { repo: input.repo, worktree: input.worktree, model: input.model, prompt: input.prompt, origin: "chat" };
+      return { ...base, endpoint: "/api/sessions/create" as const, payload, target_label, text_optional: false, match: { source: "session", mode: "create", ref: sessionLogRef(input), text: input.prompt }, max_wait_ms: 8 * 60_000 };
     }
     case "session_send": {
       if (!text) return err(400, "텍스트가 비어 있어", kind);
