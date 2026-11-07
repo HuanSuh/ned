@@ -196,7 +196,17 @@ describe("normalizers", () => {
   it("mergeFilters: a patch with only slack keeps jira", () => {
     const cur = normalizeFilters({ slack: { exclude_channels: ["a"] }, jira: { exclude_projects: ["MNT"] } });
     const next = mergeFilters(cur, { slack: { watch_channels: ["#ops"] } });
-    expect(next).toEqual({ slack: { exclude_channels: ["a"], watch_channels: ["ops"], ack_reactions: ["white_check_mark", "eyes", "+1", "heavy_check_mark"] }, jira: { exclude_projects: ["MNT"] } });
+    expect(next).toEqual({ slack: { exclude_channels: ["a"], watch_channels: ["ops"], ack_reactions: ["white_check_mark", "eyes", "+1", "heavy_check_mark"], ack_check_max: 3 }, jira: { exclude_projects: ["MNT"] } });
+  });
+  it("ack_check_max: default 3, clamped to 1..8, junk → default, survives a patch without it", () => {
+    expect(normalizeFilters({}).slack.ack_check_max).toBe(3);
+    expect(normalizeFilters({ slack: { ack_check_max: 0 } }).slack.ack_check_max).toBe(1);
+    expect(normalizeFilters({ slack: { ack_check_max: 99 } }).slack.ack_check_max).toBe(8);
+    expect(normalizeFilters({ slack: { ack_check_max: "x" } }).slack.ack_check_max).toBe(3);
+    expect(normalizeFilters({ slack: { ack_check_max: null } }).slack.ack_check_max).toBe(3);
+    const cur = mergeFilters(normalizeFilters({}), { slack: { ack_check_max: 5 } });
+    expect(cur.slack.ack_check_max).toBe(5);
+    expect(mergeFilters(cur, { slack: { exclude_channels: ["x"] } }).slack.ack_check_max).toBe(5);
   });
   it("ack_reactions: absent → defaults, explicit [] stays off, colons/case stripped, junk dropped, deduped, capped", () => {
     expect(normalizeFilters({}).slack.ack_reactions).toEqual(["white_check_mark", "eyes", "+1", "heavy_check_mark"]);

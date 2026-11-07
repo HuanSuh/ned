@@ -14,7 +14,7 @@ import { recordCost, todayCost } from "./costs.js";
 import { parseSlackUrl } from "./drafts.js";
 import { log, readJson } from "./paths.js";
 import { personaPrompt } from "./persona.js";
-import { applyThreadState, DM_BATCH_MAX, dmCandidates, mergeThreadReads, threadCandidates, type SlackThread } from "./slack-threads.js";
+import { applyThreadState, DM_BATCH_MAX, dmCandidates, mergeThreadReads, threadCandidates, THREAD_RECHECK_MINUTES, unchangedCount, type SlackThread } from "./slack-threads.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PROMPT = path.resolve(here, "../../../prompts/agenda-context.md");
@@ -148,13 +148,21 @@ export function mergeThreads(raw: unknown[], now = Date.now()): string[] {
 
 /**
  * Re-read up to agenda_thread_batch followed threads (one narrow `claude -p`). Runs on every Slack pass, even when
- * the list signature is unchanged: new replies don't change the list. Returns "budget" when the day's spend is used up.
+ * the list signature is unchanged: new replies don't change the list. Threads / DMs whose newest phase-1 ts hasn't
+ * moved since their last read are skipped (followState; re-read anyway after THREAD_RECHECK_MINUTES), and with
+ * nothing to read no claude call is made. Returns "budget" when the day's spend is used up.
  */
 export async function processThreads(cfg: NedConfig, now = Date.now()): Promise<"ok" | "none" | "budget"> {
   const a = readAgenda();
   const batch = threadCandidates(a.slack?.threads, cfg.agenda_thread_batch, now);
   const dms = dmCandidates(a.slack?.dms, DM_BATCH_MAX, now);
-  if (!batch.length && !dms.length) return "none";
+  const skipT = unchangedCount(a.slack?.threads, now), skipD = unchangedCount(a.slack?.dms, now);
+  const skipNote = skipT || skipD ? `skipped unchanged ${skipT} thread(s), ${skipD} DM(s) (same newest ts since last read, recheck after ${THREAD_RECHECK_MINUTES / 60}h)` : "";
+  if (!batch.length && !dms.length) {
+    if (skipNote) log(`agenda-threads: nothing to read — ${skipNote}, no claude call`);
+    return "none";
+  }
+  if (skipNote) log(`agenda-threads: ${batch.length} thread(s), ${dms.length} DM(s) to read — ${skipNote}`);
   if (overBudget(cfg)) {
     log(`agenda-threads: today's spend $${todayCost().toFixed(2)} ≥ budget $${cfg.agenda_daily_budget_usd} — not reading ${batch.length} thread(s), ${dms.length} DM(s)`);
     setStatus({ stopped: "budget" });

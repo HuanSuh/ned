@@ -192,11 +192,13 @@ export function renderConfig(c = S.config, { preview = false } = {}) {
   excl.jira = [...(c.filters?.jira?.exclude_projects || [])];
   excl.watch = [...(c.filters?.slack?.watch_channels || [])];
   excl.ack = [...(c.filters?.slack?.ack_reactions || [])];
+  $("c-ackmax").value = c.filters?.slack?.ack_check_max ?? 3;
   for (const id of Object.values(X_MSG)) $(id).textContent = "";
   renderExcl();
   $("cfg-port").textContent = c.port ? `port ${c.port}` : "";
   $("c-hb").value = c.heartbeat_minutes ?? "";
   $("c-sig").value = c.signal_check_minutes ?? "";
+  $("c-hbskip").checked = c.heartbeat_skip_unchanged !== false;
   $("c-bt").value = c.briefing_time ?? "";
   renderIntervals(c);
   renderAutoSched(c); // 조용한 시간 동작 / 유휴 시 동작
@@ -241,13 +243,14 @@ export function readBody() {
   return {
     heartbeat_minutes: Number($("c-hb").value),
     signal_check_minutes: Number($("c-sig").value),
+    heartbeat_skip_unchanged: $("c-hbskip").checked,
     briefing_time: $("c-bt").value,
     agenda_refresh_minutes: Number($("c-agmin").value),
     agenda_source_minutes: readIntervals(),
     ...readAutoSched(), // quiet_schedule, idle_schedule
     quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
     sources,
-    filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack] }, jira: { exclude_projects: [...excl.jira] } },
+    filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack], ack_check_max: $("c-ackmax").value === "" ? null : Number($("c-ackmax").value) }, jira: { exclude_projects: [...excl.jira] } },
     dashboard: { ...readCardLayout(), theme: readTheme() },
     notifications: readNotifications(),
     actions: Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])),

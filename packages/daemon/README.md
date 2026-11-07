@@ -28,6 +28,14 @@ node dist/cli.js prompt agenda       # dry-run: heartbeat | briefing | agenda �
 새 세션 이벤트도 없고 `signal_check_minutes` 가 지나지 않았으면 LLM 을 부르지 않고 침묵한다.
 `briefing_time` 이 지난 첫 tick 은 `prompts/briefing.md` 로 아침 브리핑을 만든다 (하루 1회).
 
+**무변경 skip** (`heartbeat_skip_unchanged`, 기본 true — `src/scheduler.ts`): 스케줄러가 자동 heartbeat 를 돌리기 직전, 아침 브리핑이 아니고
+(a) 켜진 소스 전부의 `sources_status[k].signature`, (b) `heartbeatWatchKey`(앞으로 2시간 안 일정 id + 아직 안 알린 "내 답 이후 새 답글" 스레드 키 —
+시간이 흐르거나 2단계가 스레드를 읽어도 목록 서명은 그대로라 따로 본다), (c) 처리 안 된 세션 알림 이벤트(Stop/StopFailure/Notification,
+`pendingSessionNews` — heartbeat.ts 가 즉시 판단하는 기준과 같다; 프롬프트 입력 같은 일반 이벤트는 보지 않는다) 가 **마지막으로 판단한**
+heartbeat 이후 그대로면 claude 를 부르지 않는다. `state.next_heartbeat_at` 은 다음 주기로 정상 갱신, 로그 `heartbeat: skipped — unchanged (…)`.
+heartbeat.ts 가 침묵(null, `signalDue`·세션 알림 없음)으로 끝난 회차는 기준점이 되지 않는다. Sentry 는 heartbeat 만 읽으므로 켜져 있으면
+`HEARTBEAT_SKIP_MAX_MINUTES`(180분)마다 한 번은 실제로 돈다. 수동 `POST /api/check`·`/api/heartbeat`·`ned heartbeat` 는 스케줄러를 거치지 않아 늘 실행.
+
 **heartbeat = agenda 재사용** (`src/heartbeat.ts`, `prompts/heartbeat.md` · `briefing.md`): heartbeat 는 Gmail·Slack·Jira·GitHub·캘린더를
 직접 읽지 않는다. 흐름 — (a) `agenda.json` 이 `signal_check_minutes` 보다 오래됐으면 agenda 1단계(`refreshAgenda`)를 돌리고 기다린다
 (이미 돌고 있으면 그 실행에 합류; 실패하면 이전 목록으로 진행) → (b) 프롬프트 `{{AGENDA}}` 에 agenda 목록을 압축한 텍스트를 넣는다:
@@ -99,9 +107,13 @@ heartbeat / briefing 의 `{{FILTERS}}` 에도 팔로업 목록이 붙어 needs_m
 
 **답 필요 해제 이모지** (`config.filters.slack.ack_reactions`, 기본 `["white_check_mark","eyes","+1","heavy_check_mark"]`, 최대 8, `[]` 면 끔):
 멘션·DM·참여 스레드에서 **내 답글이 보이거나 내가 이 이모지 중 하나로 리액션하면 확인 완료**다. Slack 검색 결과엔 리액션 목록이 없고
-스레드 읽기에도 누가 달았는지는 안 나오므로, agenda-lists.md 의 `<!--@ack-->` 섹션이 다른 검색과 같은 턴에 이모지마다
+스레드 읽기에도 누가 달았는지는 안 나오므로, agenda-lists.md 의 `<!--@ack-->` 섹션이 이모지마다
 `slack_search_public_and_private`(`filters: "hasmy::<이모지>:"`, 최근 24h, 20개, `response_format: "concise"`, `include_context: false`)를 한 번씩 부른다
-(`has`/`hasmy` 는 반복하면 AND 라 이모지마다 따로; `hasmy:reaction` 같은 "아무 이모지" 필터는 Slack 이 무시한다). 그 permalink 들 = `acked` →
+(`has`/`hasmy` 는 반복하면 AND 라 이모지마다 따로; `hasmy:reaction` 같은 "아무 이모지" 필터는 Slack 이 무시한다).
+비용 절감: (1) **조건부** — 모델은 먼저 멘션·DM·스레드(·팔로업) 검색만 한 턴에 하고, 그 결과에 답 필요 후보(`items` 후보, 팔로업 `needs_me` 후보)가
+하나라도 있을 때만 다음 턴에 이모지 검색을 병렬로 한다. 후보 0개면 건너뛰고 `acked_urls: []`. (2) **상한** — `filters.slack.ack_check_max`(기본 3, 1~8)개,
+`ack_reactions` 앞에서부터만 검색한다(`ackCheckEmojis`). 측정 전 기준 Slack 1단계 13턴·조회 12회 중 이모지 6회가 절반이었다.
+(2단계로 옮기는 안은 버렸다 — `slack_read_thread`/`slack_read_channel` 결과에 누가 리액션했는지가 없어 `hasmy` 검색 말고는 확인할 방법이 없다.) 그 permalink 들 = `acked` →
 `items` 에서 빼고, `all` 은 `answered: true`, `watch` 하이라이트는 `needs_me: false`. 모델은 `slack.acked_urls[]` 도 내고, 정규화(`normalize`)가
 permalink(쿼리·해시 무시)로 같은 처리를 한 번 더 한다 — 확인한 DM 은 그 대화의 그 이전 메시지까지 닫는다. 이름은 콜론 제거·소문자, 한글 커스텀 이모지 가능.
 설정 → "답 필요 해제 이모지" 칩 입력(쉼표·엔터로 추가).
@@ -133,6 +145,12 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
     맥락 수집이 깨끗이 끝난 서명을 `context_sigs` 에 기록한다. 다음 실행의 서명이 같으면 그 소스의 2단계를 통째로 건너뛴다
     (`?force=1` 이면 무시). 목록이 새로 와도 기존 맥락은 항목 단위로 이월된다(Slack 은 같은 permalink, 메일은 같은 thread 이고 맥락을
     읽은 시각이 마지막 메시지보다 뒤일 때).
+  - **팔로우 스레드·DM 재읽기** (`processThreads`, `src/slack-threads.ts`): 매 Slack 패스 뒤 `slack.threads[]`/`slack.dms[]` 중 최근 48h 활동이
+    있는 것을 최대 `agenda_thread_batch`(8)·DM 5개 한 번에 읽는다. 읽을 때 1단계가 본 최신 ts(`search_latest_ts`)를 `read_search_ts` 로 남기고,
+    다음 패스에서 그 값이 그대로면 건너뛴다(`followState` = `unchanged`). 한 번도 안 읽은 것(`never`)·1단계가 더 새 메시지를 본 것(`moved`)은
+    지금처럼 읽고, 같은 ts 라도 마지막 읽기가 `THREAD_RECHECK_MINUTES`(6시간) 지났으면 1회 재확인(`recheck` — 1단계는 최신 20건만 봐서
+    조용해 보이는 스레드도 움직일 수 있다). 후보가 0이면 claude 를 부르지 않고, 로그에 `agenda-threads: … skipped unchanged N thread(s), M DM(s)` 를 남긴다.
+    `read_search_ts` 가 없는 예전 기록은 `last_reply_ts` 와 비교한다(예전 규칙).
   - **일일 예산**: 배치 직전마다 오늘(로컬 날짜) 총 `claude -p` 비용(`~/.ned/costs.json`, agenda·agenda_context·heartbeat·draft·calendar·
     action 합산)이 `agenda_daily_budget_usd`(기본 15) 이상이면 멈추고 `context_status.stopped = "budget"`. 1단계 목록은 예산과 무관하게 돈다.
 - 동시에 여러 번 요청돼도 실행 중인 1단계 한 번을 공유한다(busy guard). 2단계는 워커 하나가 소스 큐(Slack 우선)를 순서대로 처리한다.
@@ -384,9 +402,9 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
 
 ```
 ~/.ned/
-  config.yaml            설정 (없으면 기본값으로 생성). heartbeat_minutes, signal_check_minutes,
+  config.yaml            설정 (없으면 기본값으로 생성). heartbeat_minutes, signal_check_minutes, heartbeat_skip_unchanged(true),
                          briefing_time, quiet_hours, sources.{gmail,slack,jira,github,sentry,calendar},
-                         persona (ned|alfred|oracle|jarvis), filters.{slack.exclude_channels, slack.watch_channels, slack.ack_reactions, jira.exclude_projects} (트래킹 제외 / 팔로업 채널 / 답 필요 해제 이모지, ack_reactions 외 기본 []),
+                         persona (ned|alfred|oracle|jarvis), filters.{slack.exclude_channels, slack.watch_channels, slack.ack_reactions, slack.ack_check_max, jira.exclude_projects} (트래킹 제외 / 팔로업 채널 / 답 필요 해제 이모지 / 한 run 에 검색할 이모지 수(3), ack_reactions·ack_check_max 외 기본 []),
                          port, claude_model, claude_max_turns, session_stale_minutes, agenda_refresh_minutes, notify,
                          actions.{slack_send=false, gmail_draft=true, gmail_send=false, session_send=true,
                                   jira_comment=false, jira_transition=false, github_review=false, calendar_rsvp=false} (POST /api/send 허용),

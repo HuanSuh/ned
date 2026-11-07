@@ -196,7 +196,8 @@
                   <div class="xitem"><span class="lab" id="xa-lab">답 필요 해제 이모지</span>
                     <div class="chipin" data-xbox="ack"><span class="cl">SLACK 이모지</span><span class="chips" id="x-ack"></span><input type="text" id="x-ack-in" data-x="ack" list="dl-ack" placeholder=":white_check_mark:, :eyes: ⏎" aria-label="답 필요 해제 이모지 추가" aria-describedby="xa-hint" autocomplete="off"></div>
                     <span class="hint" id="xa-hint">내 답글이 있거나 이 이모지로 리액션한 메시지는 '확인 필요'에서 빠져. 최대 8개, 다 빼면 리액션은 안 봐.</span>
-                    <span class="excl-msg" id="a-msg" role="status"></span></div>
+                    <span class="excl-msg" id="a-msg" role="status"></span>
+                    <div class="inl"><label class="lab" for="c-ackmax">한 번에 확인할 이모지</label><input id="c-ackmax" type="number" min="1" max="8" step="1" aria-describedby="c-ackmax-h"><span class="hint" id="c-ackmax-h">앞에서부터 N개만 검색(기본 3). 답 필요 후보가 없으면 검색 안 해.</span></div></div>
                 </div>
               </div>
               <div class="sgrp" data-srcgrp="jira" role="group" aria-labelledby="g-jira-h">
@@ -242,6 +243,7 @@
                 <div class="f"><label for="c-sig">신호 조회 최소 간격 (분)</label><input id="c-sig" type="number" min="1" step="1" required aria-describedby="c-sig-h"><span class="hint" id="c-sig-h">세션 이벤트가 없을 때 LLM 으로 업무 신호를 보는 최소 간격</span></div>
                 <div class="f"><label for="c-bt">아침 브리핑 시각</label><input id="c-bt" type="time" required></div>
               </div>
+              <div class="f"><label class="ck"><input type="checkbox" id="c-hbskip" aria-describedby="c-hbskip-h"> 바뀐 게 없으면 순찰 건너뛰기</label><span class="hint" id="c-hbskip-h">소스 목록·2시간 내 일정·스레드 새 답글·세션 알림이 지난 순찰 그대로면 자동 순찰은 Claude 를 부르지 않아. 아침 브리핑·지금 점검은 늘 실행.</span></div>
               <div class="agint">
                 <div class="f"><label for="c-agmin">홈 자동 갱신 기본 주기 (분)</label><input id="c-agmin" type="number" min="1" step="1" required aria-describedby="c-agmin-h"><span class="hint" id="c-agmin-h">홈 agenda(일정·Slack·메일·Jira·GitHub)를 다시 읽는 주기. 아래 소스별 칸을 비우면 이 값을 따라.</span></div>
                 <div class="f"><span class="lab" id="c-int-lab">소스별 주기 (분)</span>

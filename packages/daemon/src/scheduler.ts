@@ -5,6 +5,11 @@
  *
  * Manual runs — POST /api/check, /api/heartbeat, /api/agenda/refresh (card ↻) — never go through here: always immediate.
  *
+ * Heartbeat skip-unchanged (config.heartbeat_skip_unchanged, default on): an automatic, non-daily heartbeat is skipped
+ * (no claude call; next_heartbeat_at still advances) when every enabled source's list signature and the heartbeat watch
+ * key (calendar 2h window, unraised thread replies) equal those at the last heartbeat that judged, and no session event
+ * is pending. With Sentry on, a real run still happens at least every HEARTBEAT_SKIP_MAX_MINUTES.
+ *
  * Idle = BOTH (1) no user activity for idle_schedule.after_minutes (latest of: dashboard activity ping, Claude Code
  * session event, macOS HID input) AND (2) the last unchanged_runs automatic refreshes all came back unchanged.
  * Quiet + idle overlapping → the slower one wins (pause > larger factor).
@@ -153,9 +158,13 @@ export interface SchedulerDeps {
   overBudget: (cfg: NedConfig, job: string) => boolean;
   enabledSources: (cfg: NedConfig) => AgendaSourceKey[];
   runningSources: () => AgendaSourceKey[];
-  sourcesStatus: () => Partial<Record<AgendaSourceKey, { started_at?: number; unchanged?: boolean }>> | undefined;
+  sourcesStatus: () => Partial<Record<AgendaSourceKey, { started_at?: number; unchanged?: boolean; signature?: string }>> | undefined;
   refreshAgenda: (cfg: NedConfig, sources: AgendaSourceKey[]) => Promise<unknown>;
   heartbeat: (cfg: NedConfig, opts: { daily: boolean }) => Promise<unknown>;
+  /** Unprocessed session-news events (Stop / StopFailure / Notification — heartbeat.ts pendingSessionNews; any → run). Absent = 0. */
+  pendingEvents?: () => number;
+  /** Heartbeat inputs the list signatures miss (heartbeat.ts heartbeatWatchKey: calendar 2h window, unraised thread replies). */
+  heartbeatWatchKey?: (cfg: NedConfig) => string;
   /** Latest non-ping activity (session events, HID input), ms. Pings are added here. */
   activityAt: () => number | Promise<number>;
   /** Today's daily briefing already exists (daemon restart). */
@@ -174,6 +183,13 @@ export interface Scheduler {
 }
 
 const RUNS_KEEP = 50;
+/** Skip-unchanged never holds a heartbeat off longer than this while Sentry is on (only the heartbeat reads Sentry). */
+export const HEARTBEAT_SKIP_MAX_MINUTES = 180;
+
+/** What an automatic heartbeat would judge from, minus session events: every enabled source's list signature + the watch key. */
+export function heartbeatFingerprint(enabled: readonly AgendaSourceKey[], status: Partial<Record<AgendaSourceKey, { signature?: string }>> | undefined, watchKey = ""): string {
+  return JSON.stringify({ sig: [...enabled].sort().map((k) => [k, status?.[k]?.signature ?? null]), watch: watchKey });
+}
 
 export function createScheduler(d: SchedulerDeps): Scheduler {
   const now = d.now ?? Date.now;
@@ -183,6 +199,9 @@ export function createScheduler(d: SchedulerDeps): Scheduler {
   const inflight = new Set<Promise<unknown>>();
   let firstAgenda = true;
   let lastHbAt: number | null = null;
+  /** Fingerprint + time of the last heartbeat that actually ran (skip-unchanged compares against it). */
+  let lastRunFp: string | null = null;
+  let lastRunAt = 0;
   let hbBusy = false;
   let ticking = false;
   let lastDaily = d.dailyDoneToday ? localDay(new Date(startedAt)) : "";
@@ -219,8 +238,24 @@ export function createScheduler(d: SchedulerDeps): Scheduler {
     const today = localDay(date);
     const daily = lastDaily !== today && date.toTimeString().slice(0, 5) >= cfg.briefing_time;
     if (daily) lastDaily = today;
+    const fp = () => heartbeatFingerprint(d.enabledSources(cfg), d.sourcesStatus(), d.heartbeatWatchKey?.(cfg) ?? "");
     try {
-      await d.heartbeat(cfg, { daily });
+      // Skip-unchanged: nothing the heartbeat judges from moved since the last one that ran → no claude call.
+      if (!daily && cfg.heartbeat_skip_unchanged !== false && lastRunFp !== null) {
+        const events = d.pendingEvents?.() ?? 0;
+        const sentryDue = cfg.sources.sentry && t - lastRunAt >= HEARTBEAT_SKIP_MAX_MINUTES * 60_000;
+        if (!events && !sentryDue && fp() === lastRunFp) {
+          d.log(`heartbeat: skipped — unchanged (source lists, calendar window and thread replies same since ${new Date(lastRunAt).toTimeString().slice(0, 5)}, no new session news)`);
+          d.onHeartbeat?.(now() + cfg.heartbeat_minutes * factor * 60_000);
+          return;
+        }
+      }
+      const r = await d.heartbeat(cfg, { daily });
+      // null = heartbeat.ts stayed silent without judging: what it skipped must still count as unseen next time.
+      if (r !== null) {
+        lastRunFp = fp(); // after the run: a heartbeat may have refreshed the lists itself
+        lastRunAt = t;
+      }
       d.onHeartbeat?.(now() + cfg.heartbeat_minutes * factor * 60_000);
     } catch (e) {
       d.log(`heartbeat failed: ${String(e)}`);

@@ -78,6 +78,26 @@ export function threadAttention(a: Agenda, sent: Set<string>, now = Date.now()):
   return { items, keys };
 }
 
+/** Heartbeat's "앞으로 2시간" calendar window (agendaDigest, non-daily): timed, not declined, starting ≤2h out and not over. */
+function soonEvents(a: Agenda, now: number) {
+  return a.calendar.filter((e) => {
+    if (e.all_day || e.rsvp === "declined") return false;
+    const s = Date.parse(e.start), end = Date.parse(e.end);
+    return s <= now + 2 * 3600_000 && (Number.isFinite(end) ? end > now : s > now - 15 * 60_000);
+  });
+}
+
+/**
+ * What a heartbeat would see that the per-source list signatures don't cover: calendar events entering / leaving the
+ * 2-hour window (time passes, the list doesn't change) and followed-thread replies after mine not yet raised (phase 2
+ * reads them without touching the list). The scheduler's skip-unchanged check compares this along with the signatures.
+ */
+export function heartbeatWatchKey(cfg: NedConfig, a: Agenda = readAgenda(), now = Date.now()): string {
+  const cal = cfg.sources.calendar ? soonEvents(a, now).map((e) => e.id).sort() : [];
+  const th = cfg.sources.slack ? threadAttention(a, sentKeys(), now).keys.sort() : [];
+  return JSON.stringify({ cal, th });
+}
+
 function summarizeEvents(events: NedEvent[]): string {
   if (!events.length) return "(없음)";
   return events
@@ -158,12 +178,9 @@ export function agendaDigest(cfg: NedConfig, a: Agenda, opts: { daily: boolean; 
   if (failed.length) out.push(`갱신 실패 소스(이전 목록일 수 있음): ${failed.join(", ")}`);
 
   if (cfg.sources.calendar) {
-    const timed = a.calendar.filter((e) => !e.all_day && e.rsvp !== "declined");
-    const soon = timed.filter((e) => {
-      const s = Date.parse(e.start), end = Date.parse(e.end);
-      if (opts.daily) return new Date(s).toDateString() === new Date(now).toDateString();
-      return s <= now + 2 * 3600_000 && (Number.isFinite(end) ? end > now : s > now - 15 * 60_000);
-    });
+    const soon = opts.daily
+      ? a.calendar.filter((e) => !e.all_day && e.rsvp !== "declined" && new Date(Date.parse(e.start)).toDateString() === new Date(now).toDateString())
+      : soonEvents(a, now);
     const allDay = opts.daily ? a.calendar.filter((e) => e.all_day && new Date(Date.parse(e.start)).toDateString() === new Date(now).toDateString()) : [];
     const rsvp = a.calendar.filter((e) => e.rsvp === "needsAction" && Date.parse(e.start) > now && !soon.includes(e)).sort((x, y) => Date.parse(x.start) - Date.parse(y.start));
     out.push(`\n#### 캘린더 — ${opts.daily ? "오늘 일정" : "앞으로 2시간"}`);
@@ -305,6 +322,14 @@ async function ensureAgenda(cfg: NedConfig, mode: NonNullable<HeartbeatOptions["
   }
 }
 
+/** Session events that make a heartbeat judge right away (a session stopped, failed or wants the user). */
+const isSessionNews = (e: NedEvent) => ["Stop", "StopFailure", "Notification"].includes(e.event);
+
+/** Unprocessed session-news events (scheduler skip-unchanged: any → the heartbeat runs). Read-only, no cursor commit. */
+export function pendingSessionNews(): number {
+  return readUnprocessedEvents().events.filter(isSessionNews).length;
+}
+
 /** One heartbeat: decide whether to think, then (maybe) ask Claude and publish a briefing. */
 export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Promise<Briefing | null> {
   refreshSessions(cfg);
@@ -313,7 +338,7 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
   const now = Date.now();
   const sinceLast = state.last_heartbeat_at ? now - state.last_heartbeat_at : Infinity;
   const signalDue = sinceLast >= cfg.signal_check_minutes * 60_000;
-  const sessionNews = events.some((e) => ["Stop", "StopFailure", "Notification"].includes(e.event));
+  const sessionNews = events.some(isSessionNews);
 
   if (!opts.force && !opts.daily && !signalDue && !sessionNews) {
     log(`heartbeat: nothing new (next signal check in ${Math.ceil((cfg.signal_check_minutes * 60_000 - sinceLast) / 60_000)}m) — silent`);

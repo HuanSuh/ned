@@ -12,10 +12,10 @@ export const THREAD_FOLLOW_HOURS = 48;
 /** Threads quiet for longer than this (and gone from the lists) are dropped. */
 export const THREAD_KEEP_DAYS = 7;
 /**
- * A thread whose last known reply equals the newest message phase 1 saw is not re-read until this much time has
- * passed since its last read (phase 1 searches only the newest 20 hits, so a quiet-looking thread can still move).
+ * Safety net: a thread / DM whose newest phase-1 ts hasn't moved since its last read is skipped, but re-read once this
+ * much time has passed since that read (phase 1 searches only the newest 20 hits, so a quiet-looking thread can still move).
  */
-export const THREAD_RECHECK_MINUTES = 15;
+export const THREAD_RECHECK_MINUTES = 6 * 60;
 const MAX_THREADS = 200;
 /** Messages kept per thread / DM conversation (the card's history panel shows all of them). */
 export const RECENT_KEEP = 10;
@@ -76,6 +76,29 @@ export interface SlackThread {
   recent: ThreadMessage[];
   /** ISO of the last slack_read_thread. */
   checked_at?: string;
+  /** search_latest_ts as it was at that read ("" = none yet). Absent in records read before this field existed. */
+  read_search_ts?: string;
+}
+
+/** Why a followed thread / DM is (or isn't) re-read now. */
+export type FollowState = "never" | "moved" | "recheck" | "unchanged";
+
+/**
+ * never: not read yet · moved: phase 1 saw a newer message than at the last read · recheck: unchanged, but the last
+ * read is THREAD_RECHECK_MINUTES old · unchanged: skip. Records without read_search_ts compare against last_reply_ts.
+ */
+export function followState(t: SlackThread, now = Date.now()): FollowState {
+  if (!t.checked_at) return "never";
+  const seen = tsNum(t.search_latest_ts);
+  const base = t.read_search_ts !== undefined ? tsNum(t.read_search_ts) : tsNum(t.last_reply_ts);
+  if (seen > (base || 0)) return "moved";
+  return now - (Date.parse(t.checked_at) || 0) >= THREAD_RECHECK_MINUTES * 60_000 ? "recheck" : "unchanged";
+}
+
+/** Active (within THREAD_FOLLOW_HOURS) records skipped because nothing moved since their last read. */
+export function unchangedCount(list: SlackThread[] | undefined, now = Date.now()): number {
+  const since = now / 1000 - THREAD_FOLLOW_HOURS * 3600;
+  return (list ?? []).filter((t) => threadActivity(t) >= since && followState(t, now) === "unchanged").length;
 }
 
 /** What a list row carries about its thread (cards / drafts). */
@@ -202,17 +225,17 @@ export function syncThreadsFromList(prev: SlackThread[] | undefined, next: Slack
 
 /**
  * Threads phase 2 should re-read now, at most `n`: activity within THREAD_FOLLOW_HOURS, and either never read,
- * phase 1 saw a message newer than the last known reply, or the last read is older than THREAD_RECHECK_MINUTES.
+ * phase 1 saw a newer message than at the last read, or the last read is THREAD_RECHECK_MINUTES old (followState).
  * Order: known-new first, then never read, then by where it was seen (needs me first), then the stalest read.
  */
 export function threadCandidates(threads: SlackThread[] | undefined, n: number, now = Date.now()): SlackThread[] {
   if (n <= 0) return [];
   const since = now / 1000 - THREAD_FOLLOW_HOURS * 3600;
-  const newer = (t: SlackThread) => tsNum(t.search_latest_ts) > (tsNum(t.last_reply_ts) || 0);
+  const newer = (t: SlackThread) => followState(t, now) === "moved";
   const checked = (t: SlackThread) => (t.checked_at ? Date.parse(t.checked_at) || 0 : 0);
   return (threads ?? [])
     .filter((t) => threadActivity(t) >= since)
-    .filter((t) => !t.checked_at || newer(t) || now - checked(t) >= THREAD_RECHECK_MINUTES * 60_000)
+    .filter((t) => followState(t, now) !== "unchanged")
     .sort((a, b) => Number(newer(b)) - Number(newer(a)) || Number(!b.checked_at) - Number(!a.checked_at) || a.prio - b.prio || checked(a) - checked(b))
     .slice(0, n);
 }
@@ -265,11 +288,11 @@ export function dmCandidates(dms: SlackThread[] | undefined, n = DM_BATCH_MAX, n
   const cap = Math.min(n, DM_BATCH_MAX);
   if (cap <= 0) return [];
   const since = now / 1000 - THREAD_FOLLOW_HOURS * 3600;
-  const newer = (t: SlackThread) => tsNum(t.search_latest_ts) > (tsNum(t.last_reply_ts) || 0);
+  const newer = (t: SlackThread) => followState(t, now) === "moved";
   const checked = (t: SlackThread) => (t.checked_at ? Date.parse(t.checked_at) || 0 : 0);
   return (dms ?? [])
     .filter((t) => threadActivity(t) >= since)
-    .filter((t) => !t.checked_at || newer(t) || now - checked(t) >= THREAD_RECHECK_MINUTES * 60_000)
+    .filter((t) => followState(t, now) !== "unchanged")
     .sort((a, b) => a.prio - b.prio || Number(newer(b)) - Number(newer(a)) || Number(!b.checked_at) - Number(!a.checked_at) || checked(a) - checked(b))
     .slice(0, cap);
 }
@@ -312,6 +335,7 @@ export function mergeThreadReads(threads: SlackThread[], raw: unknown[], now = D
       .map((m) => ({ ...m, at: tsIso(m.ts) }))
       .sort((a, b) => tsNum(a.ts) - tsNum(b.ts));
     t.checked_at = nowIso;
+    t.read_search_ts = t.search_latest_ts ?? ""; // what phase 1 had seen when this read happened (skip-unchanged)
     done.push(t.key);
     if (!msgs.length) continue;
     const me = (m: ThreadMessage) => m.from === "나";
