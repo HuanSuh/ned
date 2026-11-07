@@ -27,6 +27,7 @@ daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙�
 | `app/features/layout.js` | 홈 자유 배치(≥1100px): 12열 그리드 모델(`settle` 밀어내기+위로 채우기, `deriveLayout`), 드래그 이동·크기 조절(pointer events), 키보드, 잠금, 디바운스 저장 |
 | `app/features/drafts.js` | 답장 초안 모달 |
 | `app/features/chat-action.js` | Ned Net 대화창 확인 카드(`actions.chat_write`): ```` ```ned-action ```` 파서, `renderActionCard(block, state, {id})`(순수 HTML), `wireActionCards(root, {get, set, persist, deps})`(위임 이벤트, 실행 → `/api/chat/actions/validate` → 기존 API) — 다른 화면에서도 재사용 |
+| `app/features/chat-output.js` | Ned Net 정리 결과물 저장 카드: ```` ```ned-output ```` 파서(`parseOutputBlock` — 펜스 숨김, 스트리밍 중엔 pending), `renderOutputCard({out, err, block}, md)`(순수 HTML — 저장 위치, Obsidian 에서 열기(`obsidian://` 만), Finder 에서 보기, 내용 보기), `wireOutputCards(root, {postJson, toast})`(→ `POST /api/outputs/:id/reveal`) |
 | `app/features/reviewed.js` | 확인 완료(attention·소스 항목) |
 | `app/features/personas.js` | `VOICE`, 마크, `applyPersona`, 말풍선 `say`, mood·opener |
 | `css/tokens.css` → `base` → `inbox` → `timeline` → `settings` → `home` → `components` → `responsive` | 토큰·페르소나 / 셸·카드·칩 / 탭별 / 오류 배지·모달·아이콘 / 모든 미디어쿼리(마지막이어야 함) |

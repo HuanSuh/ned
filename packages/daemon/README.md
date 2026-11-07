@@ -173,9 +173,9 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 | DELETE | `/api/todos/:id` | 삭제. 없으면 404 |
 | POST | `/api/draft` | 답장·코멘트 초안 3개 (Slack / 메일 / 에이전트 세션 / Jira 코멘트 / GitHub 리뷰). 읽기 전용 `claude -p`. 아래 참고 |
 | GET | `/api/draft/status` | 초안 미리 생성 마지막 실행 `{ pregenerated, skipped_cached, failed, cost_usd, last_run_ts, running }` |
-| POST | `/api/chat` | Ned 채팅 한 턴 `{ conversation_id?, text ≤2000자 }` → `text/event-stream`: `start{conversation_id,title}` → `delta{text}`* (`turn` = 새 응답 시작, `tool{name,label}`) → `done{text,stopped,cost_usd,chat_cost_usd,today_usd}` \| `error{error}`. 400 빈/긴 입력, 404 모르는 대화, 409 다른 턴 진행 중, 429 일일 예산 초과(`chat_ignore_budget: true` 면 예외). 읽기 도구만(`--tools ToolSearch,Bash`, 커넥터 읽기 + `gh` 읽기·`orca status`), plan 모드, `--resume <session_id>` 로 이어감, 비용 job `chat`. 저장: `~/.ned/chats/<id>.json` (최근 20개) |
+| POST | `/api/chat` | Ned 채팅 한 턴 `{ conversation_id?, text ≤2000자 }` → `text/event-stream`: `start{conversation_id,title}` → `delta{text}`* (`turn` = 새 응답 시작, `tool{name,label}`) → `done{text,stopped,cost_usd,chat_cost_usd,today_usd,output?,output_error?}` \| `error{error}`. 400 빈/긴 입력, 404 모르는 대화, 409 다른 턴 진행 중, 429 일일 예산 초과(`chat_ignore_budget: true` 면 예외). 읽기 도구만(`--tools ToolSearch,Bash`, 커넥터 읽기 + `gh` 읽기·`orca status`), plan 모드, `--resume <session_id>` 로 이어감, 비용 job `chat`. 저장: `~/.ned/chats/<id>.json` (최근 20개) |
 | GET | `/api/chats` | `{ chats: [{id,title,updated_at,messages,cost_usd}], active, input_max }` 최신순 |
-| GET | `/api/chat/:id` | 저장된 대화 `{ id, title, session_id, cost_usd, messages: [{role: user\|ned, text, ts, cost_usd?, error?, stopped?}], running }` |
+| GET | `/api/chat/:id` | 저장된 대화 `{ id, title, session_id, cost_usd, messages: [{role: user\|ned, text, ts, cost_usd?, error?, stopped?, action?, output?, output_error?}], running }` |
 | POST | `/api/chat/:id/stop` | 진행 중인 턴에 SIGTERM (없으면 404). 지금까지 흐른 텍스트가 `stopped: true` 로 저장됨 |
 | POST | `/api/chat/actions/validate` | 확인 카드 검증 `{ block: <ned-action JSON>, text?: 고친 텍스트 }` → 200 `{ ok, kind, endpoint: /api/send\|/api/calendar/events\|/api/todos, payload (origin "chat"), label, summary, target_label, text, text_optional, lookup? }` · 400 형식 · 403 `actions.chat_write`/해당 스위치 꺼짐 · 409 대상이 최근 agenda/state 에 없음. 실행은 안 함 (`src/chat-actions.ts`) |
 | POST | `/api/chat/:id/action` | 카드 상태 저장 `{ ts (ned 메시지), state: running\|executed\|failed\|cancelled, text?, result? }` → 메시지의 `action`. (없음\|failed)→running\|cancelled, running→나머지; executed·cancelled 는 최종(409) |
@@ -331,6 +331,12 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
 - **embed** (`daily_embed`): `<vault>/.obsidian/daily-notes.json` 의 `folder` + `format`(moment 부분집합 YYYY·YY·MM·M·DD·D·[문자]; format 이 없으면
   `folder/DAY.md`, `folder/YYYY-MM/DAY.md`)으로 그날 노트를 찾아, **있을 때만** `## 📝 Notes & Logs` 줄 바로 아래에
   `<!-- ned:embed -->![[<folder>/Daily/YYYY-MM/DAY]]<!-- ned:/embed -->` 한 줄을 넣는다(이미 있으면 그대로, 제목 없으면 건너뜀).
+- **정리 결과물** (`src/outputs.ts`): 채팅 턴이 성공하면 `extractOutputBlock` 이 답의 마지막 완전한 ```` ```ned-output ```` 펜스를 읽는다
+  (JSON `{kind: meeting|document|mail|other, title, markdown ≤100,000자}`; kind 모르면 other, title 없으면 첫 제목 줄). `saveOutput` 이
+  `~/.ned/outputs/<id>.json`·`.md` 를 항상 쓰고, `archive.enabled && include.outputs` 면 `<folder>/Notes/YYYY-MM/DAY.<slug>.md`
+  (slug = 제목에서 `\/:*?"<>|#^[]`·제어 문자 뺀 것 ≤60자, 같은 이름이면 ` (2)`… — 덮어쓰지 않음; frontmatter date·kind·source(본문의 https 링크)·tags).
+  메시지에 `output: {id, kind, title, vault_rel?, obsidian_url?, vault_error?}`(깨진 블록이면 `output_error`), `done` 이벤트에도 같이.
+  프롬프트 규칙은 `prompts/chat.md` 7번. 저장 후 `archiveTouch(즉시)` → 그날 리포트 "정리 결과물"에 `[[…|제목]]`.
 - **실패**: 볼트 없음·권한(EPERM/EACCES — macOS 파일 접근 안내 포함) 등은 로그 + `~/.ned/archive.json` 의 `last_error` → 설정 → 아카이브.
   그날은 대기로 남아 다음 틱에 다시 시도. 데몬은 계속 돈다.
 

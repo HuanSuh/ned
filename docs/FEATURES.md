@@ -11,7 +11,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - **타임라인**: 세션 이벤트와 브리핑을 시간순으로(유형·워크트리 필터).
 - **순찰/브리핑**: "지금 점검"(r) = 소스를 새로 가져와 판단 → 알림·attention. 자동 순찰은 `heartbeat_minutes`, 아침 브리핑은 `briefing_time`.
 - **야간·유휴 감속**: 조용한 시간엔 자동 순찰·홈 갱신이 `quiet_schedule.mode`(normal/slow/pause, 기본 slow ×`slow_factor` 6). 유휴(`idle_schedule`: `after_minutes` 120분 활동 없음 + `unchanged_runs` 6회 무변경)도 slow/pause. 홈 상단 칩. 수동 실행은 늘 즉시, 끝나면 전 소스 갱신.
-- **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기를 확인 카드로 제안, 텍스트만 고쳐 실행; `actions.chat_session_create` 면 새 세션도), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글 피드.
+- **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기를 확인 카드로 제안, 텍스트만 고쳐 실행; `actions.chat_session_create` 면 새 세션도; 회의·문서·메일 정리는 노트로 저장), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글 피드.
 - **답장 초안 ✎**: 연필 → 초안 3개 → 복사/열기/보내기. 실제 쓰기는 설정 → 쓰기 액션에서 켠 것만: `actions.slack_send`·`gmail_draft`(기본 켬)·`gmail_send`·`session_send`(기본 켬)·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯ 메뉴.
 - **확인 완료 ✓**: 항목을 처리됨으로 접음(바뀌면 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`)면 자동 해제.
 - **Gmail 읽음 표시**: 설정 → 쓰기 액션 → Gmail → "Gmail 읽음 표시까지"(`actions.gmail_mark_read`, 기본 꺼짐): 메일 ✓ 때 Gmail 도 읽음(✓ 취소해도 안 되돌림).
@@ -119,6 +119,12 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 데이터: 모델은 여전히 읽기 도구만 쓰고 ```ned-action 블록으로 **제안만** 한다(시스템 프롬프트엔 지금 허용된 동작만 들어감). [실행] → `/api/chat/actions/validate` 가 스위치와 대상(최근 agenda/state 에 있는 항목인지 url·id 로)을 확인해 요청을 만들고, 기존 `/api/send` · `/api/calendar/events` · `/api/todos` 로 실행(`origin: "chat"`). 카드 상태는 `~/.ned/chats/` 의 그 답에 저장(`/api/chat/:id/action`). 기록은 `~/.ned/sent-actions.log` → 설정 → 오늘 한 액션에 "대화창" 배지.
 - 언제: 대화하다가 그 자리에서 답장·할 일·일정·리뷰까지 끝내고 싶을 때. 대상은 바꿀 수 없어 — 다른 대상이면 대화로 다시 요청.
 - 설정: 설정 → 쓰기 액션 → 대화창 → "대화창에서 쓰기 허용" `actions.chat_write`(기본 꺼짐). 각 동작은 자기 스위치도 켜져 있어야 함(할 일 추가는 chat_write 만): `todo_add` · `slack_send` · `gmail_draft` · `gmail_send` · `jira_comment` · `jira_transition` · `github_review` · `calendar_create` · `calendar_rsvp` · `session_send` · `session_create`(`actions.chat_session_create`, 아래 "대화창에서 세션 만들기").
+
+### 통신기 — 정리 결과물 (노트 저장)
+- 보여 주는 것: 대화창에서 "이 회의 정리해 줘", "이 문서 요약해서 남겨 줘", "오늘 메일 정리해 줘" 하면 Ned 가 짧은 요약으로 답하고 그 아래 **저장 카드** — "📎 회의 정리 저장됨 · 제목", 저장 위치(볼트 경로 / "Ned 에만 저장"), [Obsidian 에서 열기] [Finder 에서 보기], "내용 보기"(노트 전문). 답이 흐르는 동안은 "정리 결과 저장 준비 중…".
+- 형식(모델이 지킴): 회의 = 한 줄 결론 → 결정 → 액션 아이템(담당·기한, 내 것 먼저) → 미결 → 출처 / 문서 = TL;DR 3줄 → 핵심 → 나에게 요구되는 것 → 리스크 → 출처 / 메일 = 답장 필요·승인·읽기만·보관 그룹(한 줄 + 발신자 + 링크). 액션 아이템은 `- [ ] 내용 #task 📅 YYYY-MM-DD` 라 Obsidian Tasks 에 바로 잡힘.
+- 데이터: 모델이 답 끝에 ```ned-output 블록(JSON `kind`·`title`·`markdown`)을 붙이면 데몬이 꺼내 저장 — 추가 Claude 호출 없음. 항상 `~/.ned/outputs/`(목록 `/api/outputs`, 하나 `/api/outputs/:id`), 아카이브가 켜져 있고 "담을 것 → 정리 결과물"(`archive.include.outputs`)이면 볼트에도 `<archive.folder>/Notes/YYYY-MM/YYYY-MM-DD.<제목>.md`(frontmatter `date`·`kind`·`source` 링크·`tags: [ned, kind]`, 같은 이름이면 " (2)"). 그날 데일리 리포트 "📎 정리 결과물"에 링크. "Finder 에서 보기" = `/api/outputs/:id/reveal`.
+- 언제: 회의록·긴 문서·메일 더미를 대화로 정리하고 기록으로 남기고 싶을 때.
 
 ### 답장 초안 ✎
 - 보여 주는 것: 맥락 요약·발췌 + 초안 3개(짧게/보통/정중하게), 편집 가능, "다시 생성"(힌트).

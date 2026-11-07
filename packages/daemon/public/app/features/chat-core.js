@@ -2,6 +2,7 @@
  * features/comms.js mounts and wires it; tests import this file directly (no document at import). */
 import { esc, safeUrl } from "../util.js";
 import { parseActionBlock, renderActionCard } from "./chat-action.js";
+import { parseOutputBlock, renderOutputCard } from "./chat-output.js";
 
 // ---------- persona wording (structure is shared; only words + theme tokens change) ----------
 export const COMMS_VOICE = {
@@ -170,10 +171,12 @@ export const usd = (n) => `$${(Number(n) || 0).toFixed(2)}`;
 
 /** A ned answer's body: its text + the 확인 카드 for a ```ned-action block (chat-action.js). `cardState(m)` → card state. */
 function nedBody(m, cardState) {
-  const pa = parseActionBlock(m.text);
-  if (!pa.block && !pa.error) return m.text ? mdLite(m.text) : "";
+  const po = parseOutputBlock(m.text); // 정리 결과물 (```ned-output → 저장 카드, chat-output.js)
+  const out = po.block || m.output || m.output_error ? renderOutputCard({ out: m.output || null, err: m.output_error || "", block: po.block }, mdLite) : "";
+  const pa = parseActionBlock(po.text);
+  if (!pa.block && !pa.error) return (po.text ? mdLite(po.text) : "") + out;
   const card = pa.block ? renderActionCard(pa.block, cardState(m, pa.block), { id: String(m.ts) }) : `<div class="cm-act bad">⚠ ${esc(pa.error)}</div>`;
-  return (pa.text ? mdLite(pa.text) : "") + card;
+  return (pa.text ? mdLite(pa.text) : "") + out + card;
 }
 const defaultCardState = (m) => ({ status: m.action?.state || "idle", text: m.action?.text, result: m.action?.result });
 
@@ -188,8 +191,9 @@ export function messagesHtml(msgs, voice, live = null, timeFn = () => "", hello 
     return `<div class="cm-msg ${me ? "me" : "ned"}${m.error ? " err" : ""}"><div class="bb">${m.text ? (me || m.error ? mdLite(m.text) : nedBody(m, cardState)) : m.stopped ? "<i>(멈춤)</i>" : ""}${m.error ? `<div class="cm-err">⚠ ${esc(m.error)}</div>` : ""}</div>${meta ? `<div class="mm">${esc(meta)}</div>` : ""}</div>`;
   };
   let html = msgs.map(row).join("");
-  const lp = live ? parseActionBlock(live.text) : null; // a proposal shows as a card once the answer is done
-  if (live) html += `<div class="cm-msg ned live"><div class="bb">${lp.text ? mdLite(lp.text) : ""}${lp.block || lp.pending ? `<div class="cm-act s-pending">⚡ 실행 제안 준비 중…</div>` : ""}<div class="cm-think"><span class="spin"></span>${esc(live.tool ? `${voice.thinking} ${live.tool}` : voice.thinking)}</div></div></div>`;
+  const lo = live ? parseOutputBlock(live.text) : null; // a ned-output block shows as a 저장 카드 once saved
+  const lp = live ? parseActionBlock(lo.text) : null; // a proposal shows as a card once the answer is done
+  if (live) html += `<div class="cm-msg ned live"><div class="bb">${lp.text ? mdLite(lp.text) : ""}${lo.block || lo.pending ? `<div class="cm-out s-pending">📎 정리 결과 저장 준비 중…</div>` : ""}${lp.block || lp.pending ? `<div class="cm-act s-pending">⚡ 실행 제안 준비 중…</div>` : ""}<div class="cm-think"><span class="spin"></span>${esc(live.tool ? `${voice.thinking} ${live.tool}` : voice.thinking)}</div></div></div>`;
   return html;
 }
 

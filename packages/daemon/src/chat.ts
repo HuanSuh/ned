@@ -3,12 +3,14 @@ import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { readAgenda, type Agenda } from "./agenda.js";
+import { archiveTouch } from "./archive.js";
 import { allowedChatKinds, chatWriteBlock } from "./chat-actions.js";
 import { llmDisabled, runClaude, type ClaudeRunResult } from "./claude.js";
 import type { NedConfig } from "./config.js";
 import { recordCost, todayCost } from "./costs.js";
 import { listBriefings } from "./heartbeat.js";
 import { NED_HOME, log, readJson, writeJsonAtomic } from "./paths.js";
+import { extractOutputBlock, outputRef, saveOutput, type OutputRef } from "./outputs.js";
 import { personaPrompt } from "./persona.js";
 import { readState, type Briefing, type NedState } from "./state.js";
 import { listTodos, type Todo } from "./todos.js";
@@ -38,6 +40,10 @@ export interface ChatMessage {
   stopped?: boolean;
   /** The 확인 카드 for this answer's ```ned-action block (POST /api/chat/:id/action). Absent = not acted on yet. */
   action?: ChatActionState;
+  /** This answer's ```ned-output block, saved (~/.ned/outputs, + the vault with config.archive) — src/outputs.ts. */
+  output?: OutputRef;
+  /** The ```ned-output block could not be read (malformed JSON / empty markdown). */
+  output_error?: string;
 }
 
 export const CHAT_ACTION_STATES = ["running", "executed", "failed", "cancelled"] as const;
@@ -476,12 +482,21 @@ export async function runChatTurn(prep: Extract<ChatPrep, { ok: true }>, emit: C
     const msg: ChatMessage = { role: "ned", text: answer, ts: Date.now(), cost_usd: cost };
     if (res.aborted) msg.stopped = true;
     else if (!res.ok) msg.error = clip(res.error || "실패", 300);
+    else {
+      // 정리 결과물: a ```ned-output block is saved by the daemon (no extra claude call) and shown as a 저장 카드.
+      const ob = extractOutputBlock(answer);
+      if (ob && "block" in ob) {
+        const rec = saveOutput(cfg.archive, ob.block, { chat_id: chat.id, message_ts: msg.ts, now: msg.ts });
+        msg.output = outputRef(rec);
+        archiveTouch(rec.ts, { cfg, immediate: true });
+      } else if (ob) msg.output_error = ob.error;
+    }
     chat.messages.push(msg);
     chat.updated_at = msg.ts;
     saveChat(chat);
     log(`chat ${chat.id}: ${res.aborted ? "stopped" : res.ok ? "ok" : `error ${clip(res.error, 120)}`} $${cost.toFixed(4)} ${res.num_turns} turns ${Date.now() - started}ms`);
     if (!res.ok && !res.aborted) emit("error", { conversation_id: chat.id, ts: msg.ts, error: msg.error, text: answer, cost_usd: cost, chat_cost_usd: chat.cost_usd, today_usd: todayCost() });
-    else emit("done", { conversation_id: chat.id, ts: msg.ts, text: answer, stopped: !!res.aborted, cost_usd: cost, chat_cost_usd: chat.cost_usd, today_usd: todayCost() });
+    else emit("done", { conversation_id: chat.id, ts: msg.ts, text: answer, stopped: !!res.aborted, cost_usd: cost, chat_cost_usd: chat.cost_usd, today_usd: todayCost(), ...(msg.output ? { output: msg.output } : {}), ...(msg.output_error ? { output_error: msg.output_error } : {}) });
   } catch (e) {
     log(`chat ${chat.id}: unexpected ${String(e)}`);
     emit("error", { conversation_id: chat.id, error: String(e) });
