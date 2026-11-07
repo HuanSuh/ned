@@ -9,7 +9,7 @@ import path from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import YAML from "yaml";
 
-const { CONFIG_PATH, BRIEFINGS_DIR, NED_HOME, localDay } = await import("../src/paths.js");
+const { CONFIG_PATH, BRIEFINGS_DIR, LOGS_DIR, NED_HOME, localDay } = await import("../src/paths.js");
 const { loadConfig, normalizeArchive, normalizeArchiveFolder, DEFAULT_ARCHIVE } = await import("../src/config.js");
 const { SENT_ACTIONS_LOG, appendActionLog } = await import("../src/actions.js");
 const vault = await import("../src/vault.js");
@@ -142,7 +142,7 @@ describe("daily report", () => {
 
   it("creates the file with frontmatter and every enabled section; dedupes 순찰 items by url", () => {
     seed();
-    const file = archive.writeDailyReport(loadConfig(), day);
+    const file = archive.writeDailyReport(loadConfig(), day).file;
     expect(file).toBe(report(day));
     const md = fs.readFileSync(file, "utf8");
     expect(md).toMatch(/^---\ncreated: 2026-11-06\ntags:\n  - ned\n  - daily\nned_version: /);
@@ -161,7 +161,7 @@ describe("daily report", () => {
   it("a second 아침 브리핑 (items already sent → empty) doesn't hide the first one's items", () => {
     seed();
     briefingFile({ ts: at(2026, 11, 6, 9, 30), type: "daily", status: "UPDATE", headline: "다시 돌림", action_items: [{ title: "결재 메일", url: "https://mail.example/1", kind: "email" }, { title: "새 항목", kind: "jira" }] });
-    const md = fs.readFileSync(archive.writeDailyReport(loadConfig(), day), "utf8");
+    const md = fs.readFileSync(archive.writeDailyReport(loadConfig(), day).file, "utf8");
     expect(md).toContain("09:00 — **오늘 회의 3개**\n09:30 — **다시 돌림**");
     expect(md.match(/결재 메일/g)?.length).toBe(1);
     expect(md).toContain("새 항목");
@@ -170,11 +170,11 @@ describe("daily report", () => {
   it("rewrites only the Ned blocks; the user's memo (outside markers) survives, edits inside are replaced", () => {
     seed();
     const cfg = loadConfig();
-    const file = archive.writeDailyReport(cfg, day);
+    const file = archive.writeDailyReport(cfg, day).file;
     const mine = fs.readFileSync(file, "utf8").replace("<!-- ned:/patrol -->\n", "<!-- ned:/patrol -->\n\n> 내 메모: 오후에 다시 보기\n").replace("Jira 마감", "Jira 마감 (내가 고침)") + "\n## 회고\n- 좋았던 점\n";
     fs.writeFileSync(file, mine);
     briefingFile({ ts: at(2026, 11, 6, 15, 0), type: "heartbeat", status: "UPDATE", updates: [{ title: "새 업데이트", kind: "github" }] });
-    archive.writeDailyReport(cfg, day);
+    archive.writeDailyReport(cfg, day).file;
     const md = fs.readFileSync(file, "utf8");
     expect(md).toContain("> 내 메모: 오후에 다시 보기");
     expect(md).toContain("## 회고\n- 좋았던 점\n");
@@ -187,18 +187,18 @@ describe("daily report", () => {
   it("include switches: an off section is not added; turning it off later empties its block", () => {
     seed();
     setConfig({ include: { actions: false, sessions: true } });
-    const md = fs.readFileSync(archive.writeDailyReport(loadConfig(), day), "utf8");
+    const md = fs.readFileSync(archive.writeDailyReport(loadConfig(), day).file, "utf8");
     expect(md).not.toContain("✉️ 보낸 것");
     expect(md).toContain("## 🤖 세션");
     setConfig({ include: { actions: false, sessions: false } });
-    const md2 = fs.readFileSync(archive.writeDailyReport(loadConfig(), day), "utf8");
+    const md2 = fs.readFileSync(archive.writeDailyReport(loadConfig(), day).file, "utf8");
     expect(md2).toContain("<!-- ned:sessions -->\n\n<!-- ned:/sessions -->");
     expect(md2).not.toContain("## 🤖 세션");
   });
 
   it("custom folder", () => {
     setConfig({ folder: "Inbox/Ned" });
-    archive.writeDailyReport(loadConfig(), day);
+    archive.writeDailyReport(loadConfig(), day).file;
     expect(fs.existsSync(report(day, "Inbox/Ned"))).toBe(true);
   });
 });
@@ -276,6 +276,73 @@ describe("triggers, tick and the midnight boundary", () => {
     fs.rmSync(V, { recursive: true, force: true });
     archive.archiveTouch(Date.now(), { immediate: true });
     expect(vault.readArchiveState().last_error).toMatch(/볼트 확인 실패/);
+  });
+});
+
+describe("concurrent edits + pending-day hygiene", () => {
+  const logText = () => { try { return fs.readFileSync(path.join(LOGS_DIR, "daemon.log"), "utf8"); } catch { return ""; } };
+
+  it("a file that changes once mid-merge is re-merged on top of the new text (user's edit kept)", () => {
+    const day = "2026-11-07";
+    const cfg = loadConfig();
+    const file = archive.writeDailyReport(cfg, day).file;
+    let reads = 0;
+    const io = { read: (abs: string) => {
+      reads++;
+      if (reads === 2) fs.appendFileSync(abs, "\n방금 Obsidian 에서 쓴 메모\n"); // lands between our read and our re-check
+      return fs.existsSync(abs) ? fs.readFileSync(abs, "utf8") : null;
+    } };
+    briefingFile({ ts: at(2026, 11, 7, 10, 0), type: "heartbeat", status: "UPDATE", action_items: [{ title: "새 알림", kind: "slack" }] });
+    expect(archive.writeDailyReport(cfg, day, io)).toEqual({ file, written: true });
+    const md = fs.readFileSync(file, "utf8");
+    expect(md).toContain("방금 Obsidian 에서 쓴 메모");
+    expect(md).toContain("새 알림");
+    expect(reads).toBeGreaterThan(2);
+  });
+
+  it("a file that never holds still: 4 attempts, nothing written, warning logged, the day stays pending", () => {
+    const day = "2026-11-07", t = at(2026, 11, 7, 12, 0);
+    const cfg = loadConfig();
+    const file = archive.writeDailyReport(cfg, day).file;
+    const before = fs.readFileSync(file, "utf8");
+    let reads = 0;
+    const io = { read: () => `${before}\n편집 ${++reads}\n` }; // different on every read
+    briefingFile({ ts: t, type: "heartbeat", status: "UPDATE", action_items: [{ title: "못 쓴 알림", kind: "slack" }] });
+    archive.archiveTouch(t, { now: t });
+    expect(archive.flushDay(cfg, day, t, io)).toBe(false);
+    expect(reads).toBe(archive.REPORT_WRITE_ATTEMPTS * 2);
+    expect(fs.readFileSync(file, "utf8")).toBe(before);
+    expect(vault.readArchiveState().dirty[day]).toBe(t);
+    expect(logText()).toMatch(/warn — Ned\/Daily\/2026-11\/2026-11-07\.md kept changing during 4 merge attempts/);
+    // next tick (real fs, file quiet) writes it
+    archive.archiveTick(loadConfig(), t + archive.ARCHIVE_FLUSH_MS + 1);
+    expect(fs.readFileSync(file, "utf8")).toContain("못 쓴 알림");
+    expect(vault.readArchiveState().dirty).toEqual({});
+  });
+
+  it("pending days older than 7 days are dropped with a warning; recent ones stay", () => {
+    const now = at(2026, 11, 20, 12, 0);
+    vault.patchArchiveState((s) => {
+      s.dirty["2026-11-01"] = 1;
+      s.dirty["2026-11-12"] = 2; // 8 days before → dropped
+      s.dirty["2026-11-13"] = 3; // exactly 7 days → kept
+      s.dirty["2026-11-19"] = 4;
+      s.dirty["garbage"] = 5;
+    }, now);
+    expect(Object.keys(vault.readArchiveState().dirty).sort()).toEqual(["2026-11-13", "2026-11-19"]);
+    expect(logText()).toMatch(/warn — dropping 3 pending day\(s\) older than 7 days, never written: 2026-11-01, 2026-11-12, garbage/);
+    // a later patch that doesn't touch dirty keeps the rest
+    vault.patchArchiveState(() => {}, now);
+    expect(Object.keys(vault.readArchiveState().dirty).sort()).toEqual(["2026-11-13", "2026-11-19"]);
+  });
+
+  it("a vault that stays broken: the day is retried, then aged out after 7 days instead of piling up", () => {
+    const t0 = at(2026, 11, 7, 10, 0);
+    fs.rmSync(V, { recursive: true, force: true });
+    archive.archiveTouch(t0, { immediate: true, now: t0 });
+    expect(Object.keys(vault.readArchiveState().dirty)).toEqual(["2026-11-07"]);
+    archive.archiveTick(loadConfig(), at(2026, 11, 15, 10, 0));
+    expect(vault.readArchiveState().dirty).toEqual({});
   });
 });
 

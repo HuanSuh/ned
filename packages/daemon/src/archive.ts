@@ -297,28 +297,40 @@ export function ensureEmbed(arch: Pick<NedArchive, "vault" | "folder">, day: str
 
 // ---------- writing ----------
 
-/** Write (create or update) the report for `day`. Throws on failure — callers go through flushDay. */
-export function writeDailyReport(cfg: NedConfig, day: string): string {
+/** Optimistic re-merge attempts when the file keeps changing under us (Obsidian saving while we merge). */
+export const REPORT_WRITE_ATTEMPTS = 4;
+/** How writeDailyReport reads the report (tests swap it to simulate a file that keeps changing). */
+export interface ReportIo {
+  read: (abs: string) => string | null;
+}
+const fsIo: ReportIo = { read: (abs) => (fs.existsSync(abs) ? fs.readFileSync(abs, "utf8") : null) };
+
+/**
+ * Write (create or update) the report for `day`. Re-reads after merging: if the file changed meanwhile, merge again on
+ * top of the new text, up to REPORT_WRITE_ATTEMPTS times. `written: false` = it never held still (nothing written) —
+ * the caller keeps the day pending. Throws on I/O failure — callers go through flushDay.
+ */
+export function writeDailyReport(cfg: NedConfig, day: string, io: ReportIo = fsIo): { file: string; written: boolean } {
   const arch = cfg.archive;
   const rel = reportRel(arch.folder, day);
   const abs = resolveInVault(arch.vault, rel);
   const sections = renderSections(collectDay(day, cfg), arch.include);
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const before = fs.existsSync(abs) ? fs.readFileSync(abs, "utf8") : null;
+  for (let attempt = 0; attempt < REPORT_WRITE_ATTEMPTS; attempt++) {
+    const before = io.read(abs);
     const next = mergeReport(before, day, sections);
-    const now = fs.existsSync(abs) ? fs.readFileSync(abs, "utf8") : null;
-    if (now !== before) continue; // changed under us (Obsidian save) — re-merge on top of it
+    if (io.read(abs) !== before) continue; // changed under us (Obsidian save) — re-merge on top of it
     if (next !== before) {
       writeFileAtomic(abs, next);
       log(`archive: wrote ${rel}${before === null ? " (new)" : ""}`);
     }
-    break;
+    return { file: abs, written: true };
   }
-  return abs;
+  log(`archive: warn — ${rel} kept changing during ${REPORT_WRITE_ATTEMPTS} merge attempts; not written, retrying on the next tick`);
+  return { file: abs, written: false };
 }
 
-/** Write one day + (daily_embed) its embed; record the outcome. Never throws. */
-export function flushDay(cfg: NedConfig, day: string, now = Date.now()): boolean {
+/** Write one day + (daily_embed) its embed; record the outcome. Never throws. false = not written (the day stays pending). */
+export function flushDay(cfg: NedConfig, day: string, now = Date.now(), io: ReportIo = fsIo): boolean {
   const arch = cfg.archive;
   const chk = checkVault(arch.vault);
   if (!chk.ok) {
@@ -326,7 +338,13 @@ export function flushDay(cfg: NedConfig, day: string, now = Date.now()): boolean
     return false;
   }
   try {
-    const file = writeDailyReport(cfg, day);
+    const { file, written } = writeDailyReport(cfg, day, io);
+    if (!written) {
+      patchArchiveState((s) => {
+        s.dirty[day] ??= now; // keep it pending → the next tick tries again
+      }, now);
+      return false;
+    }
     let embed: EmbedResult | null = null;
     if (arch.daily_embed)
       try {
@@ -340,7 +358,7 @@ export function flushDay(cfg: NedConfig, day: string, now = Date.now()): boolean
       s.last_write_at = now;
       s.last_write_path = file;
       if (embed) s.last_embed = { day, result: embed, at: now };
-    });
+    }, now);
     return true;
   } catch (e) {
     noteArchiveError(`데일리 리포트 쓰기 실패 (${day})`, e, now);
@@ -361,7 +379,7 @@ export function archiveTouch(ts: number, opts: { immediate?: boolean; cfg?: NedC
     const day = localDay(new Date(Number.isFinite(ts) ? ts : Date.now()));
     patchArchiveState((s) => {
       s.dirty[day] ??= opts.now ?? Date.now();
-    });
+    }, opts.now ?? Date.now());
     if (opts.immediate) flushDay(cfg, day, opts.now ?? Date.now());
   } catch (e) {
     log(`archive: touch failed — ${String(e).slice(0, 200)}`);
@@ -389,7 +407,7 @@ export function archiveTick(cfg: NedConfig, now = Date.now()): void {
         c[k] = (c[k] ?? 0) + 1;
         s.dirty[day] ??= now;
       }
-    });
+    }, now);
     for (const day of Object.keys(st.dirty).filter(isDay).sort()) {
       if (now - (st.written[day] ?? 0) >= ARCHIVE_FLUSH_MS) flushDay(cfg, day, now);
     }

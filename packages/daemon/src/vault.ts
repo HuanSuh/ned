@@ -158,11 +158,30 @@ export function readArchiveState(): ArchiveState {
   return { ...EMPTY, ...s, dirty: obj(s.dirty, {}), written: obj(s.written, {}), src_counts: obj(s.src_counts, {}), src_seen: s.src_seen ? obj(s.src_seen, null) : null };
 }
 
-/** Read-modify-write (one process, sync → no interleaving). Keeps per-day maps to the last 14 days. */
-export function patchArchiveState(fn: (s: ArchiveState) => void): ArchiveState {
+/** A pending day older than this is dropped (its writes kept failing — e.g. the vault went away for a week). */
+export const DIRTY_MAX_DAYS = 7;
+
+/** Local YYYY-MM-DD (same as paths.localDay; kept here so vault.ts stays import-light). */
+const ymd = (ms: number) => {
+  const d = new Date(ms), p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
+/**
+ * Read-modify-write (one process, sync → no interleaving). Keeps written / src_counts to the last 14 days, and drops
+ * pending (dirty) days older than DIRTY_MAX_DAYS before `now` with a warning — otherwise a day that can never be written
+ * would pile up forever. Malformed dirty keys are dropped too.
+ */
+export function patchArchiveState(fn: (s: ArchiveState) => void, now = Date.now()): ArchiveState {
   const s = readArchiveState();
   fn(s);
   for (const k of ["written", "src_counts"] as const) for (const d of Object.keys(s[k]).sort().slice(0, -14)) delete s[k][d];
+  const cutoff = ymd(now - DIRTY_MAX_DAYS * 24 * 3600_000);
+  const stale = Object.keys(s.dirty).filter((d) => !/^\d{4}-\d{2}-\d{2}$/.test(d) || d < cutoff);
+  if (stale.length) {
+    log(`archive: warn — dropping ${stale.length} pending day(s) older than ${DIRTY_MAX_DAYS} days, never written: ${stale.sort().join(", ")}`);
+    for (const d of stale) delete s.dirty[d];
+  }
   try {
     writeJsonAtomic(ARCHIVE_STATE_PATH, s);
   } catch (e) {
@@ -180,5 +199,5 @@ export function noteArchiveError(what: string, e: unknown, now = Date.now()): vo
   patchArchiveState((s) => {
     s.last_error = msg;
     s.last_error_at = now;
-  });
+  }, now);
 }

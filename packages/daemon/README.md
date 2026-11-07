@@ -341,7 +341,7 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
   그 섹션은 파일 끝에 새 블록. 꺼진 섹션은 새로 넣지 않고, 이미 있으면 비운다. 생성 텍스트의 `<!--` 는 `<!-` 로 바꿔 마커 위조를 막는다.
   내용은 디스크에 있는 것으로 매번 다시 그린다: 브리핑(그날 마지막 daily), 순찰(heartbeat UPDATE 의 action/updates/fyi, url·제목 키로 하루 한 번),
   보낸 것(`sent-actions.log` 의 ok — dry_run·`transitions` 읽기 제외), 결과물(`~/.ned/outputs` 그날 것), 세션(그날 이벤트로 `reduceSessions`, 워커 제외),
-  오늘(heartbeat 수·UPDATE 수, agenda 소스별 갱신 수, `costs.json`). 쓰는 사이 파일이 바뀌면(Obsidian 저장) 한 번 다시 합친다.
+  오늘(heartbeat 수·UPDATE 수, agenda 소스별 갱신 수, `costs.json`). 쓰는 사이 파일이 바뀌면(Obsidian 저장) 새 내용 위에 다시 합친다 — 최대 `REPORT_WRITE_ATTEMPTS`(4)번, 끝까지 안 멈추면 쓰지 않고 경고 로그 + 그날을 대기로 남겨 다음 틱에 재시도.
 - **언제**: `archiveTouch(ts, {immediate})` — heartbeat 저장 직후(daily·UPDATE 는 즉시, NED_OK 는 표시만), `appendActionLog` 의 ok 항목(즉시),
   결과물 저장(즉시). `archiveTick` — `cli.ts` 의 1분 `setInterval`(스케줄러 tick 옆, `scheduler.ts` 는 안 건드림)에서 agenda
   `sources_status.<k>.updated_at` 이 새로 done 이면 그날 소스 갱신 수 +1, 그리고 "바뀐 날 && 마지막 쓰기 후 5분(`ARCHIVE_FLUSH_MS`)" 이면 씀.
@@ -356,7 +356,7 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
   메시지에 `output: {id, kind, title, vault_rel?, obsidian_url?, vault_error?}`(깨진 블록이면 `output_error`), `done` 이벤트에도 같이.
   프롬프트 규칙은 `prompts/chat.md` 7번. 저장 후 `archiveTouch(즉시)` → 그날 리포트 "정리 결과물"에 `[[…|제목]]`.
 - **실패**: 볼트 없음·권한(EPERM/EACCES — macOS 파일 접근 안내 포함) 등은 로그 + `~/.ned/archive.json` 의 `last_error` → 설정 → 아카이브.
-  그날은 대기로 남아 다음 틱에 다시 시도. 데몬은 계속 돈다.
+  그날은 대기로 남아 다음 틱에 다시 시도. 데몬은 계속 돈다. 대기 중인 날이 `DIRTY_MAX_DAYS`(7일)보다 오래되면 경고 로그를 남기고 버린다(`archive.json` 이 끝없이 쌓이지 않게).
 
 ## Environment variables
 
