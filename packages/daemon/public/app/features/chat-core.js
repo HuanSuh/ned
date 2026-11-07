@@ -1,6 +1,7 @@
 /* Ned 통신기 (comms) — the DOM-free half: SSE parser, markdown-lite, the 메시지 feed and every HTML string.
  * features/comms.js mounts and wires it; tests import this file directly (no document at import). */
 import { esc, safeUrl } from "../util.js";
+import { parseActionBlock, renderActionCard } from "./chat-action.js";
 
 // ---------- persona wording (structure is shared; only words + theme tokens change) ----------
 export const COMMS_VOICE = {
@@ -116,9 +117,15 @@ function inline(s) {
   out.push(esc(s.slice(last)));
   return out.join("");
 }
+// Fenced blocks get a copy button (features/code-copy.js handles the click, delegated on document). The ```lang line is
+// consumed by the split, so <pre><code>'s textContent is exactly the original block text — that's what gets copied.
+const COPY_ICON = '<svg class="ic-copy" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M11 3.5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>'
+  + '<svg class="ic-ok" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+export const codeBlockHtml = (code) =>
+  `<div class="cm-code"><button type="button" class="cm-copy" aria-label="복사" title="복사">${COPY_ICON}</button><pre><code>${esc(code)}</code></pre></div>`;
 export function mdLite(text) {
   const parts = String(text ?? "").split(/```[^\n`]*\n?/);
-  return parts.map((p, i) => (i % 2 ? `<pre><code>${esc(p.replace(/\n$/, ""))}</code></pre>` : p.split("\n").map(inline).join("<br>"))).join("");
+  return parts.map((p, i) => (i % 2 ? codeBlockHtml(p.replace(/\n$/, "")) : p.split("\n").map(inline).join("<br>"))).join("");
 }
 
 // ---------- 메시지 feed ----------
@@ -161,18 +168,28 @@ export function feedHtml(items, voice, relFn = () => "") {
 // ---------- chat ----------
 export const usd = (n) => `$${(Number(n) || 0).toFixed(2)}`;
 
-/** Message list. `live` = the streaming answer ({ text, tool, thinking }) or null. */
-export function messagesHtml(msgs, voice, live = null, timeFn = () => "", hello = "") {
+/** A ned answer's body: its text + the 확인 카드 for a ```ned-action block (chat-action.js). `cardState(m)` → card state. */
+function nedBody(m, cardState) {
+  const pa = parseActionBlock(m.text);
+  if (!pa.block && !pa.error) return m.text ? mdLite(m.text) : "";
+  const card = pa.block ? renderActionCard(pa.block, cardState(m, pa.block), { id: String(m.ts) }) : `<div class="cm-act bad">⚠ ${esc(pa.error)}</div>`;
+  return (pa.text ? mdLite(pa.text) : "") + card;
+}
+const defaultCardState = (m) => ({ status: m.action?.state || "idle", text: m.action?.text, result: m.action?.result });
+
+/** Message list. `live` = the streaming answer ({ text, tool, thinking }) or null. `cardState(m, block)` → 확인 카드 state. */
+export function messagesHtml(msgs, voice, live = null, timeFn = () => "", hello = "", cardState = defaultCardState) {
   if (!msgs.length && !live) return hello
     ? `<div class="cm-msg ned hello"><div class="bb"><b class="hi">${esc(hello)}</b><span class="hint">${esc(voice.empty)}</span></div></div>`
     : `<div class="cm-empty">${esc(voice.empty)}</div>`;
   const row = (m) => {
     const me = m.role === "user";
     const meta = [timeFn(m.ts), !me && m.cost_usd ? usd(m.cost_usd) : "", m.stopped ? "중단됨" : ""].filter(Boolean).join(" · ");
-    return `<div class="cm-msg ${me ? "me" : "ned"}${m.error ? " err" : ""}"><div class="bb">${m.text ? mdLite(m.text) : m.stopped ? "<i>(멈춤)</i>" : ""}${m.error ? `<div class="cm-err">⚠ ${esc(m.error)}</div>` : ""}</div>${meta ? `<div class="mm">${esc(meta)}</div>` : ""}</div>`;
+    return `<div class="cm-msg ${me ? "me" : "ned"}${m.error ? " err" : ""}"><div class="bb">${m.text ? (me || m.error ? mdLite(m.text) : nedBody(m, cardState)) : m.stopped ? "<i>(멈춤)</i>" : ""}${m.error ? `<div class="cm-err">⚠ ${esc(m.error)}</div>` : ""}</div>${meta ? `<div class="mm">${esc(meta)}</div>` : ""}</div>`;
   };
   let html = msgs.map(row).join("");
-  if (live) html += `<div class="cm-msg ned live"><div class="bb">${live.text ? mdLite(live.text) : ""}<div class="cm-think"><span class="spin"></span>${esc(live.tool ? `${voice.thinking} ${live.tool}` : voice.thinking)}</div></div></div>`;
+  const lp = live ? parseActionBlock(live.text) : null; // a proposal shows as a card once the answer is done
+  if (live) html += `<div class="cm-msg ned live"><div class="bb">${lp.text ? mdLite(lp.text) : ""}${lp.block || lp.pending ? `<div class="cm-act s-pending">⚡ 실행 제안 준비 중…</div>` : ""}<div class="cm-think"><span class="spin"></span>${esc(live.tool ? `${voice.thinking} ${live.tool}` : voice.thinking)}</div></div></div>`;
   return html;
 }
 

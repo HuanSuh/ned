@@ -44,6 +44,8 @@ export interface SessionCreateInput {
   model: SessionModel;
   /** 첫 프롬프트 전문(PLAN_FIRST 로 시작). */
   prompt: string;
+  /** "chat" = Ned Net 확인 카드에서 실행 → actions.chat_write 도 켜져 있어야 한다(다른 대화창 쓰기와 같은 규칙). */
+  origin?: "chat";
 }
 
 /** One session started from the chat (chat-sessions.json). */
@@ -120,8 +122,11 @@ export function parseSessionCreate(body: Record<string, unknown>): SessionCreate
   if (!prompt) return "prompt required (첫 프롬프트 전문)";
   const full = ensurePlanFirst(prompt);
   if (full.length > MAX_PROMPT) return `prompt longer than ${MAX_PROMPT} chars`;
-  return { repo, worktree: { mode, name }, model: model as SessionModel, prompt: full };
+  return { repo, worktree: { mode, name }, model: model as SessionModel, prompt: full, ...(body.origin === "chat" ? { origin: "chat" as const } : {}) };
 }
+
+/** The `ref` of this request's sent-actions.log line (also what the card matches after a reload / restart). */
+export const sessionLogRef = (input: Pick<SessionCreateInput, "repo" | "worktree">) => ({ title: `${path.basename(input.repo)} · ${input.worktree.mode === "new" ? "새" : "기존"} ${input.worktree.name}`, repo: input.repo });
 
 // ---------------------------------------------------------------------------------------------- orca reads
 
@@ -151,8 +156,35 @@ const resultOf = (json: unknown): Record<string, unknown> => ((json as { result?
 const arr = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 const norm = (p: string) => path.resolve(p).replace(/\/+$/, "");
 
+/** Last allow-list read, for the chat prompt (chatWriteBlock is sync). */
+let repoCache: { at: number; paths: string[] } = { at: 0, paths: [] };
+let repoRefreshing = false;
+const REPO_CACHE_MS = 10 * 60_000;
+
+/** Cached Orca 등록 레포 paths; a stale / empty cache starts a background refresh (the next prompt sees it). */
+export function knownRepoPaths(now = Date.now()): string[] {
+  if (now - repoCache.at > REPO_CACHE_MS && !repoRefreshing) {
+    repoRefreshing = true;
+    void allowedRepos(sessionCreateDeps().orca)
+      .catch(() => undefined)
+      .finally(() => {
+        repoRefreshing = false;
+      });
+  }
+  return repoCache.paths;
+}
+/** Test helper. */
+export function _setRepoCache(paths: string[], at = Date.now()): void {
+  repoCache = { at, paths };
+}
+
 /** 허용 목록: `orca repo list` 의 git 레포 (실패하면 `orca worktree list` 의 메인 워크트리). */
 export async function allowedRepos(o: OrcaExec): Promise<{ repos: OrcaRepo[]; error?: string }> {
+  const r = await readAllowedRepos(o);
+  if (r.repos.length) repoCache = { at: Date.now(), paths: r.repos.map((x) => x.path) };
+  return r;
+}
+async function readAllowedRepos(o: OrcaExec): Promise<{ repos: OrcaRepo[]; error?: string }> {
   const r = await o(["repo", "list", "--json"]);
   const repos = arr<OrcaRepo>(resultOf(r.json).repos).filter((x) => typeof x?.path === "string" && (!x.kind || x.kind === "git"));
   if (repos.length) return { repos };
@@ -324,7 +356,7 @@ function logEntry(input: SessionCreateInput, action: string, ok: boolean, result
     mode: "create",
     action,
     origin: "chat",
-    ref: { title: `${path.basename(input.repo)} · ${input.worktree.mode === "new" ? "새" : "기존"} ${input.worktree.name}`, repo: input.repo },
+    ref: sessionLogRef(input),
     text: input.prompt.slice(0, 120),
     ok,
     result,
@@ -343,6 +375,7 @@ export async function validateSessionCreate(
   sessions: SessionView[] = [],
 ): Promise<{ ok: true; repo: OrcaRepo; existing?: OrcaWorktree; live: number } | ({ ok: false } & Refusal)> {
   if (cfg.actions.chat_session_create !== true) return { ok: false, status: 403, action: "refused", detail: "config.actions.chat_session_create is off — 설정 → 쓰기 액션 → 세션 → '대화창에서 세션 만들기' 를 켜야 해" };
+  if (input.origin === "chat" && cfg.actions.chat_write !== true) return { ok: false, status: 403, action: "refused", detail: "config.actions.chat_write is off — 설정 → 쓰기 액션 → 대화창 → '대화창에서 쓰기 허용' 을 켜야 해" };
   const { repos, error } = await allowedRepos(deps.orca);
   if (!repos.length) return { ok: false, status: 502, action: "session_create", detail: error ?? "Orca 등록 레포를 읽지 못했어" };
   const repo = repos.find((r) => norm(r.path) === norm(input.repo));

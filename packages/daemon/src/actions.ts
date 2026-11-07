@@ -63,7 +63,13 @@ export interface SendRequest {
   mode: SendMode;
   /** calendar `create` only (POST /api/calendar/events builds it — see calendar-create.ts). */
   event?: CalendarEventInput;
+  /** "chat" = run from a Ned Net 확인 카드 (needs config.actions.chat_write too); absent = dashboard buttons. */
+  origin?: ActionOrigin;
 }
+
+export type ActionOrigin = "chat";
+/** `body.origin` → "chat" or undefined (anything else is ignored). */
+export const parseOrigin = (v: unknown): ActionOrigin | undefined => (v === "chat" ? "chat" : undefined);
 
 export interface SendResult {
   ok: boolean;
@@ -102,8 +108,8 @@ export interface ActionLogEntry {
   event_key?: string;
   /** calendar `create` ok: the new event. */
   event?: CreatedEvent;
-  /** Where the action was asked from — "chat" = Ned 대화창 (session_create). */
-  origin?: string;
+  /** "chat" when the Ned Net 확인 카드 ran it (설정 → 오늘 한 액션 shows a 대화창 badge). */
+  origin?: ActionOrigin;
   /** session `create` (대화창에서 세션 만들기): what was started — see session-create.ts. */
   session_create?: { repo: string; worktree_mode: string; worktree_name: string; model: string; worktree_path?: string; handle?: string; stage?: string };
 }
@@ -188,7 +194,8 @@ export function parseSendRequest(body: Record<string, unknown>): SendRequest | s
     const v = typeof r[k] === "number" ? String(r[k]) : r[k];
     if (typeof v === "string" && v.trim()) ref[k] = v.trim().slice(0, 500);
   }
-  return { source, mode, text, ref, draft_id: typeof body.draft_id === "string" ? body.draft_id.slice(0, 40) : undefined };
+  const origin = parseOrigin(body.origin);
+  return { source, mode, text, ref, draft_id: typeof body.draft_id === "string" ? body.draft_id.slice(0, 40) : undefined, ...(origin ? { origin } : {}) };
 }
 
 /** Which config.actions switch gates this (source, mode). */
@@ -208,9 +215,12 @@ export function gateKey(req: Pick<SendRequest, "source" | "mode">): keyof NedCon
       return req.mode === "create" ? "calendar_create" : "calendar_rsvp";
   }
 }
-function gate(req: SendRequest, cfg: NedConfig): { key: keyof NedConfig["actions"]; on: boolean } {
+/** The switch that refuses `req` (its own gate, then chat_write for origin "chat"), or on:true. */
+export function gate(req: Pick<SendRequest, "source" | "mode" | "origin">, cfg: NedConfig): { key: keyof NedConfig["actions"]; on: boolean } {
   const key = gateKey(req);
-  return { key, on: cfg.actions[key] === true };
+  if (cfg.actions[key] !== true) return { key, on: false };
+  if (req.origin === "chat" && cfg.actions.chat_write !== true) return { key: "chat_write", on: false };
+  return { key, on: true };
 }
 
 /** Run options for a connector action: dontAsk + ONLY ToolSearch and the one write tool; no other built-ins. */
@@ -565,7 +575,7 @@ async function sendToSession(req: SendRequest): Promise<{ status: 200 | 400 | 40
  */
 export async function performSend(req: SendRequest, cfg: NedConfig): Promise<SendResult> {
   const logged_at = new Date().toISOString();
-  const entry: ActionLogEntry = { ts: logged_at, source: req.source, mode: req.mode, action: "", ref: req.ref, draft_id: req.draft_id, text: req.text.slice(0, 120), ok: false, result: "" };
+  const entry: ActionLogEntry = { ts: logged_at, source: req.source, mode: req.mode, action: "", ref: req.ref, draft_id: req.draft_id, text: req.text.slice(0, 120), ok: false, result: "", ...(req.origin ? { origin: req.origin } : {}) };
   if (req.event) entry.event_key = eventKey(req.event);
   const finish = (status: SendResult["status"], ok: boolean, action: string, detail: string, event?: CreatedEvent): SendResult => {
     appendActionLog({ ...entry, action, ok, result: detail, ...(event ? { event } : {}) });
