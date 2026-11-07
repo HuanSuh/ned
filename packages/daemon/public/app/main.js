@@ -10,6 +10,7 @@ import { init as initComms } from "./features/comms.js";
 import { init as initDrafts } from "./features/drafts.js";
 import { init as initReviewed } from "./features/reviewed.js";
 import { init as initSlackThread } from "./features/slackthread.js";
+import { init as initTodoSplit, setMeFold, isMeFolded } from "./features/todosplit.js";
 import { emit, store } from "./state.js";
 import { init as initHome } from "./tabs/home.js";
 import { dashActive, initActivityPing } from "./features/autosched.js";
@@ -176,7 +177,7 @@ window.NED = { store, api: { api, postJson }, nav };
 
 // Every module's listeners + one-time setup, in the order the single file ran them — listener order on document
 // matters (e.g. the error popover's Esc stopImmediatePropagation runs before the page keys in boot()).
-for (const init of [initChips, initPopover, initSettings, initCardLayout, initLayout, initReviewed, initDrafts, initCalendar, initCards, initSlackThread, initAgStatus, initHome, initComms, initActivityPing]) init();
+for (const init of [initChips, initPopover, initSettings, initCardLayout, initLayout, initReviewed, initDrafts, initCalendar, initCards, initSlackThread, initAgStatus, initHome, initTodoSplit, initComms, initActivityPing]) init();
 boot();
 
 function boot() {
@@ -195,7 +196,7 @@ function boot() {
         const k = { ArrowLeft: () => calMove(-1), ArrowRight: () => calMove(1), t: () => calMove(0), d: () => calView("day"), w: () => calView("week") }[ev.key];
         if (k) { k(); ev.preventDefault(); return; }
       }
-      if (ev.key === "n") { $("tadd-t").focus(); ev.preventDefault(); }
+      if (ev.key === "n") { if (isMeFolded()) setMeFold(false); $("tadd-t").focus(); ev.preventDefault(); }
       else if (TAB_KEYS[ev.key]) { ui.tab = TAB_KEYS[ev.key]; ui.sel = 0; ui.selKey = null; location.hash = "#inbox"; }
       return;
     }

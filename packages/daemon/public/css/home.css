@@ -79,6 +79,19 @@
 .tgrp > .gh .n, .scard .sh .n { margin-left: auto; font-weight: 600; color: var(--faint); background: var(--hover); border-radius: 999px; padding: 0 8px; }
 .tgrp > .gh .n.hot, .scard .sh .n.hot { color: #1c2133; background: var(--amber); }
 .tgrp .gl { border-left: 2px solid var(--gc, var(--line)); margin-top: 4px; }
+/* 할 일 card split (features/todosplit.js): .tup = 확인 필요 groups, #todo-split = divider, #grp-me = 개인 할 일.
+   Stacked flow: .tup dissolves, no divider, natural heights. Free grid (#hgrid.free, below): two areas + divider. */
+.tup { display: contents; }
+.tup[hidden], .tsplit-h[hidden] { display: none; }
+.tsplit-h + .tgrp { margin-top: 14px; }
+.tup[hidden] ~ .tgrp { margin-top: 0; }
+.tgrp > button.gh { appearance: none; background: none; border: 0; border-bottom: 1px solid var(--line); width: 100%; text-align: left; cursor: pointer; border-radius: 4px 4px 0 0; }
+.tgrp > button.gh:hover { background: var(--hover); color: var(--fg); }
+.tgrp > button.gh:focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
+.tgrp > .gh .chev { color: var(--faint); font-size: 10px; letter-spacing: 0; transition: transform .15s; }
+.tgrp.fold > .gh .chev { transform: rotate(-90deg); }
+.tgrp.fold > .gh { border-bottom-style: dashed; }
+@media (prefers-reduced-motion: reduce) { .tgrp > .gh .chev { transition: none; } }
 .g-ned { --gc: var(--mint); } .g-jira { --gc: var(--blue); } .g-gh { --gc: var(--dim); } .g-mail { --gc: var(--violet); } .g-slack { --gc: var(--hero); } .g-me { --gc: var(--amber); }
 /* source cards (mail · jira · slack · github): shrink (summary + top item) ⇄ expanded (full list) */
 /* Source cards sit in rows of a --cols (1 or 2) column grid, in config.dashboard order; packCards() sets each card's
@@ -201,6 +214,25 @@ details.tdone summary::before { content: "▸ "; } details.tdone[open] summary::
 #hgrid.free .hcol, #hgrid.free .sgrid { display: contents; }
 #hgrid.free .lp { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 #hgrid.free #todo-card { contain: none; min-height: 0; }
+/* 할 일 split (features/todosplit.js sets .tsplit, --up-max, --me-min on #todo-bd): the upper groups are content-sized
+   up to --up-max and scroll as one; 개인 할 일 fills the rest (≥ --me-min), header + form fixed, its list scrolls. */
+#todo-card .tgrp.fold { flex: none; min-height: 0; }
+#hgrid.free #todo-card > .bd.tsplit { overflow: hidden; }
+#hgrid.free #todo-card .tsplit > .tup { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; max-height: var(--up-max, 60%); overflow: auto; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
+#hgrid.free #todo-card .tsplit > .tup > .tgrp { flex: none; min-height: 0; }
+#hgrid.free #todo-card .tsplit > .tup > .tgrp > .gl { overflow: visible; }
+#hgrid.free #todo-card .tsplit > #grp-me { flex: 1 1 0; min-height: var(--me-min, 0px); margin-top: 0; }
+#hgrid.free #todo-card .tsplit > #grp-me > .gl { display: flex; flex-direction: column; overflow: hidden; }
+#hgrid.free #todo-card .tsplit #tadd { flex: none; }
+#hgrid.free #todo-card .tsplit #g-me { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
+.tsplit-h { flex: none; position: relative; height: 14px; margin: 0 -6px; cursor: ns-resize; touch-action: none; border-radius: 4px; }
+.tsplit-h::before { content: ""; position: absolute; left: 6px; right: 6px; top: 6px; height: 2px; border-radius: 2px; background: var(--line); transition: background .12s; }
+.tsplit-h::after { content: ""; position: absolute; left: 50%; top: 4px; width: 28px; height: 6px; margin-left: -14px; border-radius: 3px; background: var(--pane); border: 1px solid var(--edge); }
+.tsplit-h:hover::before, .tsplit-h:focus-visible::before, .tdrag > .tsplit-h::before { background: color-mix(in srgb, var(--hero) 70%, transparent); }
+.tsplit-h:hover::after, .tdrag > .tsplit-h::after { border-color: var(--hero); }
+.tsplit-h:focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
+.tdrag { user-select: none; cursor: ns-resize; }
+@media (prefers-reduced-motion: reduce) { .tsplit-h::before { transition: none; } }
 #hgrid.free .scard .sl { flex: 1 1 auto; min-height: 0; max-height: none; }
 #hgrid.free:not(.locked) .lgrip { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 18px; height: 24px; margin: 0 -4px 0 -6px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--faint); cursor: grab; opacity: 0; transition: opacity .12s; touch-action: none; }
 #hgrid.free .scard > .shw > .lgrip { margin: 0 -10px 0 6px; }

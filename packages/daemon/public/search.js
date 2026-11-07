@@ -517,6 +517,8 @@
     if (!card) return false;
     if (!visible(card)) { clearPills("home"); await nextFrame(); }
     if (card.classList.contains("scard") && !card.classList.contains("open")) card.querySelector(".sh[data-card]")?.click();
+    // a personal todo hit while "개인 할 일" is folded (features/todosplit.js): unfold it
+    if (h.type === "todo") { const t = $("me-fold"); if (t?.getAttribute("aria-expanded") === "false") t.click(); }
     // todo's 완료 fold, a card's 확인 완료 fold, the Slack card's 채널 팔로업 fold: open the one holding the hit
     if (which === "todo" || card.classList.contains("scard")) for (const d of card.querySelectorAll("details")) if (!d.open && [...d.querySelectorAll(".tt")].some((t) => sameText(txt(t), h.title))) d.open = true;
     const isMe = (x) => sameText(txt(x.querySelector(".tt")), h.title);
