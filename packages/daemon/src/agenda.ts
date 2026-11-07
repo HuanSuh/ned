@@ -596,7 +596,7 @@ export function pickSections(text: string, keep: Set<string>): string {
 /** Ack emoji the Slack list call searches (`hasmy::emoji:`): the first filters.slack.ack_check_max of ack_reactions. */
 export function ackCheckEmojis(cfg: NedConfig): string[] {
   const s = cfg.filters.slack;
-  return (s.ack_reactions ?? []).slice(0, Math.max(0, s.ack_check_max ?? ACK_CHECK_MAX_DEFAULT));
+  return (s.ack_reactions ?? []).slice(0, Math.max(1, s.ack_check_max ?? ACK_CHECK_MAX_DEFAULT));
 }
 
 /** Phase-1 prompt for one call covering `keys` (prompts/agenda-lists.md: lists only, no per-item context). */
