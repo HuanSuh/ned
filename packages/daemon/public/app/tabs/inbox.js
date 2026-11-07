@@ -1,6 +1,7 @@
 /* Inbox tab: model (attention + briefings), tabs, list rows, detail pane, session rail. */
 import { api } from "../api.js";
 import { draftBtn, mailRef, sessionRef, slackRef } from "../features/drafts.js";
+import { bfFailed, bfKind } from "../features/dailyfail.js";
 import { V, opener, quip, say } from "../features/personas.js";
 import { openAtt, srcKey } from "../features/reviewed.js";
 import { loadState, renderHeader } from "../main.js";
@@ -25,15 +26,17 @@ export function model() {
       other.push({ key: `${b.id}:${sec}:${i}`, kind: x.kind || "other", title: x.title, detail: x.detail, url: safeUrl(x.url), ts: b.ts, label, briefing: b, rk: srcKey(x.kind, { url: x.url }) }));
   }
   other.sort((a, b) => b.ts - a.ts);
-  // History: UPDATE briefings one per row; consecutive NED_OK runs fold into one row.
+  // History: UPDATE briefings one per row; consecutive NED_OK runs fold into one row. A failed run (claude error /
+  // unparsable answer) is not "이상 무": it gets its own row.
   const hist = [];
   for (const b of [...S.briefings].sort((a, z) => z.ts - a.ts)) {
     const last = hist[hist.length - 1];
-    if (b.status === "NED_OK" && last && last.okrun) { last.okrun.push(b); continue; }
-    if (b.status === "NED_OK") hist.push({ key: `ok:${b.id}`, okrun: [b], ts: b.ts });
+    const quiet = b.status === "NED_OK" && !bfFailed(b);
+    if (quiet && last && last.okrun) { last.okrun.push(b); continue; }
+    if (quiet) hist.push({ key: `ok:${b.id}`, okrun: [b], ts: b.ts });
     else hist.push({ key: `bf:${b.id}`, brief: b, ts: b.ts });
   }
-  const ok = S.briefings.filter((b) => b.status === "NED_OK");
+  const ok = S.briefings.filter((b) => b.status === "NED_OK" && !bfFailed(b));
   const priOpen = pri.filter((x) => !x.att.reviewed_at), priRev = pri.filter((x) => x.att.reviewed_at);
   for (const x of other) x.rat = x.rk ? (S.agenda?.reviewed || {})[x.rk] || 0 : 0; // source items: same marks as the cards
   const otherOpen = other.filter((x) => !x.rat), otherRev = other.filter((x) => x.rat);
@@ -62,7 +65,7 @@ export function rowHtml(it, i) {
   }
   if (it.brief) {
     const b = it.brief, n = (b.action_items?.length || 0), u = (b.updates?.length || 0), f = (b.fyi?.length || 0);
-    return `<div class="row ${sel}" data-i="${i}"><span class="ic">📝</span><span class="tt"><span class="stk ${b.type === "daily" ? "b" : ""} flat">${b.type === "daily" ? "아침" : "점검"}</span>&nbsp; ${esc(b.headline || `${n + u + f}건`)}</span><span class="tm">${hhmm(b.ts)}</span><span class="sb">행동 ${n} · 업데이트 ${u} · 참고 ${f}${b.cost_usd != null ? ` · $${Number(b.cost_usd).toFixed(2)}` : ""}</span></div>`;
+    return `<div class="row ${sel}" data-i="${i}"><span class="ic">📝</span><span class="tt"><span class="stk ${bfFailed(b) ? "r" : b.type === "daily" ? "b" : ""} flat">${bfKind(b)}</span>&nbsp; ${esc(b.headline || (bfFailed(b) ? "Claude 실행 실패 — raw 참고" : `${n + u + f}건`))}</span><span class="tm">${hhmm(b.ts)}</span><span class="sb">행동 ${n} · 업데이트 ${u} · 참고 ${f}${b.cost_usd != null ? ` · $${Number(b.cost_usd).toFixed(2)}` : ""}</span></div>`;
   }
   const acts = it.att ? `${openIcon(it.url)}${reviewIcon(it.att)}` : `${openIcon(it.url)}${it.rk ? reviewIcon({ id: it.rk, reviewed_at: it.rat }) : ""}`;
   return `<div class="row ${sel} ${!it.att && ui.read.has(it.key) ? "read" : ""}${isRevRow(it) ? " reviewed" : ""}${acts ? " has-acts" : ""}" data-i="${i}">
@@ -123,10 +126,11 @@ export function sectionList(title, xs) {
       return `<li>${KIND_ICON[x.kind] ? KIND_ICON[x.kind] + " " : ""}${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(x.title)}</a>` : esc(x.title)}${x.detail ? `<div class="d">${esc(x.detail)}</div>` : ""}</li>`;
     }).join("")}</ul>`;
 }
-export const bfLabel = (b) => `${b.type === "daily" ? "아침 브리핑" : "점검"} · ${dayLabel(b.ts)} ${hhmm(b.ts)}`;
+export const bfLabel = (b) => `${b.type === "daily" ? "아침 브리핑" : "점검"}${bfFailed(b) ? " 실패" : ""} · ${dayLabel(b.ts)} ${hhmm(b.ts)}`;
 export const costLine = (b) => `<dl class="kv"><dt>id</dt><dd class="mono">${esc(b.id)}</dd>${b.cost_usd != null ? `<dt>비용</dt><dd class="mono">$${Number(b.cost_usd).toFixed(3)}</dd>` : ""}</dl>${b.raw ? `<h3>raw</h3><pre class="raw">${esc(b.raw)}</pre>` : ""}`;
 
 export function briefingSay(b) {
+  if (bfFailed(b)) return say(`ned · ${esc(bfLabel(b))} · <span class="stk r flat">실패</span>`, esc("Claude 실행이 실패했거나 답을 못 읽었어. 아래 raw 참고."));
   const ok = b.status === "NED_OK";
   const lead = b.headline || (ok ? quip(b.ts) : "몇 가지 챙겨 왔어.");
   return say(`ned · ${esc(bfLabel(b))} · <span class="stk ${ok ? "g" : "a"} flat">${ok ? "ned_ok" : "update"}</span>`, esc(lead));
@@ -158,7 +162,7 @@ export function renderDetail(it, m) {
     const b = it.brief;
     sig = `bf:${b.id}`;
     html = `<div class="dwrap">${back}
-        <div class="crumb"><span class="stk ${b.type === "daily" ? "b" : ""}">${b.type === "daily" ? "아침" : "점검"}</span><span class="stk a">update</span><span>${esc(dayLabel(b.ts))} ${hhmm(b.ts)} · ${rel(b.ts)}</span></div>
+        <div class="crumb"><span class="stk ${b.type === "daily" ? "b" : ""}">${b.type === "daily" ? "아침" : "점검"}</span>${bfFailed(b) ? `<span class="stk r">실패</span>` : `<span class="stk a">update</span>`}<span>${esc(dayLabel(b.ts))} ${hhmm(b.ts)} · ${rel(b.ts)}</span></div>
         <div class="ctx">${briefingSay(b)}
         ${sectionList("행동 필요", b.action_items)}${sectionList("업데이트", b.updates)}${sectionList("참고", b.fyi)}${sectionList("세션", b.sessions)}
         <h3>메타</h3>${costLine(b)}</div></div>`;

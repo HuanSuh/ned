@@ -26,7 +26,7 @@ import { parseLines } from "./events.js";
 import { AGENDA_PATH, BRIEFINGS_DIR, EVENTS_DIR, localDay, log, readJson } from "./paths.js";
 import { OUTPUT_KIND_KO, listOutputs } from "./outputs.js";
 import { reduceSessions } from "./sessions.js";
-import type { Briefing, BriefingSection } from "./state.js";
+import { briefingOk, type Briefing, type BriefingSection } from "./state.js";
 import { checkVault, defang, findBlock, noteArchiveError, patchArchiveState, readArchiveState, replaceBlocks, resolveInVault, writeFileAtomic, type VaultCheck } from "./vault.js";
 
 /** Tick flush: a changed day is rewritten at most this often (immediate triggers bypass it). */
@@ -129,8 +129,9 @@ const keyOf = (s: BriefingSection) => (s.url || s.title || "").trim().toLowerCas
 
 /** Every daily briefing of the day (a re-run of 아침 브리핑 drops already-sent items, so the first one keeps them): one list each, deduped. */
 function briefingBody(d: DayData): string {
-  const dailies = d.briefings.filter((x) => x.type === "daily");
-  if (!dailies.length) return "## 🌅 브리핑\n\n_(아직 아침 브리핑 없음)_";
+  const dailies = d.briefings.filter((x) => x.type === "daily" && briefingOk(x)); // failed runs (claude error / unparsable) aren't a briefing
+  const failed = d.briefings.filter((x) => x.type === "daily" && !briefingOk(x)).length;
+  if (!dailies.length) return `## 🌅 브리핑\n\n_(${failed ? `아침 브리핑 실패 ${failed}회 — 성공한 브리핑 없음` : "아직 아침 브리핑 없음"})_`;
   const out = [`## 🌅 브리핑`, "", ...dailies.map((b) => `${hm(b.ts)}${b.headline ? ` — **${one(b.headline, 200)}**` : ""}`)];
   const seen = new Set<string>();
   for (const label of ["행동 필요", "업데이트", "참고"] as const) {
@@ -197,7 +198,7 @@ function todayBody(d: DayData): string {
   return [
     "## 📊 오늘",
     "",
-    `- 순찰 ${hb.length}회 (알림 ${upd}회)${d.briefings.some((b) => b.type === "daily") ? " · 아침 브리핑 ✓" : ""}`,
+    `- 순찰 ${hb.length}회 (알림 ${upd}회)${d.briefings.some((b) => b.type === "daily" && briefingOk(b)) ? " · 아침 브리핑 ✓" : d.briefings.some((b) => b.type === "daily") ? " · 아침 브리핑 실패" : ""}`,
     `- 소스 갱신: ${src.length ? src.join(" · ") : "—"}`,
     `- 비용: ${c ? `$${(c.total_usd ?? 0).toFixed(2)} (${c.runs ?? 0}회${jobs.length ? ` — ${jobs.join(", ")}` : ""})` : "$0.00"}`,
     `- 보낸 것 ${d.actions.length}건 · 정리 결과물 ${d.outputs.length}건`,

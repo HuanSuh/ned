@@ -9,6 +9,7 @@ import { draftFor } from "../features/drafts.js";
 import { renderWatchCards } from "../features/watchcards.js";
 import { V, greet, say } from "../features/personas.js";
 import { autoSchedChip } from "../features/autosched.js";
+import { dailyFailedLine } from "../features/dailyfail.js";
 import { isOpenSrc, openAtt, revAt, revCls, srcCheck, srcKey, withFold } from "../features/reviewed.js";
 import { loadAgenda, loadState, loadTodos, renderAll, renderHeader } from "../main.js";
 import { S, ui } from "../state.js";
@@ -173,6 +174,8 @@ export function homeLine() {
     if (w.length) bits.push(V().wait(w));
   }
   const sub = [];
+  const dfail = dailyFailedLine(S.state, now); // automatic morning briefing gave up after its retries
+  if (dfail) sub.push(dfail);
   const ned = openAtt().filter((a) => a.source !== "sessions").length;
   const open = (S.todos || []).filter((t) => !t.done), over = open.filter((t) => (dueInfo(t.due)?.days ?? 1) < 0).length;
   const ask = mt.filter((e) => e.rsvp === "needsAction" && e.en > now).length;

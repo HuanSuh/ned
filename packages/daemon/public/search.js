@@ -168,8 +168,9 @@
     for (const t of Array.isArray(d.todos) ? d.todos : []) out.push({ type: "todo", id: t.id, title: t.title, detail: [t.done ? "완료" : "", t.due ? `마감 ${t.due}` : "", t.note || ""].filter(Boolean).join(" · "), ts: t.created_at, url: null, kind: "me", tab: "home", anchor: "card:todo", done: !!t.done, fields: [[t.title, 3], [t.note, 1]] });
     for (const b of Array.isArray(d.briefings) ? d.briefings : []) {
       const secs = ["action_items", "updates", "fyi", "sessions"], items = secs.flatMap((sec) => (b[sec] || []).map((x) => ({ ...x, section: sec })));
-      const label = b.type === "daily" ? "아침 브리핑" : "점검";
-      out.push({ type: "briefing", id: b.id, title: b.headline || `${label} · ${b.status === "NED_OK" ? "이상 무" : `${items.length}건`}`, detail: items.map((x) => x.title).slice(0, 3).join(" · ") || label, ts: b.ts, url: null, kind: "briefing", tab: "inbox", anchor: `briefing:${b.id}`, items, status: b.status, local: true,
+      const failed = b.ok === false || (b.ok == null && b.raw != null); // features/dailyfail.js bfFailed
+      const label = `${b.type === "daily" ? "아침 브리핑" : "점검"}${failed ? " (실패)" : ""}`;
+      out.push({ type: "briefing", id: b.id, title: b.headline || `${label} · ${failed ? "Claude 실패" : b.status === "NED_OK" ? "이상 무" : `${items.length}건`}`, detail: items.map((x) => x.title).slice(0, 3).join(" · ") || label, ts: b.ts, url: null, kind: "briefing", tab: "inbox", anchor: `briefing:${b.id}`, items, status: b.status, local: true,
         fields: [[b.headline, 3], [label, 1], [b.status, 1], ...items.flatMap((x) => [[x.title, 2], [x.detail, 1], [x.kind, 1]])] });
     }
     for (const e of Array.isArray(d.events) ? d.events : []) {

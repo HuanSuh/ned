@@ -3,13 +3,14 @@ import fs from "node:fs";
 import { archiveTick } from "./archive.js";
 import { buildPrompt, enabledSources, readAgenda, refreshAgenda, runningSources } from "./agenda.js";
 import { loadConfig, type NedConfig } from "./config.js";
-import { createScheduler, eventsActivityAt, hidIdleMs } from "./scheduler.js";
+import { WAKE_GAP_MS, createScheduler, eventsActivityAt, hidIdleMs } from "./scheduler.js";
+import { createOnlineCheck } from "./online.js";
 import { todayCost } from "./costs.js";
-import { buildHeartbeatPrompt, heartbeat, heartbeatWatchKey, listBriefings, pendingSessionNews, refreshSessions } from "./heartbeat.js";
+import { buildHeartbeatPrompt, hadGoodDailyOn, heartbeat, heartbeatWatchKey, pendingSessionNews, refreshSessions } from "./heartbeat.js";
 import { readUnprocessedEvents } from "./events.js";
 import { EVENTS_DIR, STATE_PATH, ensureDirs, localDay, log } from "./paths.js";
 import { startServer } from "./server.js";
-import { readState } from "./state.js";
+import { readState, writeState } from "./state.js";
 
 const [, , cmd = "run", ...rest] = process.argv;
 const flag = (f: string) => rest.includes(f);
@@ -35,8 +36,9 @@ async function main(): Promise<void> {
       });
 
       // Don't repeat today's daily briefing after a restart: look at the briefing files,
-      // not state.last_briefing (a later heartbeat overwrites that).
-      const hadDailyToday = listBriefings(50).some((b) => b.type === "daily" && localDay(new Date(b.ts)) === localDay());
+      // not state.last_briefing (a later heartbeat overwrites that). Only a *successful* daily counts —
+      // a failed one (claude error / unparsable) runs again on the first tick past briefing_time.
+      const hadDailyToday = hadGoodDailyOn(localDay());
       // Hard stop for *automatic* runs once today's spend reaches agenda_daily_budget_usd
       // (manual buttons / POST endpoints are not gated — the user asked for them explicitly).
       let budgetWarnedAt = 0;
@@ -67,6 +69,14 @@ async function main(): Promise<void> {
           return Math.max(eventsActivityAt(), hid == null ? 0 : Date.now() - hid);
         },
         dailyDoneToday: hadDailyToday,
+        // Automatic runs only: skip the tick when api.anthropic.com doesn't resolve, and the first tick after sleep.
+        online: createOnlineCheck(),
+        wakeGapMs: WAKE_GAP_MS,
+        onDailyFailed: (at) => {
+          const s = readState();
+          s.daily_failed_at = at;
+          writeState(s);
+        },
         onHeartbeat: (nextAt) => {
           const s = readState();
           s.next_heartbeat_at = nextAt;

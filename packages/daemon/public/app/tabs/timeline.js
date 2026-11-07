@@ -1,4 +1,5 @@
 /* Timeline tab: events + briefings merged by ts, type / worktree chips. */
+import { bfKind } from "../features/dailyfail.js";
 import { S } from "../state.js";
 import { EVENT_KO } from "../ui/icons.js";
 import { $, basename, dayLabel, esc, hhmm } from "../util.js";
@@ -7,7 +8,7 @@ import { $, basename, dayLabel, esc, hhmm } from "../util.js";
 export function timelineItems() {
   const evs = S.events.map((e) => ({ ts: e.ts, type: e.event, wt: e.orca_worktree ? basename(String(e.orca_worktree).split("::").pop()) : basename(e.cwd), brief: false,
     msg: e.prompt ?? e.message ?? e.reason ?? (e.agent_type ? `agent ${e.agent_type}` : ""), raw: e }));
-  const bfs = S.briefings.map((b) => ({ ts: b.ts, type: "브리핑", wt: "", brief: true, msg: `${b.type === "daily" ? "아침" : "점검"} · ${b.status}${b.headline ? " · " + b.headline : ""}`, raw: b }));
+  const bfs = S.briefings.map((b) => ({ ts: b.ts, type: "브리핑", wt: "", brief: true, msg: `${bfKind(b)} · ${b.status}${b.headline ? " · " + b.headline : ""}`, raw: b }));
   return [...evs, ...bfs].sort((a, b) => b.ts - a.ts);
 }
 export function renderTimeline() {
