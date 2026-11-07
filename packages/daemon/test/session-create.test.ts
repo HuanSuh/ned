@@ -279,6 +279,26 @@ describe("POST /api/sessions/create", () => {
     _setSessionCreateDeps(null);
   });
 
+  it("cap is not raced: two concurrent requests (different worktrees) with 1 live → one starts, one 409", async () => {
+    fs.writeFileSync(CHAT_SESSIONS_PATH, JSON.stringify([{ job_id: "old", created_at: Date.now(), repo: REPO, mode: "new", name: "old", model: "opus", worktree_path: "/wt/old", handle: "term_old" }]));
+    const m = mockOrca({ terminals: [{ handle: "term_old" }] });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    // every orca read yields to the event loop, so validate's awaits interleave unless serialized
+    const slow: OrcaExec = async (args, t) => {
+      await new Promise((r) => setTimeout(r, 1));
+      if (args[1] === "create") await gate;
+      return m.fn(args, t);
+    };
+    const d = deps({ ...m, fn: slow });
+    const [a, b] = await Promise.all([startSessionCreate(input({ worktree: { mode: "new", name: "one" } }), cfgOn, [], d), startSessionCreate(input({ worktree: { mode: "new", name: "two" } }), cfgOn, [], d)]);
+    expect([a.kind, b.kind].sort()).toEqual(["job", "refused"]);
+    const refused = (a.kind === "refused" ? a : b) as { kind: "refused"; result: { status: number; detail: string } };
+    expect(refused.result.status).toBe(409);
+    expect(refused.result.detail).toContain("최대 2");
+    release();
+  });
+
   it("startSessionCreate joins a running job with the same repo + worktree", async () => {
     const m = mockOrca();
     let release!: () => void;

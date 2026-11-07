@@ -452,7 +452,23 @@ export async function runSessionCreate(input: SessionCreateInput, repo: OrcaRepo
 export type SessionCreateOutcome = { kind: "refused"; result: SendResult } | { kind: "job"; job: SendJob; reused: boolean };
 
 /** POST /api/sessions/create: validate synchronously (refusals logged), then start (or join) the job. */
-export async function startSessionCreate(input: SessionCreateInput, cfg: NedConfig, sessions: SessionView[] = [], deps = sessionCreateDeps()): Promise<SessionCreateOutcome> {
+/**
+ * validate → startTaskJob runs one request at a time. Without this, two POSTs (different worktrees) could both pass
+ * the cap check across validate's awaits and start 3 sessions. startTaskJob registers the running job synchronously,
+ * so the next request's liveChatSessions already counts it.
+ */
+let createLock: Promise<unknown> = Promise.resolve();
+function serialized<T>(fn: () => Promise<T>): Promise<T> {
+  const run = createLock.then(fn, fn);
+  createLock = run.catch(() => undefined);
+  return run;
+}
+
+export function startSessionCreate(input: SessionCreateInput, cfg: NedConfig, sessions: SessionView[] = [], deps = sessionCreateDeps()): Promise<SessionCreateOutcome> {
+  return serialized(() => startSessionCreateLocked(input, cfg, sessions, deps));
+}
+
+async function startSessionCreateLocked(input: SessionCreateInput, cfg: NedConfig, sessions: SessionView[], deps: SessionCreateDeps): Promise<SessionCreateOutcome> {
   const key = `${JOB_PREFIX}${norm(input.repo)}|${input.worktree.mode}|${input.worktree.name}`;
   const joined = runningJobs(key).find((j) => j.key === key);
   if (joined) return { kind: "job", job: joined, reused: true };
