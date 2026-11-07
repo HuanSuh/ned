@@ -6,6 +6,7 @@ import { S, alive, subscribe } from "../state.js";
 import { $, esc, lsGet, lsSet, hhmm, rel } from "../util.js";
 import { MINI, persona } from "./personas.js";
 import { buildFeed, clampSize, commsVoice, createSseParser, feedHtml, helloLine, messagesHtml, readSize, shellHtml, tickerOf, usd } from "./chat-core.js";
+import { bindCodeCopy } from "./code-copy.js";
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const MOD = MAC ? "⌘" : "Ctrl+";
@@ -305,7 +306,8 @@ export function init() {
   }, true);
 
   subscribe("render", () => render());
-  window.NED = window.NED || {};
+  bindCodeCopy(document); // copy buttons on every mdLite code block (delegated)
+  window.NED =window.NED || {};
   window.NED.comms = { open, close, toggle, ask: (t) => { open("chat"); return ask(t); } };
   loadChat();
   if (lsGet(LS.open) === "1") open(); else render();
