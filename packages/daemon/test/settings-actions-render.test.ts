@@ -30,6 +30,11 @@ describe("쓰기 액션 by source", () => {
     expect(groups(html)).toEqual(["slack", "gmail", "session", "jira", "github", "calendar"]);
     expect(acts(html)).toEqual(["slack_send", "gmail_draft", "gmail_send", "session_send", "jira_comment", "jira_transition", "github_review", "calendar_rsvp"]);
     expect(html).not.toContain('class="wagrp off"');
+    // actions.chat_write (Ned Net 대화창 쓰기 제안) is its own last group, never dimmed by a source.
+    const withChat = writeActionsHtml({ sources: { ...SOURCES, slack: false }, actions: { chat_write: true } }, { ...DEFAULTS, chat_write: false }, { ...KO, chat_write: "대화창에서 쓰기 허용" });
+    expect(groups(withChat).at(-1)).toBe("chat");
+    expect(withChat).toContain('data-act="chat_write" checked>대화창에서 쓰기 허용</label>');
+    expect(withChat).toMatch(/data-wagrp="chat" role="group"/);
   });
 
   it("renders the Slack group with its tone input (snapshot)", () => {
@@ -61,7 +66,7 @@ describe("쓰기 액션 by source", () => {
     const html = writeActionsHtml({ actions: { sentry_resolve: true } }, DEFAULTS, KO);
     expect(html).toContain('data-act="sentry_resolve" checked>sentry_resolve</label>');
     expect(writeActionGroups({}, DEFAULTS).find((x: { id: string }) => x.id === "calendar").keys).toEqual(["calendar_rsvp"]);
-    expect(WA_GROUPS.map((x: { id: string }) => x.id)).toEqual(["slack", "gmail", "session", "jira", "github", "calendar"]);
+    expect(WA_GROUPS.map((x: { id: string }) => x.id)).toEqual(["slack", "gmail", "session", "jira", "github", "calendar", "chat"]);
   });
 
   it("readToneBySource: blank → null", () => {

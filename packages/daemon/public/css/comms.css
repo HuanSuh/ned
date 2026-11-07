@@ -137,6 +137,24 @@
 .cm-copy.ok .ic-ok { display: block; }
 .cm-copy.ok { color: var(--cm-rx, var(--mint)); border-color: var(--cm-rx, var(--mint)); }
 .cm-err { color: var(--red); font-size: 12px; margin-top: 4px; }
+/* 확인 카드 (ned-action proposal, features/chat-action.js): target read-only, text editable, [실행] [취소]. */
+.cm-act { margin-top: 8px; padding: 8px 10px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--cm-accent) 45%, var(--line)); background: color-mix(in srgb, var(--cm-accent) 6%, var(--raise)); display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; }
+.cm-act .ca-k { font-weight: 600; font-size: 12px; color: var(--cm-accent); }
+.cm-act .ca-sum { color: var(--fg); }
+.cm-act .ca-tg { color: var(--dim); overflow-wrap: anywhere; }
+.cm-act .ca-l { color: var(--dim); font-size: 11.5px; margin-right: 4px; }
+.cm-act .ca-hint { color: var(--faint); }
+.cm-act textarea.ca-tx { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 12.5px; padding: 5px 7px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg, transparent); color: var(--fg); }
+.cm-act .ca-tx.ro { padding: 4px 7px; border-left: 2px solid var(--line); color: var(--fg); }
+.cm-act .ca-btns { display: flex; gap: 6px; justify-content: flex-end; }
+.cm-act .ca-st { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--dim); }
+.cm-act .ca-st.ok { color: var(--mint); }
+.cm-act .ca-st.bad { color: var(--red); }
+.cm-act .ca-det { color: var(--dim); overflow-wrap: anywhere; }
+.cm-act.s-cancelled { flex-direction: row; align-items: center; gap: 8px; opacity: .7; border-style: dashed; }
+.cm-act.s-cancelled .ca-done, .cm-act .ca-tick { color: var(--faint); }
+.cm-act.s-pending { color: var(--dim); border-style: dashed; }
+.cm-act.bad { color: var(--red); border-color: var(--red); border-style: dashed; }
 .cm-think { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 12px; margin-top: 4px; }
 .cm-msg.live .bb:has(> .cm-think:first-child) .cm-think { margin-top: 0; }
 .cm-in { flex: none; border-top: 1px solid var(--line); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; background: color-mix(in srgb, var(--cm-accent) 5%, transparent); }

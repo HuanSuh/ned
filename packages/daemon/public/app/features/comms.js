@@ -5,6 +5,9 @@
 import { S, alive, subscribe } from "../state.js";
 import { $, esc, lsGet, lsSet, hhmm, rel } from "../util.js";
 import { MINI, persona } from "./personas.js";
+import { postJson } from "../api.js";
+import { parseActionBlock, wireActionCards } from "./chat-action.js";
+import { sendAndWait } from "./sendjob.js";
 import { buildFeed, clampSize, commsVoice, createSseParser, feedHtml, helloLine, messagesHtml, readSize, shellHtml, tickerOf, usd } from "./chat-core.js";
 import { bindCodeCopy } from "./code-copy.js";
 
@@ -19,6 +22,8 @@ const st = {
   chatId: lsGet(LS.chat) || null, msgs: [], cost: 0, live: null, running: false, err: "",
   seen: new Set(readJ(LS.seen, [])), seeded: lsGet(LS.seen) != null, notes: readJ(LS.notes, []),
   feed: [], prevUnread: -1, persona: null, logSig: "", helloSeed: Date.now(),
+  // 확인 카드 (chat-action.js) per ned message ts: { text, status, result, tick, preview, previewError, fetching }. cardRev re-renders.
+  cards: {}, cardRev: 0,
 };
 let root, dock, panel, log, q;
 
@@ -149,7 +154,7 @@ async function loadChatWhileRunning() {
 }
 
 function landed(d, extra = {}) {
-  st.msgs.push({ role: "ned", text: d.text || "", ts: Date.now(), cost_usd: d.cost_usd, ...extra });
+  st.msgs.push({ role: "ned", text: d.text || "", ts: Number(d.ts) || Date.now(), cost_usd: d.cost_usd, ...extra });
   if (typeof d.chat_cost_usd === "number") st.cost = d.chat_cost_usd;
   if (typeof d.today_usd === "number" && S.costs) S.costs.today_usd = d.today_usd;
   st.live = null; st.running = false;
@@ -203,7 +208,40 @@ async function stop() {
 }
 function newChat() {
   if (st.running) return;
-  setChat(null); st.msgs = []; st.cost = 0; st.err = ""; st.helloSeed = Date.now(); render(); q.focus();
+  setChat(null); st.msgs = []; st.cards = {}; st.cost = 0; st.err = ""; st.helloSeed = Date.now(); render(); q.focus();
+}
+
+// ---------- 확인 카드 (ned-action proposals; actions.chat_write) ----------
+function setCard(id, patch, rerender = true) {
+  st.cards[id] = { ...(st.cards[id] || {}), ...patch };
+  if (rerender) { st.cardRev++; render(); }
+}
+/** Card state for message `m`: this page's edits / run on top of what the chat file saved (m.action). */
+function cardState(m, block) {
+  const id = String(m.ts), c = st.cards[id] || {};
+  const status = c.status || m.action?.state || "idle";
+  // A pending card shows the server's own target line (and an early "꺼져 있어") — one validate per card.
+  if (status === "idle" && !c.preview && !c.previewError && !c.fetching) {
+    c.fetching = true; st.cards[id] = c;
+    postJson("/api/chat/actions/validate", { block }).then((r) => {
+      if (r.data?.ok) setCard(id, { fetching: false, preview: { target_label: r.data.target_label, label: r.data.label, summary: r.data.summary } });
+      else setCard(id, { fetching: false, previewError: r.data?.error || `검증 실패 (HTTP ${r.status})` });
+    }).catch(() => setCard(id, { fetching: false }, false));
+  }
+  return { status, text: c.text ?? m.action?.text, result: c.result !== undefined ? c.result : m.action?.result, tick: c.tick, preview: c.preview, previewError: c.previewError };
+}
+function cardBlockOf(id) {
+  const m = st.msgs.find((x) => x.role === "ned" && String(x.ts) === String(id));
+  if (!m) return null;
+  const block = parseActionBlock(m.text).block;
+  return block ? { block, state: cardState(m, block) } : null;
+}
+async function persistCard(id, body) {
+  if (!st.chatId) return { ok: false, status: 0 };
+  const r = await postJson(`/api/chat/${encodeURIComponent(st.chatId)}/action`, { ts: Number(id), ...body });
+  const m = st.msgs.find((x) => x.role === "ned" && String(x.ts) === String(id));
+  if (r.ok && m && r.data?.action) m.action = r.data.action;
+  return r;
 }
 
 // ---------- render ----------
@@ -248,10 +286,10 @@ export function render() {
 
   if (st.tab === "chat") {
     const hello = helloLine(persona, new Date().getHours(), st.helloSeed);
-    const sig = JSON.stringify([st.msgs.length, st.msgs.at(-1)?.ts, st.live, st.err, st.persona, hello]);
+    const sig = JSON.stringify([st.msgs.length, st.msgs.at(-1)?.ts, st.live, st.err, st.persona, hello, st.cardRev]);
     if (sig !== st.logSig) {
       st.logSig = sig;
-      log.innerHTML = messagesHtml(st.msgs, v, st.live, (ts) => hhmm(ts), hello) + (st.err ? `<div class="cm-err">⚠ ${esc(st.err)}</div>` : "");
+      log.innerHTML = messagesHtml(st.msgs, v, st.live, (ts) => hhmm(ts), hello, cardState) + (st.err ? `<div class="cm-err">⚠ ${esc(st.err)}</div>` : "");
     }
     const send = $("cm-send");
     send.textContent = st.running ? "중단" : "전송"; send.classList.toggle("go", !st.running); send.classList.toggle("stop", st.running);
@@ -283,6 +321,7 @@ export function init() {
   $("cm-new").addEventListener("click", newChat);
   for (const b of panel.querySelectorAll("[data-cmtab]")) b.addEventListener("click", () => setTab(b.dataset.cmtab));
   $("cm-feed").addEventListener("click", onFeedClick);
+  wireActionCards(log, { get: cardBlockOf, set: setCard, persist: persistCard, deps: { postJson, sendAndWait } });
   $("cm-allread").addEventListener("click", () => { for (const x of st.feed) st.seen.add(x.key); saveSeen(); render(); });
   $("cm-form").addEventListener("submit", (e) => {
     e.preventDefault();

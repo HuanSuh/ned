@@ -9,7 +9,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { eventKey } from "./calendar-create.js";
-import { appendActionLog, gateKey, performSend, readActionLog, type SendRequest, type SendResult } from "./actions.js";
+import { appendActionLog, gate, performSend, readActionLog, type SendRequest, type SendResult } from "./actions.js";
 import type { NedConfig } from "./config.js";
 import { log } from "./paths.js";
 
@@ -117,7 +117,7 @@ export type StartOutcome =
  */
 export async function startSendJob(req: SendRequest, cfg: NedConfig, run: typeof performSend = performSend): Promise<StartOutcome> {
   prune();
-  if (cfg.actions[gateKey(req)] !== true) return { kind: "sync", result: await run(req, cfg) };
+  if (!gate(req, cfg).on) return { kind: "sync", result: await run(req, cfg) };
   const key = sendKey(req);
   const live = [...jobs.values()].find((j) => j.state === "running" && j.key === key);
   if (live) return { kind: "job", job: live, reused: true };
@@ -134,7 +134,7 @@ export async function startSendJob(req: SendRequest, cfg: NedConfig, run: typeof
       const detail = `send job crashed: ${String(e).slice(0, 300)}`;
       log(`send: ${req.source}/${req.mode} job ${job.id} ${detail}`);
       const logged_at = new Date().toISOString();
-      appendActionLog({ ts: logged_at, source: req.source, mode: req.mode, action: "error", ref: req.ref, draft_id: req.draft_id, text: req.text.slice(0, 120), ok: false, result: detail });
+      appendActionLog({ ts: logged_at, source: req.source, mode: req.mode, action: "error", ref: req.ref, draft_id: req.draft_id, text: req.text.slice(0, 120), ok: false, result: detail, ...(req.origin ? { origin: req.origin } : {}) });
       result = { ok: false, action: "error", detail, logged_at, status: 502 };
     }
     job.result = result;

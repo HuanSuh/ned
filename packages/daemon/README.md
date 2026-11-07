@@ -177,6 +177,8 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 | GET | `/api/chats` | `{ chats: [{id,title,updated_at,messages,cost_usd}], active, input_max }` 최신순 |
 | GET | `/api/chat/:id` | 저장된 대화 `{ id, title, session_id, cost_usd, messages: [{role: user\|ned, text, ts, cost_usd?, error?, stopped?}], running }` |
 | POST | `/api/chat/:id/stop` | 진행 중인 턴에 SIGTERM (없으면 404). 지금까지 흐른 텍스트가 `stopped: true` 로 저장됨 |
+| POST | `/api/chat/actions/validate` | 확인 카드 검증 `{ block: <ned-action JSON>, text?: 고친 텍스트 }` → 200 `{ ok, kind, endpoint: /api/send\|/api/calendar/events\|/api/todos, payload (origin "chat"), label, summary, target_label, text, text_optional, lookup? }` · 400 형식 · 403 `actions.chat_write`/해당 스위치 꺼짐 · 409 대상이 최근 agenda/state 에 없음. 실행은 안 함 (`src/chat-actions.ts`) |
+| POST | `/api/chat/:id/action` | 카드 상태 저장 `{ ts (ned 메시지), state: running\|executed\|failed\|cancelled, text?, result? }` → 메시지의 `action`. (없음\|failed)→running\|cancelled, running→나머지; executed·cancelled 는 최종(409) |
 | POST | `/api/send` | 초안 보내기 — `config.actions` 로 켠 것만. 꺼져 있으면 403 |
 | GET | `/api/actions` | `sent-actions.log` 최근 50건 (최신 먼저) |
 
@@ -272,13 +274,19 @@ Agenda 응답 형태:
 - email 은 `message_id` 가 필요하다(ref 또는 `draft_id` 의 meta). 없으면 400 — 보내기 단계에서는 읽기 도구를 허용하지 않는다.
 - 텍스트는 JSON 문자열로 프롬프트에 넣고 "글자 하나 바꾸지 말고 그대로, 도구 한 번만" 지시. 최대 4000자.
 - 모든 시도(거절·실패·dry-run 포함)는 `~/.ned/sent-actions.log` 에 JSONL 한 줄:
-  `{ts, source, mode, action, ref, draft_id, text(앞 120자), ok, result, claude_args?}` — `claude_args` 는 실제 spawn 한 argv.
+  `{ts, source, mode, action, ref, draft_id, text(앞 120자), ok, result, claude_args?, origin?}` — `claude_args` 는 실제 spawn 한 argv.
 - `NED_NO_LLM=1` 또는 `NED_SEND_DRY_RUN=1` 이면 커넥터·gh 액션(Slack/Gmail/Jira/GitHub/Calendar)은 argv 와 프롬프트를 로그에 남기고 실행하지 않는다
   (`ok:false`, `action: "dry_run:…"`, gh 본문 파일도 만들지 않음). 세션 보내기는 로컬이라 그대로 실행한다. `NED_NO_LLM=1` 의 jira `transitions` 는
   화면 테스트용 `(stub)` 전환 2개를 돌려준다.
 - 대시보드: Jira·GitHub·캘린더 항목의 **⋯ 메뉴**(`public/app/features/actions.js`) — Jira: 코멘트 초안 쓰기… / 상태 변경…(전환 목록을 먼저 읽음),
   GitHub: 리뷰 초안 쓰기…(팝업에서 리뷰 코멘트·변경 요청·승인+코멘트·PR 코멘트) / 바로 승인, 캘린더: 수락·미정·거절(주최한 일정엔 없음).
   꺼진 스위치는 '꺼짐' 으로 비활성, 쓰기는 모두 메뉴/팝업 안에서 한 번 더 확인. 설정 → 쓰기 액션 아래 **오늘 한 액션** 표(`GET /api/actions` 를 오늘·소스·결과로 거름).
+- **대화창 쓰기**(`actions.chat_write`, 기본 꺼짐): 통신기 대화 모델은 그대로 읽기 전용이고, 쓰기 요청엔 답 끝에 ```` ```ned-action ```` 블록
+  `{kind, target, text, summary}` 로 **제안만** 한다(프롬프트엔 지금 허용된 kind 만 — `chatWriteBlock`). 대시보드가 확인 카드
+  (`public/app/features/chat-action.js` — `renderActionCard`·`wireActionCards`, 다른 화면에서 재사용 가능)로 보여 주고, [실행] 때
+  `POST /api/chat/actions/validate` 가 만든 요청을 **기존** `/api/send`·`/api/calendar/events`·`/api/todos` 로 보낸다(`origin: "chat"`).
+  `origin: "chat"` 요청은 각 스위치에 더해 `actions.chat_write` 도 켜져 있어야 하고(꺼지면 403 refused), 로그 줄에 `origin` 이 붙는다(할 일 추가도
+  `source: "todo"` 줄로 남음) → 설정 → 오늘 한 액션의 "대화창" 배지. Jira 상태 변경은 카드 텍스트(상태 이름)로 전환 목록에서 id 를 찾아 실행.
 - `actions.ts` 의 `queryActionLog({since, source, result}, limit)` 는 서버 쪽 필터용으로 준비돼 있다(`GET /api/actions` 는 아직 최근 50건 그대로).
 
 Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` (ms 타임스탬프).
