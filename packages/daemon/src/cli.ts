@@ -75,7 +75,7 @@ async function main(): Promise<void> {
       await sched.tick();
       setInterval(() => {
         void sched.tick();
-        archiveTick(cfg); // Obsidian 아카이브: flush changed days (src/archive.ts) — no claude, cheap file writes
+        archiveTick(loadConfig()); // fresh read (a busy scheduler tick skips its own reload) — Obsidian 아카이브: flush changed days (src/archive.ts) — no claude, cheap file writes
       }, 60_000);
       break;
     }
