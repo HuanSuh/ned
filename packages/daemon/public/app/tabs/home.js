@@ -16,6 +16,7 @@ import { PF, PILL_KINDS, pfOn, pillRow, srcOn } from "../ui/chips.js";
 import { KIND_ICON, closeIcon, openIcon, reviewIcon } from "../ui/icons.js";
 import { errBadge, errSummary } from "../ui/popover.js";
 import { toast } from "../ui/toast.js";
+import { layoutTodoSplit } from "../features/todosplit.js";
 import { $, dueChip, dueInfo, esc, ext, hhmm, mdhm, rel, safeUrl, toMs } from "../util.js";
 export const byDue = (a, b) => (a.due ? 0 : 1) - (b.due ? 0 : 1) || String(a.due || "").localeCompare(String(b.due || ""));
 
@@ -147,6 +148,7 @@ export function renderTodoGroups() {
     if (wn) cnt.slack = (cnt.slack || 0) + wn;
   }
   $("pf-home").innerHTML = pillRow("home", cnt, PILL_KINDS.filter(srcOn));
+  layoutTodoSplit();
 }
 
 /** Ned's one line for the day, built from agenda + todos + attention. */

@@ -69,10 +69,13 @@
           <section class="card" id="todo-card">
             <div class="hd"><h2>할 일</h2><span class="sp"></span><span class="count" id="todo-count"></span></div>
             <div class="chips pills" id="pf-home" role="toolbar" aria-label="할 일 소스 필터"></div>
-            <div class="bd">
-              <div class="tgrp g-ned"><div class="gh"><span class="ico">👓</span>NED 액션 아이템<span class="n" id="n-ned">0</span></div><div class="gl" id="g-ned"></div></div>
-              <div class="tgrp g-me" id="grp-me"><div class="gh"><span class="ico">✅</span>개인 할 일<span class="n" id="n-me">0</span></div>
-                <div class="gl">
+            <div class="bd" id="todo-bd">
+              <div class="tup" id="todo-up">
+                <div class="tgrp g-ned"><div class="gh"><span class="ico">👓</span>NED 액션 아이템<span class="n" id="n-ned">0</span></div><div class="gl" id="g-ned"></div></div>
+              </div>
+              <div class="tsplit-h" id="todo-split" role="separator" aria-orientation="horizontal" aria-controls="todo-up grp-me" aria-label="할 일 영역 나누기 (드래그·↑↓, 더블클릭 기본값)" aria-valuemin="10" aria-valuemax="90" tabindex="0" title="드래그로 높이 조절 · 더블클릭하면 기본값" hidden></div>
+              <div class="tgrp g-me" id="grp-me"><button type="button" class="gh" id="me-fold" aria-expanded="true" aria-controls="me-gl" title="접기/펼치기"><span class="ico">✅</span>개인 할 일<span class="n" id="n-me">0</span><span class="chev" aria-hidden="true">▼</span></button>
+                <div class="gl" id="me-gl">
                   <form class="tadd" id="tadd" autocomplete="off"><input type="text" id="tadd-t" placeholder="할 일 추가… (⏎)" aria-label="할 일" maxlength="200"><input type="date" id="tadd-d" aria-label="마감일 (선택)"><button class="btn small" type="submit">추가</button></form>
                   <div id="g-me"></div>
                 </div></div>
