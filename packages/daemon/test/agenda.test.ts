@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ackCheckEmojis,
   ackedSet,
   buildListsPrompt,
   collapseDMs,
@@ -258,5 +259,22 @@ describe("slack ack reactions (filters.slack.ack_reactions)", () => {
     expect(off).not.toContain("hasmy");
     expect(off).not.toContain("acked_urls");
     expect(off).not.toContain("{{");
+  });
+
+  it("ack search is conditional (only with candidates) and capped at filters.slack.ack_check_max from the front", () => {
+    const six = ["white_check_mark", "eyes", "+1", "heavy_check_mark", "ok_hand", "done"];
+    const p = buildListsPrompt(cfg({ filters: normalizeFilters({ slack: { ack_reactions: six } }) }), ["slack"]);
+    expect(p).toContain(":white_check_mark: :eyes: :+1:");
+    expect(p).not.toContain(":heavy_check_mark:");
+    expect(p).not.toContain(":ok_hand:");
+    expect(p).toContain("하나라도 있을 때만");
+    expect(p).toContain("건너뛰고");
+    expect(p).not.toContain("{{");
+    const all = buildListsPrompt(cfg({ filters: normalizeFilters({ slack: { ack_reactions: six, ack_check_max: 8 } }) }), ["slack"]);
+    expect(all).toContain(":ok_hand: :done:");
+    expect(ackCheckEmojis(cfg({ filters: normalizeFilters({ slack: { ack_reactions: six, ack_check_max: 1 } }) }))).toEqual(["white_check_mark"]);
+    // With followed channels, needs_me highlights count as candidates too.
+    const w = buildListsPrompt(cfg({ filters: normalizeFilters({ slack: { watch_channels: ["ops"] } }) }), ["slack"]);
+    expect(w).toContain("`needs_me` 하이라이트 후보");
   });
 });

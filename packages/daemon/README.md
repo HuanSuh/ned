@@ -99,9 +99,13 @@ heartbeat / briefing 의 `{{FILTERS}}` 에도 팔로업 목록이 붙어 needs_m
 
 **답 필요 해제 이모지** (`config.filters.slack.ack_reactions`, 기본 `["white_check_mark","eyes","+1","heavy_check_mark"]`, 최대 8, `[]` 면 끔):
 멘션·DM·참여 스레드에서 **내 답글이 보이거나 내가 이 이모지 중 하나로 리액션하면 확인 완료**다. Slack 검색 결과엔 리액션 목록이 없고
-스레드 읽기에도 누가 달았는지는 안 나오므로, agenda-lists.md 의 `<!--@ack-->` 섹션이 다른 검색과 같은 턴에 이모지마다
+스레드 읽기에도 누가 달았는지는 안 나오므로, agenda-lists.md 의 `<!--@ack-->` 섹션이 이모지마다
 `slack_search_public_and_private`(`filters: "hasmy::<이모지>:"`, 최근 24h, 20개, `response_format: "concise"`, `include_context: false`)를 한 번씩 부른다
-(`has`/`hasmy` 는 반복하면 AND 라 이모지마다 따로; `hasmy:reaction` 같은 "아무 이모지" 필터는 Slack 이 무시한다). 그 permalink 들 = `acked` →
+(`has`/`hasmy` 는 반복하면 AND 라 이모지마다 따로; `hasmy:reaction` 같은 "아무 이모지" 필터는 Slack 이 무시한다).
+비용 절감: (1) **조건부** — 모델은 먼저 멘션·DM·스레드(·팔로업) 검색만 한 턴에 하고, 그 결과에 답 필요 후보(`items` 후보, 팔로업 `needs_me` 후보)가
+하나라도 있을 때만 다음 턴에 이모지 검색을 병렬로 한다. 후보 0개면 건너뛰고 `acked_urls: []`. (2) **상한** — `filters.slack.ack_check_max`(기본 3, 1~8)개,
+`ack_reactions` 앞에서부터만 검색한다(`ackCheckEmojis`). 측정 전 기준 Slack 1단계 13턴·조회 12회 중 이모지 6회가 절반이었다.
+(2단계로 옮기는 안은 버렸다 — `slack_read_thread`/`slack_read_channel` 결과에 누가 리액션했는지가 없어 `hasmy` 검색 말고는 확인할 방법이 없다.) 그 permalink 들 = `acked` →
 `items` 에서 빼고, `all` 은 `answered: true`, `watch` 하이라이트는 `needs_me: false`. 모델은 `slack.acked_urls[]` 도 내고, 정규화(`normalize`)가
 permalink(쿼리·해시 무시)로 같은 처리를 한 번 더 한다 — 확인한 DM 은 그 대화의 그 이전 메시지까지 닫는다. 이름은 콜론 제거·소문자, 한글 커스텀 이모지 가능.
 설정 → "답 필요 해제 이모지" 칩 입력(쉼표·엔터로 추가).
@@ -349,7 +353,7 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
 ~/.ned/
   config.yaml            설정 (없으면 기본값으로 생성). heartbeat_minutes, signal_check_minutes,
                          briefing_time, quiet_hours, sources.{gmail,slack,jira,github,sentry,calendar},
-                         persona (ned|alfred|oracle|jarvis), filters.{slack.exclude_channels, slack.watch_channels, slack.ack_reactions, jira.exclude_projects} (트래킹 제외 / 팔로업 채널 / 답 필요 해제 이모지, ack_reactions 외 기본 []),
+                         persona (ned|alfred|oracle|jarvis), filters.{slack.exclude_channels, slack.watch_channels, slack.ack_reactions, slack.ack_check_max, jira.exclude_projects} (트래킹 제외 / 팔로업 채널 / 답 필요 해제 이모지 / 한 run 에 검색할 이모지 수(3), ack_reactions·ack_check_max 외 기본 []),
                          port, claude_model, claude_max_turns, session_stale_minutes, agenda_refresh_minutes, notify,
                          actions.{slack_send=false, gmail_draft=true, gmail_send=false, session_send=true,
                                   jira_comment=false, jira_transition=false, github_review=false, calendar_rsvp=false} (POST /api/send 허용),

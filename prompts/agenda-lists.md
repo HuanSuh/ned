@@ -11,7 +11,7 @@
 ## 규칙
 - **읽기만 한다.** 어떤 쓰기(RSVP, 수정, 코멘트, 읽음 처리, 메시지, 리액션)도 하지 않는다.
 - 첫 턴: `ToolSearch` 를 **한 번**, 이 쿼리 그대로: `{{TOOL_SELECT}}`
-- 둘째 턴: 아래 조회를 **모두 한 턴에 병렬로** 부른다. 같은 조회를 반복하지 않는다. 셋째 턴에 JSON 을 출력한다.
+- 둘째 턴: 아래 조회를 **모두 한 턴에 병렬로** 부른다 (해제 이모지 검색만 예외 — 그 섹션대로). 같은 조회를 반복하지 않는다. 조회가 끝난 다음 턴에 JSON 을 출력한다.
 - 조회가 실패하거나 도구가 없으면 그 블록은 `[]` 로 둔다. 지어내지 않는다.
 - 출력은 **JSON 객체 하나만**, 공백·줄바꿈 없이 한 줄로. 첫 글자 `{`, 마지막 글자 `}`. 설명·마크다운·코드펜스 금지.
 
@@ -34,10 +34,11 @@
 <!--@ack-->
 
 ### slack — 해제 이모지: {{ACK_EMOJIS}}
-<!-- 내가 이 이모지로 리액션한 메시지 = 확인 완료. 검색 결과에는 리액션 목록이 없어서 `hasmy::이모지:` 필터로 따로 찾는다 (`has`/`hasmy` 는 반복하면 AND 라 이모지마다 한 번). -->
-- 위 검색과 **같은 턴에** 이모지마다 `slack_search_public_and_private` 한 번: `filters: "hasmy::<이모지>:"` (예: {{ACK_EXAMPLE}}), `after: "{{SLACK_SINCE}}"`, `sort: "timestamp"`, `limit: 20`, `include_bots: false`, **`response_format: "concise"`, `include_context: false`** (permalink 만 필요하다).
+<!-- 내가 이 이모지로 리액션한 메시지 = 확인 완료. 검색 결과에는 리액션 목록이 없어서 `hasmy::이모지:` 필터로 따로 찾는다 (`has`/`hasmy` 는 반복하면 AND 라 이모지마다 한 번). 해제할 후보가 없으면 찾을 이유가 없다. -->
+- **조건부, 셋째 턴**: 둘째 턴 결과를 본 뒤, `items` 후보(나에게 답이 필요해 보이는 메시지{{ACK_WATCH_COND}})가 **하나라도 있을 때만** 이모지 검색을 한다. 후보가 0개면 이모지 검색을 **건너뛰고** 바로 JSON 을 출력한다 (`acked_urls: []`).
+- 할 때는 **한 턴에 병렬로** 이모지마다 `slack_search_public_and_private` 한 번 (위 이모지만, 더 하지 않는다): `filters: "hasmy::<이모지>:"` (예: {{ACK_EXAMPLE}}), `after: "{{SLACK_SINCE}}"`, `sort: "timestamp"`, `limit: 20`, `include_bots: false`, **`response_format: "concise"`, `include_context: false`** (permalink 만 필요하다).
 - 결과 메시지들의 permalink 집합 = `acked`. `acked` 인 메시지는 `items` 에서 빼고, `all` 에서는 `answered: true`, `watch` 하이라이트에서는 `needs_me: false`.
-- `acked_urls`: 결과 permalink 를 **그대로** 전부 (중복 제거, 최대 100). 없으면 `[]`.
+- `acked_urls`: 결과 permalink 를 **그대로** 전부 (중복 제거, 최대 100). 검색을 건너뛰었거나 없으면 `[]`.
 <!--@/ack-->
 <!--@watch-->
 

@@ -191,6 +191,7 @@ export function renderConfig(c = S.config, { preview = false } = {}) {
   excl.jira = [...(c.filters?.jira?.exclude_projects || [])];
   excl.watch = [...(c.filters?.slack?.watch_channels || [])];
   excl.ack = [...(c.filters?.slack?.ack_reactions || [])];
+  $("c-ackmax").value = c.filters?.slack?.ack_check_max ?? 3;
   for (const id of Object.values(X_MSG)) $(id).textContent = "";
   renderExcl();
   $("cfg-port").textContent = c.port ? `port ${c.port}` : "";
@@ -245,7 +246,7 @@ export function readBody() {
     ...readAutoSched(), // quiet_schedule, idle_schedule
     quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
     sources,
-    filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack] }, jira: { exclude_projects: [...excl.jira] } },
+    filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack], ack_check_max: $("c-ackmax").value === "" ? null : Number($("c-ackmax").value) }, jira: { exclude_projects: [...excl.jira] } },
     dashboard: { ...readCardLayout(), theme: readTheme() },
     notifications: readNotifications(),
     actions: Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])),
