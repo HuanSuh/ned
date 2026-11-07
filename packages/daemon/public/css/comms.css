@@ -121,6 +121,21 @@
 .cm-msg .bb code { font: 12px var(--mono); background: var(--hover); padding: 0 4px; border-radius: 4px; }
 .cm-msg .bb pre { margin: 6px 0; padding: 8px; background: var(--hover); border-radius: 6px; overflow: auto; }
 .cm-msg .bb pre code { background: none; padding: 0; }
+/* fenced code block + copy button (chat-core.js codeBlockHtml, features/code-copy.js). Button and <pre> share one grid
+ * cell; the button is sticky so it stays in view while a long block scrolls past, and sits outside <pre> so a
+ * horizontal scroll doesn't carry it away. */
+.cm-code { display: grid; grid-template-columns: minmax(0, 1fr); margin: 6px 0; }
+.cm-code > * { grid-area: 1 / 1; }
+.cm-msg .bb .cm-code pre { margin: 0; padding-right: 36px; }
+.cm-copy { position: sticky; top: 6px; z-index: 1; align-self: start; justify-self: end; margin: 5px 5px 0 0; display: grid; place-items: center;
+  width: 26px; height: 26px; padding: 0; border-radius: calc(var(--cm-radius, 8px) / 3); cursor: pointer;
+  color: var(--dim); background: var(--cm-bg, var(--raise)); border: 1px solid var(--line); opacity: .75; transition: opacity .12s, color .12s, border-color .12s; }
+.cm-code:hover .cm-copy, .cm-copy:hover, .cm-copy:focus-visible, .cm-copy.ok { opacity: 1; }
+.cm-copy:hover { color: var(--cm-accent-text, var(--fg)); border-color: var(--cm-accent, var(--edge)); }
+.cm-copy:focus-visible { outline: 2px solid var(--cm-accent, var(--hero)); outline-offset: 1px; }
+.cm-copy .ic-ok, .cm-copy.ok .ic-copy { display: none; }
+.cm-copy.ok .ic-ok { display: block; }
+.cm-copy.ok { color: var(--cm-rx, var(--mint)); border-color: var(--cm-rx, var(--mint)); }
 .cm-err { color: var(--red); font-size: 12px; margin-top: 4px; }
 .cm-think { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 12px; margin-top: 4px; }
 .cm-msg.live .bb:has(> .cm-think:first-child) .cm-think { margin-top: 0; }

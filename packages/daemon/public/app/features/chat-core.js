@@ -116,9 +116,15 @@ function inline(s) {
   out.push(esc(s.slice(last)));
   return out.join("");
 }
+// Fenced blocks get a copy button (features/code-copy.js handles the click, delegated on document). The ```lang line is
+// consumed by the split, so <pre><code>'s textContent is exactly the original block text — that's what gets copied.
+const COPY_ICON = '<svg class="ic-copy" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M11 3.5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>'
+  + '<svg class="ic-ok" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+export const codeBlockHtml = (code) =>
+  `<div class="cm-code"><button type="button" class="cm-copy" aria-label="복사" title="복사">${COPY_ICON}</button><pre><code>${esc(code)}</code></pre></div>`;
 export function mdLite(text) {
   const parts = String(text ?? "").split(/```[^\n`]*\n?/);
-  return parts.map((p, i) => (i % 2 ? `<pre><code>${esc(p.replace(/\n$/, ""))}</code></pre>` : p.split("\n").map(inline).join("<br>"))).join("");
+  return parts.map((p, i) => (i % 2 ? codeBlockHtml(p.replace(/\n$/, "")) : p.split("\n").map(inline).join("<br>"))).join("");
 }
 
 // ---------- 메시지 feed ----------

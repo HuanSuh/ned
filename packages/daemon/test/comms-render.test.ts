@@ -11,7 +11,8 @@ describe("mdLite", () => {
     expect(mdLite("<b>x</b>\n두 번째 `a<b` **굵게**")).toBe("&lt;b&gt;x&lt;/b&gt;<br>두 번째 <code>a&lt;b</code> <b>굵게</b>");
     expect(mdLite("[PR](https://gh/1) 와 https://x.y/z.")).toBe('<a href="https://gh/1" target="_blank" rel="noopener">PR</a> 와 <a href="https://x.y/z" target="_blank" rel="noopener">https://x.y/z</a>.');
     expect(mdLite("[bad](javascript:alert(1))")).toBe("[bad](javascript:alert(1))");
-    expect(mdLite("앞\n```sh\ngh pr list <x>\n```\n뒤")).toBe("앞<br><pre><code>gh pr list &lt;x&gt;</code></pre>뒤");
+    const fence = mdLite("앞\n```sh\ngh pr list <x>\n```\n뒤");
+    expect(fence).toMatch(/^앞<br><div class="cm-code"><button type="button" class="cm-copy" aria-label="복사" title="복사">.*<\/button><pre><code>gh pr list &lt;x&gt;<\/code><\/pre><\/div>뒤$/);
   });
 });
 
