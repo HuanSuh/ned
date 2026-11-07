@@ -36,15 +36,22 @@ export interface Briefing {
   sessions?: BriefingSection[];
   cost_usd?: number;
   raw?: string;
+  /** false = claude failed or its answer didn't parse (raw holds the text). Absent on older files — see briefingOk. */
+  ok?: boolean;
 }
+
+/** Did this briefing actually judge? Older files have no `ok`: a failed run is the one that kept `raw`. */
+export const briefingOk = (b: Pick<Briefing, "ok" | "raw">): boolean => b.ok ?? b.raw === undefined;
 
 export interface NedState {
   updated_at: number;
   daemon_pid: number;
   sessions: SessionView[];
   attention: AttentionItem[];
-  last_briefing: Pick<Briefing, "id" | "ts" | "type" | "status" | "headline"> | null;
+  last_briefing: Pick<Briefing, "id" | "ts" | "type" | "status" | "headline" | "ok"> | null;
   last_heartbeat_at: number | null;
+  /** Today's automatic morning briefing gave up after its retries (ms). Cleared by the next successful daily. */
+  daily_failed_at?: number | null;
   next_heartbeat_at: number | null;
   quiet: boolean;
   /** config.persona, mirrored here so the menu-bar app and dashboard can follow it. */

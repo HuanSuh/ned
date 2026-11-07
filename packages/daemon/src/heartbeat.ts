@@ -8,11 +8,11 @@ import { inQuietHours, watchChannels, type NedConfig, type NotifyKind } from "./
 import { personaPrompt } from "./persona.js";
 import { readRecentEvents, readUnprocessedEvents, type NedEvent } from "./events.js";
 import { notify } from "./notify.js";
-import { BRIEFINGS_DIR, DISMISSED_PATH, SENT_LOG, log, readJson, writeJsonAtomic } from "./paths.js";
+import { BRIEFINGS_DIR, DISMISSED_PATH, SENT_LOG, localDay, log, readJson, writeJsonAtomic } from "./paths.js";
 import { reduceSessions } from "./sessions.js";
 import { annotateChatOrigin } from "./session-create.js";
 import { THREAD_FOLLOW_HOURS, hasNewSinceMe, threadActivity, threadKeyOf } from "./slack-threads.js";
-import { readState, writeState, type AttentionItem, type Briefing, type BriefingSection } from "./state.js";
+import { briefingOk, readState, writeState, type AttentionItem, type Briefing, type BriefingSection } from "./state.js";
 
 type State = ReturnType<typeof readState>;
 
@@ -383,8 +383,10 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
     sessions: parsed?.sessions ?? [],
     cost_usd: res.cost_usd,
     raw: res.ok && parsed ? undefined : res.text.slice(0, 4000),
+    ok: res.ok && !!parsed,
   };
   if (!res.ok) log(`heartbeat: claude failed — ${res.error?.slice(0, 300)}`);
+  else if (!parsed) log(`heartbeat: answer didn't parse as JSON — kept in raw (${res.text.length} chars)`);
 
   // Drop items already surfaced before, then record the new ones.
   const fresh = (xs: BriefingSection[]) => xs.filter((x) => !sent.has(keyOf(x)));
@@ -411,11 +413,12 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
   writeJsonAtomic(path.join(BRIEFINGS_DIR, `${id}.json`), briefing);
   commit();
   // Obsidian 아카이브: briefing / UPDATE → write the day's report now; a quiet NED_OK only bumps the 순찰 count (tick flush).
-  archiveTouch(now, { cfg, immediate: briefing.type === "daily" || briefing.status === "UPDATE" });
+  archiveTouch(now, { cfg, immediate: (briefing.type === "daily" && briefing.ok === true) || briefing.status === "UPDATE" });
 
   const next = readState();
   next.last_heartbeat_at = now;
-  next.last_briefing = { id, ts: now, type: briefing.type, status: briefing.status, headline: briefing.headline };
+  next.last_briefing = { id, ts: now, type: briefing.type, status: briefing.status, headline: briefing.headline, ok: briefing.ok };
+  if (briefing.type === "daily" && briefing.ok) next.daily_failed_at = null; // a good morning briefing clears the 실패 line
   if (briefing.status === "UPDATE") {
     const items: AttentionItem[] = briefing.action_items.map((a, i) => ({
       id: `${id}:${i}`,
@@ -458,6 +461,11 @@ export function notifyBriefing(cfg: NedConfig, briefing: Briefing): void {
   } else {
     items.forEach((a, i) => notify(`Ned · ${a.kind ?? "other"}`, a.title, cfg.notify, { sound: sound && i === 0 }));
   }
+}
+
+/** Today's (local day) daily briefing that actually judged — failed ones (claude error / unparsable) don't count. */
+export function hadGoodDailyOn(day: string, briefings: Briefing[] = listBriefings(50)): boolean {
+  return briefings.some((b) => b.type === "daily" && briefingOk(b) && localDay(new Date(b.ts)) === day);
 }
 
 export function listBriefings(limit = 50): Briefing[] {

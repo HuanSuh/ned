@@ -15,6 +15,15 @@
  * Quiet + idle overlapping → the slower one wins (pause > larger factor).
  * When quiet hours end / idle ends: every source refreshes at once, then one heartbeat (so a morning briefing that is
  * already due reads fresh lists).
+ *
+ * Morning briefing (daily): counts as done for the day only when it succeeded (heartbeat() → briefing.ok !== false, no
+ * throw). A failure retries after DAILY_RETRY_MINUTES, at most DAILY_MAX_RETRIES times (4 runs); then the day is given
+ * up (log + d.onDailyFailed → state.daily_failed_at). A restart starts over (cli: only a successful daily file counts).
+ *
+ * Offline / wake (deps `online`, `wakeGapMs` — cli sets both; absent in most tests): before any automatic run the tick
+ * asks `online()` (src/online.ts, DNS 3s, cached 30s) and skips the whole tick when offline — no claude, no cost, no
+ * source error. A tick that comes ≥ wakeGapMs after the previous one (the Mac slept) runs nothing: "wake grace", the
+ * next tick does the work once Wi-Fi is back. Pending quiet/idle-end refreshes wait for the tick that actually runs.
  */
 import { execFile } from "node:child_process";
 import fs from "node:fs";
@@ -169,6 +178,12 @@ export interface SchedulerDeps {
   activityAt: () => number | Promise<number>;
   /** Today's daily briefing already exists (daemon restart). */
   dailyDoneToday?: boolean;
+  /** Online probe for automatic runs (src/online.ts). Absent = always online. */
+  online?: () => Promise<boolean>;
+  /** Tick gap that means "just woke from sleep" → that tick runs nothing (wake grace). Absent / 0 = off. */
+  wakeGapMs?: number;
+  /** The automatic morning briefing failed DAILY_MAX_RETRIES + 1 times today and was given up (state.daily_failed_at). */
+  onDailyFailed?: (at: number, attempts: number) => void;
   /** After an automatic heartbeat: when the next one is planned (state.next_heartbeat_at). */
   onHeartbeat?: (nextAt: number) => void;
   log: (msg: string) => void;
@@ -185,6 +200,15 @@ export interface Scheduler {
 const RUNS_KEEP = 50;
 /** Skip-unchanged never holds a heartbeat off longer than this while Sentry is on (only the heartbeat reads Sentry). */
 export const HEARTBEAT_SKIP_MAX_MINUTES = 180;
+/** A failed automatic morning briefing runs again this long after (no config key). */
+export const DAILY_RETRY_MINUTES = 10;
+/** Retries after the first failure (4 runs in all), then the day is given up. */
+export const DAILY_MAX_RETRIES = 3;
+/** Default wake-grace gap the daemon uses (cli.ts): ticks are 1 minute apart, ≥ 3 means the Mac slept. */
+export const WAKE_GAP_MS = 3 * 60_000;
+
+/** heartbeat() result → did the daily judge? null / { ok: false } = no; anything else (incl. undefined in tests) = yes. */
+const dailyOk = (r: unknown): boolean => r !== null && (r as { ok?: boolean } | undefined)?.ok !== false;
 
 /** What an automatic heartbeat would judge from, minus session events: every enabled source's list signature + the watch key. */
 export function heartbeatFingerprint(enabled: readonly AgendaSourceKey[], status: Partial<Record<AgendaSourceKey, { signature?: string }>> | undefined, watchKey = ""): string {
@@ -205,6 +229,15 @@ export function createScheduler(d: SchedulerDeps): Scheduler {
   let hbBusy = false;
   let ticking = false;
   let lastDaily = d.dailyDoneToday ? localDay(new Date(startedAt)) : "";
+  /** Failed automatic daily runs on `dailyFailDay`; next try not before dailyRetryAt; dailyGaveUp = day given up. */
+  let dailyFailDay = "";
+  let dailyFails = 0;
+  let dailyRetryAt = 0;
+  let dailyGaveUp = "";
+  let lastTickAt: number | null = null;
+  let wasOffline = false;
+  /** A quiet / idle end whose full refresh hasn't run yet (offline or over budget at that tick). */
+  let pendingEnd: "quiet" | "idle" | null = null;
   let prevQuietThrottled = false;
   let idle: IdleStatus = IDLE_OFF;
   let pausedLogAt = 0;
@@ -229,15 +262,46 @@ export function createScheduler(d: SchedulerDeps): Scheduler {
     }
   };
 
+  /** Morning briefing due now: not done today, not given up, past briefing_time, retry wait over. */
+  const dailyWanted = (cfg: NedConfig, t: number): boolean => {
+    const date = new Date(t);
+    const today = localDay(date);
+    return lastDaily !== today && dailyGaveUp !== today && date.toTimeString().slice(0, 5) >= cfg.briefing_time && (dailyFailDay !== today || t >= dailyRetryAt);
+  };
+
+  const dailyFailed = (t: number, today: string, why: string): void => {
+    if (dailyFailDay !== today) {
+      dailyFailDay = today;
+      dailyFails = 0;
+    }
+    dailyFails++;
+    if (dailyFails > DAILY_MAX_RETRIES) {
+      dailyGaveUp = today;
+      d.log(`daily: failed ${dailyFails} times today (${why}) — giving up until tomorrow (manual 아침 브리핑 still works)`);
+      d.onDailyFailed?.(t, dailyFails);
+      return;
+    }
+    dailyRetryAt = t + DAILY_RETRY_MINUTES * 60_000;
+    d.log(`daily: failed (${why}) — retry ${dailyFails}/${DAILY_MAX_RETRIES} at ${new Date(dailyRetryAt).toTimeString().slice(0, 5)}`);
+  };
+
+  /** Offline → log on the transition, true = skip this tick. */
+  const offline = async (): Promise<boolean> => {
+    if (!d.online) return false;
+    const ok = await d.online();
+    if (!ok && !wasOffline) d.log("offline — automatic runs wait for the next tick (no claude call)");
+    if (ok && wasOffline) d.log("online again — automatic runs resume");
+    wasOffline = !ok;
+    return !ok;
+  };
+
   const runHeartbeat = async (cfg: NedConfig, factor: number): Promise<void> => {
     if (hbBusy) return;
     hbBusy = true;
     const t = now();
     lastHbAt = t;
-    const date = new Date(t);
-    const today = localDay(date);
-    const daily = lastDaily !== today && date.toTimeString().slice(0, 5) >= cfg.briefing_time;
-    if (daily) lastDaily = today;
+    const today = localDay(new Date(t));
+    const daily = dailyWanted(cfg, t);
     const fp = () => heartbeatFingerprint(d.enabledSources(cfg), d.sourcesStatus(), d.heartbeatWatchKey?.(cfg) ?? "");
     try {
       // Skip-unchanged: nothing the heartbeat judges from moved since the last one that ran → no claude call.
@@ -250,7 +314,21 @@ export function createScheduler(d: SchedulerDeps): Scheduler {
           return;
         }
       }
-      const r = await d.heartbeat(cfg, { daily });
+      let r: unknown;
+      try {
+        r = await d.heartbeat(cfg, { daily });
+      } catch (e) {
+        if (daily) dailyFailed(t, today, String(e));
+        throw e;
+      }
+      if (daily) {
+        if (dailyOk(r)) {
+          lastDaily = today;
+          if (dailyFails) d.log(`daily: ok on attempt ${dailyFails + 1}`);
+          dailyFails = 0;
+          dailyRetryAt = 0;
+        } else dailyFailed(t, today, "claude failed or unparsable answer");
+      }
       // null = heartbeat.ts stayed silent without judging: what it skipped must still count as unseen next time.
       if (r !== null) {
         lastRunFp = fp(); // after the run: a heartbeat may have refreshed the lists itself
@@ -270,6 +348,12 @@ export function createScheduler(d: SchedulerDeps): Scheduler {
     try {
       const cfg = d.loadConfig();
       const t = now();
+      const gap = lastTickAt == null ? 0 : t - lastTickAt;
+      lastTickAt = t;
+      if (d.wakeGapMs && gap >= d.wakeGapMs) {
+        d.log(`wake: ${Math.round(gap / 60_000)}m since the last tick (slept) — automatic runs wait for the next tick`);
+        return;
+      }
       const q = quietStatus(cfg, new Date(t));
       const quietThrottled = q.active && q.mode !== "normal";
       const quietEnded = prevQuietThrottled && !quietThrottled;
@@ -293,11 +377,17 @@ export function createScheduler(d: SchedulerDeps): Scheduler {
 
       if (quietEnded || idleEnded) {
         d.log(`${quietEnded ? "quiet" : "idle"}: ended — full refresh`);
+        pendingEnd = quietEnded ? "quiet" : "idle";
+      }
+      if (pendingEnd) {
+        if (await offline()) return; // the full refresh waits for a tick that is online
+        const why = pendingEnd;
+        pendingEnd = null;
         if (d.overBudget(cfg, "agenda")) return;
         const live = d.runningSources();
         const keys = d.enabledSources(cfg).filter((k) => !live.includes(k));
         firstAgenda = false;
-        if (keys.length) await track(runAgenda(cfg, keys, quietEnded ? "quiet ended" : "idle ended"));
+        if (keys.length) await track(runAgenda(cfg, keys, `${why} ended`));
         if (!d.overBudget(cfg, "heartbeat")) await track(runHeartbeat(cfg, 1));
         return;
       }
@@ -312,11 +402,15 @@ export function createScheduler(d: SchedulerDeps): Scheduler {
       }
       pausedLogAt = 0;
 
+      const enabled = d.enabledSources(cfg);
+      const live = d.runningSources();
+      const last = lastRuns(scheduled, d.sourcesStatus(), enabled);
+      const due = firstAgenda ? enabled.filter((k) => !live.includes(k)) : dueSources(cfg, enabled, last, t, live, th.factor);
+      const hbWanted = !hbBusy && (dailyWanted(cfg, t) || heartbeatDue(lastHbAt, cfg.heartbeat_minutes, th.factor, t));
+      if (!due.length && !hbWanted) return;
+      if (await offline()) return;
+
       if (!d.overBudget(cfg, "agenda")) {
-        const enabled = d.enabledSources(cfg);
-        const live = d.runningSources();
-        const last = lastRuns(scheduled, d.sourcesStatus(), enabled);
-        const due = firstAgenda ? enabled.filter((k) => !live.includes(k)) : dueSources(cfg, enabled, last, t, live, th.factor);
         if (due.length) {
           const why = firstAgenda ? "startup" : `due: ${due.map((k) => `${k} ${Math.round(sourceMinutes(cfg, k) * th.factor)}m`).join(", ")}${th.by ? ` (${th.by} ×${th.factor})` : ""}`;
           firstAgenda = false;
@@ -324,9 +418,7 @@ export function createScheduler(d: SchedulerDeps): Scheduler {
         }
       }
 
-      const date = new Date(t);
-      const dailyDue = lastDaily !== localDay(date) && date.toTimeString().slice(0, 5) >= cfg.briefing_time;
-      if (!hbBusy && (dailyDue || heartbeatDue(lastHbAt, cfg.heartbeat_minutes, th.factor, t)) && !d.overBudget(cfg, "heartbeat")) void track(runHeartbeat(cfg, th.factor));
+      if (hbWanted && !d.overBudget(cfg, "heartbeat")) void track(runHeartbeat(cfg, th.factor));
     } catch (e) {
       d.log(`scheduler tick failed: ${String(e)}`);
     } finally {

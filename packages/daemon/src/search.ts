@@ -6,7 +6,7 @@ import { loadConfig } from "./config.js";
 import { readRecentEvents, type NedEvent } from "./events.js";
 import { listBriefings } from "./heartbeat.js";
 import { NED_HOME, TODOS_PATH, readJson } from "./paths.js";
-import { readState, type AttentionItem, type BriefingSection } from "./state.js";
+import { briefingOk, readState, type AttentionItem, type BriefingSection } from "./state.js";
 import type { Todo } from "./todos.js";
 
 /**
@@ -233,9 +233,9 @@ function candidates(): Cand[] {
 
   for (const b of listBriefings(100_000)) {
     const items: BriefingSection[] = [...(b.action_items ?? []), ...(b.updates ?? []), ...(b.fyi ?? []), ...(b.sessions ?? [])];
-    const label = b.type === "daily" ? "아침 브리핑" : "점검";
+    const label = `${b.type === "daily" ? "아침 브리핑" : "점검"}${briefingOk(b) ? "" : " (실패)"}`;
     out.push({
-      type: "briefing", id: b.id, title: b.headline || `${label} · ${b.status === "NED_OK" ? "이상 무" : `${items.length}건`}`, detail: items.map((x) => x.title).slice(0, 3).join(" · ") || label, ts: b.ts, url: null, kind: "briefing", tab: "inbox", anchor: `briefing:${b.id}`,
+      type: "briefing", id: b.id, title: b.headline || `${label} · ${!briefingOk(b) ? "Claude 실패" : b.status === "NED_OK" ? "이상 무" : `${items.length}건`}`, detail: items.map((x) => x.title).slice(0, 3).join(" · ") || label, ts: b.ts, url: null, kind: "briefing", tab: "inbox", anchor: `briefing:${b.id}`,
       items: (["action_items", "updates", "fyi", "sessions"] as const).flatMap((sec) => (b[sec] ?? []).map((x) => ({ section: sec, title: x.title, detail: x.detail, url: url(x.url) ?? undefined, kind: x.kind }))),
       fields: [[b.headline, 3], [label, 1], [b.status, 1], ...items.flatMap((x): Array<[unknown, number]> => [[x.title, 2], [x.detail, 1], [x.kind, 1]])],
     });

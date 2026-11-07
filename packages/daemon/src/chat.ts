@@ -12,7 +12,7 @@ import { listBriefings } from "./heartbeat.js";
 import { NED_HOME, log, readJson, writeJsonAtomic } from "./paths.js";
 import { extractOutputBlock, outputRef, saveOutput, type OutputRef } from "./outputs.js";
 import { personaPrompt } from "./persona.js";
-import { readState, type Briefing, type NedState } from "./state.js";
+import { briefingOk, readState, type Briefing, type NedState } from "./state.js";
 import { listTodos, type Todo } from "./todos.js";
 
 /**
@@ -198,7 +198,7 @@ export function buildChatContext(inp: ChatContextInput, max = CHAT_CONTEXT_MAX):
   const sess = (st.sessions ?? []).filter((s) => s.status !== "ended");
   sections.push(["열린 에이전트 세션", sess.slice(0, 8).map((s) => `- ${s.worktree || path.basename(s.cwd)} · ${s.status}${s.is_worker ? " (워커)" : ""}${s.last_prompt ? ` · ${clip(s.last_prompt, 70)}` : ""} session_id=${s.id}`)]);
 
-  const heads = briefings.filter((b) => b.headline).slice(0, 3);
+  const heads = briefings.filter((b) => b.headline && briefingOk(b)).slice(0, 3);
   sections.push(["최근 브리핑", heads.map((b) => `- ${new Date(b.ts).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} ${clip(b.headline, 120)}`)]);
 
   const td = todos.filter((t) => !t.done);

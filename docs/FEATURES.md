@@ -6,18 +6,18 @@
 ## 요약
 
 Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub·Sentry)를 모아 보여 주는 로컬 대시보드(탭: 홈·인박스·타임라인·설정). 전역 키: h 홈, i 인박스, r 지금 점검, ⌘K·/ 검색, ⌘J 통신기.
-- **홈**: 일정(일/주, ＋·드래그로 일정 만들기, ⋯ 수락/미정/거절), 할 일(NED 액션 아이템 / 개인 할 일 — 구분선·접기, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, ↻ 소스별 갱신), 팔로업 채널 카드(멘션 없어도 따라가는 Slack 채널 24h 요약, "나한테" 강조). 새 메시지 없는 Slack 스레드·DM 은 다시 안 읽음.
-- **인박스**: 우선(attention)·기타(업데이트/참고)·기록(브리핑) 3탭 + "장비실"(세션 상태, 대화창 출처 배지). j/k 이동, e 닫기, ⏎ 열기, 1/2/3 탭.
+- **홈**: 일정(일/주, ＋·드래그로 일정 만들기, ⋯ 수락/미정/거절), 할 일(NED 액션 아이템 / 개인 할 일 — 구분선·접기, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, ↻ 소스별 갱신), 팔로업 채널 카드(멘션 없어도 따라가는 Slack 채널 24h 요약, "나한테" 강조).
+- **인박스**: 우선(attention)·기타(업데이트/참고)·기록(브리핑) 3탭 + "장비실"(세션 상태, 대화창 출처 배지). 키 j/k·e·⏎·1/2/3.
 - **타임라인**: 세션 이벤트와 브리핑을 시간순으로(유형·워크트리 필터).
-- **순찰/브리핑**: "지금 점검"(r) = 소스를 새로 가져와 판단 → 알림·attention. 자동 순찰은 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑은 `briefing_time`.
+- **순찰/브리핑**: "지금 점검"(r) = 소스를 새로 가져와 판단 → 알림·attention. 자동 순찰은 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑은 `briefing_time` — 실패하면 10분 뒤 재시도(최대 3회, 다 실패 시 홈에 한 줄). 오프라인·잠 깬 직후 틱은 자동 실행을 다음 틱으로.
 - **야간·유휴 감속**: 조용한 시간엔 자동 순찰·홈 갱신이 `quiet_schedule.mode`(normal/slow/pause, 기본 slow ×`slow_factor` 6). 유휴(`idle_schedule`: 120분 무활동 + 6회 무변경)도 slow/pause. 홈 상단 칩. 수동 실행은 늘 즉시, 끝나면 전 소스 갱신.
 - **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기를 확인 카드로 제안, 텍스트만 고쳐 실행; `actions.chat_session_create` 면 새 세션도; 회의·문서·메일 정리는 노트로 저장), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글 피드.
 - **답장 초안 ✎**: 연필 → 초안 3개 → 복사/열기/보내기. 실제 쓰기는 설정 → 쓰기 액션에서 켠 것만: `actions.slack_send`·`gmail_draft`(기본 켬)·`gmail_send`·`session_send`(기본 켬)·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯ 메뉴.
 - **확인 완료 ✓**: 항목을 처리됨으로 접음(바뀌면 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`, 앞 `ack_check_max`개만 검색)면 자동 해제.
 - **Gmail 읽음 표시**: 설정 → 쓰기 액션 → Gmail → "Gmail 읽음 표시까지"(`actions.gmail_mark_read`, 기본 꺼짐): 메일 ✓ 때 Gmail 도 읽음(✓ 취소해도 안 되돌림).
-- **검색 ⌘K**: 주의·세션·일정·소스·할 일·브리핑·이벤트·초안·설정 통합 검색(초성).
+- **검색 ⌘K**: 대시보드 전체 통합 검색(초성).
 - **아카이브(Obsidian)**: 설정 → 아카이브에 볼트 `archive.vault` + 켜기 `archive.enabled` → 매일 `<archive.folder>/Daily/YYYY-MM/날짜.md` 에 브리핑·순찰·보낸 것·결과물·통계 자동 기록(Claude 호출 없음, 마커 밖 메모 보존). `archive.daily_embed` = 내 데일리 노트에 embed 한 줄.
-- **설정**(바꾼 뒤 하단 "저장"): 외형(테마 `dashboard.theme` 시스템/라이트/다크, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(`heartbeat_minutes`, `signal_check_minutes`, `briefing_time`, `agenda_refresh_minutes`, `agenda_source_minutes.*`, `quiet_schedule.*`, `idle_schedule.*`) · 쓰기 액션(`actions.*`, 기본 말투 `reply_tone`, 소스별 답장 말투 `reply_tone_by_source.*`, 오늘 한 액션 로그) · 아카이브(`archive.*`) · Claude(모델 `claude_model`, 최대 턴 `claude_max_turns`, 하루 사용 상한 `agenda_daily_budget_usd` 기본 $15 — 닿으면 자동 실행·대화가 멈춤). 바뀐 항목만 저장, 저장마다 백업 10개 → "이전 설정으로 되돌리기".
+- **설정**(바꾼 뒤 하단 "저장"): 외형(테마 `dashboard.theme` 시스템/라이트/다크, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(`heartbeat_minutes`, `signal_check_minutes`, `briefing_time`, `agenda_refresh_minutes`, `agenda_source_minutes.*`, `quiet_schedule.*`, `idle_schedule.*`) · 쓰기 액션(`actions.*`, 기본 말투 `reply_tone`, 소스별 답장 말투 `reply_tone_by_source.*`, 오늘 한 액션 로그) · 아카이브(`archive.*`) · Claude(모델 `claude_model`, 최대 턴 `claude_max_turns`, 하루 사용 상한 `agenda_daily_budget_usd` 기본 $15 — 닿으면 자동 실행·대화가 멈춤). 저장마다 백업 10개 → "이전 설정으로 되돌리기".
 
 ## 상세
 
@@ -98,6 +98,8 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 ### 순찰·브리핑 (지금 점검)
 - 보여 주는 것: Ned 의 판단 결과 — 알림 배너, 확인 필요(attention), 인박스 기록의 브리핑(NED_OK = 이상 무 / UPDATE).
 - 데이터: 자동 순찰은 `heartbeat_minutes`(기본 10)마다, 신호 판단은 `signal_check_minutes`(기본 60)가 지났거나 세션 이벤트가 있을 때만 LLM 호출. agenda.json 재사용 + Sentry 직접 조회. 아침 브리핑은 `briefing_time`(기본 09:00) 뒤 첫 순찰, 하루 1회.
+- 아침 브리핑 재시도: 자동 아침 브리핑은 **성공했을 때만** 그날 완료로 친다(Claude 실패·답 해석 실패는 브리핑 파일에 `ok: false` + raw 로 남고 인박스·타임라인·검색에 "아침 실패"로 표시, 아카이브 🌅·대화 맥락엔 안 들어감). 실패하면 10분 뒤 다시(최대 3회 = 총 4번), 다 실패하면 그날은 포기하고 `state.json` 에 `daily_failed_at` → 홈 한 줄 "오늘 아침 브리핑 실패 — '아침 브리핑'이나 '지금 점검'으로 다시"(성공한 아침 브리핑이 지움). 데몬을 다시 켜면 오늘 **성공한** 아침 브리핑 파일이 있을 때만 건너뛰고, 재시도 횟수는 0부터. 설정 키 없음.
+- 오프라인·잠 깬 직후: 자동 실행(소스 갱신·순찰·아침 브리핑)은 Claude 를 띄우기 전에 `api.anthropic.com` DNS 조회(3초, 결과 30초 캐시)로 온라인인지 보고, 오프라인이면 그 틱을 통째로 건너뜀(로그 `offline — …`, 비용·소스 오류 없음, 재시도 횟수도 안 씀). 앞 틱과 3분 이상 벌어진 틱(맥이 잠들었다 깸)은 아무것도 안 돌리고 다음 틱에(로그 `wake: …`). 수동 실행(지금 점검·아침 브리핑·카드 ↻)은 확인 없이 늘 즉시.
 - 무변경 건너뛰기(`heartbeat_skip_unchanged`, 기본 켬): 지난번 판단한 순찰 뒤로 소스 목록(서명)·2시간 안 일정·팔로우 스레드의 새 답글·세션 알림(응답 완료/오류/입력 대기)이 하나도 안 바뀌었으면 자동 순찰은 Claude 를 부르지 않고 다음 주기로 넘김(로그 `heartbeat: skipped — unchanged`). Sentry 가 켜져 있으면 3시간마다 한 번은 실제로 돔. 아침 브리핑·지금 점검·`/api/heartbeat` 는 늘 실행.
 - 언제: 방금 들어온 것까지 반영해 판단받고 싶을 때 "지금 점검".
 - 버튼·키·설정: 헤더 "지금 점검"(r, 데이터 갱신 중 → 판단 중, 1~2분), "아침 브리핑". 설정 → 순찰 주기. 하루 상한(`agenda_daily_budget_usd`) 도달 시 자동 실행만 멈춤.

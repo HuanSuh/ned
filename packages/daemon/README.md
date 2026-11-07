@@ -28,6 +28,18 @@ node dist/cli.js prompt agenda       # dry-run: heartbeat | briefing | agenda �
 새 세션 이벤트도 없고 `signal_check_minutes` 가 지나지 않았으면 LLM 을 부르지 않고 침묵한다.
 `briefing_time` 이 지난 첫 tick 은 `prompts/briefing.md` 로 아침 브리핑을 만든다 (하루 1회).
 
+**아침 브리핑 재시도** (`src/scheduler.ts`): 아침 브리핑은 성공했을 때만 그날 완료(`lastDaily`)로 친다. `heartbeat()` 는 결과 브리핑에
+`ok`(claude 성공 && JSON 파싱 성공)를 남기고, 실패해도 파일은 `type: "daily"`, `ok: false`, `raw` 로 저장한다(`briefingOk()` — `ok` 없는
+옛 파일은 `raw` 가 없으면 성공). 스케줄러는 실패(또는 throw)면 `DAILY_RETRY_MINUTES`(10) 뒤 다시, `DAILY_MAX_RETRIES`(3)번까지; 다 실패하면
+그날은 포기하고 로그 + `onDailyFailed` → `state.daily_failed_at`(대시보드 홈 한 줄, 성공한 daily 가 `null` 로 지움). 재시도 중에도
+`hbBusy` 락과 예산 가드는 그대로. 데몬 재시작 시 `hadGoodDailyOn(오늘)` — 성공한 daily 파일만 센다, 재시도 횟수는 0부터.
+실패 브리핑은 아카이브 🌅·대화창 맥락에서 빠지고, 대시보드(인박스 기록·타임라인·검색)엔 "아침 실패"로 보인다.
+
+**오프라인·wake grace** (`src/online.ts`, 스케줄러 deps `online`·`wakeGapMs`): 자동 실행이 있을 틱에만 `dns.promises.lookup("api.anthropic.com")`
+(3초 타임아웃, 30초 캐시) → 실패면 그 틱 전체를 건너뛴다(전환 때만 로그 `offline — …` / `online again — …`, 비용 0, 소스 상태 그대로,
+야간·유휴 종료 전체 갱신은 온라인 틱까지 미룸). 앞 틱과 `WAKE_GAP_MS`(3분) 이상 벌어진 틱은 잠에서 깬 것으로 보고 아무것도 안 돌린다.
+수동 `POST /api/check`·`/api/heartbeat`·`/api/agenda/refresh` 는 스케줄러를 거치지 않으므로 확인 없이 즉시.
+
 **무변경 skip** (`heartbeat_skip_unchanged`, 기본 true — `src/scheduler.ts`): 스케줄러가 자동 heartbeat 를 돌리기 직전, 아침 브리핑이 아니고
 (a) 켜진 소스 전부의 `sources_status[k].signature`, (b) `heartbeatWatchKey`(앞으로 2시간 안 일정 id + 아직 안 알린 "내 답 이후 새 답글" 스레드 키 —
 시간이 흐르거나 2단계가 스레드를 읽어도 목록 서명은 그대로라 따로 본다), (c) 처리 안 된 세션 알림 이벤트(Stop/StopFailure/Notification,
@@ -412,10 +424,10 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
                          draft_context_max_age_minutes=180 (agenda 맥락 → fast 초안), draft_fast_model="sonnet", drafts_pregenerate=false,
                          agenda_all_limit=20 (mail/slack all[] 상한), agenda_context_batch=5 (2단계 배치 크기),
                          agenda_daily_budget_usd=15 (2단계 일일 예산), agenda_light_model="sonnet" (agenda 전 호출 모델, null = claude_model)
-  state.json             menu bar / 대시보드가 읽는 단일 뷰 (sessions, attention, last_briefing, quiet …)
+  state.json             menu bar / 대시보드가 읽는 단일 뷰 (sessions, attention, last_briefing, daily_failed_at, quiet …)
   cursor.json            heartbeat 가 처리한 마지막 이벤트 ts
   events/YYYY-MM-DD.jsonl  훅(packages/hook/ned-hook.sh)이 append 하는 이벤트. 로컬 날짜 기준
-  briefings/<iso-ts>.json  heartbeat / daily 브리핑 결과 (status, action_items, updates, fyi, sessions, cost_usd)
+  briefings/<iso-ts>.json  heartbeat / daily 브리핑 결과 (status, ok, action_items, updates, fyi, sessions, cost_usd, 실패 시 raw)
   briefings/sent.log     이미 알린 항목 키 (title 또는 url) — 중복 억제
   agenda.json            HOME 탭 agenda: {updated_at, cost_usd, error?, sources_status, context_status, context_sigs, calendar, jira, github, mail, slack}
   agenda.raw.txt         마지막으로 빈/깨진 agenda 호출의 모델 원문 (디버깅)

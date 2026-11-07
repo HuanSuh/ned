@@ -48,7 +48,7 @@ export function renderHeader() {
         ? errBadge("heartbeat", { where: S.hbErr.daily ? "아침 브리핑 실행" : "점검 실행", message: S.hbErr.message, at: S.hbErr.at, retry: () => runHeartbeat(S.hbErr.daily) }) : ""}
       <span><span class="led ${n ? "a" : ""}"></span>attn ${n}</span>
       <span class="opt"><span class="led ${s?.quiet ? "b" : ""}"></span>quiet</span>
-      <span class="opt" title="${esc(lb ? `${lb.type === "daily" ? "아침" : "점검"} ${lb.status}${lb.headline ? " · " + lb.headline : ""}` : "")}">last ${s?.last_heartbeat_at ? rel(s.last_heartbeat_at) : "—"}</span>
+      <span class="opt" title="${esc(lb ? `${lb.type === "daily" ? "아침" : "점검"} ${lb.ok === false ? "실패" : lb.status}${lb.headline ? " · " + lb.headline : ""}` : "")}">last ${s?.last_heartbeat_at ? rel(s.last_heartbeat_at) : "—"}</span>
       <span>next ${s?.next_heartbeat_at ? rel(s.next_heartbeat_at) : "—"}</span>`;
   const o = opener();
   $("say").innerHTML = say(`ned · ${hhmm(Date.now())}`, esc(o.lead), esc(o.sub));
