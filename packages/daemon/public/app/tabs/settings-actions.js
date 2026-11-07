@@ -12,6 +12,7 @@ export const WA_GROUPS = [
   { id: "jira", label: "Jira", icon: KIND_ICON.jira, src: "jira", tone: null, keys: ["jira_comment", "jira_transition"] },
   { id: "github", label: "GitHub", icon: KIND_ICON.github, src: "github", tone: null, keys: ["github_review"] },
   { id: "calendar", label: "캘린더", icon: KIND_ICON.calendar, src: "calendar", tone: null, keys: ["calendar_rsvp", "calendar_create"] },
+  { id: "chat", label: "대화창", icon: "🗨", src: null, tone: null, keys: ["chat_write"] },
 ];
 export const TONE_SOURCES = ["slack", "email", "session"];
 
@@ -21,6 +22,7 @@ const ACTION_HINT = {
   github_review: "PR 항목 ⋯ → 리뷰 초안 / 승인 / 변경 요청 / 코멘트 (gh pr review · gh pr comment)",
   calendar_rsvp: "일정 ⋯ → 수락 / 미정 / 거절",
   gmail_mark_read: "메일 카드의 ✓(확인 완료)를 누르면 Gmail 에서도 그 스레드를 읽음 처리 (백그라운드, 실패해도 확인 완료는 유지). 확인을 취소해도 안 읽음으로 되돌리지 않아",
+  chat_write: "Ned Net 대화창이 쓰기(보내기·만들기·할 일 추가)를 제안하면 확인 카드로 보여 줌 → 텍스트만 고쳐 [실행]. 각 동작은 위 스위치도 켜져 있어야 해",
   calendar_create: "일정 카드 ＋ / 주 보기 드래그 / 일 보기 빈 시간 클릭 → 새 일정 팝업 → 확인 후 Google Calendar 에 생성",
 };
 

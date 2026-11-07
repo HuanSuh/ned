@@ -135,7 +135,7 @@ export const syncWriteActions = () => syncWriteActionGroups($("wa-groups"), (k) 
 /** The 소스 checkbox for `key` — scoped to #c-sources: the home tab's 팔로업 cards also carry `data-src="slack"`
  *  (status spans), and an unscoped querySelector picked one of those first → "Slack 소스가 꺼져 있어" while it was on. */
 const srcToggle = (key) => document.querySelector(`#c-sources input[data-src="${key}"]`);
-const SRC_KO = { slack: "Slack", email: "메일", session: "세션", jira: "Jira", github: "GitHub", calendar: "캘린더" };
+const SRC_KO = { slack: "Slack", email: "메일", session: "세션", jira: "Jira", github: "GitHub", calendar: "캘린더", todo: "할 일" };
 const OUTCOME_KO = { ok: ["성공", "ok"], refused: ["거절(꺼짐)", ""], dry_run: ["dry-run", ""], failed: ["실패", "today"] };
 export const outcomeOf = (e) => (e.ok ? "ok" : e.action === "refused" ? "refused" : String(e.action || "").startsWith("dry_run:") ? "dry_run" : "failed");
 export const AL = { list: null, error: "", source: "", result: "", reads: false };
@@ -163,7 +163,7 @@ export function renderActionLog() {
       : rows.length ? `<table class="altab"><thead><tr><th>시각</th><th>소스</th><th>동작</th><th>결과</th><th>내용</th></tr></thead><tbody>${rows.map((e) => {
         const o = OUTCOME_KO[outcomeOf(e)], d = new Date(e.ts);
         const what = e.ref?.title || e.ref?.key || (e.ref?.repo ? `${e.ref.repo}#${e.ref.number}` : "") || e.ref?.url || "";
-        return `<tr title="${esc(e.result || "")}"><td>${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}</td><td>${esc(SRC_KO[e.source] || e.source)}</td><td><code>${esc(e.action === "refused" ? `${e.mode} (refused)` : String(e.action).replace(/^dry_run:/, ""))}</code></td>
+        return `<tr title="${esc(e.result || "")}"><td>${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}</td><td>${esc(SRC_KO[e.source] || e.source)}${e.origin === "chat" ? ' <span class="chipx" title="Ned Net 대화창의 확인 카드에서 실행">대화창</span>' : ""}</td><td><code>${esc(e.action === "refused" ? `${e.mode} (refused)` : String(e.action).replace(/^dry_run:/, ""))}</code></td>
           <td><span class="chipx ${o[1]}">${esc(o[0])}</span></td><td class="alw">${esc(what)}${e.text ? ` <span class="hint">“${esc(e.text.slice(0, 60))}”</span>` : ""}</td></tr>`;
       }).join("")}</tbody></table>` : `<div class="hint">${all.length ? "필터에 맞는 액션 없음." : "오늘은 아직 한 액션 없음."}</div>`}`;
 }

@@ -3,12 +3,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
-import { parseSendRequest, readActionLog, type SendRequest } from "./actions.js";
+import { appendActionLog, parseOrigin, parseSendRequest, readActionLog, type SendRequest } from "./actions.js";
 import { parseCalendarCreate } from "./calendar-create.js";
 import { getSendJob, linkOf, startSendJob, viewJob } from "./send-jobs.js";
 import { AGENDA_SOURCES, agendaBusy, enabledSources, patchAgenda, readAgenda, runningSources, startAgendaRefresh, type AgendaSourceKey } from "./agenda.js";
 import { contextStatus, requestContext } from "./agenda-context.js";
-import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runChatTurn, sseFrame, stopChat } from "./chat.js";
+import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runChatTurn, setChatActionState, sseFrame, stopChat } from "./chat.js";
+import { validateChatAction } from "./chat-actions.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
 import { PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeDashboard, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, restoreConfigBackup, saveConfig, sourceRefreshMinutes, watchChannels, type NedConfig, type PersonaId } from "./config.js";
@@ -279,8 +280,24 @@ export function startServer(getConfig: () => NedConfig): void {
   };
   app.get("/api/todos", (c) => c.json(listTodos()));
   app.post("/api/todos", async (c) => {
-    const t = addTodo(await readBody(c));
-    return t ? c.json(t, 201) : c.json({ error: "title required" }, 400);
+    const body = await readBody(c);
+    const origin = parseOrigin(body.origin);
+    if (!origin) {
+      const t = addTodo(body);
+      return t ? c.json(t, 201) : c.json({ error: "title required" }, 400);
+    }
+    // From a Ned Net 확인 카드: needs actions.chat_write, and lands in the action log like any other chat write.
+    const ts = new Date().toISOString();
+    const title = typeof body.title === "string" ? body.title.trim() : "";
+    const entry = { ts, source: "todo", mode: "add", ref: { title: title.slice(0, 200) }, text: title.slice(0, 120), origin };
+    if (loadConfig().actions.chat_write !== true) {
+      appendActionLog({ ...entry, action: "refused", ok: false, result: "config.actions.chat_write is off — turn it on in settings to allow this" });
+      return c.json({ ok: false, error: "config.actions.chat_write is off — turn it on in settings to allow this" }, 403);
+    }
+    const t = addTodo(body);
+    if (!t) return c.json({ error: "title required" }, 400);
+    appendActionLog({ ...entry, action: "todo_add", ok: true, result: `todo ${t.id}${t.due ? ` (마감 ${t.due})` : ""}` });
+    return c.json(t, 201);
   });
   app.patch("/api/todos/:id", async (c) => {
     const t = updateTodo(c.req.param("id"), await readBody(c));
@@ -330,9 +347,11 @@ export function startServer(getConfig: () => NedConfig): void {
   // New Google Calendar event (config.actions.calendar_create): same job flow as /api/send — 400 bad input, 403 off,
   // 202 {job_id} (joins an identical running request), 409 already_sent when the same title + time was created in 10 min.
   app.post("/api/calendar/events", async (c) => {
-    const ev = parseCalendarCreate(await readBody(c));
+    const body = await readBody(c);
+    const ev = parseCalendarCreate(body);
     if (typeof ev === "string") return c.json({ ok: false, error: ev }, 400);
-    return startJob(c, { source: "calendar", mode: "create", text: "", ref: { title: ev.title, calendar_id: ev.calendar_id }, event: ev });
+    const origin = parseOrigin(body.origin);
+    return startJob(c, { source: "calendar", mode: "create", text: "", ref: { title: ev.title, calendar_id: ev.calendar_id }, event: ev, ...(origin ? { origin } : {}) });
   });
   app.get("/api/calendar/events/:job_id", jobView);
   app.get("/api/actions", (c) => c.json(readActionLog(50)));
@@ -368,6 +387,24 @@ export function startServer(getConfig: () => NedConfig): void {
   app.get("/api/chat/:id", (c) => {
     const chat = readChat(c.req.param("id"));
     return chat ? c.json({ ...chat, running: activeChat() === chat.id }) : c.json({ error: "not found" }, 404);
+  });
+  // 확인 카드 (actions.chat_write): check a ```ned-action proposal + build the request for the existing endpoint.
+  // 200 {ok, endpoint, payload, …} · 400 malformed · 403 switched off · 409 target not among the known items.
+  app.post("/api/chat/actions/validate", async (c) => {
+    const body = await readBody(c);
+    const r = validateChatAction(loadConfig(), body.block, { agenda: readAgenda(), state: readState() }, body.text);
+    if (!r.ok) {
+      const { status, ...out } = r;
+      return c.json(out, status);
+    }
+    return c.json(r);
+  });
+  // The card's state on its message (running → executed | failed, or cancelled); executed / cancelled are final (409).
+  app.post("/api/chat/:id/action", async (c) => {
+    const body = await readBody(c);
+    const r = setChatActionState(c.req.param("id"), body.ts, body);
+    if (!r.ok) return c.json({ ok: false, error: r.error }, r.status);
+    return c.json(r);
   });
   app.post("/api/chat/:id/stop", (c) => (stopChat(c.req.param("id")) ? c.json({ ok: true }) : c.json({ ok: false, error: "not running" }, 404)));
 
