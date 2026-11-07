@@ -91,6 +91,7 @@ export function mergeConfigPatch(cur: NedConfig, body: Partial<NedConfig>): NedC
     notifications: normalizeNotifications(m.notifications, cur.notifications),
     actions: normalizeActions(m.actions, cur.actions),
     reply_tone: normalizeReplyTone(m.reply_tone, cur.reply_tone),
+    heartbeat_skip_unchanged: m.heartbeat_skip_unchanged !== false,
     reply_tone_by_source: normalizeReplyToneBySource(m.reply_tone_by_source, cur.reply_tone_by_source),
     filters: mergeFilters(cur.filters, filters),
     agenda_source_minutes: normalizeAgendaSourceMinutes(m.agenda_source_minutes, cur.agenda_source_minutes),

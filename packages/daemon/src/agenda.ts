@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { extractJson, llmDisabled, runClaude } from "./claude.js";
-import { filtersPrompt, jqlExclude, watchChannels, type NedConfig } from "./config.js";
+import { ACK_CHECK_MAX_DEFAULT, filtersPrompt, jqlExclude, watchChannels, type NedConfig } from "./config.js";
 import { personaPrompt } from "./persona.js";
 import { AGENDA_PATH, AGENDA_RAW_PATH, log, readJson, writeJsonAtomic } from "./paths.js";
 import { applyThreadState, syncDmsFromList, syncThreadsFromList, type SlackThread, type ThreadRowFields } from "./slack-threads.js";
@@ -593,6 +593,12 @@ export function pickSections(text: string, keep: Set<string>): string {
   return text.replace(/<!--@([a-z]+)-->\n?([\s\S]*?)<!--@\/\1-->\n?/g, (_m, name: string, body: string) => (keep.has(name) ? body : ""));
 }
 
+/** Ack emoji the Slack list call searches (`hasmy::emoji:`): the first filters.slack.ack_check_max of ack_reactions. */
+export function ackCheckEmojis(cfg: NedConfig): string[] {
+  const s = cfg.filters.slack;
+  return (s.ack_reactions ?? []).slice(0, Math.max(1, s.ack_check_max ?? ACK_CHECK_MAX_DEFAULT));
+}
+
 /** Phase-1 prompt for one call covering `keys` (prompts/agenda-lists.md: lists only, no per-item context). */
 export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = new Date()): string {
   const cr = calendarRange(now), cb = rangeBounds(cr.from, cr.to);
@@ -600,7 +606,8 @@ export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = 
   const keep = new Set<string>(keys);
   if (keys.includes("slack") || keys.includes("mail")) keep.add("voice");
   if (watch.length) keep.add("watch");
-  const ack = keys.includes("slack") ? cfg.filters.slack.ack_reactions ?? [] : [];
+  // Each ack emoji is one extra Slack search: only the first ack_check_max of them, and only when there are candidates (prompt).
+  const ack = keys.includes("slack") ? ackCheckEmojis(cfg) : [];
   if (ack.length) keep.add("ack");
   const select = `select:${keys.flatMap((k) => LIST_TOOLS[k]).join(",")}`;
   const since = String(Math.floor(now.getTime() / 1000) - 24 * 3600);
@@ -616,6 +623,7 @@ export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = 
     .replaceAll("{{WATCH_CHANNELS}}", watch.map((c) => `#${c}`).join(", "))
     .replaceAll("{{ACK_EMOJIS}}", ack.map((e) => `:${e}:`).join(" "))
     .replaceAll("{{ACK_EXAMPLE}}", ack.length ? `\`hasmy::${ack[0]}:\`` : "")
+    .replaceAll("{{ACK_WATCH_COND}}", watch.length ? " 또는 팔로업 채널의 `needs_me` 하이라이트 후보" : "")
     .replaceAll("{{ACK_KEY}}", ack.length ? ',"acked_urls":[]' : "")
     .replaceAll("{{WATCH_KEY}}", watch.length ? ',"watch":[{"channel":"#채널","summary":"","highlights":[{"from":"","text":"","ts":"ISO","url":"","needs_me":false,"reason":""}],"recent":[{"from":"","text":"","ts":"ISO","url":""}]}]' : "")
     .replaceAll("{{PERSONA}}", () => personaPrompt(cfg.persona))
