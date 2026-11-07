@@ -137,6 +137,12 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
     맥락 수집이 깨끗이 끝난 서명을 `context_sigs` 에 기록한다. 다음 실행의 서명이 같으면 그 소스의 2단계를 통째로 건너뛴다
     (`?force=1` 이면 무시). 목록이 새로 와도 기존 맥락은 항목 단위로 이월된다(Slack 은 같은 permalink, 메일은 같은 thread 이고 맥락을
     읽은 시각이 마지막 메시지보다 뒤일 때).
+  - **팔로우 스레드·DM 재읽기** (`processThreads`, `src/slack-threads.ts`): 매 Slack 패스 뒤 `slack.threads[]`/`slack.dms[]` 중 최근 48h 활동이
+    있는 것을 최대 `agenda_thread_batch`(8)·DM 5개 한 번에 읽는다. 읽을 때 1단계가 본 최신 ts(`search_latest_ts`)를 `read_search_ts` 로 남기고,
+    다음 패스에서 그 값이 그대로면 건너뛴다(`followState` = `unchanged`). 한 번도 안 읽은 것(`never`)·1단계가 더 새 메시지를 본 것(`moved`)은
+    지금처럼 읽고, 같은 ts 라도 마지막 읽기가 `THREAD_RECHECK_MINUTES`(6시간) 지났으면 1회 재확인(`recheck` — 1단계는 최신 20건만 봐서
+    조용해 보이는 스레드도 움직일 수 있다). 후보가 0이면 claude 를 부르지 않고, 로그에 `agenda-threads: … skipped unchanged N thread(s), M DM(s)` 를 남긴다.
+    `read_search_ts` 가 없는 예전 기록은 `last_reply_ts` 와 비교한다(예전 규칙).
   - **일일 예산**: 배치 직전마다 오늘(로컬 날짜) 총 `claude -p` 비용(`~/.ned/costs.json`, agenda·agenda_context·heartbeat·draft·calendar·
     action 합산)이 `agenda_daily_budget_usd`(기본 15) 이상이면 멈추고 `context_status.stopped = "budget"`. 1단계 목록은 예산과 무관하게 돈다.
 - 동시에 여러 번 요청돼도 실행 중인 1단계 한 번을 공유한다(busy guard). 2단계는 워커 하나가 소스 큐(Slack 우선)를 순서대로 처리한다.

@@ -16,6 +16,8 @@ import {
   applyThreadState,
   dmCandidates,
   dmKeyOf,
+  followState,
+  unchangedCount,
   syncDmsFromList,
   hasNewSinceMe,
   markThreadSeen,
@@ -84,6 +86,36 @@ describe("threadCandidates (cost control)", () => {
     const never = base({ key: "b" });
     const stale = base({ key: "c", last_reply_ts: MINE, search_latest_ts: MINE, checked_at: new Date(NOW - (THREAD_RECHECK_MINUTES + 1) * 60_000).toISOString() });
     expect(threadCandidates([stale, never, newer], 8, NOW).map((t) => t.key)).toEqual(["a", "b", "c"]);
+  });
+  it("skips a read thread whose phase-1 newest ts is unchanged since the read, even when the read's last reply lags it", () => {
+    // Phase 1 saw MINE, the read came back with only ROOT (e.g. the excerpt cut) — before, this re-read every pass.
+    const t = base({ last_reply_ts: ROOT, search_latest_ts: MINE, read_search_ts: MINE, checked_at: recently });
+    expect(followState(t, NOW)).toBe("unchanged");
+    expect(threadCandidates([t], 8, NOW)).toEqual([]);
+    expect(unchangedCount([t], NOW)).toBe(1);
+    // Phase 1 then sees a newer message → read again, first in line.
+    const moved = { ...t, search_latest_ts: ts(1) };
+    expect(followState(moved, NOW)).toBe("moved");
+    expect(threadCandidates([moved], 8, NOW)).toHaveLength(1);
+  });
+  it("safety net: an unchanged thread is re-read once its last read is 6h old (not before)", () => {
+    expect(THREAD_RECHECK_MINUTES).toBe(360);
+    const at = (min: number) => new Date(NOW - min * 60_000).toISOString();
+    const t5h = base({ last_reply_ts: MINE, search_latest_ts: MINE, read_search_ts: MINE, checked_at: at(5 * 60) });
+    expect(threadCandidates([t5h], 8, NOW)).toEqual([]);
+    const t6h = { ...t5h, checked_at: at(6 * 60 + 1) };
+    expect(followState(t6h, NOW)).toBe("recheck");
+    expect(threadCandidates([t6h], 8, NOW)).toHaveLength(1);
+    expect(unchangedCount([t5h, t6h], NOW)).toBe(1);
+  });
+  it("mergeThreadReads records the phase-1 ts it was read at (read_search_ts)", () => {
+    const t = base({ search_latest_ts: MINE });
+    mergeThreadReads([t], [{ key: t.key, messages: [{ from: "Kim", ts: ROOT, text: "x" }] }], NOW);
+    expect(t.read_search_ts).toBe(MINE);
+    expect(threadCandidates([t], 8, NOW)).toEqual([]);
+    const never = base({ key: "n" });
+    mergeThreadReads([never], [{ key: "n", messages: [] }], NOW);
+    expect(never.read_search_ts).toBe("");
   });
   it("only threads active in the last 48h, at most N", () => {
     const old = (sec - 49 * 3600).toFixed(6);
@@ -266,6 +298,20 @@ describe("DM conversations (slack.dms)", () => {
     read.checked_at = new Date(NOW - 60_000).toISOString();
     read.search_latest_ts = ts(1); // phase 1 saw a newer message
     expect(dmCandidates([read], 99, NOW).map((x) => x.key)).toEqual(["dm:D0"]);
+  });
+  it("dmCandidates: a DM whose newest phase-1 ts is unchanged since its read is skipped until the 6h recheck", () => {
+    const d = syncDmsFromList([], block({ items: [dm("D1", 10)] }), NOW)[0];
+    // Read 2h ago: slack_read_channel's newest message is older than what search saw (read_search_ts keeps the search's).
+    mergeThreadReads([d], [{ key: "dm:D1", messages: [{ from: "Lee", ts: ts(30), text: "q" }] }], NOW - 2 * 3600_000);
+    expect(d.last_reply_ts).toBe(ts(30));
+    expect(dmCandidates([d], 99, NOW)).toEqual([]);
+    expect(unchangedCount([d], NOW)).toBe(1);
+    // Next phase-1 pass sees the same newest DM message → still skipped; a newer one → read.
+    const again = syncDmsFromList([d], block({ items: [dm("D1", 10)] }), NOW)[0];
+    expect(dmCandidates([again], 99, NOW)).toEqual([]);
+    const newer = syncDmsFromList([d], block({ items: [dm("D1", 2)] }), NOW)[0];
+    expect(dmCandidates([newer], 99, NOW).map((x) => x.key)).toEqual(["dm:D1"]);
+    expect(dmCandidates([d], 99, NOW + 4 * 3600_000 + 60_000).map((x) => x.key)).toEqual(["dm:D1"]); // 6h after the read
   });
   it("a read DM (mine included, ≤10) lands on its DM rows as `dm`, not on other rows", () => {
     const s = block({ items: [dm("D1", 10)], all: [{ ...dm("D1", 10), answered: false }, { ...item(), answered: false }] as SlackAllItem[] });
