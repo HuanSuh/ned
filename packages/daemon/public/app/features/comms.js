@@ -307,7 +307,7 @@ export function init() {
 
   subscribe("render", () => render());
   bindCodeCopy(document); // copy buttons on every mdLite code block (delegated)
-  window.NED =window.NED || {};
+  window.NED = window.NED || {};
   window.NED.comms = { open, close, toggle, ask: (t) => { open("chat"); return ask(t); } };
   loadChat();
   if (lsGet(LS.open) === "1") open(); else render();
