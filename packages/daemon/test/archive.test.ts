@@ -158,6 +158,15 @@ describe("daily report", () => {
     expect(md).toContain("- 순찰 3회 (알림 2회) · 아침 브리핑 ✓");
   });
 
+  it("a second 아침 브리핑 (items already sent → empty) doesn't hide the first one's items", () => {
+    seed();
+    briefingFile({ ts: at(2026, 11, 6, 9, 30), type: "daily", status: "UPDATE", headline: "다시 돌림", action_items: [{ title: "결재 메일", url: "https://mail.example/1", kind: "email" }, { title: "새 항목", kind: "jira" }] });
+    const md = fs.readFileSync(archive.writeDailyReport(loadConfig(), day), "utf8");
+    expect(md).toContain("09:00 — **오늘 회의 3개**\n09:30 — **다시 돌림**");
+    expect(md.match(/결재 메일/g)?.length).toBe(1);
+    expect(md).toContain("새 항목");
+  });
+
   it("rewrites only the Ned blocks; the user's memo (outside markers) survives, edits inside are replaced", () => {
     seed();
     const cfg = loadConfig();

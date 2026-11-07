@@ -127,13 +127,21 @@ const MODE_KO: Record<string, string> = {
 const itemLine = (x: BriefingSection, prefix = "") => `- ${prefix}${x.kind ? `[${KIND_KO[x.kind] ?? x.kind}] ` : ""}${link(one(x.title, 160), x.url)}${x.detail ? ` — ${one(x.detail, 160)}` : ""}`;
 const keyOf = (s: BriefingSection) => (s.url || s.title || "").trim().toLowerCase();
 
+/** Every daily briefing of the day (a re-run of 아침 브리핑 drops already-sent items, so the first one keeps them): one list each, deduped. */
 function briefingBody(d: DayData): string {
-  const b = [...d.briefings].reverse().find((x) => x.type === "daily");
-  if (!b) return "## 🌅 브리핑\n\n_(아직 아침 브리핑 없음)_";
-  const out = [`## 🌅 브리핑`, "", `${hm(b.ts)}${b.headline ? ` — **${one(b.headline, 200)}**` : ""}`];
-  for (const [label, xs] of [["행동 필요", b.action_items], ["업데이트", b.updates], ["참고", b.fyi]] as const) {
-    if (!xs?.length) continue;
-    out.push("", `**${label}**`, ...xs.map((x) => itemLine(x)));
+  const dailies = d.briefings.filter((x) => x.type === "daily");
+  if (!dailies.length) return "## 🌅 브리핑\n\n_(아직 아침 브리핑 없음)_";
+  const out = [`## 🌅 브리핑`, "", ...dailies.map((b) => `${hm(b.ts)}${b.headline ? ` — **${one(b.headline, 200)}**` : ""}`)];
+  const seen = new Set<string>();
+  for (const label of ["행동 필요", "업데이트", "참고"] as const) {
+    const key = label === "행동 필요" ? "action_items" : label === "업데이트" ? "updates" : "fyi";
+    const xs = dailies.flatMap((b) => b[key] ?? []).filter((x) => {
+      const k = keyOf(x);
+      if (!k || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    if (xs.length) out.push("", `**${label}**`, ...xs.map((x) => itemLine(x)));
   }
   return out.join("\n");
 }
@@ -300,7 +308,10 @@ export function writeDailyReport(cfg: NedConfig, day: string): string {
     const next = mergeReport(before, day, sections);
     const now = fs.existsSync(abs) ? fs.readFileSync(abs, "utf8") : null;
     if (now !== before) continue; // changed under us (Obsidian save) — re-merge on top of it
-    if (next !== before) writeFileAtomic(abs, next);
+    if (next !== before) {
+      writeFileAtomic(abs, next);
+      log(`archive: wrote ${rel}${before === null ? " (new)" : ""}`);
+    }
     break;
   }
   return abs;
