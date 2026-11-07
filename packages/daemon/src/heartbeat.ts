@@ -9,6 +9,7 @@ import { readRecentEvents, readUnprocessedEvents, type NedEvent } from "./events
 import { notify } from "./notify.js";
 import { BRIEFINGS_DIR, DISMISSED_PATH, SENT_LOG, log, readJson, writeJsonAtomic } from "./paths.js";
 import { reduceSessions } from "./sessions.js";
+import { annotateChatOrigin } from "./session-create.js";
 import { THREAD_FOLLOW_HOURS, hasNewSinceMe, threadActivity, threadKeyOf } from "./slack-threads.js";
 import { readState, writeState, type AttentionItem, type Briefing, type BriefingSection } from "./state.js";
 
@@ -91,7 +92,7 @@ const readDismissed = () => readJson<Dismissed>(DISMISSED_PATH, {});
 /** Refresh `state.sessions` from events. Cheap; runs every tick. */
 export function refreshSessions(cfg: NedConfig): void {
   const state = readState();
-  const sessions = reduceSessions(readRecentEvents(2), cfg.session_stale_minutes);
+  const sessions = annotateChatOrigin(reduceSessions(readRecentEvents(2), cfg.session_stale_minutes));
   const dismissed = readDismissed();
   // Sessions that need the human become attention items (replaced each tick),
   // unless the user dismissed this same alert (a new Notification/StopFailure brings it back).

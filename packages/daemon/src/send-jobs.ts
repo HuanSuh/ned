@@ -23,6 +23,8 @@ export interface SendJob {
   started_at: number;
   finished_at?: number;
   result?: SendResult;
+  /** Long multi-step jobs (session_create): the step running now, for the polling UI. */
+  stage?: string;
 }
 
 export interface SendJobView {
@@ -30,6 +32,7 @@ export interface SendJobView {
   state: SendJobState;
   started_at: string;
   elapsed_ms: number;
+  stage?: string;
   result?: Omit<SendResult, "status"> & { http_status: SendResult["status"]; error?: string };
 }
 
@@ -57,6 +60,7 @@ function prune(now = Date.now()): void {
 
 export function viewJob(j: SendJob, now = Date.now()): SendJobView {
   const v: SendJobView = { job_id: j.id, state: j.state, started_at: new Date(j.started_at).toISOString(), elapsed_ms: (j.finished_at ?? now) - j.started_at };
+  if (j.stage) v.stage = j.stage;
   if (j.result) {
     const { status, ...rest } = j.result;
     v.result = rest.ok ? { ...rest, http_status: status } : { ...rest, http_status: status, error: rest.detail };
@@ -142,6 +146,40 @@ export async function startSendJob(req: SendRequest, cfg: NedConfig, run: typeof
     job.finished_at = Date.now();
   })();
   return { kind: "job", job, reused: false };
+}
+
+/**
+ * A job that is not a SendRequest → performSend (대화창에서 세션 만들기: worktree + agent boot + prompt, ~1-2 min).
+ * Same map, same GET view, same crash → logged 502. A running job with the same `key` is joined. Gating and
+ * dedupe are the caller's (it refuses synchronously before calling this).
+ */
+export function startTaskJob(key: string, req: SendRequest, run: (job: SendJob) => Promise<SendResult>): { job: SendJob; reused: boolean } {
+  prune();
+  const live = [...jobs.values()].find((j) => j.state === "running" && j.key === key);
+  if (live) return { job: live, reused: true };
+  const job: SendJob = { id: randomUUID(), key, req, state: "running", started_at: Date.now() };
+  jobs.set(job.id, job);
+  void (async () => {
+    let result: SendResult;
+    try {
+      result = await run(job);
+    } catch (e) {
+      const detail = `job crashed: ${String(e).slice(0, 300)}`;
+      log(`job: ${req.source}/${req.mode} ${job.id} ${detail}`);
+      const logged_at = new Date().toISOString();
+      appendActionLog({ ts: logged_at, source: req.source, mode: req.mode, action: "error", ref: req.ref, text: req.text.slice(0, 120), ok: false, result: detail });
+      result = { ok: false, action: "error", detail, logged_at, status: 502 };
+    }
+    job.result = result;
+    job.state = "done";
+    job.finished_at = Date.now();
+  })();
+  return { job, reused: false };
+}
+
+/** Running jobs, optionally only those whose key starts with `prefix`. */
+export function runningJobs(prefix = ""): SendJob[] {
+  return [...jobs.values()].filter((j) => j.state === "running" && j.key.startsWith(prefix));
 }
 
 /** Test helper: forget every job. */

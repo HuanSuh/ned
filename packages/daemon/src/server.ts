@@ -6,6 +6,7 @@ import { serve } from "@hono/node-server";
 import { parseSendRequest, readActionLog, type SendRequest } from "./actions.js";
 import { parseCalendarCreate } from "./calendar-create.js";
 import { getSendJob, linkOf, startSendJob, viewJob } from "./send-jobs.js";
+import { parseSessionCreate, startSessionCreate } from "./session-create.js";
 import { AGENDA_SOURCES, agendaBusy, enabledSources, patchAgenda, readAgenda, runningSources, startAgendaRefresh, type AgendaSourceKey } from "./agenda.js";
 import { contextStatus, requestContext } from "./agenda-context.js";
 import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runChatTurn, sseFrame, stopChat } from "./chat.js";
@@ -336,6 +337,19 @@ export function startServer(getConfig: () => NedConfig): void {
   });
   app.get("/api/calendar/events/:job_id", jobView);
   app.get("/api/actions", (c) => c.json(readActionLog(50)));
+  // 대화창에서 세션 만들기 (config.actions.chat_session_create): 400 bad input / repo not registered, 403 off,
+  // 409 over the cap (대화창 출처 살아 있는 세션 2개), else 202 {job_id} — worktree + claude + 첫 프롬프트 (~1-2분), poll the GET.
+  app.post("/api/sessions/create", async (c) => {
+    const input = parseSessionCreate(await readBody(c));
+    if (typeof input === "string") return c.json({ ok: false, error: input }, 400);
+    const st = await startSessionCreate(input, loadConfig(), readState().sessions ?? []);
+    if (st.kind === "refused") {
+      const { status, ...out } = st.result;
+      return c.json({ ...out, error: out.detail }, status);
+    }
+    return c.json({ ok: true, job_id: st.job.id, reused: st.reused, started_at: new Date(st.job.started_at).toISOString() }, 202);
+  });
+  app.get("/api/sessions/create/:job_id", jobView);
 
   // Ned 채팅 (dashboard PDA → 대화). POST answers as text/event-stream: start → delta* (turn / tool) → done | error.
   // 400 empty / > CHAT_INPUT_MAX chars, 404 unknown conversation_id, 409 another turn running, 429 over the daily budget.

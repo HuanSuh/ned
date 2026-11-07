@@ -162,7 +162,7 @@ export function renderActionLog() {
     ${AL.error ? `<div class="hint" style="color:var(--red)">불러오지 못했어: ${esc(AL.error)}</div>` : AL.list === null ? `<div class="hint">불러오는 중…</div>`
       : rows.length ? `<table class="altab"><thead><tr><th>시각</th><th>소스</th><th>동작</th><th>결과</th><th>내용</th></tr></thead><tbody>${rows.map((e) => {
         const o = OUTCOME_KO[outcomeOf(e)], d = new Date(e.ts);
-        const what = e.ref?.title || e.ref?.key || (e.ref?.repo ? `${e.ref.repo}#${e.ref.number}` : "") || e.ref?.url || "";
+        const what = (e.origin === "chat" ? "대화창 · " : "") + (e.ref?.title || e.ref?.key || (e.ref?.repo ? `${e.ref.repo}#${e.ref.number}` : "") || e.ref?.url || "");
         return `<tr title="${esc(e.result || "")}"><td>${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}</td><td>${esc(SRC_KO[e.source] || e.source)}</td><td><code>${esc(e.action === "refused" ? `${e.mode} (refused)` : String(e.action).replace(/^dry_run:/, ""))}</code></td>
           <td><span class="chipx ${o[1]}">${esc(o[0])}</span></td><td class="alw">${esc(what)}${e.text ? ` <span class="hint">“${esc(e.text.slice(0, 60))}”</span>` : ""}</td></tr>`;
       }).join("")}</tbody></table>` : `<div class="hint">${all.length ? "필터에 맞는 액션 없음." : "오늘은 아직 한 액션 없음."}</div>`}`;

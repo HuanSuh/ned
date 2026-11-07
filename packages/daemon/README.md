@@ -179,6 +179,8 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 | POST | `/api/chat/:id/stop` | 진행 중인 턴에 SIGTERM (없으면 404). 지금까지 흐른 텍스트가 `stopped: true` 로 저장됨 |
 | POST | `/api/send` | 초안 보내기 — `config.actions` 로 켠 것만. 꺼져 있으면 403 |
 | GET | `/api/actions` | `sent-actions.log` 최근 50건 (최신 먼저) |
+| POST | `/api/sessions/create` | 대화창에서 세션 만들기 (`actions.chat_session_create`, 기본 off) `{repo, worktree:{mode:"new"\|"existing", name}, model:"opus"\|"sonnet"(기본 opus), prompt}`. 400 입력/미등록 레포/없는 기존 워크트리, 403 꺼짐, 409 대화창 출처로 살아 있는 세션 2개(상한), 202 `{job_id}` — 아래 "세션 만들기" |
+| GET | `/api/sessions/create/:job_id` | 세션 만들기 작업 `{state, stage, elapsed_ms, result?{ok, detail, session:{worktree_path, handle, stage}}}` (`stage`: worktree_create\|agent_launch → agent_boot → prompt_send → submit_confirm) |
 
 Agenda 응답 형태:
 
@@ -279,6 +281,12 @@ Agenda 응답 형태:
 - 대시보드: Jira·GitHub·캘린더 항목의 **⋯ 메뉴**(`public/app/features/actions.js`) — Jira: 코멘트 초안 쓰기… / 상태 변경…(전환 목록을 먼저 읽음),
   GitHub: 리뷰 초안 쓰기…(팝업에서 리뷰 코멘트·변경 요청·승인+코멘트·PR 코멘트) / 바로 승인, 캘린더: 수락·미정·거절(주최한 일정엔 없음).
   꺼진 스위치는 '꺼짐' 으로 비활성, 쓰기는 모두 메뉴/팝업 안에서 한 번 더 확인. 설정 → 쓰기 액션 아래 **오늘 한 액션** 표(`GET /api/actions` 를 오늘·소스·결과로 거름).
+- **세션 만들기**(`src/session-create.ts`): 검증(토글·`orca repo list` 허용 목록·상한 2 — `~/.ned/chat-sessions.json` 의 handle 이 `orca terminal list` 에 살아 있는 것 + 진행 중 작업) 후 작업에서
+  `orca worktree create --name <n> --repo path:<repo> --parent-worktree path:<repo> --agent claude --model <m> --surface terminal`(기존이면 `orca agent launch --worktree path:<wt>`) —
+  `--prompt` 는 쓰지 않는다(초안으로만 남는 버그) → `orca terminal read --screen` 에 Claude 입력줄/상태줄이 보일 때까지(최대 90초, 신뢰 확인 화면이면 409)
+  → `orca terminal send --enter --wait-submit 15 --text <prompt>` → draft 가 비고 첫 활동(스피너·도구 줄, 또는 receipt `turn_started`)이면 성공. 실패는 `[단계] 사유`.
+  첫 프롬프트는 "먼저 계획을 제시하고 승인받은 뒤 구현한다." 로 시작(없으면 붙임). 로그: `source:"session", mode:"create", action:"session_create", origin:"chat", session_create:{…}`.
+  `refreshSessions` 가 cwd(또는 Orca 워크트리 경로)가 기록된 워크트리인 세션에 `origin:"chat"`, `origin_terminal` 을 단다(장비실 배지). `NED_SEND_DRY_RUN=1` 이면 검증까지만.
 - `actions.ts` 의 `queryActionLog({since, source, result}, limit)` 는 서버 쪽 필터용으로 준비돼 있다(`GET /api/actions` 는 아직 최근 50건 그대로).
 
 Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` (ms 타임스탬프).
@@ -348,6 +356,7 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
   drafts/<id>.json       답장 초안 캐시 (1시간): {id, source, mode, context_age_minutes, context, drafts, cost_usd, created_at, hint, tone, meta}
   drafts/_pregenerate.json  마지막 미리 생성 실행 결과 (GET /api/draft/status)
   sent-actions.log       POST /api/send 시도 기록 JSONL (거절·실패 포함)
+  chat-sessions.json     대화창에서 만든 세션: [{job_id, created_at, repo, mode, name, model, worktree_path, worktree_id, handle, ok, stage}] (14일)
   todos.json             개인 할 일. 완료 후 7일 지난 항목은 로드할 때 정리된다
   dismissed.json         dismiss 한 세션 attention: {id: {alert_ts, at}} (7일 보관)
   logs/daemon.log        데몬 로그

@@ -191,6 +191,8 @@ export interface NedActions {
   calendar_rsvp: boolean;
   /** New Google Calendar event from the 일정 card (POST /api/calendar/events). Default off. */
   calendar_create: boolean;
+  /** Ned 대화창이 제안한 새 에이전트 세션(Orca 워크트리 + claude + 첫 프롬프트)을 확인 후 시작 (POST /api/sessions/create). Default off. */
+  chat_session_create: boolean;
 }
 export const DEFAULT_ACTIONS: NedActions = {
   slack_send: false,
@@ -203,6 +205,7 @@ export const DEFAULT_ACTIONS: NedActions = {
   github_review: false,
   calendar_rsvp: false,
   calendar_create: false,
+  chat_session_create: false,
 };
 export const DEFAULT_REPLY_TONE = "간결하고 정중한 존댓말, 핵심 먼저";
 
