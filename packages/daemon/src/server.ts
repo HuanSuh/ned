@@ -1,8 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
 import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
+import { archiveFlushNow, archiveStatus } from "./archive.js";
 import { appendActionLog, parseOrigin, parseSendRequest, readActionLog, type SendRequest } from "./actions.js";
 import { parseCalendarCreate } from "./calendar-create.js";
 import { getSendJob, linkOf, startSendJob, viewJob } from "./send-jobs.js";
@@ -13,11 +15,13 @@ import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runCh
 import { validateChatAction } from "./chat-actions.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeDashboard, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, restoreConfigBackup, saveConfig, sourceRefreshMinutes, watchChannels, type NedConfig, type PersonaId } from "./config.js";
+import { PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, restoreConfigBackup, saveConfig, sourceRefreshMinutes, watchChannels, type NedConfig, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { checkStatus, dismissAttention, heartbeat, listBriefings, runCheck } from "./heartbeat.js";
 import { log } from "./paths.js";
+import { listOutputs, outputFile, readOutput } from "./outputs.js";
+import { checkVault } from "./vault.js";
 import { onMailReviewed, type MarkReadOutcome } from "./mail-read.js";
 import { SOURCE_KEY, readSourceReviewed, readState, setReviewed, writeState } from "./state.js";
 import { noteActivity, schedulerStatus } from "./scheduler.js";
@@ -96,10 +100,23 @@ export function mergeConfigPatch(cur: NedConfig, body: Partial<NedConfig>): NedC
     agenda_source_minutes: normalizeAgendaSourceMinutes(m.agenda_source_minutes, cur.agenda_source_minutes),
     quiet_schedule: normalizeQuietSchedule(m.quiet_schedule, cur.quiet_schedule),
     idle_schedule: normalizeIdleSchedule(m.idle_schedule, cur.idle_schedule),
+    archive: normalizeArchive(m.archive, cur.archive),
   };
   // Re-normalized even without a dashboard patch: a 팔로업 channel added / removed in filters adds / drops its `watch:` card.
   merged.dashboard = normalizeDashboard(dashboard ?? {}, cur.dashboard, watchChannels(merged.filters));
   return merged;
+}
+
+/**
+ * Obsidian 아카이브: a vault that changed (or was just switched on) must be usable — absolute, an existing folder, not
+ * inside ~/.ned or the Ned repo. A missing `.obsidian` is only a warning (GET /api/archive/status). null = fine.
+ */
+export function archivePatchError(cur: NedConfig, next: NedConfig): string | null {
+  const a = next.archive;
+  if (a.enabled && !a.vault) return "아카이브를 켜려면 볼트 경로가 필요해";
+  if (!a.vault || (a.vault === cur.archive.vault && (cur.archive.enabled || !a.enabled))) return null;
+  const chk = checkVault(a.vault);
+  return chk.ok ? null : `볼트 경로를 쓸 수 없어: ${chk.error}`;
 }
 
 /** Mirror persona + notification settings into state.json right away (dashboard / Ned.app read them there). */
@@ -150,6 +167,8 @@ export function startServer(getConfig: () => NedConfig): void {
     const cur = loadConfig(); // may create config.yaml — so read the token after it
     const seen = configUpdatedAt();
     const merged = mergeConfigPatch(cur, body);
+    const archErr = archivePatchError(cur, merged);
+    if (archErr) return c.json({ error: archErr, field: "archive.vault" }, 400);
     // Check → save runs synchronously (no await), so no other request of this daemon can interleave. An outside
     // writer (hand edit) landing between the stat above and the write below is caught by this second look; the
     // remaining window is the few µs inside saveConfig itself — accepted (backups cover it).
@@ -430,6 +449,32 @@ export function startServer(getConfig: () => NedConfig): void {
     return c.json(r);
   });
   app.post("/api/chat/:id/stop", (c) => (stopChat(c.req.param("id")) ? c.json({ ok: true }) : c.json({ ok: false, error: "not running" }, 404)));
+
+  // 정리 결과물 (Ned Net ```ned-output blocks, src/outputs.ts): always in ~/.ned/outputs, + the vault with config.archive.
+  app.get("/api/outputs", (c) => {
+    const limit = Math.max(1, Math.min(500, Number(c.req.query("limit")) || 50));
+    return c.json(listOutputs({ limit }).map(({ markdown: _m, ...r }) => r));
+  });
+  app.get("/api/outputs/:id", (c) => {
+    const r = readOutput(c.req.param("id"));
+    return r ? c.json(r) : c.json({ error: "not found" }, 404);
+  });
+  // "Finder 에서 보기": `open -R` on the vault note (or the ~/.ned copy). Never spawns under tests / NED_NO_LLM.
+  app.post("/api/outputs/:id/reveal", (c) => {
+    const r = readOutput(c.req.param("id"));
+    if (!r) return c.json({ error: "not found" }, 404);
+    const file = outputFile(r);
+    if (!fs.existsSync(file)) return c.json({ ok: false, error: "파일이 없어 (옮겼거나 지웠어?)", path: file }, 404);
+    if (process.env.VITEST || process.env.NED_NO_LLM === "1") return c.json({ ok: true, dry_run: true, path: file });
+    execFile("open", ["-R", file], (err) => { if (err) log(`outputs: reveal failed — ${String(err).slice(0, 200)}`); });
+    return c.json({ ok: true, path: file });
+  });
+  // Obsidian 아카이브 (src/archive.ts): 설정 → 아카이브 상태(볼트 배지·마지막 쓰기·마지막 오류) / "지금 쓰기".
+  app.get("/api/archive/status", (c) => c.json(archiveStatus(loadConfig())));
+  app.post("/api/archive/flush", (c) => {
+    const r = archiveFlushNow(loadConfig());
+    return c.json({ ...r, status: archiveStatus(loadConfig()) }, r.ok ? 200 : /꺼져/.test(r.error ?? "") ? 409 : 500);
+  });
 
   registerSearch(app); // GET /api/search (src/search.ts) — before the static catch-all
   // Static files under public/ (proposals, svg mark, ...). Registered last so /api/* wins.

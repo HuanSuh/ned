@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import { archiveTick } from "./archive.js";
 import { buildPrompt, enabledSources, readAgenda, refreshAgenda, runningSources } from "./agenda.js";
 import { loadConfig, type NedConfig } from "./config.js";
 import { createScheduler, eventsActivityAt, hidIdleMs } from "./scheduler.js";
@@ -72,7 +73,10 @@ async function main(): Promise<void> {
         log,
       });
       await sched.tick();
-      setInterval(() => void sched.tick(), 60_000);
+      setInterval(() => {
+        void sched.tick();
+        archiveTick(cfg); // Obsidian 아카이브: flush changed days (src/archive.ts) — no claude, cheap file writes
+      }, 60_000);
       break;
     }
     case "agenda": {

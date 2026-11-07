@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { archiveTouch } from "./archive.js";
 import { agendaBusy, readAgenda, refreshAgenda, type Agenda } from "./agenda.js";
 import { extractJson, llmDisabled, noLlmResult, runClaude, type ClaudeRunOptions } from "./claude.js";
 import { inQuietHours, watchChannels, type NedConfig, type NotifyKind } from "./config.js";
@@ -384,6 +385,8 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
 
   writeJsonAtomic(path.join(BRIEFINGS_DIR, `${id}.json`), briefing);
   commit();
+  // Obsidian 아카이브: briefing / UPDATE → write the day's report now; a quiet NED_OK only bumps the 순찰 count (tick flush).
+  archiveTouch(now, { cfg, immediate: briefing.type === "daily" || briefing.status === "UPDATE" });
 
   const next = readState();
   next.last_heartbeat_at = now;

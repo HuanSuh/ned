@@ -183,6 +183,11 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 | GET | `/api/actions` | `sent-actions.log` 최근 50건 (최신 먼저) |
 | POST | `/api/sessions/create` | 대화창에서 세션 만들기 (`actions.chat_session_create`, 기본 off) `{repo, worktree:{mode:"new"\|"existing", name}, model:"opus"\|"sonnet"(기본 opus), prompt}`. 400 입력/미등록 레포/없는 기존 워크트리, 403 꺼짐, 409 대화창 출처로 살아 있는 세션 2개(상한), 202 `{job_id}` — 아래 "세션 만들기" |
 | GET | `/api/sessions/create/:job_id` | 세션 만들기 작업 `{state, stage, elapsed_ms, result?{ok, detail, session:{worktree_path, handle, stage}}}` (`stage`: worktree_create\|agent_launch → agent_boot → prompt_send → submit_confirm) |
+| GET | `/api/archive/status` | Obsidian 아카이브 상태 `{ enabled, vault, folder, check: {ok, obsidian, path, error?} \| null, today_rel, today_url (obsidian://, 파일 있을 때), last_write_at, last_write_path, last_error, last_error_at, last_embed: {day, result}, pending_days }` — 아래 "Obsidian 아카이브" |
+| POST | `/api/archive/flush` | 오늘(+대기 중인 날) 리포트를 지금 씀 → `{ ok, written: [day], error?, status }` · 409 아카이브 꺼짐 · 500 쓰기 실패(`status.last_error`) |
+| GET | `/api/outputs?limit=50` | 정리 결과물 목록(최신순, `markdown` 뺌) `[{ id, ts, kind, title, sources, chat_id?, message_ts?, vault_rel?, vault_path?, obsidian_url?, vault_error? }]` |
+| GET | `/api/outputs/:id` | 결과물 하나(`markdown` 포함). 404 |
+| POST | `/api/outputs/:id/reveal` | "Finder 에서 보기": 볼트 노트(없으면 `~/.ned/outputs/<id>.md`)에 `open -R`. 테스트·`NED_NO_LLM=1` 에선 실행 안 함(`dry_run: true`). 404 |
 
 Agenda 응답 형태:
 
@@ -303,6 +308,32 @@ Agenda 응답 형태:
 
 Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` (ms 타임스탬프).
 
+## Obsidian 아카이브 (`src/archive.ts`, `src/vault.ts`, `src/outputs.ts`)
+
+`config.archive` (기본 꺼짐): `enabled`, `vault` (절대 경로, `~/` 펼침), `folder` (기본 `Ned`, `..`·점으로 시작하는 세그먼트 거부),
+`daily_embed` (기본 false), `include.{briefings, updates, actions, outputs, sessions}` (sessions 만 기본 false). Claude 호출 없음.
+
+- **볼트 검증** (`checkVault`): 절대 경로 · 있는 폴더 · `~/.ned` 나 Ned 레포의 안/상위가 아닐 것. `PUT /api/config` 가 vault 를 바꾸거나 처음 켤 때 검사해
+  400 `{error, field: "archive.vault"}`. `.obsidian` 유무는 상태(`check.obsidian`)로만 — 없으면 경고, 쓰기는 함.
+- **경로 안전** (`resolveInVault`): 모든 쓰기는 `<vault>/<rel>` 이 볼트 안으로 정규화되는지(`..`, 절대 경로, NUL), 가장 깊은 기존 조상의
+  realpath 가 볼트 안인지(심링크 탈출), 대상 자체가 심링크가 아닌지 확인한다. 쓰기는 같은 폴더의 `.<이름>.ned-tmp-<pid>` → rename.
+- **데일리 리포트** `<vault>/<folder>/Daily/YYYY-MM/YYYY-MM-DD.md`: 처음 만들 때 frontmatter(`created`, `tags: [ned, daily]`, `ned_version`)
+  + 제목. 섹션 `briefing`·`patrol`·`sent`·`outputs`·`sessions`·`today` 를 `<!-- ned:<이름> -->` … `<!-- ned:/<이름> -->` 사이에만 쓴다.
+  짝은 "닫는 마커가 뒤에 있는 마지막 여는 마커 ~ 그 뒤 첫 닫는 마커" — 고아 마커가 사용자 글을 끼고 짝이 되지 않는다. 짝이 없으면
+  그 섹션은 파일 끝에 새 블록. 꺼진 섹션은 새로 넣지 않고, 이미 있으면 비운다. 생성 텍스트의 `<!--` 는 `<!-` 로 바꿔 마커 위조를 막는다.
+  내용은 디스크에 있는 것으로 매번 다시 그린다: 브리핑(그날 마지막 daily), 순찰(heartbeat UPDATE 의 action/updates/fyi, url·제목 키로 하루 한 번),
+  보낸 것(`sent-actions.log` 의 ok — dry_run·`transitions` 읽기 제외), 결과물(`~/.ned/outputs` 그날 것), 세션(그날 이벤트로 `reduceSessions`, 워커 제외),
+  오늘(heartbeat 수·UPDATE 수, agenda 소스별 갱신 수, `costs.json`). 쓰는 사이 파일이 바뀌면(Obsidian 저장) 한 번 다시 합친다.
+- **언제**: `archiveTouch(ts, {immediate})` — heartbeat 저장 직후(daily·UPDATE 는 즉시, NED_OK 는 표시만), `appendActionLog` 의 ok 항목(즉시),
+  결과물 저장(즉시). `archiveTick` — `cli.ts` 의 1분 `setInterval`(스케줄러 tick 옆, `scheduler.ts` 는 안 건드림)에서 agenda
+  `sources_status.<k>.updated_at` 이 새로 done 이면 그날 소스 갱신 수 +1, 그리고 "바뀐 날 && 마지막 쓰기 후 5분(`ARCHIVE_FLUSH_MS`)" 이면 씀.
+  날짜는 변화의 ts 기준(23:59 에 시작한 순찰은 그날 파일). 지난 날은 대기 중인 변화가 있을 때만 쓰고 그 뒤로는 안 건드림.
+- **embed** (`daily_embed`): `<vault>/.obsidian/daily-notes.json` 의 `folder` + `format`(moment 부분집합 YYYY·YY·MM·M·DD·D·[문자]; format 이 없으면
+  `folder/DAY.md`, `folder/YYYY-MM/DAY.md`)으로 그날 노트를 찾아, **있을 때만** `## 📝 Notes & Logs` 줄 바로 아래에
+  `<!-- ned:embed -->![[<folder>/Daily/YYYY-MM/DAY]]<!-- ned:/embed -->` 한 줄을 넣는다(이미 있으면 그대로, 제목 없으면 건너뜀).
+- **실패**: 볼트 없음·권한(EPERM/EACCES — macOS 파일 접근 안내 포함) 등은 로그 + `~/.ned/archive.json` 의 `last_error` → 설정 → 아카이브.
+  그날은 대기로 남아 다음 틱에 다시 시도. 데몬은 계속 돈다.
+
 ## Environment variables
 
 | 변수 | 기본 | 설명 |
@@ -368,6 +399,8 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
   drafts/<id>.json       답장 초안 캐시 (1시간): {id, source, mode, context_age_minutes, context, drafts, cost_usd, created_at, hint, tone, meta}
   drafts/_pregenerate.json  마지막 미리 생성 실행 결과 (GET /api/draft/status)
   sent-actions.log       POST /api/send 시도 기록 JSONL (거절·실패 포함)
+  archive.json           Obsidian 아카이브 상태: {dirty: {day: ms}, written: {day: ms}, src_seen, src_counts: {day: {source: n}}, last_write_at, last_write_path, last_error, last_error_at, last_embed} (14일)
+  outputs/<id>.{json,md} 정리 결과물 (대화창 ```ned-output) — 아카이브가 꺼져 있어도 항상 저장
   chat-sessions.json     대화창에서 만든 세션: [{job_id, created_at, repo, mode, name, model, worktree_path, worktree_id, handle, ok, stage}] (14일)
   todos.json             개인 할 일. 완료 후 7일 지난 항목은 로드할 때 정리된다
   dismissed.json         dismiss 한 세션 attention: {id: {alert_ts, at}} (7일 보관)

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import YAML from "yaml";
 import type { NotifyMode } from "./notify.js";
@@ -67,6 +68,57 @@ export interface NedConfig {
   dashboard: NedDashboard;
   /** Ned 채팅 (POST /api/chat) runs even when today's spend ≥ agenda_daily_budget_usd. Default false: 429 over budget. */
   chat_ignore_budget: boolean;
+  /** Obsidian 아카이브: the daemon writes a daily report + 정리 결과물 notes into a vault (no claude call). src/archive.ts. */
+  archive: NedArchive;
+}
+
+export interface NedArchive {
+  enabled: boolean;
+  /** Absolute vault path ("~/" expanded). Must be an existing directory outside ~/.ned and the repo (checked on save / write). */
+  vault: string;
+  /** Ned's folder inside the vault (relative, no ".."). */
+  folder: string;
+  /** Put an `![[…]]` embed of the day's report into the user's own daily note (only when that note already exists). */
+  daily_embed: boolean;
+  include: { briefings: boolean; updates: boolean; actions: boolean; outputs: boolean; sessions: boolean };
+}
+export const DEFAULT_ARCHIVE: NedArchive = {
+  enabled: false,
+  vault: "",
+  folder: "Ned",
+  daily_embed: false,
+  include: { briefings: true, updates: true, actions: true, outputs: true, sessions: false },
+};
+
+/** "Ned/", "/a//b/" → "Ned", "a/b"; "..", absolute-looking or control characters → `fallback`. Max 120 chars. */
+export function normalizeArchiveFolder(v: unknown, fallback = DEFAULT_ARCHIVE.folder): string {
+  if (typeof v !== "string") return fallback;
+  const segs = v.replace(/\\/g, "/").split("/").map((s) => s.trim()).filter((s) => s && s !== ".");
+  if (!segs.length) return DEFAULT_ARCHIVE.folder;
+  if (segs.some((s) => s === ".." || s.startsWith(".") || /[\u0000-\u001f:]/.test(s))) return fallback;
+  const out = segs.join("/");
+  return out.length <= 120 ? out : fallback;
+}
+
+/** Merge a (partial) archive patch over `base`; vault is trimmed and "~/" expanded (existence is checked elsewhere). */
+export function normalizeArchive(raw: unknown, base: NedArchive = DEFAULT_ARCHIVE): NedArchive {
+  const r = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
+  const inc = (r.include && typeof r.include === "object" && !Array.isArray(r.include) ? r.include : {}) as Record<string, unknown>;
+  const bi = base.include ?? DEFAULT_ARCHIVE.include;
+  let vault = base.vault ?? "";
+  if (typeof r.vault === "string") {
+    vault = r.vault.trim();
+    if (vault === "~" || vault.startsWith("~/")) vault = path.join(os.homedir(), vault.slice(1));
+    if (vault.length > 1 && /[\\/]$/.test(vault)) vault = vault.replace(/[\\/]+$/, "");
+  } else if (r.vault === null) vault = "";
+  return {
+    enabled: bool(r.enabled, base.enabled),
+    vault,
+    folder: "folder" in r ? normalizeArchiveFolder(r.folder, base.folder) : base.folder,
+    daily_embed: bool(r.daily_embed, base.daily_embed),
+    include: { briefings: bool(inc.briefings, bi.briefings), updates: bool(inc.updates, bi.updates), actions: bool(inc.actions, bi.actions), outputs: bool(inc.outputs, bi.outputs), sessions: bool(inc.sessions, bi.sessions) },
+  };
 }
 
 export const DASHBOARD_CARDS = ["slack", "mail", "jira", "github"] as const;
@@ -470,6 +522,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   agenda_light_model: "sonnet",
   dashboard: DEFAULT_DASHBOARD,
   chat_ignore_budget: false,
+  archive: DEFAULT_ARCHIVE,
 };
 
 /** A finite number within [min, max] (truncated when `int`), else `fallback`. */
@@ -500,6 +553,7 @@ export function loadConfig(): NedConfig {
       draft_context_max_age_minutes: Number.isFinite(Number(parsed.draft_context_max_age_minutes)) && Number(parsed.draft_context_max_age_minutes) >= 0 ? Number(parsed.draft_context_max_age_minutes) : DEFAULT_CONFIG.draft_context_max_age_minutes,
       drafts_pregenerate: parsed.drafts_pregenerate === true,
       chat_ignore_budget: parsed.chat_ignore_budget === true,
+      archive: normalizeArchive(parsed.archive),
       dashboard: normalizeDashboard(parsed.dashboard, DEFAULT_DASHBOARD, watchChannels(filters)),
       agenda_source_minutes: normalizeAgendaSourceMinutes(parsed.agenda_source_minutes),
       quiet_schedule: normalizeQuietSchedule(parsed.quiet_schedule),

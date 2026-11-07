@@ -20,6 +20,7 @@ daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙�
 | `app/ui/modal.js` | 모달 열기/닫기(`body.modal-open`)·Tab 포커스 트랩 |
 | `app/ui/toast.js` | `toast()` |
 | `app/tabs/home.js` · `inbox.js` · `timeline.js` · `settings.js` | 탭별 렌더와 그 탭 안 이벤트 |
+| `app/tabs/settings-archive.js` | 설정 → 아카이브(`config.archive`): 켜기·볼트 경로·Ned 폴더·담을 것·데일리 노트 embed(`readArchive` → 저장 PUT), 상태 줄(`GET /api/archive/status` — 볼트 배지·마지막 쓰기·마지막 오류, "지금 쓰기" = `POST /api/archive/flush`) |
 | `app/features/calendar.js` | 일정 패널(일/주, `/api/calendar` 범위, `ned.cal`) |
 | `app/features/cards.js` | 소스 카드(메일·Jira·Slack·GitHub), `packCards`(행 배치), `unionAll`(전체 뷰) |
 | `app/features/cardlayout.js` | 홈 카드 배치: `config.dashboard` 순서·폭 정규화·기본값, 설정 섹션(↑/↓, 1열/2열, 잠금, 배치 초기화, 12열 미리보기) |
@@ -51,6 +52,7 @@ daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙�
 | 브리핑 히스토리 | `GET /api/briefings?limit=30` | 최신순, 펼치면 headline/action_items/updates/fyi/sessions/cost/raw. `NED_OK` 는 접힘·흐리게 |
 | 타임라인 | `GET /api/events?days=2` + 브리핑 | ts 로 병합, 이벤트 유형·워크트리 칩 필터 |
 | 설정 | `GET/PUT /api/config` | 페르소나 선택 UI 는 없음(현재 UI 미제공, config.persona 로만 — 테마는 `state.persona` 를 따름). heartbeat/신호 간격, 브리핑 시각, 조용한 시간, 소스 토글(`config.sources` 키에서 자동 생성), **트래킹 제외**(Slack 채널 / Jira 프로젝트 칩 입력: 엔터·쉼표로 추가, ✕·빈 입력에서 Backspace 로 빼기, `MNT-123` 은 `MNT` 로, 잘못된 키는 안내만. 자동완성 후보는 `/api/agenda` 의 slack 채널·jira 키 접두어와 `/api/briefings` 의 slack·jira 항목에서 클라이언트가 모은 datalist. 저장 = `PUT /api/config` 의 `filters`), claude_model, claude_max_turns |
+| 설정 → 아카이브 | `GET /api/archive/status` · `POST /api/archive/flush` · `PUT /api/config { archive }` | Obsidian 볼트 경로(잘못된 경로·~/.ned·레포 안이면 저장이 400 으로 막히고 "저장 실패: …"), `.obsidian` 있으면 "볼트 확인됨" 칩. 끄면 나머지는 흐려지지만 값은 저장됨 |
 
 ## 갱신 주기
 - `/api/state` 10초 폴링(탭이 다시 보이면 즉시). `/api/agenda`·`/api/todos` 60초 폴링.

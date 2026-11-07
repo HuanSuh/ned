@@ -6,17 +6,18 @@
 ## 요약
 
 Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub·Sentry)를 모아 보여 주는 로컬 대시보드(탭: 홈·인박스·타임라인·설정). 전역 키: h 홈, i 인박스, r 지금 점검, ⌘K·/ 검색, ⌘J 통신기.
-- **홈**: 일정(일/주, ＋·드래그로 일정 만들기, ⋯ 수락/미정/거절), 할 일(NED 액션 아이템 / 개인 할 일 — 구분선·접기, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체` 전환, ↻ 소스별 갱신), 팔로업 채널 카드(멘션 없어도 따라가는 Slack 채널 24h 요약, "나한테" 강조). 데이터: agenda.json(소스별 주기 갱신).
-- **인박스**: 우선(확인 필요 attention)·기타(브리핑의 업데이트/참고)·기록(브리핑 목록) 3탭 + 오른쪽 "장비실"(세션 상태, 대화창 출처 배지). j/k 이동, e 닫기, ⏎ 열기, 1/2/3 탭.
-- **타임라인**: 세션 이벤트(시작·프롬프트·알림·응답 완료·오류)와 브리핑을 시간순으로, 유형·워크트리 필터.
-- **순찰/브리핑**: 헤더 "지금 점검"(r) = 소스를 새로 가져온 뒤 판단해 알림·attention 생성. 자동 순찰은 `heartbeat_minutes`, 아침 브리핑은 `briefing_time`.
-- **야간·유휴 감속**: 조용한 시간엔 자동 순찰·홈 갱신이 `quiet_schedule.mode`(normal/slow/pause, 기본 slow ×`slow_factor` 6). 유휴(`idle_schedule`: `after_minutes` 120분 활동 없음 + `unchanged_runs` 6회 무변경)도 slow/pause. 홈 상단 "야간 모드"/"유휴 모드" 칩. 수동 갱신·지금 점검은 늘 즉시, 끝나면 전 소스 한 번 갱신.
+- **홈**: 일정(일/주, ＋·드래그로 일정 만들기, ⋯ 수락/미정/거절), 할 일(NED 액션 아이템 / 개인 할 일 — 구분선·접기, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체` 전환, ↻ 소스별 갱신), 팔로업 채널 카드(멘션 없어도 따라가는 Slack 채널 24h 요약, "나한테" 강조).
+- **인박스**: 우선(attention)·기타(업데이트/참고)·기록(브리핑) 3탭 + "장비실"(세션 상태, 대화창 출처 배지). j/k 이동, e 닫기, ⏎ 열기, 1/2/3 탭.
+- **타임라인**: 세션 이벤트와 브리핑을 시간순으로(유형·워크트리 필터).
+- **순찰/브리핑**: "지금 점검"(r) = 소스를 새로 가져와 판단 → 알림·attention. 자동 순찰은 `heartbeat_minutes`, 아침 브리핑은 `briefing_time`.
+- **야간·유휴 감속**: 조용한 시간엔 자동 순찰·홈 갱신이 `quiet_schedule.mode`(normal/slow/pause, 기본 slow ×`slow_factor` 6). 유휴(`idle_schedule`: `after_minutes` 120분 활동 없음 + `unchanged_runs` 6회 무변경)도 slow/pause. 홈 상단 칩. 수동 실행은 늘 즉시, 끝나면 전 소스 갱신.
 - **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기를 확인 카드로 제안, 텍스트만 고쳐 실행; `actions.chat_session_create` 면 새 세션도), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글 피드.
-- **답장 초안 ✎**: 항목의 연필 → 3가지 말투 초안 → 복사/열기/보내기. 실제 쓰기는 설정 → 쓰기 액션에서 켠 것만: `actions.slack_send`·`gmail_draft`(기본 켬)·`gmail_send`·`session_send`(기본 켬)·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯ 메뉴.
+- **답장 초안 ✎**: 연필 → 초안 3개 → 복사/열기/보내기. 실제 쓰기는 설정 → 쓰기 액션에서 켠 것만: `actions.slack_send`·`gmail_draft`(기본 켬)·`gmail_send`·`session_send`(기본 켬)·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯ 메뉴.
 - **확인 완료 ✓**: 항목을 처리됨으로 접음(바뀌면 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`)면 자동 해제.
-- **Gmail 읽음 표시**: 설정 → 쓰기 액션 → Gmail → "메일 확인 시: Gmail 읽음 표시까지" 선택 후 저장(`actions.gmail_mark_read`, 기본 꺼짐). 메일 ✓ 때 Gmail 스레드도 읽음 처리, ✓ 취소해도 안 읽음으로 안 되돌림.
+- **Gmail 읽음 표시**: 설정 → 쓰기 액션 → Gmail → "Gmail 읽음 표시까지"(`actions.gmail_mark_read`, 기본 꺼짐): 메일 ✓ 때 Gmail 도 읽음(✓ 취소해도 안 되돌림).
 - **검색 ⌘K**: 주의 항목·세션·일정·소스 항목·할 일·브리핑·이벤트·초안·설정 통합 검색(초성).
-- **설정**(바꾼 뒤 하단 "저장"): 외형(테마 `dashboard.theme` 시스템/라이트/다크, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`) · 소스(`sources.*`, Slack 팔로업 채널 `filters.slack.watch_channels`, 트래킹 제외 채널 `filters.slack.exclude_channels`, 답 필요 해제 이모지 `filters.slack.ack_reactions`, Jira 제외 프로젝트 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(`heartbeat_minutes`, `signal_check_minutes`, `briefing_time`, `agenda_refresh_minutes`, 소스별 주기 `agenda_source_minutes.*`, 조용한 시간 동작 `quiet_schedule.*`, 유휴 시 동작 `idle_schedule.*`) · 쓰기 액션(`actions.*`, 기본 말투 `reply_tone`, 소스별 답장 말투 `reply_tone_by_source.*`, 오늘 한 액션 로그) · Claude(모델 `claude_model`, 최대 턴 `claude_max_turns`, 하루 사용 상한 `agenda_daily_budget_usd` 기본 $15 — 닿으면 자동 실행·대화가 멈춤). 바뀐 항목만 저장(충돌 시 최신 + 내 수정 유지). 저장마다 백업(10개) → 하단 "이전 설정으로 되돌리기". "새 버전" 배너가 뜨면 새로고침 전까지 저장 잠김.
+- **아카이브(Obsidian)**: 설정 → 아카이브에 볼트 `archive.vault` + 켜기 `archive.enabled` → 매일 `<archive.folder>/Daily/YYYY-MM/날짜.md` 에 브리핑·순찰·보낸 것·결과물·통계 자동 기록(Claude 호출 없음, 마커 밖 메모 보존). `archive.daily_embed` = 내 데일리 노트에 embed 한 줄.
+- **설정**(바꾼 뒤 하단 "저장"): 외형(테마 `dashboard.theme` 시스템/라이트/다크, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(`heartbeat_minutes`, `signal_check_minutes`, `briefing_time`, `agenda_refresh_minutes`, `agenda_source_minutes.*`, `quiet_schedule.*`, `idle_schedule.*`) · 쓰기 액션(`actions.*`, 기본 말투 `reply_tone`, 소스별 답장 말투 `reply_tone_by_source.*`, 오늘 한 액션 로그) · 아카이브(`archive.*`) · Claude(모델 `claude_model`, 최대 턴 `claude_max_turns`, 하루 사용 상한 `agenda_daily_budget_usd` 기본 $15 — 닿으면 자동 실행·대화가 멈춤). 바뀐 항목만 저장(충돌 시 최신+내 수정 유지). 저장마다 백업 10개 → "이전 설정으로 되돌리기". "새 버전" 배너면 새로고침 전 저장 잠김.
 
 ## 상세
 
@@ -158,13 +159,21 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 언제: "그 메일 어디 있었지", "알림 설정 어디야" 처럼 찾을 때.
 - 키: ⌘K/Ctrl+K 또는 /, ↑/↓(Ctrl+N/P, Tab) 이동, ⏎ 열기, ⌘⏎ 새 탭, ⇧⏎ 대시보드에서 보기, Esc 지우기→닫기.
 
+### 아카이브 — Obsidian
+- 보여 주는 것: Obsidian 볼트 안 Ned 폴더(`archive.folder`, 기본 Ned)에 매일 **데일리 리포트** `Daily/YYYY-MM/YYYY-MM-DD.md` — 🌅 브리핑(아침 브리핑의 행동 필요/업데이트/참고, 링크) · 🔔 순찰(그날 순찰 알림 시간순, 같은 항목 한 번) · ✉️ 보낸 것(답장·일정 생성·읽음 처리·할 일 추가 등 성공한 쓰기, 시각·대상·요약) · 📎 정리 결과물(결과물 노트 링크) · 🤖 세션(켜면) · 📊 오늘(순찰 횟수, 소스별 갱신 수, 비용). frontmatter `created`·`tags: [ned, daily]`·`ned_version`. Ned 데일리 리포트는 내 데일리 노트와 별도 파일.
+- 데이터: 이미 있는 것(`~/.ned/briefings/`, `~/.ned/sent-actions.log`, `~/.ned/outputs/`, 세션 이벤트, `~/.ned/costs.json`, agenda 갱신)으로 데몬이 마크다운을 씀 — Claude 호출 없음, 비용 0. 섹션마다 `<!-- ned:섹션 -->` … `<!-- ned:/섹션 -->` 사이만 다시 쓰고 **마커 밖에 적은 메모는 그대로**(마커를 지우면 그 섹션은 파일 끝에 새로 붙음). 임시 파일 → rename 으로 원자적 쓰기, 볼트 밖 경로(.. · 심링크)는 거부. 상태는 `~/.ned/archive.json`.
+- 언제 쓰나: 아침 브리핑·순찰 알림·쓰기 성공·결과물 저장 직후 바로, 그 밖의 변화(순찰 횟수·소스 갱신)는 1분 틱에서 마지막 쓰기 후 5분 지나면. 자정 넘어 끝난 순찰은 그 순찰이 시작된 날 파일로, 지난 날 파일은 그 뒤로 안 건드림.
+- 내 데일리 노트 embed(`archive.daily_embed`, 기본 꺼짐): 켜면 그날 내 데일리 노트가 **이미 있을 때만**(없으면 만들지 않음) "## 📝 Notes & Logs" 바로 아래에 `<!-- ned:embed -->![[Ned/Daily/YYYY-MM/YYYY-MM-DD]]<!-- ned:/embed -->` 한 줄. 다른 줄은 손대지 않음. 데일리 노트 위치는 `<볼트>/.obsidian/daily-notes.json` 의 folder·format(없으면 건너뜀).
+- 설정: 설정 → 아카이브 — "아카이브 켜기" `archive.enabled`(기본 꺼짐) · "볼트 경로" `archive.vault`(절대 경로, 있는 폴더여야 하고 ~/.ned·Ned 레포 안은 거부 — `.obsidian` 이 있으면 "볼트 확인됨" 배지, 없으면 경고만) · "Ned 폴더" `archive.folder` · "담을 것" `archive.include.briefings`·`archive.include.updates`·`archive.include.actions`·`archive.include.outputs`(기본 켬)·`archive.include.sessions`(기본 꺼짐) · "내 데일리 노트에 embed" `archive.daily_embed`. 상태 줄: 오늘 리포트 경로("Obsidian 에서 열기"), 마지막 쓰기, 대기 중인 날, 마지막 오류(권한 거부면 macOS 파일 접근 허용 안내), "지금 쓰기"(`/api/archive/flush`), 상태는 `/api/archive/status`. 쓰기가 실패해도 데몬은 계속 돌고 다음 틱에 다시 시도.
+
 ### 설정 탭
-상단 바로가기: 외형 · 소스 · 알림 · 순찰 주기 · 쓰기 액션 · Claude. "다시 불러오기", 하단 "● 저장 안 된 변경" + "저장".
+상단 바로가기: 외형 · 소스 · 알림 · 순찰 주기 · 쓰기 액션 · 아카이브 · Claude. "다시 불러오기", 하단 "● 저장 안 된 변경" + "저장".
 - **외형**: 테마 🖥️시스템/☀️라이트/🌙다크 `dashboard.theme`(바로 미리보기, 저장해야 유지) · 홈 카드 배치 ↑/↓·1열/2열 `dashboard.card_order`/`dashboard.card_span` · "홈 배치 잠금" `dashboard.locked` · "팔로업 채널을 별도 카드로" `dashboard.watch_cards` · "배치 초기화".
 - **소스**: Gmail/Slack/Jira/GitHub/Sentry/캘린더 `sources.*`(끄면 조회·보고 안 함). Slack: 팔로업 채널 `filters.slack.watch_channels` · 트래킹 제외 채널 `filters.slack.exclude_channels`(팔로업보다 우선) · 답 필요 해제 이모지 `filters.slack.ack_reactions`. Jira: 제외 프로젝트 `filters.jira.exclude_projects`. 칩 입력: ⏎/쉼표 추가, 빈 입력 Backspace 삭제.
 - **알림**: 알림 켜기 `notifications.enabled` · 소스별 `notifications.kinds.*` · 아침 브리핑 알림 `notifications.briefing` · 소리 `notifications.sound` · 묶음 기준 `notifications.summary_threshold`(기본 3) · 조용한 시간 `quiet_hours`(기본 23:00~08:00) · 그 시간엔 보내지 않음/소리 없이 `notifications.quiet_delivery`.
 - **순찰 주기**: heartbeat 간격 `heartbeat_minutes`(10) · 신호 조회 최소 간격 `signal_check_minutes`(60) · 아침 브리핑 시각 `briefing_time`(09:00) · 홈 자동 갱신 기본 주기 `agenda_refresh_minutes`(60) · 소스별 주기 Slack/메일/캘린더/Jira/GitHub `agenda_source_minutes.*`(비우면 기본) · 조용한 시간 동작 `quiet_schedule.*` · 유휴 시 동작 `idle_schedule.*`(위 "야간 모드 · 유휴 모드").
 - **쓰기 액션**: 기본 말투 `reply_tone` · 소스별 그룹 토글 `actions.*`(위 "쓰기 액션") · 답장 말투 `reply_tone_by_source.*` · 오늘 한 액션.
+- **아카이브**: 켜기 `archive.enabled` · 볼트 경로 `archive.vault` · Ned 폴더 `archive.folder` · 담을 것 `archive.include.*` · 내 데일리 노트 embed `archive.daily_embed` · 상태·"지금 쓰기"(위 "아카이브 — Obsidian").
 - **Claude**: 모델 `claude_model`(비우면 기본) · 최대 턴 `claude_max_turns`(25) · 하루 사용 상한 `agenda_daily_budget_usd`(15, 닿으면 자동 실행과 대화가 멈춤, 버튼 실행은 계속).
 - **저장·되돌리기**:
   - 보여 주는 것: 하단 "● 저장 안 된 변경" + "저장". 바뀐 항목만 저장("바뀐 항목이 없어."면 저장할 게 없음). 다른 곳(다른 탭·config.yaml 직접 수정·데몬 업그레이드)에서 그 사이 바뀌었으면 덮어쓰지 않고 최신 값을 불러온 뒤 내가 수정한 항목은 유지 → 다시 저장.
@@ -196,6 +205,8 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `reply_tone` · `reply_tone_by_source.slack` · `reply_tone_by_source.email` · `reply_tone_by_source.session` | "간결하고 정중한 존댓말, 핵심 먼저" · null | 쓰기 액션 → 기본 말투 / 답장 말투 |
 | `dashboard.theme` · `dashboard.card_order` · `dashboard.card_span` · `dashboard.locked` · `dashboard.watch_cards` · `dashboard.layout` | system · slack,mail,jira,github · — · false · true · null | 외형 (layout 은 홈 드래그 배치) |
 | `claude_model` · `claude_max_turns` · `agenda_daily_budget_usd` | null · 25 · 15 | Claude |
+| `archive.enabled` · `archive.vault` · `archive.folder` · `archive.daily_embed` | false · "" · Ned · false | 아카이브 |
+| `archive.include.briefings` · `archive.include.updates` · `archive.include.actions` · `archive.include.outputs` · `archive.include.sessions` | true · true · true · true · false | 아카이브 → 담을 것 |
 | `persona` | ned | UI 없음 (ned/alfred/oracle/jarvis — 말투·테마·통신기 이름) |
 | `port` | 7777 | UI 없음 (`NED_PORT` 가 우선) |
 | `notify` | auto | UI 없음 (auto/osascript/off) |
@@ -230,6 +241,11 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `c-model` | Claude → 모델 | `claude_model` |
 | `c-turns` | Claude → 최대 턴 | `claude_max_turns` |
 | `c-budget` | Claude → 하루 사용 상한 | `agenda_daily_budget_usd` |
+| `c-arch-on` | 아카이브 → 아카이브 켜기 | `archive.enabled` |
+| `c-arch-vault` | 아카이브 → 볼트 경로 | `archive.vault` |
+| `c-arch-folder` | 아카이브 → Ned 폴더 | `archive.folder` |
+| `c-arch-inc` | 아카이브 → 담을 것 | `archive.include.*` |
+| `c-arch-embed` | 아카이브 → 내 데일리 노트 embed | `archive.daily_embed` |
 
 쓰기 액션 토글은 `data-act="<키>"` → `actions.<키>` (부록 A).
 
@@ -242,4 +258,5 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 초안·보내기: `/api/draft` · `/api/send`
 - 세션 만들기: `/api/sessions/create`(대화창 확인 카드 [실행], 진행은 `/api/sessions/create/:job_id`)
 - 통신기: `/api/chat`(SSE) · `/api/chat/:id` · `/api/chat/:id/stop` · `/api/chats` · `/api/chat/actions/validate`(확인 카드 검증) · `/api/chat/:id/action`(카드 상태 저장)
+- 아카이브: `/api/archive/status`(볼트 배지·마지막 쓰기·마지막 오류) · `/api/archive/flush`(지금 쓰기) · `/api/outputs`(정리 결과물 목록) · `/api/outputs/:id`(하나, 마크다운 포함) · `/api/outputs/:id/reveal`(Finder 에서 보기)
 - 설정: `/api/config`(GET/PUT — 바뀐 키만, 충돌 시 409) · `/api/config/backups` · `/api/config/restore`(이전 설정으로 되돌리기)
