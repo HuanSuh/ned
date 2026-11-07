@@ -45,6 +45,8 @@ function configKeys(): string[] {
     ...sub("quiet_schedule"),
     ...sub("idle_schedule"),
     ...sub("agenda_source_minutes"),
+    ...sub("archive"),
+    ...sub("archive.include"),
   ];
 }
 

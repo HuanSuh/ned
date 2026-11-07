@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { archiveTouch } from "./archive.js";
 import { buildClaudeArgs, extractJson, llmDisabled, runClaude, type ClaudeRunOptions } from "./claude.js";
 import type { NedConfig } from "./config.js";
 import { invalidateCalendarRanges } from "./calendar.js";
@@ -136,6 +137,7 @@ export function appendActionLog(e: ActionLogEntry): void {
   } catch (err) {
     log(`actions: could not write ${SENT_ACTIONS_LOG}: ${String(err)}`);
   }
+  if (e.ok && !e.action.startsWith("dry_run:") && e.mode !== "transitions") archiveTouch(Date.parse(e.ts), { immediate: true }); // Obsidian 아카이브 "보낸 것"
 }
 
 export interface ActionLogFilter {

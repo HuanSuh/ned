@@ -154,6 +154,7 @@
           <a href="#settings" data-sjump="s-notify">알림</a>
           <a href="#settings" data-sjump="s-patrol">순찰 주기</a>
           <a href="#settings" data-sjump="s-actions">쓰기 액션</a>
+          <a href="#settings" data-sjump="s-archive">아카이브</a>
           <a href="#settings" data-sjump="s-claude">Claude</a>
         </nav>
         <form id="cfg" class="sbody" autocomplete="off">
@@ -293,6 +294,21 @@
           </section>
 
           <!-- 6. Claude -->
+          <section class="card ssec" id="s-archive" aria-labelledby="s-archive-h" aria-describedby="s-archive-d">
+            <div class="hd"><h2 id="s-archive-h" tabindex="-1">아카이브</h2></div>
+            <div class="bd">
+              <p class="sdesc" id="s-archive-d">Obsidian 볼트에 매일 기록을 쌓아 — 데일리 리포트(브리핑·순찰·보낸 것·정리 결과물·오늘)와 대화창 정리 결과물 노트. Claude 호출 없이 데몬이 파일만 써.</p>
+              <div class="ntf arch" id="c-arch">
+                <label class="ck non"><input type="checkbox" id="c-arch-on"> 아카이브 켜기</label>
+                <div class="nrow"><label class="lab" for="c-arch-vault">볼트 경로</label><div class="inl"><input type="text" id="c-arch-vault" placeholder="/Users/me/Documents/obsidian" spellcheck="false" style="min-width:min(100%,360px);flex:1" aria-describedby="c-arch-vh"><span class="chipx" id="c-arch-badge" hidden></span></div></div>
+                <div class="nrow"><span class="lab"></span><span class="hint" id="c-arch-vh">볼트 폴더의 절대 경로. ~/.ned 나 Ned 레포 안은 안 돼. .obsidian 폴더가 있으면 "볼트 확인됨".</span></div>
+                <div class="nrow"><label class="lab" for="c-arch-folder">Ned 폴더</label><div class="inl"><input type="text" id="c-arch-folder" placeholder="Ned" spellcheck="false" style="width:160px"><span class="hint">볼트 안 폴더 — Daily/YYYY-MM/날짜.md · Notes/YYYY-MM/날짜.제목.md</span></div></div>
+                <div class="nrow"><span class="lab" id="c-arch-inc-lab">담을 것</span><div class="toggles ngrid" id="c-arch-inc" role="group" aria-labelledby="c-arch-inc-lab"></div></div>
+                <div class="nrow"><span class="lab">내 데일리 노트</span><div class="inl"><label class="ck"><input type="checkbox" id="c-arch-embed"> 내 데일리 노트에 오늘 리포트 embed 한 줄</label><span class="hint">"## 📝 Notes &amp; Logs" 아래에 ![[…]] 한 줄만, 그날 노트가 이미 있을 때만 (.obsidian/daily-notes.json 의 폴더).</span></div></div>
+                <div class="nrow"><span class="lab">상태</span><div class="archst" id="c-arch-status" aria-live="polite"><span class="hint">불러오는 중…</span></div></div>
+              </div>
+            </div>
+          </section>
           <section class="card ssec" id="s-claude" aria-labelledby="s-claude-h" aria-describedby="s-claude-d">
             <div class="hd"><h2 id="s-claude-h" tabindex="-1">Claude</h2></div>
             <div class="bd">

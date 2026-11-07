@@ -1,4 +1,4 @@
-/* Settings tab: one form, six section cards (외형 · 소스 · 알림 · 순찰 주기 · 쓰기 액션 · Claude), a jump nav and a sticky save bar.
+/* Settings tab: one form, seven section cards (외형 · 소스 · 알림 · 순찰 주기 · 쓰기 액션 · 아카이브 · Claude), a jump nav and a sticky save bar.
  * Field ids and the PUT /api/config body are unchanged; only the layout moved (index.html #v-settings). */
 import { api } from "../api.js";
 import { BUILD, onBuildStale } from "../features/build.js";
@@ -6,6 +6,7 @@ import { diffConfig, isEmptyPatch, mergePatch } from "../features/config-diff.js
 import { readCardLayout, renderCardLayout } from "../features/cardlayout.js";
 import { ACTION_DEFAULTS, ACTION_KO } from "../features/drafts.js";
 import { readToneBySource, syncWriteActionGroups, writeActionsHtml } from "./settings-actions.js";
+import { initArchive, readArchive, renderArchive } from "./settings-archive.js";
 import { persona } from "../features/personas.js";
 import { applyTheme, normTheme, syncTheme, themeHtml } from "../features/theme.js";
 import { loadAgenda } from "../main.js";
@@ -212,6 +213,7 @@ export function renderConfig(c = S.config, { preview = false } = {}) {
   $("c-model").value = c.claude_model ?? "";
   $("c-turns").value = c.claude_max_turns ?? "";
   $("c-budget").value = c.agenda_daily_budget_usd ?? "";
+  renderArchive(c); // 아카이브 (Obsidian)
   $("c-msg").textContent = ""; $("c-msg").className = "msg";
   savedBody = readBody(); saved = snap(); syncDirty();
   syncSaveLock();
@@ -257,6 +259,7 @@ export function readBody() {
     claude_model: $("c-model").value.trim() || null,
     claude_max_turns: Number($("c-turns").value),
     agenda_daily_budget_usd: Number($("c-budget").value),
+    archive: readArchive(),
   };
 }
 
@@ -362,6 +365,7 @@ export function init() {
   });
   onBuildStale(syncSaveLock);
   initRestore();
+  initArchive();
 }
 
 // ---------- 새 버전 감지: daemon build changed since page load → 저장 잠금 (build.js shows the reload banner) ----------

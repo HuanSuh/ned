@@ -7,6 +7,8 @@ import { $, esc, lsGet, lsSet, hhmm, rel } from "../util.js";
 import { MINI, persona } from "./personas.js";
 import { postJson } from "../api.js";
 import { parseActionBlock, wireActionCards } from "./chat-action.js";
+import { OUTPUT_CSS, wireOutputCards } from "./chat-output.js";
+import { toast } from "../ui/toast.js";
 import { sendAndWait } from "./sendjob.js";
 import { buildFeed, clampSize, commsVoice, createSseParser, feedHtml, helloLine, messagesHtml, readSize, shellHtml, tickerOf, usd } from "./chat-core.js";
 import { bindCodeCopy } from "./code-copy.js";
@@ -154,7 +156,7 @@ async function loadChatWhileRunning() {
 }
 
 function landed(d, extra = {}) {
-  st.msgs.push({ role: "ned", text: d.text || "", ts: Number(d.ts) || Date.now(), cost_usd: d.cost_usd, ...extra });
+  st.msgs.push({ role: "ned", text: d.text || "", ts: Number(d.ts) || Date.now(), cost_usd: d.cost_usd, ...(d.output ? { output: d.output } : {}), ...(d.output_error ? { output_error: d.output_error } : {}), ...extra });
   if (typeof d.chat_cost_usd === "number") st.cost = d.chat_cost_usd;
   if (typeof d.today_usd === "number" && S.costs) S.costs.today_usd = d.today_usd;
   st.live = null; st.running = false;
@@ -322,6 +324,8 @@ export function init() {
   for (const b of panel.querySelectorAll("[data-cmtab]")) b.addEventListener("click", () => setTab(b.dataset.cmtab));
   $("cm-feed").addEventListener("click", onFeedClick);
   wireActionCards(log, { get: cardBlockOf, set: setCard, persist: persistCard, deps: { postJson, sendAndWait } });
+  wireOutputCards(log, { postJson, toast }); // 정리 결과물 저장 카드: Finder 에서 보기
+  { const css = document.createElement("style"); css.textContent = OUTPUT_CSS; document.head.appendChild(css); }
   $("cm-allread").addEventListener("click", () => { for (const x of st.feed) st.seen.add(x.key); saveSeen(); render(); });
   $("cm-form").addEventListener("submit", (e) => {
     e.preventDefault();
