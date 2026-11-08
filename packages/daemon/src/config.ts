@@ -357,6 +357,11 @@ export interface NedFilters {
     ack_reactions: string[];
     /** At most this many ack_reactions (from the front) are searched per agenda run (1..ACK_REACTIONS_MAX, default 3). */
     ack_check_max: number;
+    /**
+     * Slack user groups I belong to whose mentions also count (agenda `reason: "group"`): user-group IDs ("S0ABC123")
+     * or handles without "@" ("mobile-dev"). [] = off (no extra search). At most GROUP_MENTIONS_MAX.
+     */
+    group_mentions: string[];
   };
   /** Jira project keys, e.g. ["MNT", "IP2"]. */
   jira: { exclude_projects: string[] };
@@ -384,17 +389,30 @@ export function normalizeAckReactions(v: unknown): string[] {
 }
 const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
+/** At most this many group mentions (all go into one extra Slack search). */
+export const GROUP_MENTIONS_MAX = 8;
+/** "@mobile-dev " → "mobile-dev"; IDs ("S0ABC123") stay as typed. Accepts a list or a comma / space separated string. */
+export function normalizeGroupMentions(v: unknown): string[] {
+  const list = typeof v === "string" ? v.split(/[,\s]+/) : strs(v);
+  const out = list
+    .map((e) => e.replace(/\s+/g, "").replace(/^@+/, ""))
+    .filter((e) => /^[\p{L}\p{N}._-]{1,80}$/u.test(e));
+  return uniq(out).slice(0, GROUP_MENTIONS_MAX);
+}
+/** User-group ID ("S0ABC123") vs. handle ("mobile-dev"). */
+export const isGroupId = (g: string): boolean => /^S[A-Z0-9]{6,}$/.test(g) && /\d/.test(g);
+
 /**
  * Coerce whatever came from YAML / PUT into clean filters. Channel names lose a leading "#" and spaces;
  * Jira keys are upper-cased and must look like a project key (they are pasted into JQL verbatim).
  */
 export function normalizeFilters(raw: unknown): NedFilters {
-  const f = (raw && typeof raw === "object" ? raw : {}) as { slack?: { exclude_channels?: unknown; watch_channels?: unknown; ack_reactions?: unknown; ack_check_max?: unknown }; jira?: { exclude_projects?: unknown } };
+  const f = (raw && typeof raw === "object" ? raw : {}) as { slack?: { exclude_channels?: unknown; watch_channels?: unknown; ack_reactions?: unknown; ack_check_max?: unknown; group_mentions?: unknown }; jira?: { exclude_projects?: unknown } };
   const chans = (v: unknown) => strs(v).map((c) => c.trim().replace(/^#+/, "").replace(/\s+/g, "")).filter((c) => c && c.length <= 80);
   const channels = chans(f.slack?.exclude_channels);
   const watch = chans(f.slack?.watch_channels);
   const projects = strs(f.jira?.exclude_projects).map((k) => k.trim().toUpperCase()).filter((k) => /^[A-Z][A-Z0-9_]{0,19}$/.test(k));
-  return { slack: { exclude_channels: uniq(channels), watch_channels: uniq(watch).slice(0, 20), ack_reactions: normalizeAckReactions(f.slack?.ack_reactions), ack_check_max: normalizeAckCheckMax(f.slack?.ack_check_max) }, jira: { exclude_projects: uniq(projects) } };
+  return { slack: { exclude_channels: uniq(channels), watch_channels: uniq(watch).slice(0, 20), ack_reactions: normalizeAckReactions(f.slack?.ack_reactions), ack_check_max: normalizeAckCheckMax(f.slack?.ack_check_max), group_mentions: normalizeGroupMentions(f.slack?.group_mentions) }, jira: { exclude_projects: uniq(projects) } };
 }
 
 /** Deep-merge a partial filters patch over the current filters (a key that is present replaces that list). */
@@ -514,7 +532,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   idle_schedule: DEFAULT_IDLE_SCHEDULE,
   sources: { gmail: true, slack: true, jira: true, github: true, sentry: true, calendar: true },
   persona: "ned",
-  filters: { slack: { exclude_channels: [], watch_channels: [], ack_reactions: [...DEFAULT_ACK_REACTIONS], ack_check_max: ACK_CHECK_MAX_DEFAULT }, jira: { exclude_projects: [] } },
+  filters: { slack: { exclude_channels: [], watch_channels: [], ack_reactions: [...DEFAULT_ACK_REACTIONS], ack_check_max: ACK_CHECK_MAX_DEFAULT, group_mentions: [] }, jira: { exclude_projects: [] } },
   port: 7777,
   claude_model: null,
   claude_max_turns: 25,

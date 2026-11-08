@@ -9,7 +9,9 @@ import {
   inQuietHours,
   jqlExclude,
   loadConfig,
+  isGroupId,
   mergeFilters,
+  normalizeGroupMentions,
   normalizeAckReactions,
   normalizeActions,
   normalizeDashboard,
@@ -196,7 +198,7 @@ describe("normalizers", () => {
   it("mergeFilters: a patch with only slack keeps jira", () => {
     const cur = normalizeFilters({ slack: { exclude_channels: ["a"] }, jira: { exclude_projects: ["MNT"] } });
     const next = mergeFilters(cur, { slack: { watch_channels: ["#ops"] } });
-    expect(next).toEqual({ slack: { exclude_channels: ["a"], watch_channels: ["ops"], ack_reactions: ["white_check_mark", "eyes", "+1", "heavy_check_mark"], ack_check_max: 3 }, jira: { exclude_projects: ["MNT"] } });
+    expect(next).toEqual({ slack: { exclude_channels: ["a"], watch_channels: ["ops"], ack_reactions: ["white_check_mark", "eyes", "+1", "heavy_check_mark"], ack_check_max: 3, group_mentions: [] }, jira: { exclude_projects: ["MNT"] } });
   });
   it("ack_check_max: default 3, clamped to 1..8, junk → default, survives a patch without it", () => {
     expect(normalizeFilters({}).slack.ack_check_max).toBe(3);
@@ -220,6 +222,19 @@ describe("normalizers", () => {
     expect(cur.slack.ack_reactions).toEqual(["ok_hand"]);
     expect(mergeFilters(cur, { slack: { exclude_channels: ["x"] } }).slack.ack_reactions).toEqual(["ok_hand"]);
     expect(mergeFilters(cur, { slack: { ack_reactions: [] } }).slack.ack_reactions).toEqual([]);
+  });
+  it("group_mentions: default [], leading @ and spaces stripped, IDs kept as typed, junk dropped, deduped, capped at 8", () => {
+    expect(normalizeFilters({}).slack.group_mentions).toEqual([]);
+    expect(normalizeGroupMentions(["@mobile-dev", " mobile-dev ", "S0ABC1234", "@@ios team", "bad<tag>", "", 3, "@", "모바일_팀"])).toEqual(["mobile-dev", "S0ABC1234", "iosteam", "모바일_팀"]);
+    expect(normalizeGroupMentions("@a, b  @a")).toEqual(["a", "b"]);
+    expect(normalizeGroupMentions(Array.from({ length: 12 }, (_, i) => `g${i}`))).toHaveLength(8);
+    expect(isGroupId("S0ABC1234")).toBe(true);
+    expect(isGroupId("mobile-dev")).toBe(false);
+    expect(isGroupId("SALES")).toBe(false);
+    const cur = mergeFilters(normalizeFilters({}), { slack: { group_mentions: ["@mobile-dev"] } });
+    expect(cur.slack.group_mentions).toEqual(["mobile-dev"]);
+    expect(mergeFilters(cur, { slack: { exclude_channels: ["x"] } }).slack.group_mentions).toEqual(["mobile-dev"]);
+    expect(mergeFilters(cur, { slack: { group_mentions: [] } }).slack.group_mentions).toEqual([]);
   });
   it("watchChannels removes excluded channels case-insensitively; jqlExclude formats", () => {
     const f = normalizeFilters({ slack: { exclude_channels: ["OPS"], watch_channels: ["ops", "dev"] }, jira: { exclude_projects: ["A", "B"] } });
