@@ -5,6 +5,7 @@ import { meetings, renderAgenda, todayEvents } from "../features/calendar.js";
 import { histPanel, histToggle, threadMain, threadPreview } from "../features/slackthread.js";
 import { GH_REASON, MAIL_REASON, PRIO_LED, SLACK_REASON, card, cardMode, collapseDMs, counts, group, moreBadge, packCards, preview, renderSlackWatch, unionAll, watchNeeds } from "../features/cards.js";
 import { watchCardsOn } from "../features/cardlayout.js";
+import { histBar, histList } from "../features/histview.js";
 import { draftFor } from "../features/drafts.js";
 import { renderWatchCards } from "../features/watchcards.js";
 import { V, greet, say } from "../features/personas.js";
@@ -20,6 +21,18 @@ import { toast } from "../ui/toast.js";
 import { layoutTodoSplit } from "../features/todosplit.js";
 import { $, dueChip, dueInfo, esc, ext, hhmm, mdhm, rel, safeUrl, toMs } from "../util.js";
 export const byDue = (a, b) => (a.due ? 0 : 1) - (b.due ? 0 : 1) || String(a.due || "").localeCompare(String(b.due || ""));
+
+/**
+ * A card list with the 수집 이력 toggle (features/histview.js): the toggle row, then the card's own rows — or, with
+ * 지난 7일 / 30일 on, the history list. `below`: Jira / GitHub put the toggle under their (short) list instead.
+ */
+export function withHist(id, query, rows, { below = false, empty = "", loading = false } = {}) {
+  if (loading && !rows) return ""; // first load: the card's skeleton
+  const h = histList(id, query);
+  if (h !== null) return histBar(id) + h;
+  const list = rows || (empty ? `<div class="gnone">${esc(empty)}</div>` : "");
+  return below ? list + histBar(id) : histBar(id) + list;
+}
 
 export function renderTodoGroups() {
   const s = S.state, ag = S.agenda;
@@ -55,7 +68,7 @@ export function renderTodoGroups() {
   });
   card("mail", {
     hidden: !mailOn, loading: loadingSrc("mail", ag?.mail), n: mi.length, hot: mi.some((x) => x.reason === "deadline" || x.reason === "approval"),
-    mode: cardMode("mail"), allRows: mailAllRows, allEmpty: mail ? "최근 2일 안 읽은 메일 목록 없음 (다음 새로고침 때 채워져)." : "다음 새로고침 때 메일도 가져올게.",
+    mode: cardMode("mail"), allRows: withHist("mail", { source: "mail" }, mailAllRows, { empty: mail ? "표시 구간에 메일 없음 (다음 새로고침 때 채워져)." : "", loading: loadingSrc("mail", ag?.mail) }), allEmpty: mail ? "표시 구간에 메일 없음 (다음 새로고침 때 채워져)." : "다음 새로고침 때 메일도 가져올게.",
     rows: withFold("mail", "email", miAll, (x) => {
       const u = safeUrl(x.url), r = mailRow(x);
       return `<div class="ti${revCls("email", x)}"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.subject || "(제목 없음)")) : esc(x.subject || "(제목 없음)")}</span>
@@ -71,12 +84,12 @@ export function renderTodoGroups() {
   const jDays = (j) => dueInfo(j.due)?.days;
   card("jira", {
     loading: loadingSrc("jira", ag?.jira), n: jira.length, hot: jira.some((j) => (jDays(j) ?? 1) <= 0),
-    rows: withFold("jira", "jira", jiraAll, (j) => {
+    rows: withHist("jira", { source: "jira" }, withFold("jira", "jira", jiraAll, (j) => {
       const u = safeUrl(j.url);
       return `<div class="ti${revCls("jira", j)}"><span class="ic" title="${esc(j.priority || "")}"><span class="led ${PRIO_LED[String(j.priority || "").toLowerCase()] || ""}" style="margin:0"></span></span><div class="mn"><span class="tt">${u ? ext(u, esc(j.title)) : esc(j.title)}</span>
           <div class="sb"><span class="key">${esc(j.key)}</span><span class="chipx">${esc(j.status || "—")}</span>${dueChip(j.due)}</div></div>
           <div class="ra">${openIcon(u)}${srcCheck("jira", j)}</div></div>`;
-    }),
+    }), { below: true, empty: unavailable ? "" : "배정된 이슈 없음.", loading: loadingSrc("jira", ag?.jira) }),
     empty: unavailable || "배정된 이슈 없음.",
     sum: jira.length ? esc(counts([["마감 지난", jira.filter((j) => jDays(j) < 0).length], ["오늘", jira.filter((j) => jDays(j) === 0).length], ["진행 중", jira.filter((j) => /진행|progress/i.test(j.status || "")).length]]).replace(/ (\d+)/g, " $1건") || `열린 이슈 ${jira.length}건`) : "",
     pv: jira[0] && preview(`<span class="key">${esc(jira[0].key)}</span>`, jira[0].title, safeUrl(jira[0].url), dueChip(jira[0].due) || `<span class="chipx">${esc(jira[0].status || "—")}</span>`),
@@ -101,7 +114,7 @@ export function renderTodoGroups() {
   });
   card("slack", {
     hidden: !slackOn, loading: loadingSrc("slack", ag?.slack), n: si.length + wNeed.length, hot: si.some((x) => x.reason === "dm" || x.reason === "mention") || wNeed.length > 0,
-    mode: cardMode("slack"), allRows: slackAllRows, allEmpty: slack ? "최근 24시간 멘션·DM 목록 없음 (다음 새로고침 때 채워져)." : "다음 새로고침 때 Slack 도 가져올게.",
+    mode: cardMode("slack"), allRows: withHist("slack", { source: "slack" }, slackAllRows, { empty: slack ? "표시 구간에 멘션·DM 없음 (다음 새로고침 때 채워져)." : "", loading: loadingSrc("slack", ag?.slack) }), allEmpty: slack ? "표시 구간에 멘션·DM 없음 (다음 새로고침 때 채워져)." : "다음 새로고침 때 Slack 도 가져올게.",
     rows: withFold("slack", "slack", siAll, (x) => {
       const u = safeUrl(x.url), r = slRow(x);
       return `<div class="ti${revCls("slack", x)}"><span class="ic">${r[2]}</span><div class="mn">${threadMain(x, u, `<span class="chipx ${r[0]}">${x.reopened ? "새 답글" : r[1]}</span>${moreBadge(x)}${histToggle(x)}`) ||`<span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
@@ -117,12 +130,12 @@ export function renderTodoGroups() {
   const ghR = (x) => GH_REASON[x.reason] || ["", x.reason || "", "🐙"];
   card("gh", {
     loading: loadingSrc("github", ag?.github), n: gh.length, hot: gh.some((x) => x.reason === "review_requested"),
-    rows: withFold("gh", "github", ghAll, (x) => {
+    rows: withHist("gh", { source: "github" }, withFold("gh", "github", ghAll, (x) => {
       const u = safeUrl(x.url), r = ghR(x);
       return `<div class="ti${revCls("github", x)}"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.title)) : esc(x.title)}</span>
           <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.repo)}#${esc(x.number)}</span><span class="chipx ${r[0]}">${esc(r[1])}</span>${x.author ? `<span>@${esc(x.author)}</span>` : ""}${x.updated ? `<span>${rel(toMs(x.updated))}</span>` : ""}</div></div>
           <div class="ra">${openIcon(u)}${srcCheck("github", x)}</div></div>`;
-    }),
+    }), { below: true, empty: unavailable ? "" : "기다리는 리뷰 없음.", loading: loadingSrc("github", ag?.github) }),
     empty: unavailable || "기다리는 리뷰 없음.",
     sum: esc(counts(Object.keys(GH_REASON).map((k) => [GH_REASON[k][1], gh.filter((x) => x.reason === k).length]))),
     pv: gh[0] && preview(ghR(gh[0])[2], gh[0].title, safeUrl(gh[0].url), `<span class="chipx ${ghR(gh[0])[0]}">${esc(ghR(gh[0])[1])}</span>`),

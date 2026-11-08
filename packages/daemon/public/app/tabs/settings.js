@@ -7,6 +7,7 @@ import { readCardLayout, renderCardLayout } from "../features/cardlayout.js";
 import { ACTION_DEFAULTS, ACTION_KO } from "../features/drafts.js";
 import { readToneBySource, syncWriteActionGroups, writeActionsHtml } from "./settings-actions.js";
 import { initArchive, readArchive, renderArchive } from "./settings-archive.js";
+import { initHistorySettings, readHistorySettings, renderHistorySettings } from "./settings-history.js";
 import { persona } from "../features/personas.js";
 import { applyTheme, normTheme, syncTheme, themeHtml } from "../features/theme.js";
 import { loadAgenda } from "../main.js";
@@ -216,6 +217,7 @@ export function renderConfig(c = S.config, { preview = false } = {}) {
   $("c-turns").value = c.claude_max_turns ?? "";
   $("c-budget").value = c.agenda_daily_budget_usd ?? "";
   renderArchive(c); // 아카이브 (Obsidian)
+  renderHistorySettings(c); // 수집·보관
   $("c-msg").textContent = ""; $("c-msg").className = "msg";
   savedBody = readBody(); saved = snap(); syncDirty();
   syncSaveLock();
@@ -262,6 +264,7 @@ export function readBody() {
     claude_max_turns: Number($("c-turns").value),
     agenda_daily_budget_usd: Number($("c-budget").value),
     archive: readArchive(),
+    history: readHistorySettings(),
   };
 }
 
@@ -368,6 +371,7 @@ export function init() {
   onBuildStale(syncSaveLock);
   initRestore();
   initArchive();
+  initHistorySettings();
 }
 
 // ---------- 새 버전 감지: daemon build changed since page load → 저장 잠금 (build.js shows the reload banner) ----------

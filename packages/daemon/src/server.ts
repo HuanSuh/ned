@@ -15,9 +15,10 @@ import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runCh
 import { validateChatAction } from "./chat-actions.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, restoreConfigBackup, saveConfig, sourceRefreshMinutes, watchChannels, type NedConfig, type PersonaId } from "./config.js";
+import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, restoreConfigBackup, saveConfig, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
+import { historyStatus, queryHistory } from "./history.js";
 import { checkStatus, dismissAttention, heartbeat, listBriefings, runCheck } from "./heartbeat.js";
 import { log } from "./paths.js";
 import { listOutputs, outputFile, readOutput } from "./outputs.js";
@@ -280,6 +281,14 @@ export function startServer(getConfig: () => NedConfig): void {
     const force = c.req.query("force") === "1";
     const cfg = loadConfig();
     return c.json({ context_status: requestContext(cfg, ["slack", "mail"], { force }) });
+  });
+  // 수집 이력 (src/history.ts): a card's "지난 7일 / 30일" list, and 설정 → 수집·보관's status line.
+  app.get("/api/history/status", (c) => c.json(historyStatus(loadConfig())));
+  app.get("/api/history", (c) => {
+    const source = c.req.query("source") as HistorySource;
+    if (!HISTORY_SOURCES.includes(source)) return c.json({ error: `source must be one of ${HISTORY_SOURCES.join("|")}` }, 400);
+    const q = c.req.query();
+    return c.json(queryHistory(loadConfig(), readAgenda(), { source, days: Number(q.days ?? 7), q: (q.q ?? "").slice(0, 200), channel: q.channel, limit: Number(q.limit ?? 200) }));
   });
   app.get("/api/costs", (c) => c.json(costSummary(loadConfig().agenda_daily_budget_usd, Number(c.req.query("days") ?? 14))));
 
