@@ -47,6 +47,9 @@ function configKeys(): string[] {
     ...sub("agenda_source_minutes"),
     ...sub("archive"),
     ...sub("archive.include"),
+    ...sub("history"),
+    ...sub("history.display"),
+    ...sub("history.keep_days"),
   ];
 }
 

@@ -15,7 +15,7 @@ import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runCh
 import { validateChatAction } from "./chat-actions.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, restoreConfigBackup, saveConfig, sourceRefreshMinutes, watchChannels, type NedConfig, type PersonaId } from "./config.js";
+import { PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, restoreConfigBackup, saveConfig, sourceRefreshMinutes, watchChannels, type NedConfig, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { checkStatus, dismissAttention, heartbeat, listBriefings, runCheck } from "./heartbeat.js";
@@ -102,6 +102,7 @@ export function mergeConfigPatch(cur: NedConfig, body: Partial<NedConfig>): NedC
     quiet_schedule: normalizeQuietSchedule(m.quiet_schedule, cur.quiet_schedule),
     idle_schedule: normalizeIdleSchedule(m.idle_schedule, cur.idle_schedule),
     archive: normalizeArchive(m.archive, cur.archive),
+    history: normalizeHistory(m.history, cur.history),
   };
   // Re-normalized even without a dashboard patch: a 팔로업 channel added / removed in filters adds / drops its `watch:` card.
   merged.dashboard = normalizeDashboard(dashboard ?? {}, cur.dashboard, watchChannels(merged.filters));

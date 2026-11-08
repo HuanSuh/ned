@@ -75,6 +75,44 @@ export interface NedConfig {
   chat_ignore_budget: boolean;
   /** Obsidian 아카이브: the daemon writes a daily report + 정리 결과물 notes into a vault (no claude call). src/archive.ts. */
   archive: NedArchive;
+  /** 수집 이력 (src/history.ts): what agenda collected, kept per source; Slack·메일 cards / patrol / drafts read their display window from it. */
+  history: NedHistory;
+}
+
+export const HISTORY_SOURCES = ["slack", "mail", "jira", "github", "calendar"] as const;
+export type HistorySource = (typeof HISTORY_SOURCES)[number];
+export interface NedHistory {
+  /** false = no history file is written and Slack·메일 show the latest snapshot only (the old behaviour). */
+  enabled: boolean;
+  /** 표시 구간: how far back the Slack·메일 cards, the patrol prompt and draft context look (1..168 h / 1..14 d). */
+  display: { slack_hours: number; mail_days: number };
+  /** 보관 기간 per source, whole days 0..365 (0 = don't record that source). Never below its display window. */
+  keep_days: Record<HistorySource, number>;
+}
+export const DEFAULT_HISTORY: NedHistory = {
+  enabled: true,
+  display: { slack_hours: 24, mail_days: 3 },
+  keep_days: { slack: 30, mail: 30, jira: 90, github: 90, calendar: 90 },
+};
+
+/**
+ * Merge a (partial) history patch over `base`: enabled boolean; display clamped (slack 1..168 h, mail 1..14 d); keep_days
+ * integers 0..365. A keep below its display window is raised to it (Slack: ceil(hours / 24) days) — 0 stays 0 (off).
+ */
+export function normalizeHistory(raw: unknown, base: NedHistory = DEFAULT_HISTORY): NedHistory {
+  const r = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+  const d = obj(r.display), k = obj(r.keep_days);
+  const bd = base.display ?? DEFAULT_HISTORY.display, bk = base.keep_days ?? DEFAULT_HISTORY.keep_days;
+  const int = (v: unknown, min: number, max: number, fb: number) => {
+    const n = Number(v);
+    return v == null || v === "" || typeof v === "boolean" || !Number.isFinite(n) ? fb : Math.max(min, Math.min(max, Math.round(n)));
+  };
+  const display = { slack_hours: int(d.slack_hours, 1, 168, bd.slack_hours), mail_days: int(d.mail_days, 1, 14, bd.mail_days) };
+  const keep_days = Object.fromEntries(HISTORY_SOURCES.map((s) => [s, int(k[s], 0, 365, bk[s] ?? DEFAULT_HISTORY.keep_days[s])])) as Record<HistorySource, number>;
+  const floor: Partial<Record<HistorySource, number>> = { slack: Math.ceil(display.slack_hours / 24), mail: display.mail_days };
+  for (const [s, min] of Object.entries(floor) as [HistorySource, number][]) if (keep_days[s] > 0 && keep_days[s] < min) keep_days[s] = min;
+  return { enabled: typeof r.enabled === "boolean" ? r.enabled : base.enabled !== false, display, keep_days };
 }
 
 export interface NedArchive {
@@ -85,14 +123,15 @@ export interface NedArchive {
   folder: string;
   /** Put an `![[…]]` embed of the day's report into the user's own daily note (only when that note already exists). */
   daily_embed: boolean;
-  include: { briefings: boolean; updates: boolean; actions: boolean; outputs: boolean; sessions: boolean };
+  /** history = 데일리 리포트 "## 📥 들어온 것" (그날 처음 본 수집 이력 항목, src/history.ts). */
+  include: { briefings: boolean; updates: boolean; actions: boolean; outputs: boolean; sessions: boolean; history: boolean };
 }
 export const DEFAULT_ARCHIVE: NedArchive = {
   enabled: false,
   vault: "",
   folder: "Ned",
   daily_embed: false,
-  include: { briefings: true, updates: true, actions: true, outputs: true, sessions: false },
+  include: { briefings: true, updates: true, actions: true, outputs: true, sessions: false, history: true },
 };
 
 /** "Ned/", "/a//b/" → "Ned", "a/b"; "..", absolute-looking or control characters → `fallback`. Max 120 chars. */
@@ -122,7 +161,7 @@ export function normalizeArchive(raw: unknown, base: NedArchive = DEFAULT_ARCHIV
     vault,
     folder: "folder" in r ? normalizeArchiveFolder(r.folder, base.folder) : base.folder,
     daily_embed: bool(r.daily_embed, base.daily_embed),
-    include: { briefings: bool(inc.briefings, bi.briefings), updates: bool(inc.updates, bi.updates), actions: bool(inc.actions, bi.actions), outputs: bool(inc.outputs, bi.outputs), sessions: bool(inc.sessions, bi.sessions) },
+    include: { briefings: bool(inc.briefings, bi.briefings), updates: bool(inc.updates, bi.updates), actions: bool(inc.actions, bi.actions), outputs: bool(inc.outputs, bi.outputs), sessions: bool(inc.sessions, bi.sessions), history: bool(inc.history, bi.history ?? true) },
   };
 }
 
@@ -559,6 +598,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   dashboard: DEFAULT_DASHBOARD,
   chat_ignore_budget: false,
   archive: DEFAULT_ARCHIVE,
+  history: DEFAULT_HISTORY,
 };
 
 /** A finite number within [min, max] (truncated when `int`), else `fallback`. */
@@ -591,6 +631,7 @@ export function loadConfig(): NedConfig {
       heartbeat_skip_unchanged: parsed.heartbeat_skip_unchanged !== false,
       chat_ignore_budget: parsed.chat_ignore_budget === true,
       archive: normalizeArchive(parsed.archive),
+      history: normalizeHistory(parsed.history),
       dashboard: normalizeDashboard(parsed.dashboard, DEFAULT_DASHBOARD, watchChannels(filters)),
       agenda_source_minutes: normalizeAgendaSourceMinutes(parsed.agenda_source_minutes),
       quiet_schedule: normalizeQuietSchedule(parsed.quiet_schedule),

@@ -347,6 +347,16 @@ Agenda 응답 형태:
 
 Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` (ms 타임스탬프).
 
+## 수집 이력 (`src/history.ts`, `config.history`)
+
+agenda 1단계가 소스 목록을 병합할 때마다(`mergeSources` → `historyUpsert`) 항목을 `~/.ned/history/<source>.json` 에 key 기준으로 upsert 한다
+(Claude 호출 없음). key: slack `slackUrlKey(permalink)` · mail thread id · jira 이슈 키 · github PR url · calendar event id(없으면 `url|start`).
+레코드 `{key, source, first_seen, last_seen, ts, state, item}` — `item` 은 가벼운 스냅샷(2단계 context·thread 제외), `state`:
+slack `{reason, need(items 에 뽑힘), answered, acked, count, rank, rank_at}` · mail `{unread, needs_action, rank, rank_at}` ·
+jira/github `{open}`(목록에서 빠지면 false, 다시 보이면 true) · calendar `{rsvp}`. 파일 하나에 소스 전체(JSON, mtime 캐시) — 수천 건에서
+읽기·쓰기 수 ms. 하루 한 번(`meta.json` `last_prune_day`) `keep_days` 넘게 안 보인 레코드를 지우고(0 = 파일 삭제), `HISTORY_SOURCES` 파일만 만진다.
+`history.enabled=false` 면 기록·prune 모두 안 한다.
+
 ## Obsidian 아카이브 (`src/archive.ts`, `src/vault.ts`, `src/outputs.ts`)
 
 `config.archive` (기본 꺼짐): `enabled`, `vault` (절대 경로, `~/` 펼침), `folder` (기본 `Ned`, `..`·점으로 시작하는 세그먼트 거부),
@@ -432,13 +442,16 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
                          reply_tone (답장 초안 말투, 기본 "간결하고 정중한 존댓말, 핵심 먼저"), reply_tone_by_source ({slack,email,session}: 소스별 말투, null = reply_tone),
                          draft_context_max_age_minutes=180 (agenda 맥락 → fast 초안), draft_fast_model="sonnet", drafts_pregenerate=false,
                          agenda_all_limit=20 (mail/slack all[] 상한), agenda_context_batch=5 (2단계 배치 크기),
-                         agenda_daily_budget_usd=15 (2단계 일일 예산), agenda_light_model="sonnet" (agenda 전 호출 모델, null = claude_model)
+                         agenda_daily_budget_usd=15 (2단계 일일 예산), agenda_light_model="sonnet" (agenda 전 호출 모델, null = claude_model),
+                         history.{enabled=true, display.{slack_hours=24, mail_days=3}, keep_days.{slack=30, mail=30, jira=90, github=90, calendar=90}} (수집 이력)
   state.json             menu bar / 대시보드가 읽는 단일 뷰 (sessions, attention, last_briefing, daily_failed_at, quiet …)
   cursor.json            heartbeat 가 처리한 마지막 이벤트 ts
   events/YYYY-MM-DD.jsonl  훅(packages/hook/ned-hook.sh)이 append 하는 이벤트. 로컬 날짜 기준
   briefings/<iso-ts>.json  heartbeat / daily 브리핑 결과 (status, ok, action_items, updates, fyi, sessions, cost_usd, 실패 시 raw)
   briefings/sent.log     이미 알린 항목 키 (title 또는 url) — 중복 억제
   agenda.json            HOME 탭 agenda: {updated_at, cost_usd, error?, sources_status, context_status, context_sigs, calendar, jira, github, mail, slack}
+  history/<source>.json  수집 이력 (src/history.ts, slack|mail|jira|github|calendar): {v:1, records:[{key, source, first_seen, last_seen, ts, state, item}]} — key 기준 upsert, compact JSON, temp→rename
+  history/meta.json      {last_prune_day, collect:{slack|mail:{last_ok_at, last_full_at}}} — 하루 1회 prune 일자, 증분 수집 기준 시각
   agenda.raw.txt         마지막으로 빈/깨진 agenda 호출의 모델 원문 (디버깅)
   costs.json             claude -p 비용 원장: {days: {YYYY-MM-DD: {total_usd, runs, jobs: {agenda, agenda_context, heartbeat, draft, calendar, action}}}} (30일)
   drafts/<id>.json       답장 초안 캐시 (1시간): {id, source, mode, context_age_minutes, context, drafts, cost_usd, created_at, hint, tone, meta}
