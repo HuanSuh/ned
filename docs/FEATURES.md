@@ -15,9 +15,9 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - **답장 초안 ✎**: 연필 → 초안 3개 → 복사/열기/보내기. 실제 쓰기는 설정 → 쓰기 액션에서 켠 것만: `actions.slack_send`·`gmail_draft`(기본 켬)·`gmail_send`·`session_send`(기본 켬)·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯ 메뉴.
 - **확인 완료 ✓**: 항목을 처리됨으로 접음(바뀌면 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`, 앞 `ack_check_max`개만 검색)면 자동 해제.
 - **Gmail 읽음 표시**: 설정 → 쓰기 액션 → Gmail → "Gmail 읽음 표시까지"(`actions.gmail_mark_read`, 기본 꺼짐): 메일 ✓ 때 Gmail 도 읽음(✓ 취소해도 안 되돌림).
-- **검색 ⌘K**: 대시보드 전체 통합 검색(초성).
+- **검색 ⌘K**: 전체 통합 검색(초성).
 - **아카이브(Obsidian)**: 설정 → 아카이브에 볼트 `archive.vault` + 켜기 `archive.enabled` → 매일 `<archive.folder>/Daily/YYYY-MM/날짜.md` 에 브리핑·순찰·보낸 것·결과물·통계 자동 기록(Claude 호출 없음, 마커 밖 메모 보존). `archive.daily_embed` = 내 데일리 노트에 embed 한 줄.
-- **설정**(바꾼 뒤 하단 "저장"): 외형(테마 `dashboard.theme` 시스템/라이트/다크, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(`heartbeat_minutes`, `signal_check_minutes`, `briefing_time`, `agenda_refresh_minutes`, `agenda_source_minutes.*`, `quiet_schedule.*`, `idle_schedule.*`) · 쓰기 액션(`actions.*`, 기본 말투 `reply_tone`, 소스별 답장 말투 `reply_tone_by_source.*`, 오늘 한 액션 로그) · 아카이브(`archive.*`) · Claude(모델 `claude_model`, 최대 턴 `claude_max_turns`, 하루 사용 상한 `agenda_daily_budget_usd` 기본 $15 — 닿으면 자동 실행·대화가 멈춤). 저장마다 백업 10개 → "이전 설정으로 되돌리기".
+- **설정**(바꾼 뒤 하단 "저장"): 외형(테마 `dashboard.theme` 시스템/라이트/다크, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(`heartbeat_minutes`, `signal_check_minutes`, `briefing_time`, `agenda_refresh_minutes`, `agenda_source_minutes.*`, `quiet_schedule.*`, `idle_schedule.*`) · 쓰기 액션(`actions.*`, 기본 말투 `reply_tone`, 소스별 답장 말투 `reply_tone_by_source.*`, 오늘 한 액션 로그) · 아카이브(`archive.*`) · Claude(모델 `claude_model`, 최대 턴 `claude_max_turns`, 하루 사용 상한 `agenda_daily_budget_usd` 기본 $15 — 닿으면 자동 실행·대화가 멈춤). 저장마다 백업 10개 → "이전 설정으로 되돌리기".
 
 ## 상세
 
@@ -49,7 +49,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 레이아웃: 위 = 확인 필요 그룹(스크롤), 아래 = 개인 할 일(입력폼 고정, 목록 스크롤, 최소 ≈180px — 항목이 적으면 내용만큼). 기본 60/40, 개인 할 일이 짧으면 남는 높이는 위로. 사이 구분선 드래그(↑↓ 키도)로 비율 조절·브라우저에 저장(`ned.todo.split`), 더블클릭 = 기본값. "개인 할 일" 헤더 클릭 = 접기/펼치기(`ned.todo.meFold`, 접히면 위가 전부; n·검색 이동 시 자동 펼침). 좁은 화면(<1100px, 자유 배치 아님)은 구분선 없이 자연 높이.
 
 ### 홈 — 소스 카드 (메일·Jira·Slack·GitHub)
-- 보여 주는 것: 📬 메일 확인 필요(결재/마감/답장/확인, 안 읽은 N) · 📋 Jira 내 이슈(마감 지난/오늘/진행 중) · 💬 Slack 답할 것(DM/멘션/스레드, 답 필요/답함/새 답글) · 🐙 GitHub 리뷰 요청(리뷰 요청/변경 요청/승인됨). 접힘/펼침, 메일·Slack 은 `확인 필요 | 전체`(전체 = 메일 최근 2일 안 읽음, Slack 최근 24h 멘션·DM).
+- 보여 주는 것: 📬 메일 확인 필요(결재/마감/답장/확인, 안 읽은 N) · 📋 Jira 내 이슈(마감 지난/오늘/진행 중) · 💬 Slack 답할 것(DM/멘션/스레드/그룹, 답 필요/답함/새 답글) · 🐙 GitHub 리뷰 요청(리뷰 요청/변경 요청/승인됨). 접힘/펼침, 메일·Slack 은 `확인 필요 | 전체`(전체 = 메일 최근 2일 안 읽음, Slack 최근 24h 멘션·DM).
 - 데이터: agenda.json — 소스별 `claude -p`(커넥터 읽기) 또는 GitHub 는 `gh search prs`. 소스별 주기마다 자동, 답장 맥락은 백그라운드 수집("맥락 수집 N/M"). Slack 스레드·DM 의 최근 대화는 갱신마다 다시 읽되, 마지막으로 읽은 뒤 새 메시지가 안 보이면 건너뜀(6시간마다 한 번은 재확인).
 - 언제: 답할 메시지·리뷰·마감 이슈를 소스별로 훑을 때.
 - 버튼·설정: 카드 ↻(그 소스만 지금 갱신), ⚠ 오류 배지, 항목 ✎ 초안·열기·✓ 확인. `sources.*`, `agenda_source_minutes.*`, `dashboard.card_order`/`card_span`, `agenda_all_limit`.
@@ -162,6 +162,11 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 언제: 처리했거나 볼 필요 없는 항목을 목록에서 치울 때.
 - 설정: 설정 → 소스 → Slack → "답 필요 해제 이모지"(`filters.slack.ack_reactions`, 기본 white_check_mark·eyes·+1·heavy_check_mark, 최대 8, 비우면 리액션 안 봄). 이모지 하나 = Slack 검색 한 번이라, 한 번에 앞에서부터 "한 번에 확인할 이모지"(`filters.slack.ack_check_max`, 기본 3, 1~8)개만 보고, 답 필요 후보가 하나도 없으면 이모지 검색 자체를 건너뜀.
 
+### Slack 그룹 멘션
+- 보여 주는 것: 내가 속한 Slack 유저그룹(@mobile-dev 등)을 향한 멘션도 Slack 카드에 "그룹"(👥) 칩으로. `전체` 에는 모두, `확인 필요` 에는 그룹에 구체적으로 묻거나 요청했는데 아무도(나 포함) 답하지 않은 것만(공지·공유 제외). 같은 메시지가 개인 멘션에도 걸리면 개인 멘션으로(dm > 멘션 > 스레드 > 그룹). 그룹 멘션은 스레드 팔로업 대상이 아님.
+- 데이터: agenda Slack 1단계에서 그룹마다 검색 1번 추가(기존 검색과 같은 턴, 턴 수 그대로) — ID 면 `<!subteam^S…>`, 핸들이면 `"@핸들"` 로 찾음. `reason: "group"`.
+- 설정: 설정 → 소스 → Slack → "그룹 멘션"(`filters.slack.group_mentions`, 기본 [], 최대 8). 그룹 ID(`S…`, Slack 그룹 프로필 ⋯ → ID 복사 — 가장 정확) 또는 핸들(`@mobile-dev`, 앞 @ 는 떼어 저장). 비우면 검색 안 함.
+
 ### 검색 ⌘K
 - 보여 주는 것: 주의 항목·세션·일정·Jira·GitHub·메일·Slack·개인 할 일·브리핑·타임라인 이벤트·초안·설정 항목 통합 검색, 한글 초성 매칭.
 - 데이터: `GET /api/search`(state, 브리핑 전체, 최근 30일 이벤트, 할 일, agenda.json, 초안) — 읽기 전용.
@@ -178,7 +183,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 ### 설정 탭
 상단 바로가기: 외형 · 소스 · 알림 · 순찰 주기 · 쓰기 액션 · 아카이브 · Claude. "다시 불러오기", 하단 "● 저장 안 된 변경" + "저장".
 - **외형**: 테마 🖥️시스템/☀️라이트/🌙다크 `dashboard.theme`(바로 미리보기, 저장해야 유지) · 홈 카드 배치 ↑/↓·1열/2열 `dashboard.card_order`/`dashboard.card_span` · "홈 배치 잠금" `dashboard.locked` · "팔로업 채널을 별도 카드로" `dashboard.watch_cards` · "배치 초기화".
-- **소스**: Gmail/Slack/Jira/GitHub/Sentry/캘린더 `sources.*`(끄면 조회·보고 안 함). Slack: 팔로업 채널 `filters.slack.watch_channels` · 트래킹 제외 채널 `filters.slack.exclude_channels`(팔로업보다 우선) · 답 필요 해제 이모지 `filters.slack.ack_reactions` · 한 번에 확인할 이모지 `filters.slack.ack_check_max`(3). Jira: 제외 프로젝트 `filters.jira.exclude_projects`. 칩 입력: ⏎/쉼표 추가, 빈 입력 Backspace 삭제.
+- **소스**: Gmail/Slack/Jira/GitHub/Sentry/캘린더 `sources.*`(끄면 조회·보고 안 함). Slack: 팔로업 채널 `filters.slack.watch_channels` · 트래킹 제외 채널 `filters.slack.exclude_channels`(팔로업보다 우선) · 답 필요 해제 이모지 `filters.slack.ack_reactions` · 한 번에 확인할 이모지 `filters.slack.ack_check_max`(3) · 그룹 멘션 `filters.slack.group_mentions`(유저그룹 ID·핸들). Jira: 제외 프로젝트 `filters.jira.exclude_projects`. 칩 입력: ⏎/쉼표 추가, 빈 입력 Backspace 삭제.
 - **알림**: 알림 켜기 `notifications.enabled` · 소스별 `notifications.kinds.*` · 아침 브리핑 알림 `notifications.briefing` · 소리 `notifications.sound` · 묶음 기준 `notifications.summary_threshold`(기본 3) · 조용한 시간 `quiet_hours`(기본 23:00~08:00) · 그 시간엔 보내지 않음/소리 없이 `notifications.quiet_delivery`.
 - **순찰 주기**: heartbeat 간격 `heartbeat_minutes`(10) · 신호 조회 최소 간격 `signal_check_minutes`(60) · "바뀐 게 없으면 순찰 건너뛰기" `heartbeat_skip_unchanged`(켬) · 아침 브리핑 시각 `briefing_time`(09:00) · 홈 자동 갱신 기본 주기 `agenda_refresh_minutes`(60) · 소스별 주기 Slack/메일/캘린더/Jira/GitHub `agenda_source_minutes.*`(비우면 기본) · 조용한 시간 동작 `quiet_schedule.*` · 유휴 시 동작 `idle_schedule.*`(위 "야간 모드 · 유휴 모드").
 - **쓰기 액션**: 기본 말투 `reply_tone` · 소스별 그룹 토글 `actions.*`(위 "쓰기 액션") · 답장 말투 `reply_tone_by_source.*` · 오늘 한 액션.
@@ -209,6 +214,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `filters.slack.exclude_channels` | [] | 소스 → Slack → 트래킹 제외 채널 |
 | `filters.slack.ack_reactions` | white_check_mark, eyes, +1, heavy_check_mark | 소스 → Slack → 답 필요 해제 이모지 |
 | `filters.slack.ack_check_max` | 3 (1~8) | 소스 → Slack → 한 번에 확인할 이모지 |
+| `filters.slack.group_mentions` | [] (최대 8) | 소스 → Slack → 그룹 멘션 |
 | `filters.jira.exclude_projects` | [] | 소스 → Jira → 제외 프로젝트 |
 | `notifications.enabled` · `notifications.briefing` · `notifications.sound` · `notifications.summary_threshold` · `notifications.quiet_delivery` | true · true · true · 3 · skip | 알림 |
 | `notifications.kinds.session` · `notifications.kinds.email` · `notifications.kinds.slack` · `notifications.kinds.jira` · `notifications.kinds.github` · `notifications.kinds.sentry` · `notifications.kinds.calendar` | 전부 true | 알림 → 소스별 |
@@ -237,6 +243,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `x-slack-in` | 소스 → Slack → 트래킹 제외 채널 | `filters.slack.exclude_channels` |
 | `x-ack-in` | 소스 → Slack → 답 필요 해제 이모지 | `filters.slack.ack_reactions` |
 | `c-ackmax` | 소스 → Slack → 한 번에 확인할 이모지 | `filters.slack.ack_check_max` |
+| `x-group-in` | 소스 → Slack → 그룹 멘션 | `filters.slack.group_mentions` |
 | `x-jira-in` | 소스 → Jira → 제외 프로젝트 | `filters.jira.exclude_projects` |
 | `n-on` | 알림 → 알림 켜기 | `notifications.enabled` |
 | `n-kinds` | 알림 → 소스별 | `notifications.kinds.*` |

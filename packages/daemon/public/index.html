@@ -198,6 +198,10 @@
                     <span class="hint" id="xa-hint">내 답글이 있거나 이 이모지로 리액션한 메시지는 '확인 필요'에서 빠져. 최대 8개, 다 빼면 리액션은 안 봐.</span>
                     <span class="excl-msg" id="a-msg" role="status"></span>
                     <div class="inl"><label class="lab" for="c-ackmax">한 번에 확인할 이모지</label><input id="c-ackmax" type="number" min="1" max="8" step="1" aria-describedby="c-ackmax-h"><span class="hint" id="c-ackmax-h">앞에서부터 N개만 검색(기본 3). 답 필요 후보가 없으면 검색 안 해.</span></div></div>
+                  <div class="xitem"><span class="lab" id="xg-lab">그룹 멘션</span>
+                    <div class="chipin" data-xbox="group"><span class="cl">SLACK 그룹</span><span class="chips" id="x-group"></span><input type="text" id="x-group-in" data-x="group" list="dl-group" placeholder="@mobile-dev, S0ABC123 ⏎" aria-label="집계할 Slack 유저그룹 추가" aria-describedby="xg-hint" autocomplete="off"></div>
+                    <span class="hint" id="xg-hint">내가 속한 유저그룹(@팀) 멘션도 모아. 그룹 ID(S…, 그룹 프로필의 ⋯ → ID 복사) 또는 핸들. 최대 8개, 검색 1번 추가. 답 필요에는 그룹에 구체적으로 물은 것만.</span>
+                    <span class="excl-msg" id="g-msg" role="status"></span></div>
                 </div>
               </div>
               <div class="sgrp" data-srcgrp="jira" role="group" aria-labelledby="g-jira-h">
@@ -209,7 +213,7 @@
                     <span class="excl-msg" id="j-msg" role="status"></span></div>
                 </div>
               </div>
-              <datalist id="dl-slack"></datalist><datalist id="dl-jira"></datalist><datalist id="dl-watch"></datalist><datalist id="dl-ack"></datalist>
+              <datalist id="dl-slack"></datalist><datalist id="dl-jira"></datalist><datalist id="dl-watch"></datalist><datalist id="dl-ack"></datalist><datalist id="dl-group"></datalist>
             </div>
           </section>
 

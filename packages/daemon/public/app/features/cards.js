@@ -10,7 +10,7 @@ import { CARD_KIND, srcOn } from "../ui/chips.js";
 import { $, esc, ext, lsGet, lsSet, toMs } from "../util.js";
 export const GH_REASON = { review_requested: ["rv", "리뷰 요청", "👀"], my_pr_changes_requested: ["over", "변경 요청", "✍️"], my_pr_approved: ["ok", "승인됨", "✅"] };
 export const MAIL_REASON = { reply: ["rv", "답장", "↩️"], approval: ["today", "결재", "🖊️"], deadline: ["over", "마감", "⏰"], request: ["", "확인", "📨"] };
-export const SLACK_REASON = { dm: ["today", "DM", "💬"], mention: ["rv", "멘션", "📣"], thread: ["", "스레드", "🧵"] };
+export const SLACK_REASON = { dm: ["today", "DM", "💬"], mention: ["rv", "멘션", "📣"], thread: ["", "스레드", "🧵"], group: ["", "그룹", "👥"] }; // group = 내 유저그룹 멘션 (filters.slack.group_mentions)
 export const PRIO_LED = { highest: "r", high: "r", medium: "a" };
 
 export function group(id, n, hot, rows, emptyMsg) {

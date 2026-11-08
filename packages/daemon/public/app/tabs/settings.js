@@ -18,18 +18,19 @@ import { $, esc } from "../util.js";
 
 // ---------- settings ----------
 // ---------- tracking exclusions (settings) ----------
-export const excl = { slack: [], jira: [], watch: [], ack: [] }; // watch = 팔로업 채널 (filters.slack.watch_channels), ack = 답 필요 해제 이모지 (filters.slack.ack_reactions), same chip UI
+export const excl = { slack: [], jira: [], watch: [], ack: [], group: [] }; // watch = 팔로업 채널 (filters.slack.watch_channels), ack = 답 필요 해제 이모지 (filters.slack.ack_reactions), group = 그룹 멘션 (filters.slack.group_mentions), same chip UI
 const ACK_SUGGEST = ["white_check_mark", "eyes", "+1", "heavy_check_mark", "ok_hand", "raised_hands", "pray", "done"];
 export const normX = {
   slack: (v) => v.trim().replace(/^#+/, "").replace(/\s+/g, ""),
   watch: (v) => v.trim().replace(/^#+/, "").replace(/\s+/g, ""),
   jira: (v) => v.trim().toUpperCase().replace(/-\d*$/, ""), // "MNT-123" → "MNT"
   ack: (v) => v.trim().replace(/^:+|:+$/g, "").toLowerCase(), // ":Eyes:" → "eyes"
+  group: (v) => v.replace(/\s+/g, "").replace(/^@+/, ""), // "@mobile-dev" → "mobile-dev"; IDs (S0ABC123) as typed
 };
-export const validX = { slack: (v) => v.length > 0 && v.length <= 80, watch: (v) => v.length > 0 && v.length <= 80, jira: (v) => /^[A-Z][A-Z0-9_]{0,19}$/.test(v), ack: (v) => /^[\p{Ll}\p{Lo}\p{N}_+'.-]{1,64}$/u.test(v) };
-export const showX = { slack: (v) => `#${v}`, watch: (v) => `#${v}`, jira: (v) => v, ack: (v) => `:${v}:` };
+export const validX = { slack: (v) => v.length > 0 && v.length <= 80, watch: (v) => v.length > 0 && v.length <= 80, jira: (v) => /^[A-Z][A-Z0-9_]{0,19}$/.test(v), ack: (v) => /^[\p{Ll}\p{Lo}\p{N}_+'.-]{1,64}$/u.test(v), group: (v) => /^[\p{L}\p{N}._-]{1,80}$/u.test(v) };
+export const showX = { slack: (v) => `#${v}`, watch: (v) => `#${v}`, jira: (v) => v, ack: (v) => `:${v}:`, group: (v) => (/^S[A-Z0-9]{6,}$/.test(v) && /\d/.test(v) ? v : `@${v}`) };
 export function renderExcl() {
-  for (const k of ["slack", "jira", "watch", "ack"]) {
+  for (const k of ["slack", "jira", "watch", "ack", "group"]) {
     $("x-" + k).innerHTML = excl[k].map((v, i) => `<span class="xchip"${k === "watch" && excl.slack.some((x) => x.toLowerCase() === v.toLowerCase()) ? ` style="opacity:.5" title="트래킹 제외에도 있어서 건너뛰어"` : ""}>${esc(showX[k](v))}<button type="button" data-xdel="${k}:${i}" aria-label="${esc(showX[k](v))} 빼기" title="빼기">✕</button></span>`).join("");
   }
   // Candidates: channels / project keys seen so far in agenda.json and briefings (client-side, no new API).
@@ -48,17 +49,17 @@ export function renderExcl() {
   $("dl-ack").innerHTML = ACK_SUGGEST.filter((v) => !excl.ack.includes(v)).map((v) => `<option value=":${esc(v)}:">`).join("");
   $("dl-jira").innerHTML = [...pj].filter((v) => !excl.jira.includes(v)).sort().map((v) => `<option value="${esc(v)}">`).join("");
 }
-const X_MSG = { slack: "x-msg", jira: "j-msg", watch: "w-msg", ack: "a-msg" }; // one status line per chip box
+const X_MSG = { slack: "x-msg", jira: "j-msg", watch: "w-msg", ack: "a-msg", group: "g-msg" }; // one status line per chip box
 export function addExcl(k, raw) {
   let added = 0, bad = [];
   for (const part of String(raw).split(/[,\s]+/)) {
     if (!part.trim()) continue;
     const v = normX[k](part);
     if (!validX[k](v)) { bad.push(part.trim()); continue; }
-    if (k === "ack" && excl.ack.length >= 8 && !excl.ack.includes(v)) { bad.push(`${part.trim()} (최대 8개)`); continue; }
+    if ((k === "ack" || k === "group") && excl[k].length >= 8 && !excl[k].includes(v)) { bad.push(`${part.trim()} (최대 8개)`); continue; }
     if (!excl[k].includes(v)) { excl[k].push(v); added++; }
   }
-  $(X_MSG[k]).textContent = bad.length ? `${k === "jira" ? "프로젝트 키는 영문 대문자로 시작하는 영숫자만 돼" : k === "ack" ? "이모지 이름에 공백·기호는 안 돼 (영문·한글·숫자·_+-.' 만)" : "채널 이름이 비었거나 너무 길어"}: ${bad.join(", ")}` : added ? "추가했어. 저장을 눌러야 적용돼." : "";
+  $(X_MSG[k]).textContent = bad.length ? `${k === "jira" ? "프로젝트 키는 영문 대문자로 시작하는 영숫자만 돼" : k === "ack" ? "이모지 이름에 공백·기호는 안 돼 (영문·한글·숫자·_+-.' 만)" : k === "group" ? "그룹 ID(S…)나 핸들(@이름)만 돼 (영문·한글·숫자·._- 만)" : "채널 이름이 비었거나 너무 길어"}: ${bad.join(", ")}` : added ? "추가했어. 저장을 눌러야 적용돼." : "";
   renderExcl();
 }
 
@@ -192,6 +193,7 @@ export function renderConfig(c = S.config, { preview = false } = {}) {
   excl.jira = [...(c.filters?.jira?.exclude_projects || [])];
   excl.watch = [...(c.filters?.slack?.watch_channels || [])];
   excl.ack = [...(c.filters?.slack?.ack_reactions || [])];
+  excl.group = [...(c.filters?.slack?.group_mentions || [])];
   $("c-ackmax").value = c.filters?.slack?.ack_check_max ?? 3;
   for (const id of Object.values(X_MSG)) $(id).textContent = "";
   renderExcl();
@@ -250,7 +252,7 @@ export function readBody() {
     ...readAutoSched(), // quiet_schedule, idle_schedule
     quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
     sources,
-    filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack], ack_check_max: $("c-ackmax").value === "" ? null : Number($("c-ackmax").value) }, jira: { exclude_projects: [...excl.jira] } },
+    filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack], ack_check_max: $("c-ackmax").value === "" ? null : Number($("c-ackmax").value), group_mentions: [...excl.group] }, jira: { exclude_projects: [...excl.jira] } },
     dashboard: { ...readCardLayout(), theme: readTheme() },
     notifications: readNotifications(),
     actions: Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])),
@@ -311,7 +313,7 @@ export function init() {
     AL[f.dataset.alf] = f.type === "checkbox" ? f.checked : f.value; renderActionLog();
   });
   $("cfg").addEventListener("click", (e) => { if (e.target.closest("[data-alrefresh]")) { e.preventDefault(); loadActionLog(); } });
-  for (const k of ["slack", "jira", "watch", "ack"]) {
+  for (const k of ["slack", "jira", "watch", "ack", "group"]) {
     const input = $(`x-${k}-in`);
     input.addEventListener("keydown", (e) => {
       if ((e.key === "Enter" || e.key === ",") && !e.isComposing) { e.preventDefault(); if (input.value.trim()) { addExcl(k, input.value); input.value = ""; } }
