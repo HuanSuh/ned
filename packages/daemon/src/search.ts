@@ -3,7 +3,7 @@ import path from "node:path";
 import type { Hono } from "hono";
 import { readAgenda } from "./agenda.js";
 import { HISTORY_SOURCES, loadConfig, type HistorySource, type NedConfig } from "./config.js";
-import { currentKeys, describeRecord, readHistory, recording, type HistRecord } from "./history.js";
+import { currentKeys, describeRecord, excludedSlack, readHistory, recording, type HistRecord } from "./history.js";
 import type { Agenda } from "./agenda.js";
 import { readRecentEvents, type NedEvent } from "./events.js";
 import { listBriefings } from "./heartbeat.js";
@@ -276,7 +276,7 @@ export function historyCands(cfg: NedConfig, a: Agenda): Cand[] {
   for (const src of HISTORY_SOURCES) {
     if (!srcOn(cfg, src) || !recording(cfg, src)) continue;
     for (const r of readHistory(src)) {
-      if (cur[src].has(r.key)) continue;
+      if (cur[src].has(r.key) || excludedSlack(cfg, r)) continue;
       const d = describeRecord(r), it = r.item as Record<string, any>, ts = isoTs(r.ts);
       const day = ts ? `${new Date(ts).getMonth() + 1}/${new Date(ts).getDate()}` : "";
       const watchCh = src === "slack" && it.watch?.channel && !(r.state as { reason?: string }).reason ? String(it.watch.channel).replace(/^#+/, "") : "";

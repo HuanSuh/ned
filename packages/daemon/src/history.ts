@@ -129,7 +129,19 @@ export function readHistory<R extends AnyRec = HistRecord>(src: HistorySource): 
   const c = cache.get(file);
   if (c && c.mtime === st.mtimeMs && c.size === st.size) return c.recs as R[];
   const f = readJson<Partial<HistFile> | null>(file, null);
-  const recs = Array.isArray(f?.records) ? f!.records.filter((r) => r && typeof r === "object" && typeof r.key === "string") : [];
+  if (!f || !Array.isArray(f.records)) {
+    // Unreadable: keep it aside for inspection and start over (collectWindow sees no file → the full window).
+    const aside = `${file}.corrupt-${Date.now()}`;
+    try {
+      fs.renameSync(file, aside);
+      log(`history[${src}]: ${path.basename(file)} unreadable — moved to ${path.basename(aside)}, starting a fresh history`);
+    } catch (e) {
+      log(`history[${src}]: ${path.basename(file)} unreadable and could not be moved — ${String(e).slice(0, 200)}`);
+    }
+    cache.delete(file);
+    return [];
+  }
+  const recs = f.records.filter((r) => r && typeof r === "object" && typeof r.key === "string");
   cache.set(file, { mtime: st.mtimeMs, size: st.size, recs });
   return recs as R[];
 }
@@ -196,13 +208,19 @@ export interface CollectWindow {
  * history file or no successful run yet) and when the last full search is FULL_RESCAN_HOURS old; else incremental:
  * max(full start, last successful run − OVERLAP_MINUTES).
  */
-export function collectWindow(src: "slack" | "mail", cfg: Pick<NedConfig, "history">, now: number, meta: HistoryMeta = readHistoryMeta(), hasFile = fs.existsSync(historyFile(src))): CollectWindow {
+export function collectWindow(src: "slack" | "mail", cfg: Pick<NedConfig, "history">, now: number, meta: HistoryMeta = readHistoryMeta(), hasFile = historyUsable(src)): CollectWindow {
   const fullSince = now - (src === "slack" ? SLACK_FULL_HOURS * H : MAIL_FULL_DAYS * D);
   if (!recording(cfg, src)) return { full: true, since: fullSince, reason: "off" };
   const c = meta.collect[src];
   if (!hasFile || !c || !Number.isFinite(c.last_ok_at) || !c.last_ok_at) return { full: true, since: fullSince, reason: "first" };
   if (!c.last_full_at || now - c.last_full_at >= FULL_RESCAN_HOURS * H || c.last_ok_at > now) return { full: true, since: fullSince, reason: "rescan" };
   return { full: false, since: Math.max(fullSince, c.last_ok_at - OVERLAP_MINUTES * 60_000), reason: "incremental" };
+}
+
+/** The source's history file exists and parses (a corrupt one is moved aside by readHistory → false). */
+function historyUsable(src: HistorySource): boolean {
+  readHistory(src);
+  return fs.existsSync(historyFile(src));
 }
 
 /** Remember a successful list run (its prompt time `at`) as the next incremental window's anchor. */
@@ -317,6 +335,13 @@ export function upsertSlack(map: Map<string, SlackRec>, s: SlackBlock, ctx: Upse
       r.item.watch ??= { channel: w.channel, hl: false, needs_me: false, why: "", text: "" };
     }
   }
+  // Ack emoji on any record Ned remembers (a channel / thread message outside this run's results too).
+  for (const k of ctx.acked ?? []) {
+    const r = map.get(k);
+    if (!r) continue;
+    r.state.acked = true;
+    if (r.item.watch) r.item.watch.needs_me = false;
+  }
   markMine(map, ctx.mine ?? [], "answered");
   // An acked DM closes that conversation up to the acked message (same rule as agenda normalize()).
   markMine(map, [...(ctx.acked ?? [])].filter((k) => /\/archives\/D[A-Z0-9]+\//.test(k)).map((k) => `https://${k}`), "acked", true);
@@ -394,7 +419,7 @@ export function upsertMail(map: Map<string, MailRec>, m: MailBlock, ctx: UpsertC
   }
   // The unread search always covers MAIL_UNREAD_DAYS whole: a thread it no longer lists there was read.
   const unreadLo = now - MAIL_UNREAD_DAYS * D;
-  if (m.all.length || m.unread === 0) {
+  if (m.all.length || (m.unread === 0 && win?.full !== false)) {
     const lo = m.all.length ? Math.max(unreadLo, oldestAll) : unreadLo;
     for (const r of map.values()) if (r.state.unread && !inAll.has(r.key) && ms(r.ts) >= lo) r.state.unread = false;
   }
@@ -421,10 +446,11 @@ export const calendarKey = (e: Pick<CalendarItem, "id" | "url" | "start">): stri
 
 /**
  * The hook in agenda.ts mergeSources: record every source in `keys` from this run's (normalized) payload, then prune
- * once a day. Never throws — a history failure must not lose the agenda merge.
+ * once a day. Never throws — a history failure must not lose the agenda merge; returns the sources whose write failed.
  */
-export function historyUpsert(p: AgendaPayload, keys: readonly AgendaSourceKey[], cfg: NedConfig, ctx: UpsertCtx): void {
-  if (cfg.history?.enabled === false) return;
+export function historyUpsert(p: AgendaPayload, keys: readonly AgendaSourceKey[], cfg: NedConfig, ctx: UpsertCtx): Set<HistorySource> {
+  const failed = new Set<HistorySource>();
+  if (cfg.history?.enabled === false) return failed;
   for (const k of keys) {
     const src = k as HistorySource;
     if (!recording(cfg, src)) continue;
@@ -439,9 +465,11 @@ export function historyUpsert(p: AgendaPayload, keys: readonly AgendaSourceKey[]
       writeHistory(src, [...map.values()]);
     } catch (e) {
       log(`history[${src}]: upsert failed — ${String(e).slice(0, 200)}`);
+      failed.add(src);
     }
   }
   pruneHistory(cfg, ctx.now);
+  return failed;
 }
 
 /**
@@ -589,7 +617,10 @@ export function slackView(cfg: NedConfig, fresh: SlackBlock, prev: SlackBlock | 
     const summary = fw && (ctx.full || fw.summary) ? fw.summary : pw?.summary ?? "";
     watch.push({ channel: `#${ch}`, summary, highlights: hls, recent });
   }
-  const summary = fresh.summary || (viewItems.length && !ctx.full ? prev?.summary ?? "" : "");
+  // Incremental answer with no rows: whatever it says ("새 것 없음") doesn't replace the summary of what is still open.
+  const freshEmpty = !fresh.items.length && !fresh.all.length;
+  const keepPrev = viewItems.length && !ctx.full ? prev?.summary ?? "" : "";
+  const summary = !ctx.full && freshEmpty ? keepPrev : fresh.summary || keepPrev;
   return { summary, items: viewItems, all: supersetSlack(viewItems, viewAll), watch };
 }
 
@@ -615,7 +646,8 @@ export function mailView(cfg: NedConfig, fresh: MailBlock, prev: MailBlock | nul
     .sort(byRank)
     .slice(0, 10)
     .map((r) => ({ id: r.key, from: r.item.from, subject: r.item.subject, snippet: r.item.snippet, received: r.ts, url: r.item.url, reason: r.item.reason ?? "request", why: r.item.why }));
-  const summary = fresh.summary || (items.length && !ctx.full ? prev?.summary ?? "" : "");
+  const keepPrev = items.length && !ctx.full ? prev?.summary ?? "" : "";
+  const summary = !ctx.full && !fresh.items.length && !fresh.all.length ? keepPrev : fresh.summary || keepPrev;
   return { summary, unread: fresh.unread, unread_capped: fresh.unread_capped, items, all: supersetMail(items, all) };
 }
 
@@ -687,6 +719,15 @@ function isCurrent(r: HistRecord, cfg: NedConfig, now: number, cur: Record<Histo
   return cur.calendar.has(r.key);
 }
 
+/** A Slack record in a channel tracking-excluded (filters.slack.exclude_channels) — never listed or searched. */
+export function excludedSlack(cfg: Pick<NedConfig, "filters">, r: HistRecord): boolean {
+  if (r.source !== "slack") return false;
+  const ex = new Set(cfg.filters.slack.exclude_channels.map((c) => c.toLowerCase()));
+  if (!ex.size) return false;
+  const it = r.item as Partial<SlackHistItem>;
+  return [it.channel, it.watch?.channel].some((c) => !!c && ex.has(String(c).replace(/^#+/, "").toLowerCase()));
+}
+
 export interface HistoryQuery {
   source: HistorySource;
   /** 1..90 (default 7). */
@@ -708,7 +749,7 @@ export function queryHistory(cfg: NedConfig, agenda: Agenda, qy: HistoryQuery, n
   const cur = currentKeys(agenda);
   const rows: HistoryRow[] = [];
   for (const r of readHistory(qy.source)) {
-    if (ms(r.ts) < lo) continue;
+    if (ms(r.ts) < lo || excludedSlack(cfg, r)) continue;
     const d = describeRecord(r);
     if (ch) {
       const it = r.item as Partial<SlackHistItem>;

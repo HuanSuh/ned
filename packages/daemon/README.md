@@ -381,6 +381,12 @@ agenda 에서 이어 붙이고, 그 다음 `finalizeSlackView` 가 ✓ 확인 �
 답함 처리한다. 해제 이모지 검색 `{{ACK_SINCE}}` 는 증분일 때 이력의 가장 오래된 열린 항목까지(최대 표시 구간·7일), 열린 항목이 있으면 후보가 없어도 돈다.
 팔로업 채널은 증분일 때 이전 요약(`{{WATCH_PREV}}`)을 받아 새 메시지가 있을 때만 다시 쓴다. 전체 창 run 은 반환된 가장 오래된 행보다 새로운데
 목록에 없는 열린 항목을 닫는다(검색 상한 20 으로 밀린 옛 행은 그대로). `ned prompt agenda` 는 지금 쓸 창 그대로 출력.
+기준 시각(`noteCollected`)은 진짜 수집일 때만 옮긴다: 응답 JSON 에 그 소스 키가 없으면(`missingKeys` — 실패 취급, 이력에도 안 씀),
+`historyUpsert` 가 그 소스 쓰기에 실패하면(그 run 은 뷰 재조립 없이 이번 목록 그대로), 증분 run 의 이번 답이 비었으면(Slack items·all 0, 메일 all 0)
+그대로 둔다 — 재시작 직후 커넥터가 안 붙어 빈 답이 와도 그 구간이 다음 run 에 다시 검색된다. 빈 증분 답은 메일 안 읽음 표시도 바꾸지 않는다.
+`acked_urls` 는 이번 결과 밖의 기존 레코드에도 적용, 이력 파일이 파싱 안 되면 `<src>.json.corrupt-<ts>` 로 옮기고 빈 이력(→ `collectWindow` first).
+2단계가 답함 처리로 목록을 바꾸면 `sources_status.slack.signature` 를 그 자리에서 뷰 기준으로 다시 계산(완료된 `context_sigs.slack` 도 따라감).
+`/api/history`·검색의 이력 결과는 `filters.slack.exclude_channels` 를 뺀다(`excludedSlack`). 증분 run 의 답에 행이 없으면 summary 는 이전 것을 유지.
 
 **검색·아카이브 연동**: `GET /api/search` 는 이력 레코드도 후보로 넣는다(`historyCands`) — agenda.json 이 지금 보여 주는 key(`currentKeys`)는
 빼서 같은 항목이 두 번 안 나오고, id 는 agenda 히트와 같은 체계(slack permalink · mail thread id · jira key · github `repo#n` · calendar id),

@@ -843,18 +843,33 @@ export interface MergeMeta {
   /** The windows the call searched + what it reported besides the lists (history upsert). */
   win?: ListWindows;
   extras?: Pick<UpsertCtx, "mine" | "acked" | "replied">;
+  /** Source keys the answer didn't carry at all — treated as a failed collection (not recorded, window anchor kept). */
+  missing?: AgendaSourceKey[];
 }
+
+/** Source keys of `keys` that a list answer doesn't carry (absent / null). */
+export function missingKeys(raw: Record<string, unknown> | null, keys: readonly AgendaSourceKey[]): AgendaSourceKey[] {
+  return keys.filter((k) => !raw || raw[k] === undefined || raw[k] === null);
+}
+
+/** This source came back with no rows (Slack items + all, mail all). */
+const noRows = (p: AgendaPayload, k: "slack" | "mail") => (k === "slack" ? !p.slack?.items.length && !p.slack?.all.length : !p.mail?.all.length);
 
 /**
  * Merge one finished call's keys into agenda.json (item-level context carry-over) and mark them done. With the history
  * on, the call's lists are recorded first (historyUpsert) and Slack / mail remember this run as the next window's anchor.
  */
 export function mergeSources(payload: AgendaPayload, keys: AgendaSourceKey[], meta: MergeMeta, cfg: NedConfig): Agenda {
+  const missing = new Set(meta.missing ?? []);
+  const empty = { slack: noRows(payload, "slack"), mail: noRows(payload, "mail") }; // this run's own answer, before the view replaces it
+  let failed = new Set<string>();
   const a = patchAgenda((a) => {
-    historyUpsert(payload, keys, cfg, { now: meta.now, win: { slack: meta.win?.slack, mail: meta.win?.mail }, ...meta.extras });
+    // A key the answer didn't carry is a failed collection: nothing recorded for it (the view still comes from the history).
+    failed = historyUpsert(payload, keys.filter((k) => !missing.has(k)), cfg, { now: meta.now, win: { slack: meta.win?.slack, mail: meta.win?.mail }, ...meta.extras });
+    for (const k of failed) log(`agenda[${k}]: history write failed — showing this run's list as is, window anchor kept`);
     // 표시 원천 = 이력: Slack / mail blocks are rebuilt from the history for the display window, so every agenda.json reader
     // (heartbeat, drafts, chat, search, phase 2, the dashboard) sees the long window while collection stays incremental.
-    const view = (k: "slack" | "mail") => keys.includes(k) && !!payload[k] && historyDisplay(cfg, k);
+    const view = (k: "slack" | "mail") => keys.includes(k) && !!payload[k] && historyDisplay(cfg, k) && !failed.has(k);
     const vctx = (k: "slack" | "mail") => ({ now: meta.now, full: meta.win?.[k]?.full ?? true });
     const reviewed = view("slack") || view("mail") ? readReviewed() : {};
     if (view("slack")) payload.slack = slackView(cfg, payload.slack!, a.slack, vctx("slack"));
@@ -871,7 +886,16 @@ export function mergeSources(payload: AgendaPayload, keys: AgendaSourceKey[], me
     if (keys.includes("calendar")) a.calendar_range = calendarRange(new Date(meta.now));
     a.updated_at = Date.now();
   });
-  for (const k of ["slack", "mail"] as const) if (keys.includes(k) && recording(cfg, k)) noteCollected(k, meta.now, meta.win?.[k]?.full ?? true);
+  // The next incremental window starts from this run only when it really collected: not on a missing key / history write
+  // failure, and not on an empty incremental answer (right after a restart the connectors may not be attached yet —
+  // moving the anchor would lose that stretch for good).
+  for (const k of ["slack", "mail"] as const) {
+    if (!keys.includes(k) || !recording(cfg, k)) continue;
+    const inc = meta.win?.[k] ? !meta.win[k]!.full : false;
+    const why = missing.has(k) ? "no key in the answer" : failed.has(k) ? "history write failed" : inc && empty[k] ? "empty incremental answer" : "";
+    if (why) log(`agenda[${k}]: window anchor kept (${why})`);
+    else noteCollected(k, meta.now, meta.win?.[k]?.full ?? true);
+  }
   return a;
 }
 
@@ -998,15 +1022,17 @@ async function doRefresh(cfg: NedConfig, want: AgendaSourceKey[]): Promise<Agend
     const incremental = (["slack", "mail"] as const).some((k) => win[k] && !win[k]!.full);
     if (win.slack || win.mail) log(`agenda[${c.id}]: window ${(["slack", "mail"] as const).filter((k) => win[k]).map((k) => `${k} ${win[k]!.full ? `full (${win[k]!.reason})` : `since ${new Date(win[k]!.since).toISOString().slice(11, 16)}Z`}`).join(", ")}`);
     let extras: MergeMeta["extras"] = {};
+    let missing: AgendaSourceKey[] = [];
     const parse = (text: string): AgendaPayload | null => {
       const j = extractJson<Partial<Record<keyof AgendaPayload, unknown>>>(text);
-      if (j) extras = listExtras(j);
+      if (j) { extras = listExtras(j); missing = missingKeys(j as Record<string, unknown>, c.keys); }
       return j ? normalize(j, cfg, new Date(now).toISOString()) : null;
     };
     let payload: AgendaPayload | null = null, cost = 0, turns = 0, error = "", raw = "";
     if (stub) {
       const s = await stubList(c.keys, order);
       extras = listExtras(s.raw);
+      missing = missingKeys(s.raw, c.keys);
       payload = normalize(s.raw, cfg, new Date(now).toISOString());
     } else {
       const run = () =>
@@ -1048,7 +1074,7 @@ async function doRefresh(cfg: NedConfig, want: AgendaSourceKey[]): Promise<Agend
       log(`agenda[${c.id}]: failed at +${at}s — ${error.slice(0, 300)}`);
       return;
     }
-    const a = mergeSources(payload, c.keys, { started, cost, now, win, extras }, cfg);
+    const a = mergeSources(payload, c.keys, { started, cost, now, win, extras, missing }, cfg);
     finished.push(`${c.id}+${at}s`);
     const unchanged = c.keys.filter((k) => a.sources_status?.[k]?.unchanged);
     log(`agenda[${c.id}]: ${describe(a, c.keys)} — $${cost.toFixed(2)}, ${turns} turns, ${Math.round((Date.now() - started) / 1000)}s, merged at +${at}s${unchanged.length ? ` (unchanged: ${unchanged.join(",")})` : ""}`);

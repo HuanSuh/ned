@@ -146,7 +146,17 @@ export function mergeThreads(raw: unknown[], now = Date.now()): string[] {
     // My replies phase 2 just saw answer the older asks in the history too (and leave the view's items now).
     let cfg: NedConfig | null = null;
     try { cfg = loadConfig(); } catch { /* no config (tests) */ }
-    if (cfg) applyAnswered(a.slack, historyFromThreads(a.slack, cfg));
+    const answered = cfg ? historyFromThreads(a.slack, cfg) : new Set<string>();
+    if (answered.size) {
+      applyAnswered(a.slack, answered);
+      // The list changed here, not in phase 1: re-sign it now (view basis) so the next phase-1 run doesn't report a
+      // change that already happened. A completed context collection for the old list carries over to the new one.
+      const st = a.sources_status?.slack, old = st?.signature, sig = sourceSignature("slack", a);
+      if (st && old !== sig) {
+        st.signature = sig;
+        if (a.context_sigs?.slack === old) a.context_sigs = { ...a.context_sigs, slack: sig };
+      }
+    }
   });
   return keys;
 }
