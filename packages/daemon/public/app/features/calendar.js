@@ -1,5 +1,6 @@
 /* Home calendar panel: day / week views over agenda.calendar + /api/calendar ranges. */
 import { api } from "../api.js";
+import { histBar, histList } from "./histview.js";
 import { init as initCreate, pendingFor } from "./calcreate.js";
 import { packCards } from "./cards.js";
 import { actionsOn } from "./drafts.js";
@@ -129,6 +130,10 @@ export function renderAgenda() {
   $("cal-today").classList.toggle("on", days.includes(todayYmd()));
   $("hgrid").classList.toggle("wk", ui.cal.view === "week");
   if (S.agenda === undefined) { box.innerHTML = `<div class="gnone">불러오는 중…</div>`; $("ag-count").textContent = ""; return; }
+  // 수집 이력 (calnav "이력"): past events Ned saw, newest first, instead of the day / week grid.
+  const hist = histList("cal", { source: "calendar" });
+  $("cal-hist")?.setAttribute("aria-pressed", String(hist !== null));
+  if (hist !== null) { box.innerHTML = histBar("cal") + hist; $("ag-count").textContent = ""; return; }
   const src = calSource(days);
   if (ui.cal.view === "week") renderWeek(box, days, src.cal); else renderDay(box, days[0], src.cal);
   // Days outside agenda.calendar_range: say we're fetching (or that it failed) above what we already have.

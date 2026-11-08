@@ -193,7 +193,7 @@ export function agendaDigest(cfg: NedConfig, a: Agenda, opts: { daily: boolean; 
     }
   }
   if (cfg.sources.slack) {
-    out.push("\n#### Slack (최근 24h, 나를 멘션·DM)");
+    out.push(`\n#### Slack (최근 ${cfg.history?.enabled !== false && (cfg.history?.keep_days?.slack ?? 0) > 0 ? cfg.history.display.slack_hours : 24}h, 나를 멘션·DM)`);
     const s = a.slack;
     if (!s) out.push("(아직 안 가져옴)");
     else {

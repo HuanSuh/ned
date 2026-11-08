@@ -21,6 +21,9 @@ daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙�
 | `app/ui/toast.js` | `toast()` |
 | `app/tabs/home.js` · `inbox.js` · `timeline.js` · `settings.js` | 탭별 렌더와 그 탭 안 이벤트 |
 | `app/tabs/settings-archive.js` | 설정 → 아카이브(`config.archive`): 켜기·볼트 경로·Ned 폴더·담을 것·데일리 노트 embed(`readArchive` → 저장 PUT), 상태 줄(`GET /api/archive/status` — 볼트 배지·마지막 쓰기·마지막 오류, "지금 쓰기" = `POST /api/archive/flush`) |
+| `app/tabs/settings-history.js` | 설정 → 수집·보관(`config.history`): 이력 기록 켜기·표시 구간(Slack 시간·메일 일)·소스별 보관 기간(`readHistorySettings` → 저장 PUT), 상태 줄(`GET /api/history/status`) |
+| `app/features/histview.js` | 카드의 수집 이력 토글 `표시 구간 \| 지난 7일 \| 30일`(`histBar`, `histList` — `GET /api/history`, 카드별 `ned.cardhist.<id>`, agenda `updated_at` 바뀌면 다시 받음): 메일·Slack 전체 보기, Jira·GitHub 목록 아래, 팔로업 카드(`channel=`), 일정 calnav "이력" |
+| `app/features/histrows.js` | 이력 행 렌더(순수): 날짜 구분선(`dayHead` 오늘/어제/M/D (요일)), 상태 칩, "지금" 표시 |
 | `app/features/calendar.js` | 일정 패널(일/주, `/api/calendar` 범위, `ned.cal`) |
 | `app/features/cards.js` | 소스 카드(메일·Jira·Slack·GitHub), `packCards`(행 배치), `unionAll`(전체 뷰) |
 | `app/features/cardlayout.js` | 홈 카드 배치: `config.dashboard` 순서·폭 정규화·기본값, 설정 섹션(↑/↓, 1열/2열, 잠금, 배치 초기화, 12열 미리보기) |
@@ -119,6 +122,7 @@ daemon 을 `NED_HOME=/some/fixture` 로 띄우거나, 같은 라우트를 흉내
 ## 알림 설정 · 메일/Slack 전체 보기
 
 - 설정 → 알림: 마스터 스위치, 소스별 토글 그리드, 아침 브리핑·소리, 묶음 기준(숫자), 조용한 시간 처리(보내지 않음 / 소리 없이). 마스터를 끄면 나머지는 비활성. 저장 = `PUT /api/config` 의 `notifications`.
+- 수집 이력 토글(`features/histview.js`): 메일·Slack 은 전체 보기 맨 위, Jira·GitHub 은 목록 아래, 팔로업 카드는 펼친 목록 아래, 일정은 calnav "이력". `지난 7일`/`30일` 을 고르면 그 카드 목록이 `/api/history` 결과(날짜 구분선, 지금 카드에 있는 건 왼쪽 바 + "지금")로 바뀐다. 카드별 `localStorage` `ned.cardhist.<id>`.
 - 메일·Slack 카드 헤더 오른쪽 `확인 필요 | 전체` (카드별 `localStorage` `ned.cardmode.<mail|slack>`). 전체는 `items ∪ all` — 항목 키(`srcKey`: Slack 채널 id + ts, 메일 thread id; 없으면 링크)로 합쳐 한 줄씩(같으면 `all` 쪽 레코드), 최신순. 그래서 `all` 에 없는 확인 필요 항목(스레드 질문·오래된 마감 메일)도 보인다. 확인 필요 항목은 왼쪽 포인트색 바, Slack 에서 이미 답한 건 흐리게 + '답함'. '전체' 를 고르면 접힌 카드는 펼친다. 배지 숫자는 확인 필요 개수 그대로.
 - 카드 안 리스트도 카드 높이를 채운다(≥900): 소스 카드는 헤더·요약 auto, 리스트 영역(`.sl`)이 나머지를 차지하고 왼쪽 색 구분선이 바닥까지 이어진다 — 마지막 행 카드가 남는 높이를 받고(최소 220px) 긴 리스트는 그 안에서 스크롤, 다른 카드는 460px 에서 스크롤. 할 일 카드는 Ned 액션 / 개인 할 일 두 섹션이 내용 크기 비율로 높이를 나누고 각자 안에서 스크롤. 일정 패널 본문도 바닥까지(안에서 스크롤).
 - Slack DM 은 대화당 최신 1건만(같은 채널 ID 기준, 안전망으로 클라이언트에서도 묶음). 묶인 메시지가 더 있으면 `+N` 배지(N = count − 1). 카드 배지·요약·인사말 개수도 묶은 뒤 기준.

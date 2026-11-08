@@ -19,24 +19,25 @@
 {{FILTERS}}
 <!--@slack-->
 
-## slack — 최근 24시간, 나에게 온 것
+## slack — {{SLACK_RANGE}}
 내 user_id 는 `slack_search_public_and_private` 도구 설명에 있다 (`Current logged in user's user_id is U…`) → 아래 `<ME>`.
 검색 세 번 (모두 `after: "{{SLACK_SINCE}}"`, `sort: "timestamp"`, `limit: 20`, `include_bots: false`, `response_format: "detailed"`, `max_context_length: 200`):
 - 멘션 `keywords: ["<@ME>"]` → `"mention"` / DM `filters: "is:dm"`, `channel_types: "im,mpim"` → `"dm"` / 스레드 `filters: "is:thread with:<@ME>"` → `"thread"`
-{{GROUP_MENTIONS}}- **확인 완료 조건**: 멘션·DM·참여 스레드에서 그 뒤에 **내 답글이 보이거나, 내가 해제 이모지로 리액션한 메시지**(아래 `acked` — 해제 이모지 블록이 없으면 빈 집합)는 확인 완료다.
+{{GROUP_MENTIONS}}{{SLACK_INCR}}- **확인 완료 조건**: 멘션·DM·참여 스레드에서 그 뒤에 **내 답글이 보이거나, 내가 해제 이모지로 리액션한 메시지**(아래 `acked` — 해제 이모지 블록이 없으면 빈 집합)는 확인 완료다.
 - `items` (최대 10, 급한 순): 다른 사람이 **나에게** 질문·요청·확인·의견을 구했고, 검색 결과 context 상 그 뒤에 내 답이 안 보이고 `acked` 도 아닌 것. 단순 공유·감사·인사·봇·내 메시지·남에게 묻는 것은 뺀다{{GROUP_ITEMS_RULE}}. 애매하면 넣는다. 같은 대화는 하나만 (dm > mention > thread{{GROUP_PRIO}}).
   - DM 은 같은 대화(permalink 의 같은 채널 ID)당 가장 최근 1건만, 답 안 한 메시지가 여러 개면 `count` 에 개수.
   - `channel` `#채널`/`DM`/`그룹 DM`, `from` 표시 이름, `text` 나에게 바라는 것 한국어 한 줄(40자 안팎 요약), `url` permalink 그대로, `ts` ISO-8601.
 - `all` (최신순, 최대 {{ALL_LIMIT}}): 나를 멘션했거나 DM 한 메시지 전부 (봇 제외, 중복 제거, 고르지 않음). **`items` 에 넣은 항목도 반드시 `all` 에 포함한다** (같은 `url`). `text` 원문 한 줄(80자 안팎), `answered` 그 뒤 내 답이 보이거나 `acked` 면 true.
+- `mine`: 위 검색 결과에 보인 **내가 보낸** 메시지의 permalink 를 **그대로** (최신순, 최대 30, 없으면 `[]`) — Ned 가 그 대화·스레드의 이전 항목을 답함으로 친다.
 - `summary`: 위 말투로 한 문장 (40자 안팎). 볼 게 없으면 `""`.
-- 출력 키: `"slack":{"summary":"","items":[{"channel":"","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread{{GROUP_REASON}}","count":1}],"all":[{"channel":"","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread{{GROUP_REASON}}","answered":false}]{{ACK_KEY}}{{WATCH_KEY}}}`
+- 출력 키: `"slack":{"summary":"","items":[{"channel":"","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread{{GROUP_REASON}}","count":1}],"all":[{"channel":"","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread{{GROUP_REASON}}","answered":false}],"mine":[]{{ACK_KEY}}{{WATCH_KEY}}}`
 <!--@/slack-->
 <!--@ack-->
 
 ### slack — 해제 이모지: {{ACK_EMOJIS}}
 <!-- 내가 이 이모지로 리액션한 메시지 = 확인 완료. 검색 결과에는 리액션 목록이 없어서 `hasmy::이모지:` 필터로 따로 찾는다 (`has`/`hasmy` 는 반복하면 AND 라 이모지마다 한 번). 해제할 후보가 없으면 찾을 이유가 없다. -->
-- **조건부, 셋째 턴**: 둘째 턴 결과를 본 뒤, `items` 후보(나에게 답이 필요해 보이는 메시지{{ACK_WATCH_COND}})가 **하나라도 있을 때만** 이모지 검색을 한다. 후보가 0개면 이모지 검색을 **건너뛰고** 바로 JSON 을 출력한다 (`acked_urls: []`).
-- 할 때는 **한 턴에 병렬로** 이모지마다 `slack_search_public_and_private` 한 번 (위 이모지만, 더 하지 않는다): `filters: "hasmy::<이모지>:"` (예: {{ACK_EXAMPLE}}), `after: "{{SLACK_SINCE}}"`, `sort: "timestamp"`, `limit: 20`, `include_bots: false`, **`response_format: "concise"`, `include_context: false`** (permalink 만 필요하다).
+- **조건부, 셋째 턴**: 둘째 턴 결과를 본 뒤, `items` 후보(나에게 답이 필요해 보이는 메시지{{ACK_WATCH_COND}})가 **하나라도 있을 때만** 이모지 검색을 한다{{ACK_OPEN}}. 후보가 0개면 이모지 검색을 **건너뛰고** 바로 JSON 을 출력한다 (`acked_urls: []`).
+- 할 때는 **한 턴에 병렬로** 이모지마다 `slack_search_public_and_private` 한 번 (위 이모지만, 더 하지 않는다): `filters: "hasmy::<이모지>:"` (예: {{ACK_EXAMPLE}}), `after: "{{ACK_SINCE}}"`, `sort: "timestamp"`, `limit: 20`, `include_bots: false`, **`response_format: "concise"`, `include_context: false`** (permalink 만 필요하다).
 - 결과 메시지들의 permalink 집합 = `acked`. `acked` 인 메시지는 `items` 에서 빼고, `all` 에서는 `answered: true`, `watch` 하이라이트에서는 `needs_me: false`.
 - `acked_urls`: 결과 permalink 를 **그대로** 전부 (중복 제거, 최대 100). 검색을 건너뛰었거나 없으면 `[]`.
 <!--@/ack-->
@@ -44,7 +45,7 @@
 
 ### slack.watch — 팔로업 채널: {{WATCH_CHANNELS}}
 - 위 검색과 **같은 턴에** 채널마다 `slack_search_public_and_private` 한 번: `filters: "in:#<채널>"`, 나머지 인자는 위와 같다. 찾지 못한 채널은 `summary: ""`, `highlights: []`, `recent: []`. 트래킹 제외 채널은 조회하지 않는다.
-- 채널마다 하나: `summary` 지난 24시간 정해진 것·물은 것 2~3줄(`\n` 구분, 잡담뿐이면 `""`), `highlights` 의미 있는 메시지 최대 5개(결정·질문·요청·마감·장애·공지): `from`, `text`(한 줄 ≤200자 요약), `ts`, `url` permalink, `needs_me`(나를 향한 질문·요청, 내 일에 영향 주는 결정, 마감 — 이미 처리됐으면 false), `reason`(25자 안팎). needs_me 를 먼저.
+{{WATCH_PREV}}- 채널마다 하나: `summary` 지난 24시간 정해진 것·물은 것 2~3줄(`\n` 구분, 잡담뿐이면 `""`), `highlights` 의미 있는 메시지 최대 5개(결정·질문·요청·마감·장애·공지): `from`, `text`(한 줄 ≤200자 요약), `ts`, `url` permalink, `needs_me`(나를 향한 질문·요청, 내 일에 영향 주는 결정, 마감 — 이미 처리됐으면 false), `reason`(25자 안팎). needs_me 를 먼저.
 - `recent`: 같은 검색 결과에서 **가장 최근 메시지 최대 3개, 최신순** — 고르지 않는다 (잡담이어도, highlights 와 겹쳐도 넣는다). `from` 표시 이름, `text` 원문 한 줄(≤120자, 넘치면 자름), `ts`, `url` permalink. 결과가 없으면 `[]`.
 <!--@/watch-->
 <!--@mail-->
@@ -53,10 +54,11 @@
 `search_threads` 두 번을 한 턴에 병렬로. 스레드를 열지 않는다 (선별은 발신자·제목·스니펫으로).
 - `in:inbox is:unread newer_than:2d` (최대 50, 요약 보기) → 결과 스레드 수를 `unread` 에, 최신 {{ALL_LIMIT}}개를 `all` 에 (고르지 않음): `id` thread id, `from` 표시 이름, `subject`, `ts` 마지막 메시지 ISO, `unread` (안 읽음이면 true).
 - **`items` 에 넣은 스레드도 반드시 `all` 에 포함한다** (같은 `id`, 읽은 메일이면 `unread: false`).
-- `in:inbox newer_than:3d -category:promotions -category:social -category:updates -category:forums` (최대 30) → **사람이 보낸 업무 메일로 내 행동이 필요한 것**만 `items` (최대 10, 급한 순). 뉴스레터·자동 알림·광고·내가 마지막으로 보낸 스레드는 뺀다.
+- `in:inbox {{MAIL_ITEMS_RANGE}} -category:promotions -category:social -category:updates -category:forums` (최대 30) → **사람이 보낸 업무 메일로 내 행동이 필요한 것**만 `items` (최대 10, 급한 순). 뉴스레터·자동 알림·광고·내가 마지막으로 보낸 스레드는 뺀다.
   - `reason`: `reply` 회신 요청 / `approval` 결재·승인 / `deadline` 기한 / `request` 그 밖의 확인·검토. `id` thread id, `from`, `subject`, `received` 마지막 메시지 ISO, `why` 왜 봐야 하는지 한 줄(25자 안팎), `snippet` 스니펫 앞부분 그대로.
+{{MAIL_INCR}}- `replied`: 두 번째 검색 결과 중 **마지막 메시지를 내가 보낸** 스레드 id (최대 20, 없으면 `[]`).
 - `summary`: 위 말투로 한 문장 (40자 안팎). 볼 게 없으면 `""`.
-- 출력 키: `"mail":{"summary":"","unread":0,"items":[{"id":"","from":"","subject":"","snippet":"","received":"ISO","reason":"reply|approval|deadline|request","why":""}],"all":[{"id":"","from":"","subject":"","ts":"ISO","unread":true}]}`
+- 출력 키: `"mail":{"summary":"","unread":0,"items":[{"id":"","from":"","subject":"","snippet":"","received":"ISO","reason":"reply|approval|deadline|request","why":""}],"all":[{"id":"","from":"","subject":"","ts":"ISO","unread":true}],"replied":[]}`
 <!--@/mail-->
 <!--@calendar-->
 

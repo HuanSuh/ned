@@ -9,6 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { normalizeMailContext, normalizeSlackContext, patchAgenda, pickSections, readAgenda, sourceSignature, type Agenda, type ContextStatus } from "./agenda.js";
 import { extractJson, llmDisabled, runClaude } from "./claude.js";
+import { applyAnswered, historyFromThreads } from "./history.js";
 import { loadConfig, type NedConfig } from "./config.js";
 import { recordCost, todayCost } from "./costs.js";
 import { parseSlackUrl } from "./drafts.js";
@@ -142,6 +143,20 @@ export function mergeThreads(raw: unknown[], now = Date.now()): string[] {
     const isDm = (r: unknown) => String((r as { key?: unknown })?.key ?? "").startsWith("dm:");
     keys = [...mergeThreadReads(a.slack.threads ?? [], raw.filter((r) => !isDm(r)), now), ...mergeThreadReads(a.slack.dms ?? [], raw.filter(isDm), now)];
     applyThreadState(a.slack);
+    // My replies phase 2 just saw answer the older asks in the history too (and leave the view's items now).
+    let cfg: NedConfig | null = null;
+    try { cfg = loadConfig(); } catch { /* no config (tests) */ }
+    const answered = cfg ? historyFromThreads(a.slack, cfg) : new Set<string>();
+    if (answered.size) {
+      applyAnswered(a.slack, answered);
+      // The list changed here, not in phase 1: re-sign it now (view basis) so the next phase-1 run doesn't report a
+      // change that already happened. A completed context collection for the old list carries over to the new one.
+      const st = a.sources_status?.slack, old = st?.signature, sig = sourceSignature("slack", a);
+      if (st && old !== sig) {
+        st.signature = sig;
+        if (a.context_sigs?.slack === old) a.context_sigs = { ...a.context_sigs, slack: sig };
+      }
+    }
   });
   return keys;
 }

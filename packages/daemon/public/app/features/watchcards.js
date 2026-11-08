@@ -10,6 +10,7 @@ import { cardDomId, cardKeyOf, watchCh, watchIds, WATCH_ICON } from "./cardlayou
 import { cardOpen } from "./cards.js";
 import { decoratePanel } from "./layout.js";
 import { isOpenSrc, revCls, srcCheck, srcKey, withFold } from "./reviewed.js";
+import { histBar, histList } from "./histview.js";
 import { histPanel, histToggle, newChip, recentHtml, threadTail } from "./slackthread.js";
 import { summaryHtml } from "./watchsum.js";
 import { openIcon } from "../ui/icons.js";
@@ -69,7 +70,7 @@ export function renderWatchCards(slack, on, unavailable) {
     $("n-" + k).textContent = open.length;
     $("n-" + k).classList.toggle("hot", need.length > 0);
     $("wme-" + k).innerHTML = need.length ? `<span class="chipx today">나한테 ${need.length}</span>` : "";
-    const fallback = unavailable || (!slack ? "다음 새로고침 때 Slack 도 가져올게." : w ? "지난 24시간 눈에 띄는 대화 없음." : "다음 새로고침 때 이 채널도 볼게.");
+    const fallback = unavailable || (!slack ? "다음 새로고침 때 Slack 도 가져올게." : w ? "표시 구간에 눈에 띄는 대화 없음." : "다음 새로고침 때 이 채널도 볼게.");
     const sum = summaryHtml(w?.summary, hls);
     // Nothing stood out (no summary, no highlights): the channel's newest messages instead of an empty card.
     const quiet = !sum && !hls.length ? recentHtml(w?.recent) : "";
@@ -77,9 +78,11 @@ export function renderWatchCards(slack, on, unavailable) {
     $("ss-" + k).innerHTML = sum || (quiet ? "" : `<li>${esc(fallback)}</li>`);
     $("ss-" + k).hidden = !sum && !!quiet;
     $("pv-" + k).innerHTML = quiet || need.map((h) => watchRow(w.channel, h)).join("");
-    $("g-" + k).innerHTML = hls.length
+    // 수집 이력 (features/histview.js): 지난 7일 / 30일 of this channel instead of the display window's highlights.
+    const hist = histList(id, { source: "slack", channel: ch });
+    $("g-" + k).innerHTML = hist !== null ? histBar(id) + hist : (hls.length
       ? withFold(id, "slack", needFirst(hls), (h) => watchRow(w.channel, h)) + recentHtml(w?.recent, new Set(hls.map((h) => h.url).filter(Boolean))) // expanded only (.wall): newest messages not already listed
-      : quiet; // nothing to list: the summary area already says so
+      : quiet) + (slack ? histBar(id) : ""); // nothing to list: the summary area already says so
     const isOpen = cardOpen(id, 0); // shrunk by default: the summary + needs_me already show
     el.classList.toggle("open", isOpen);
     el.querySelector(".sh").setAttribute("aria-expanded", String(isOpen));
