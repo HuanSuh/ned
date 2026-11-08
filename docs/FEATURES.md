@@ -15,10 +15,10 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - **답장 초안 ✎**: 연필 → 초안 3개 → 복사/열기/보내기. 실제 쓰기는 설정 → 쓰기 액션에서 켠 것만: `actions.slack_send`·`gmail_draft`(기본 켬)·`gmail_send`·`session_send`(기본 켬)·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯ 메뉴.
 - **확인 완료 ✓**: 항목을 처리됨으로 접음(바뀌면 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`, 앞 `ack_check_max`개만 검색)면 자동 해제.
 - **Gmail 읽음 표시**(`actions.gmail_mark_read`, 기본 꺼짐): 메일 ✓ 때 Gmail 도 읽음.
-- **검색 ⌘K**: 전체 통합 검색(초성).
-- **아카이브(Obsidian)**: 설정 → 아카이브에 볼트 `archive.vault` + 켜기 `archive.enabled` → 매일 `<archive.folder>/Daily/YYYY-MM/날짜.md` 에 브리핑·순찰·보낸 것·결과물·통계 자동 기록(Claude 호출 없음, 마커 밖 메모 보존). `archive.daily_embed` = 내 데일리 노트에 embed 한 줄.
-- **수집 이력**: 가져온 항목을 소스별로 디스크에 보관(`history.keep_days.*`). 수집은 새 것만(증분), Slack·메일 카드·순찰·초안은 이력에서 표시 구간(`history.display.*`, 24시간·3일)만큼. 설정 → 수집·보관.
-- **설정**(바꾼 뒤 하단 "저장"): 외형(테마 `dashboard.theme` 시스템/라이트/다크, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(`heartbeat_minutes`, `signal_check_minutes`, `briefing_time`, `agenda_refresh_minutes`, `agenda_source_minutes.*`, `quiet_schedule.*`, `idle_schedule.*`) · 쓰기 액션(`actions.*`, 기본 말투 `reply_tone`, 소스별 답장 말투 `reply_tone_by_source.*`, 오늘 한 액션 로그) · 아카이브(`archive.*`) · Claude(모델 `claude_model`, 최대 턴 `claude_max_turns`, 하루 사용 상한 `agenda_daily_budget_usd` 기본 $15 — 닿으면 자동 실행·대화가 멈춤). 저장마다 백업 10개 → "이전 설정으로 되돌리기".
+- **검색 ⌘K**: 전체 통합 검색(초성, 수집 이력 포함).
+- **아카이브(Obsidian)**: 설정 → 아카이브에 볼트 `archive.vault` + 켜기 `archive.enabled` → 매일 `<archive.folder>/Daily/YYYY-MM/날짜.md` 에 브리핑·순찰·보낸 것·결과물·들어온 것·통계 자동 기록(Claude 호출 없음, 마커 밖 메모 보존). `archive.daily_embed` = 내 데일리 노트에 embed 한 줄.
+- **수집 이력**: 가져온 항목을 소스별로 보관(`history.keep_days.*`). 수집은 새 것만(증분), Slack·메일 카드·순찰·초안은 이력에서 표시 구간(`history.display.*`, 24시간·3일)만큼.
+- **설정**(바꾼 뒤 하단 "저장"): 외형(테마 `dashboard.theme` 시스템/라이트/다크, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(`heartbeat_minutes`, `signal_check_minutes`, `briefing_time`, `agenda_refresh_minutes`, `agenda_source_minutes.*`, `quiet_schedule.*`, `idle_schedule.*`) · 쓰기 액션(`actions.*`, 기본 말투 `reply_tone`, 소스별 답장 말투 `reply_tone_by_source.*`, 오늘 한 액션 로그) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(모델 `claude_model`, 최대 턴 `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd` $15 — 닿으면 자동 실행·대화 멈춤). 저장마다 백업 10개 → "이전 설정으로 되돌리기".
 
 ## 상세
 
@@ -178,16 +178,16 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 
 ### 검색 ⌘K
 - 보여 주는 것: 주의 항목·세션·일정·Jira·GitHub·메일·Slack·개인 할 일·브리핑·타임라인 이벤트·초안·설정 항목 통합 검색, 한글 초성 매칭.
-- 데이터: `GET /api/search`(state, 브리핑 전체, 최근 30일 이벤트, 할 일, agenda.json, 초안) — 읽기 전용.
+- 데이터: `GET /api/search`(state, 브리핑 전체, 최근 30일 이벤트, 할 일, agenda.json, 수집 이력, 초안) — 읽기 전용. 수집 이력은 지금 카드에 없는 것만(같은 항목이 두 번 안 나옴) "이력 · 날짜" 로, ⇧⏎ 는 그 소스 카드로.
 - 언제: "그 메일 어디 있었지", "알림 설정 어디야" 처럼 찾을 때.
 - 키: ⌘K/Ctrl+K 또는 /, ↑/↓(Ctrl+N/P, Tab) 이동, ⏎ 열기, ⌘⏎ 새 탭, ⇧⏎ 대시보드에서 보기, Esc 지우기→닫기.
 
 ### 아카이브 — Obsidian
-- 보여 주는 것: Obsidian 볼트 안 Ned 폴더(`archive.folder`, 기본 Ned)에 매일 **데일리 리포트** `Daily/YYYY-MM/YYYY-MM-DD.md` — 🌅 브리핑(아침 브리핑의 행동 필요/업데이트/참고, 링크) · 🔔 순찰(그날 순찰 알림 시간순, 같은 항목 한 번) · ✉️ 보낸 것(답장·일정 생성·읽음 처리·할 일 추가 등 성공한 쓰기, 시각·대상·요약) · 📎 정리 결과물(결과물 노트 링크) · 🤖 세션(켜면) · 📊 오늘(순찰 횟수, 소스별 갱신 수, 비용). frontmatter `created`·`tags: [ned, daily]`·`ned_version`. Ned 데일리 리포트는 내 데일리 노트와 별도 파일.
+- 보여 주는 것: Obsidian 볼트 안 Ned 폴더(`archive.folder`, 기본 Ned)에 매일 **데일리 리포트** `Daily/YYYY-MM/YYYY-MM-DD.md` — 🌅 브리핑(아침 브리핑의 행동 필요/업데이트/참고, 링크) · 🔔 순찰(그날 순찰 알림 시간순, 같은 항목 한 번) · ✉️ 보낸 것(답장·일정 생성·읽음 처리·할 일 추가 등 성공한 쓰기, 시각·대상·요약) · 📎 정리 결과물(결과물 노트 링크) · 🤖 세션(켜면) · 📥 들어온 것(수집 이력에서 그날 처음 본 항목, 소스별 최대 30줄 +N — Slack 채널·보낸이·한 줄·링크 / 메일 보낸이·제목 / Jira 키·제목 / GitHub 레포·PR 제목 / 캘린더 시각·제목) · 📊 오늘(순찰 횟수, 소스별 갱신 수, 비용). frontmatter `created`·`tags: [ned, daily]`·`ned_version`. Ned 데일리 리포트는 내 데일리 노트와 별도 파일.
 - 데이터: 이미 있는 것(`~/.ned/briefings/`, `~/.ned/sent-actions.log`, `~/.ned/outputs/`, 세션 이벤트, `~/.ned/costs.json`, agenda 갱신)으로 데몬이 마크다운을 씀 — Claude 호출 없음, 비용 0. 섹션마다 `<!-- ned:섹션 -->` … `<!-- ned:/섹션 -->` 사이만 다시 쓰고 **마커 밖에 적은 메모는 그대로**(마커를 지우면 그 섹션은 파일 끝에 새로 붙음). 임시 파일 → rename 으로 원자적 쓰기, 볼트 밖 경로(.. · 심링크)는 거부. 상태는 `~/.ned/archive.json`.
 - 언제 쓰나: 아침 브리핑·순찰 알림·쓰기 성공·결과물 저장 직후 바로, 그 밖의 변화(순찰 횟수·소스 갱신)는 1분 틱에서 마지막 쓰기 후 5분 지나면. 자정 넘어 끝난 순찰은 그 순찰이 시작된 날 파일로, 지난 날 파일은 그 뒤로 안 건드림.
 - 내 데일리 노트 embed(`archive.daily_embed`, 기본 꺼짐): 켜면 그날 내 데일리 노트가 **이미 있을 때만**(없으면 만들지 않음) "## 📝 Notes & Logs" 바로 아래에 `<!-- ned:embed -->![[Ned/Daily/YYYY-MM/YYYY-MM-DD]]<!-- ned:/embed -->` 한 줄. 다른 줄은 손대지 않음. 데일리 노트 위치는 `<볼트>/.obsidian/daily-notes.json` 의 folder·format(없으면 건너뜀).
-- 설정: 설정 → 아카이브 — "아카이브 켜기" `archive.enabled`(기본 꺼짐) · "볼트 경로" `archive.vault`(절대 경로, 있는 폴더여야 하고 ~/.ned·Ned 레포 안은 거부 — `.obsidian` 이 있으면 "볼트 확인됨" 배지, 없으면 경고만) · "Ned 폴더" `archive.folder` · "담을 것" `archive.include.briefings`·`archive.include.updates`·`archive.include.actions`·`archive.include.outputs`(기본 켬)·`archive.include.sessions`(기본 꺼짐) · "내 데일리 노트에 embed" `archive.daily_embed`. 상태 줄: 오늘 리포트 경로("Obsidian 에서 열기"), 마지막 쓰기, 대기 중인 날, 마지막 오류(권한 거부면 macOS 파일 접근 허용 안내), "지금 쓰기"(`/api/archive/flush`), 상태는 `/api/archive/status`. 쓰기가 실패해도 데몬은 계속 돌고 다음 틱에 다시 시도(쓰는 중 파일이 계속 바뀌면 4번까지 다시 합친 뒤 다음 틱으로, 7일 넘게 못 쓴 날은 경고 후 포기).
+- 설정: 설정 → 아카이브 — "아카이브 켜기" `archive.enabled`(기본 꺼짐) · "볼트 경로" `archive.vault`(절대 경로, 있는 폴더여야 하고 ~/.ned·Ned 레포 안은 거부 — `.obsidian` 이 있으면 "볼트 확인됨" 배지, 없으면 경고만) · "Ned 폴더" `archive.folder` · "담을 것" `archive.include.briefings`·`archive.include.updates`·`archive.include.actions`·`archive.include.outputs`·`archive.include.history`(📥 들어온 것, 기본 켬)·`archive.include.sessions`(기본 꺼짐) · "내 데일리 노트에 embed" `archive.daily_embed`. 상태 줄: 오늘 리포트 경로("Obsidian 에서 열기"), 마지막 쓰기, 대기 중인 날, 마지막 오류(권한 거부면 macOS 파일 접근 허용 안내), "지금 쓰기"(`/api/archive/flush`), 상태는 `/api/archive/status`. 쓰기가 실패해도 데몬은 계속 돌고 다음 틱에 다시 시도(쓰는 중 파일이 계속 바뀌면 4번까지 다시 합친 뒤 다음 틱으로, 7일 넘게 못 쓴 날은 경고 후 포기).
 
 ### 설정 탭
 상단 바로가기: 외형 · 소스 · 알림 · 순찰 주기 · 수집·보관 · 쓰기 액션 · 아카이브 · Claude. "다시 불러오기", 하단 "● 저장 안 된 변경" + "저장".

@@ -4,7 +4,7 @@
 import { api } from "../api.js";
 import { $, esc } from "../util.js";
 
-export const ARCH_INC = [["briefings", "🌅 아침 브리핑"], ["updates", "🔔 순찰 알림"], ["actions", "✉️ 보낸 것"], ["outputs", "📎 정리 결과물"], ["sessions", "🤖 세션"]];
+export const ARCH_INC = [["briefings", "🌅 아침 브리핑"], ["updates", "🔔 순찰 알림"], ["actions", "✉️ 보낸 것"], ["outputs", "📎 정리 결과물"], ["sessions", "🤖 세션"], ["history", "📥 들어온 것"]];
 const EMBED_KO = { inserted: "embed 넣음", present: "embed 있음", no_note: "그날 데일리 노트 없음(만들지 않음)", no_config: ".obsidian/daily-notes.json 없음", no_heading: "\"## 📝 Notes & Logs\" 제목 없음", bad_format: "데일리 노트 형식을 못 읽음" };
 export const AS = { status: null, error: "", busy: false };
 

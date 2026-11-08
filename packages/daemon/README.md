@@ -382,6 +382,11 @@ agenda 에서 이어 붙이고, 그 다음 `finalizeSlackView` 가 ✓ 확인 �
 팔로업 채널은 증분일 때 이전 요약(`{{WATCH_PREV}}`)을 받아 새 메시지가 있을 때만 다시 쓴다. 전체 창 run 은 반환된 가장 오래된 행보다 새로운데
 목록에 없는 열린 항목을 닫는다(검색 상한 20 으로 밀린 옛 행은 그대로). `ned prompt agenda` 는 지금 쓸 창 그대로 출력.
 
+**검색·아카이브 연동**: `GET /api/search` 는 이력 레코드도 후보로 넣는다(`historyCands`) — agenda.json 이 지금 보여 주는 key(`currentKeys`)는
+빼서 같은 항목이 두 번 안 나오고, id 는 agenda 히트와 같은 체계(slack permalink · mail thread id · jira key · github `repo#n` · calendar id),
+detail `이력 · M/D · …`, `tab: home` / `anchor: card:<slack|mail|jira|gh|cal>`(팔로업 전용 행은 `card:watch:<ch>`). 아카이브 데일리 리포트는
+`archive.include.history`(기본 true)면 `<!-- ned:history -->` "## 📥 들어온 것" — 그날 `first_seen` 레코드를 소스별(최대 `INCOMING_MAX` 30줄 + "… 외 N건").
+
 ## Obsidian 아카이브 (`src/archive.ts`, `src/vault.ts`, `src/outputs.ts`)
 
 `config.archive` (기본 꺼짐): `enabled`, `vault` (절대 경로, `~/` 펼침), `folder` (기본 `Ned`, `..`·점으로 시작하는 세그먼트 거부),

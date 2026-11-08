@@ -1,7 +1,7 @@
 /**
  * Obsidian 아카이브 (config.archive): the daemon keeps a daily report <vault>/<folder>/Daily/YYYY-MM/YYYY-MM-DD.md —
- * 브리핑 · 순찰 · 보낸 것 · 정리 결과물 · 세션 · 오늘 — rendered from what is already on disk (briefings, sent-actions.log,
- * outputs, events, costs, agenda refresh counts). No claude call.
+ * 브리핑 · 순찰 · 보낸 것 · 정리 결과물 · 세션 · 들어온 것 · 오늘 — rendered from what is already on disk (briefings, sent-actions.log,
+ * outputs, events, the 수집 이력 (src/history.ts), costs, agenda refresh counts). No claude call.
  *
  * Each section lives between `<!-- ned:<name> -->` … `<!-- ned:/<name> -->`; only that span is rewritten, anything the user
  * writes outside the markers is kept byte-for-byte. Writes are atomic (temp → rename).
@@ -22,6 +22,7 @@ import YAML from "yaml";
 import { readActionLog, type ActionLogEntry } from "./actions.js";
 import { loadConfig, type NedArchive, type NedConfig } from "./config.js";
 import { COSTS_PATH } from "./costs.js";
+import { describeRecord, firstSeenOn, type HistRecord } from "./history.js";
 import { parseLines } from "./events.js";
 import { AGENDA_PATH, BRIEFINGS_DIR, EVENTS_DIR, localDay, log, readJson } from "./paths.js";
 import { OUTPUT_KIND_KO, listOutputs } from "./outputs.js";
@@ -31,7 +32,7 @@ import { checkVault, defang, findBlock, noteArchiveError, patchArchiveState, rea
 
 /** Tick flush: a changed day is rewritten at most this often (immediate triggers bypass it). */
 export const ARCHIVE_FLUSH_MS = 5 * 60_000;
-export const SECTIONS = ["briefing", "patrol", "sent", "outputs", "sessions", "today"] as const;
+export const SECTIONS = ["briefing", "patrol", "sent", "outputs", "sessions", "history", "today"] as const;
 export type SectionName = (typeof SECTIONS)[number];
 
 /** Same idea as server.ts BUILD_ID (code mtime), without importing the server. */
@@ -72,6 +73,8 @@ export interface DayData {
   sessions: ReturnType<typeof reduceSessions>;
   costs: { total_usd: number; runs: number; jobs: Record<string, { usd: number; runs: number }> } | null;
   srcCounts: Record<string, number>;
+  /** 수집 이력 records first seen that day, per source (archive.include.history). */
+  incoming?: Record<string, HistRecord[]>;
 }
 
 /** Briefing files are named by their UTC ISO time — read only the ones that can fall on `day` (local), then check ts. */
@@ -113,6 +116,7 @@ export function collectDay(day: string, cfg: Pick<NedConfig, "session_stale_minu
     sessions: reduceSessions(events, cfg.session_stale_minutes ?? 180, dayStart(day) + 24 * 3600_000).filter((s) => !s.is_worker),
     costs,
     srcCounts: readArchiveState().src_counts[day] ?? {},
+    incoming: firstSeenOn(day),
   };
 }
 
@@ -189,6 +193,43 @@ function sessionsBody(d: DayData): string {
   return ["## 🤖 세션", "", ...(lines.length ? lines : ["_(오늘 세션 없음)_"])].join("\n");
 }
 
+/** Lines per source in "📥 들어온 것" before "… 외 N건". */
+export const INCOMING_MAX = 30;
+const INCOMING_KO: [string, string][] = [["slack", "Slack"], ["mail", "메일"], ["jira", "Jira"], ["github", "GitHub"], ["calendar", "캘린더"]];
+const md = (ms: number) => `${new Date(ms).getMonth() + 1}/${new Date(ms).getDate()}`;
+
+/** One "📥 들어온 것" line for a history record (per source: who · what · link). */
+function incomingLine(r: HistRecord): string {
+  const it = r.item as Record<string, any>, t = Date.parse(r.ts);
+  const d = describeRecord(r);
+  switch (r.source) {
+    case "slack":
+      return `- ${Number.isFinite(t) ? `${hm(t)} ` : ""}${one(it.channel || it.watch?.channel || "", 40)}${it.from ? ` · ${one(it.from, 40)}` : ""} — ${link(one(d.title, 120), it.url)}`;
+    case "mail":
+      return `- ${Number.isFinite(t) ? `${hm(t)} ` : ""}${one(it.from, 60)} — ${link(one(it.subject || "(제목 없음)", 120), it.url)}`;
+    case "jira":
+      return `- ${link(one(it.key, 30), it.url)} ${one(it.title, 120)}`;
+    case "github":
+      return `- ${one(it.repo, 60)}#${one(it.number, 10)} ${link(one(it.title, 120), it.url)}`;
+    default:
+      return `- ${Number.isFinite(t) ? (it.all_day ? `${md(t)} 종일 ` : `${md(t)} ${hm(t)} `) : ""}${link(one(it.title || "(제목 없음)", 120), it.url)}`;
+  }
+}
+
+function incomingBody(d: DayData): string {
+  const out = ["## 📥 들어온 것"];
+  let any = false;
+  for (const [src, label] of INCOMING_KO) {
+    const recs = d.incoming?.[src] ?? [];
+    if (!recs.length) continue;
+    any = true;
+    out.push("", `**${label}** ${recs.length}`, ...recs.slice(0, INCOMING_MAX).map(incomingLine));
+    if (recs.length > INCOMING_MAX) out.push(`- … 외 ${recs.length - INCOMING_MAX}건`);
+  }
+  if (!any) out.push("", "_(오늘 새로 들어온 것 없음)_");
+  return out.join("\n");
+}
+
 function todayBody(d: DayData): string {
   const hb = d.briefings.filter((b) => b.type === "heartbeat");
   const upd = hb.filter((b) => b.status === "UPDATE").length;
@@ -213,6 +254,7 @@ export function renderSections(d: DayData, inc: NedArchive["include"]): { name: 
     { name: "sent", body: inc.actions ? sentBody(d) : "" },
     { name: "outputs", body: inc.outputs ? outputsBody(d) : "" },
     { name: "sessions", body: inc.sessions ? sessionsBody(d) : "" },
+    { name: "history", body: inc.history !== false ? incomingBody(d) : "" },
     { name: "today", body: todayBody(d) },
   ];
 }

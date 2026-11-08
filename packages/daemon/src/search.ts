@@ -2,7 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Hono } from "hono";
 import { readAgenda } from "./agenda.js";
-import { loadConfig } from "./config.js";
+import { HISTORY_SOURCES, loadConfig, type HistorySource, type NedConfig } from "./config.js";
+import { currentKeys, describeRecord, readHistory, recording, type HistRecord } from "./history.js";
+import type { Agenda } from "./agenda.js";
 import { readRecentEvents, type NedEvent } from "./events.js";
 import { listBriefings } from "./heartbeat.js";
 import { NED_HOME, TODOS_PATH, readJson } from "./paths.js";
@@ -11,7 +13,8 @@ import type { Todo } from "./todos.js";
 
 /**
  * GET /api/search?q=&limit=50 — one ranked list over everything Ned keeps on disk: state (attention, sessions),
- * every briefing file, the last 30 days of events, todos, agenda.json and drafts (if a drafts store exists).
+ * every briefing file, the last 30 days of events, todos, agenda.json, the 수집 이력 (src/history.ts — records not already
+ * shown by agenda.json, so a hit appears once) and drafts (if a drafts store exists).
  * The dashboard's ⌘K palette searches what it already loaded locally and merges these hits (deduped on type+id)
  * for older briefings / events. Read-only: nothing here writes (listTodos would prune, so todos are read raw).
  */
@@ -223,6 +226,8 @@ function candidates(): Cand[] {
     }
   }
 
+  out.push(...historyCands(cfg, a));
+
   const todos = readJson<Todo[]>(TODOS_PATH, []);
   if (Array.isArray(todos)) for (const t of todos) {
     out.push({
@@ -253,6 +258,52 @@ function candidates(): Cand[] {
 
   out.push(...drafts());
   return out;
+}
+
+const HIST_TYPE: Record<HistorySource, SearchType> = { slack: "slack", mail: "mail", jira: "jira", github: "github", calendar: "calendar" };
+const HIST_KIND: Record<HistorySource, string> = { slack: "slack", mail: "email", jira: "jira", github: "github", calendar: "calendar" };
+const HIST_CARD: Record<HistorySource, string> = { slack: "card:slack", mail: "card:mail", jira: "card:jira", github: "card:gh", calendar: "card:cal" };
+const srcOn = (cfg: NedConfig, s: HistorySource) => (s === "mail" ? cfg.sources.gmail : cfg.sources[s]) !== false;
+
+/**
+ * 수집 이력 records as hits (same type / id scheme as the agenda hits, so the palette dedupes them), minus what agenda.json
+ * shows now (currentKeys — those are hits already). Detail says "이력 · M/D"; anchor = the source's card.
+ */
+export function historyCands(cfg: NedConfig, a: Agenda): Cand[] {
+  if (cfg.history?.enabled === false) return [];
+  const cur = currentKeys(a);
+  const out: Cand[] = [];
+  for (const src of HISTORY_SOURCES) {
+    if (!srcOn(cfg, src) || !recording(cfg, src)) continue;
+    for (const r of readHistory(src)) {
+      if (cur[src].has(r.key)) continue;
+      const d = describeRecord(r), it = r.item as Record<string, any>, ts = isoTs(r.ts);
+      const day = ts ? `${new Date(ts).getMonth() + 1}/${new Date(ts).getDate()}` : "";
+      const watchCh = src === "slack" && it.watch?.channel && !(r.state as { reason?: string }).reason ? String(it.watch.channel).replace(/^#+/, "") : "";
+      out.push({
+        type: HIST_TYPE[src],
+        id: histId(r),
+        title: d.title,
+        detail: ["이력", day, d.detail].filter(Boolean).join(" · "),
+        ts,
+        url: url(d.url),
+        kind: HIST_KIND[src],
+        tab: "home",
+        anchor: watchCh && cfg.dashboard.watch_cards !== false ? `card:watch:${watchCh}` : HIST_CARD[src],
+        fields: [[d.title, 3], [d.detail, 2], [it.subject ?? it.key ?? it.repo, 2], [it.why ?? it.snippet ?? it.location, 1]],
+      });
+    }
+  }
+  return out;
+}
+
+/** The id an agenda hit of the same item would have (slack: permalink, mail: thread id, jira: key, github: repo#n, calendar: event id). */
+function histId(r: HistRecord): string {
+  const it = r.item as Record<string, any>;
+  if (r.source === "slack") return String(it.url || r.key);
+  if (r.source === "github" && it.repo) return `${it.repo}#${it.number}`;
+  if (r.source === "calendar") return String(it.id || r.key);
+  return r.key;
 }
 
 export function search(q: string, limit = 50): SearchHit[] {
