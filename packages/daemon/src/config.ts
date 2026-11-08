@@ -389,14 +389,18 @@ export function normalizeAckReactions(v: unknown): string[] {
 }
 const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
-/** At most this many group mentions (all go into one extra Slack search). */
+/** At most this many group mentions (one extra Slack search per group, same turn). */
 export const GROUP_MENTIONS_MAX = 8;
-/** "@mobile-dev " → "mobile-dev"; IDs ("S0ABC123") stay as typed. Accepts a list or a comma / space separated string. */
+/**
+ * "@Mobile-Dev " → "mobile-dev" (handles lower-cased); "s0abc123" → "S0ABC123" (ID-shaped: s + 6+ alnum with a digit).
+ * Deduped case-insensitively. Accepts a list or a comma / space separated string.
+ */
 export function normalizeGroupMentions(v: unknown): string[] {
   const list = typeof v === "string" ? v.split(/[,\s]+/) : strs(v);
   const out = list
     .map((e) => e.replace(/\s+/g, "").replace(/^@+/, ""))
-    .filter((e) => /^[\p{L}\p{N}._-]{1,80}$/u.test(e));
+    .filter((e) => /^[\p{L}\p{N}._-]{1,80}$/u.test(e))
+    .map((e) => (/^s[a-z0-9]{6,}$/i.test(e) && /\d/.test(e) ? e.toUpperCase() : e.toLowerCase()));
   return uniq(out).slice(0, GROUP_MENTIONS_MAX);
 }
 /** User-group ID ("S0ABC123") vs. handle ("mobile-dev"). */

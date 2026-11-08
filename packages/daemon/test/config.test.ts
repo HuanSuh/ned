@@ -227,6 +227,7 @@ describe("normalizers", () => {
     expect(normalizeFilters({}).slack.group_mentions).toEqual([]);
     expect(normalizeGroupMentions(["@mobile-dev", " mobile-dev ", "S0ABC1234", "@@ios team", "bad<tag>", "", 3, "@", "모바일_팀"])).toEqual(["mobile-dev", "S0ABC1234", "iosteam", "모바일_팀"]);
     expect(normalizeGroupMentions("@a, b  @a")).toEqual(["a", "b"]);
+    expect(normalizeGroupMentions(["s0abc1234", "S0ABC1234", "@Mobile-Dev", "mobile-dev", "sales"])).toEqual(["S0ABC1234", "mobile-dev", "sales"]);
     expect(normalizeGroupMentions(Array.from({ length: 12 }, (_, i) => `g${i}`))).toHaveLength(8);
     expect(isGroupId("S0ABC1234")).toBe(true);
     expect(isGroupId("mobile-dev")).toBe(false);

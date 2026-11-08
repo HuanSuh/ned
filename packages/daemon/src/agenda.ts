@@ -637,7 +637,8 @@ export function groupMentionsPrompt(groups: string[], since: string): string {
 }
 
 /** Phase-1 prompt for one call covering `keys` (prompts/agenda-lists.md: lists only, no per-item context). */
-export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = new Date()): string {
+/** `tpl`: the template text (tests pass a variant); defaults to prompts/agenda-lists.md. */
+export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = new Date(), tpl = fs.readFileSync(path.join(PROMPTS_DIR, "agenda-lists.md"), "utf8")): string {
   const cr = calendarRange(now), cb = rangeBounds(cr.from, cr.to);
   const watch = keys.includes("slack") ? watchChannels(cfg.filters) : [];
   const keep = new Set<string>(keys);
@@ -649,7 +650,7 @@ export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = 
   const groups = keys.includes("slack") ? cfg.filters.slack.group_mentions ?? [] : [];
   const select = `select:${keys.flatMap((k) => LIST_TOOLS[k]).join(",")}`;
   const since = String(Math.floor(now.getTime() / 1000) - 24 * 3600);
-  return pickSections(fs.readFileSync(path.join(PROMPTS_DIR, "agenda-lists.md"), "utf8"), keep)
+  return pickSections(tpl, keep)
     .replaceAll("{{NOW}}", isoLocal(now))
     .replaceAll("{{TZ}}", Intl.DateTimeFormat().resolvedOptions().timeZone)
     .replaceAll("{{TOOL_SELECT}}", select)
@@ -661,6 +662,8 @@ export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = 
     .replaceAll("{{WATCH_CHANNELS}}", watch.map((c) => `#${c}`).join(", "))
     .replaceAll("{{GROUP_MENTIONS}}", () => groupMentionsPrompt(groups, since))
     .replaceAll("{{GROUP_REASON}}", groups.length ? "|group" : "")
+    .replaceAll("{{GROUP_ITEMS_RULE}}", groups.length ? " (그룹 멘션은 위 그룹 규칙을 따른다)" : "")
+    .replaceAll("{{GROUP_PRIO}}", groups.length ? " > group" : "")
     .replaceAll("{{ACK_EMOJIS}}", ack.map((e) => `:${e}:`).join(" "))
     .replaceAll("{{ACK_EXAMPLE}}", ack.length ? `\`hasmy::${ack[0]}:\`` : "")
     .replaceAll("{{ACK_WATCH_COND}}", watch.length ? " 또는 팔로업 채널의 `needs_me` 하이라이트 후보" : "")

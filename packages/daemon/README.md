@@ -131,8 +131,8 @@ permalink(쿼리·해시 무시)로 같은 처리를 한 번 더 한다 — 확�
 설정 → "답 필요 해제 이모지" 칩 입력(쉼표·엔터로 추가).
 
 **그룹 멘션** (`config.filters.slack.group_mentions`, 기본 `[]`, 최대 8): 내가 속한 Slack 유저그룹 멘션(원문 `<!subteam^S…|@이름>`)은
-`<@me>` 검색에 안 걸리므로 그룹마다 따로 찾는다. 항목은 유저그룹 ID(`S0ABC123`, 그대로 둠) 또는 핸들(`@mobile-dev` → `mobile-dev`, 공백·중복 제거;
-`normalizeGroupMentions`). 프롬프트 `{{GROUP_MENTIONS}}`(`groupMentionsPrompt`): 비어 있으면 `""`(프롬프트·턴 수 그대로), 있으면 멘션·DM·스레드
+`<@me>` 검색에 안 걸리므로 그룹마다 따로 찾는다. 항목은 유저그룹 ID(`S0ABC123`, 소문자로 넣어도 대문자로) 또는 핸들(`@Mobile-Dev` → `mobile-dev`, 소문자; 공백 제거·대소문자 무시 중복 제거;
+`normalizeGroupMentions`). 그룹이 있을 때만 items 규칙에 "그룹 멘션은 위 그룹 규칙을 따른다"·우선순위에 `> group` 이 붙는다(`{{GROUP_ITEMS_RULE}}`·`{{GROUP_PRIO}}`). 프롬프트 `{{GROUP_MENTIONS}}`(`groupMentionsPrompt`): 비어 있으면 `""`(프롬프트·턴 수 그대로), 있으면 멘션·DM·스레드
 검색과 **같은 턴에** 그룹마다 `slack_search_public_and_private` 한 번 — `keywords: ["<!subteam^S…>"]`(ID) / `keywords: ["\"@핸들\""]`(핸들).
 도구 설명상 `keywords` 배열은 **AND** 라서 여러 그룹·표기를 한 검색에 넣을 수 없다 → 그룹 수만큼 검색(결과 0이어도 다른 표기로 재검색 안 함).
 결과 `reason: "group"`: `all` 엔 모두(answered 규칙 동일), `items` 엔 그룹에 구체적 질문·요청을 했고 아무도(나 포함) 답하지 않은 것만.

@@ -282,6 +282,17 @@ describe("slack ack reactions (filters.slack.ack_reactions)", () => {
 });
 
 describe("slack group mentions (filters.slack.group_mentions)", () => {
+  it("no groups → prompt byte-identical to the template without the group placeholders", async () => {
+    const fs = await import("node:fs"), path = await import("node:path");
+    const orig = fs.readFileSync(path.resolve(__dirname, "../../../prompts/agenda-lists.md"), "utf8");
+    expect(orig).toContain("{{GROUP_ITEMS_RULE}}");
+    const stripped = orig.replace(/\{\{GROUP_(MENTIONS|REASON|ITEMS_RULE|PRIO)\}\}/g, "");
+    const now = new Date("2026-11-06T01:00:00Z");
+    const withGroups = buildListsPrompt(cfg(), ["slack"], now);
+    expect(buildListsPrompt(cfg(), ["slack"], now, stripped)).toBe(withGroups);
+    expect(withGroups).toContain("남에게 묻는 것은 뺀다. 애매하면");
+    expect(withGroups).toContain("(dm > mention > thread).");
+  });
   it("no groups → placeholder empty, prompt has no group search or group reason", () => {
     const p = buildListsPrompt(cfg(), ["slack"]);
     expect(p).not.toContain("{{");
@@ -296,6 +307,8 @@ describe("slack group mentions (filters.slack.group_mentions)", () => {
     expect(p).toContain('`keywords: ["\\"@mobile-dev\\""]`');
     expect(p).toContain("같은 턴에");
     expect(p).toContain("dm > mention > thread > group");
+    expect(p).toContain("(dm > mention > thread > group).");
+    expect(p).toContain("남에게 묻는 것은 뺀다 (그룹 멘션은 위 그룹 규칙을 따른다).");
     expect(p).toContain('"reason":"mention|dm|thread|group"');
     expect(groupMentionToken("S0ABC1234")).toBe("<!subteam^S0ABC1234>");
     expect(groupMentionToken("ios")).toBe('"@ios"');

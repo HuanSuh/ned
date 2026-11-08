@@ -25,7 +25,7 @@ export const normX = {
   watch: (v) => v.trim().replace(/^#+/, "").replace(/\s+/g, ""),
   jira: (v) => v.trim().toUpperCase().replace(/-\d*$/, ""), // "MNT-123" → "MNT"
   ack: (v) => v.trim().replace(/^:+|:+$/g, "").toLowerCase(), // ":Eyes:" → "eyes"
-  group: (v) => v.replace(/\s+/g, "").replace(/^@+/, ""), // "@mobile-dev" → "mobile-dev"; IDs (S0ABC123) as typed
+  group: (v) => { const g = v.replace(/\s+/g, "").replace(/^@+/, ""); return /^s[a-z0-9]{6,}$/i.test(g) && /\d/.test(g) ? g.toUpperCase() : g.toLowerCase(); }, // "@Mobile-Dev" → "mobile-dev", "s0abc123" → "S0ABC123" (= config.normalizeGroupMentions)
 };
 export const validX = { slack: (v) => v.length > 0 && v.length <= 80, watch: (v) => v.length > 0 && v.length <= 80, jira: (v) => /^[A-Z][A-Z0-9_]{0,19}$/.test(v), ack: (v) => /^[\p{Ll}\p{Lo}\p{N}_+'.-]{1,64}$/u.test(v), group: (v) => /^[\p{L}\p{N}._-]{1,80}$/u.test(v) };
 export const showX = { slack: (v) => `#${v}`, watch: (v) => `#${v}`, jira: (v) => v, ack: (v) => `:${v}:`, group: (v) => (/^S[A-Z0-9]{6,}$/.test(v) && /\d/.test(v) ? v : `@${v}`) };
