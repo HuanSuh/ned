@@ -17,7 +17,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { collapseDMs, dedupeSlack, slackConvKey, slackUrlKey, supersetMail, type Agenda, type AgendaPayload, type AgendaSourceKey, type CalendarItem, type GithubItem, type JiraItem, type MailAllItem, type MailBlock, type MailItem, type MailReason, type SlackAllItem, type SlackBlock, type SlackItem, type SlackReason, type SlackWatchChannel } from "./agenda.js";
+import { collapseDMs, dedupeSlack, slackConvKey, slackUrlKey, supersetMail, supersetSlack, type Agenda, type AgendaPayload, type AgendaSourceKey, type CalendarItem, type GithubItem, type JiraItem, type MailAllItem, type MailBlock, type MailItem, type MailReason, type SlackAllItem, type SlackBlock, type SlackItem, type SlackReason, type SlackWatchChannel } from "./agenda.js";
 import { HISTORY_SOURCES, watchChannels, type HistorySource, type NedConfig } from "./config.js";
 import { NED_HOME, localDay, log, readJson } from "./paths.js";
 import { threadRef, type SlackThread } from "./slack-threads.js";
@@ -590,7 +590,7 @@ export function slackView(cfg: NedConfig, fresh: SlackBlock, prev: SlackBlock | 
     watch.push({ channel: `#${ch}`, summary, highlights: hls, recent });
   }
   const summary = fresh.summary || (viewItems.length && !ctx.full ? prev?.summary ?? "" : "");
-  return { summary, items: viewItems, all: viewAll, watch };
+  return { summary, items: viewItems, all: supersetSlack(viewItems, viewAll), watch };
 }
 
 /** After thread state (applyThreadState): drop 확인 완료 rows from items (thread-aware key), cap at 10. */

@@ -357,6 +357,18 @@ jira/github `{open}`(목록에서 빠지면 false, 다시 보이면 true) · cal
 읽기·쓰기 수 ms. 하루 한 번(`meta.json` `last_prune_day`) `keep_days` 넘게 안 보인 레코드를 지우고(0 = 파일 삭제), `HISTORY_SOURCES` 파일만 만진다.
 `history.enabled=false` 면 기록·prune 모두 안 한다.
 
+**표시 원천 = 이력** (`slackView`, `mailView`, `finalizeSlackView` — `agenda.ts` `mergeSources`): 소스 키를 upsert 한 직후, 그 run 의
+slack/mail 블록을 이력 + `history.display` 구간으로 다시 만들어 agenda.json 에 쓴다 → heartbeat·drafts·chat·server·search·agenda-context 는
+수정 없이 긴 구간을 본다. Slack items = 구간 안 `need && !answered && !acked`(정렬: 마지막으로 뽑힌 run 의 순서 → 최신), all = 구간 안
+멘션·DM·스레드·그룹 행(최신순, `agenda_all_limit`, items 포함 보장), DM collapse·dedupe·제외 채널은 기존 함수 재사용, watch = 팔로업 채널
+이력 행(하이라이트 needs_me 먼저 5개 + 최신 3개, 증분 run 이 요약을 비우면 이전 요약 유지). context·threads 는 `carryContexts` 가 이전
+agenda 에서 이어 붙이고, 그 다음 `finalizeSlackView` 가 ✓ 확인 완료(reviewed.json, 대시보드 `srcKey`/`srcRevAt` 과 같은 규칙 — 스레드면
+`@last_reply_ts`)를 items 에서 빼고 10개로 자른다. 메일 items = `needs_action` && 확인 완료 아님(최대 10), all = 구간 안 스레드(최신순, `unread`),
+`unread` 수·summary 는 이번 run. 증분 run 의 빈 summary 는 열린 항목이 남아 있으면 이전 것을 유지. 서명(`sourceSignature`)은 이 뷰로 계산 —
+새 것이 없는 증분 run 은 `unchanged: true` 라 heartbeat skip·2단계 skip 이 그대로 동작한다. 2단계 `mergeThreads` 는 읽은 스레드의 내 마지막 답·DM 의
+내 메시지로 이력의 옛 항목을 답함 처리(`historyFromThreads`)하고 그 행을 바로 items 에서 뺀다(`applyAnswered`). Jira/GitHub/캘린더는 스냅샷 그대로.
+`history.enabled=false`(또는 그 소스 `keep_days` 0)면 예전처럼 이번 목록 그대로.
+
 **증분 수집** (`collectWindow`, `listWindows`, `prompts/agenda-lists.md`): Slack·메일 1단계 호출은 `meta.json` 의 `collect.<src>.last_ok_at`
 (마지막으로 병합에 성공한 run 의 기준 시각) − `OVERLAP_MINUTES`(30) 이후만 검색한다 — Slack `{{SLACK_SINCE}}` = `max(now−24h, last_ok−30m)`,
 메일 items 검색 `{{MAIL_ITEMS_RANGE}}` = `after:YYYY/MM/DD`(Gmail 은 날짜를 태평양 자정으로 읽으므로 UTC−8 날짜 — `gmailAfter`).

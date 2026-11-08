@@ -8,7 +8,8 @@ import { extractJson, llmDisabled, runClaude } from "./claude.js";
 import { ACK_CHECK_MAX_DEFAULT, filtersPrompt, isGroupId, jqlExclude, watchChannels, type NedConfig } from "./config.js";
 import { personaPrompt } from "./persona.js";
 import { AGENDA_PATH, AGENDA_RAW_PATH, log, readJson, writeJsonAtomic } from "./paths.js";
-import { ACK_LOOKBACK_HOURS, collectWindow, gmailAfter, historyUpsert, noteCollected, openSlack, recording, type CollectWindow, type UpsertCtx } from "./history.js";
+import { ACK_LOOKBACK_HOURS, collectWindow, finalizeSlackView, gmailAfter, historyDisplay, historyUpsert, mailView, noteCollected, openSlack, recording, slackView, type CollectWindow, type UpsertCtx } from "./history.js";
+import { readReviewed } from "./state.js";
 import { applyThreadState, syncDmsFromList, syncThreadsFromList, type SlackThread, type ThreadRowFields } from "./slack-threads.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -851,7 +852,15 @@ export interface MergeMeta {
 export function mergeSources(payload: AgendaPayload, keys: AgendaSourceKey[], meta: MergeMeta, cfg: NedConfig): Agenda {
   const a = patchAgenda((a) => {
     historyUpsert(payload, keys, cfg, { now: meta.now, win: { slack: meta.win?.slack, mail: meta.win?.mail }, ...meta.extras });
+    // 표시 원천 = 이력: Slack / mail blocks are rebuilt from the history for the display window, so every agenda.json reader
+    // (heartbeat, drafts, chat, search, phase 2, the dashboard) sees the long window while collection stays incremental.
+    const view = (k: "slack" | "mail") => keys.includes(k) && !!payload[k] && historyDisplay(cfg, k);
+    const vctx = (k: "slack" | "mail") => ({ now: meta.now, full: meta.win?.[k]?.full ?? true });
+    const reviewed = view("slack") || view("mail") ? readReviewed() : {};
+    if (view("slack")) payload.slack = slackView(cfg, payload.slack!, a.slack, vctx("slack"));
+    if (view("mail")) payload.mail = mailView(cfg, payload.mail!, a.mail, vctx("mail"), reviewed);
     carryContexts(a, payload, keys);
+    if (view("slack")) finalizeSlackView(payload.slack!, reviewed); // after thread state: 확인 완료 keys carry the latest reply
     a.sources_status ??= {};
     for (const k of keys) {
       const sig = sourceSignature(k, payload);
