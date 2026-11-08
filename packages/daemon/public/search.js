@@ -105,6 +105,7 @@
     { id: "quiet", title: "조용한 시간", detail: "알림 없는 시간대", el: "c-qon", keys: "quiet hours 방해 금지 dnd 야간" },
     { id: "sources", title: "업무 신호 소스", detail: "Gmail · Slack · Jira · GitHub · Sentry · 캘린더", el: "c-sources", keys: "sources 소스 gmail slack jira github sentry calendar 캘린더 메일" },
     { id: "filters", title: "트래킹 제외", detail: "Slack 채널 · Jira 프로젝트 제외", el: "x-slack-in", keys: "filters exclude 제외 채널 프로젝트 트래킹" },
+    { id: "group_mentions", title: "Slack 그룹 멘션", detail: "내가 속한 유저그룹(@팀) 멘션도 집계", el: "x-group-in", keys: "group_mentions group subteam 그룹 유저그룹 팀 멘션" },
     { id: "notifications", title: "알림", detail: "배너 · 소리 · 묶음 기준 · 조용한 시간 동작", el: "n-on", keys: "notifications 알림 배너 소리 sound 묶음" },
     { id: "model", title: "Claude 모델", detail: "비우면 기본값", el: "c-model", keys: "model claude 모델 sonnet opus" },
     { id: "turns", title: "Claude 최대 턴", detail: "claude -p 최대 턴 수", el: "c-turns", keys: "turns max 턴" },
@@ -154,7 +155,7 @@
         const id = x.url || `${x.channel}:${x.ts}`;
         if (seen.has(id)) continue; seen.add(id);
         const th = x.thread || {}; // followed thread: summary + latest reply are searchable too
-        out.push({ type: "slack", id, title: x.text || "(내용 없음)", detail: [`${x.channel} · ${x.from}`, th.thread_summary].filter(Boolean).join(" — "), ts: isoTs(x.ts), url: safeUrl(x.url), kind: "slack", tab: "home", anchor: "card:slack", fields: [[x.text, 3], [x.channel, 2], [x.from, 2], [th.thread_summary, 2], [th.last_reply_text, 1], [th.last_reply_from, 1]] });
+        out.push({ type: "slack", id, title: x.text || "(내용 없음)", detail: [`${x.channel} · ${x.from}${x.reason === "group" ? " · 그룹 멘션" : ""}`, th.thread_summary].filter(Boolean).join(" — "), ts: isoTs(x.ts), url: safeUrl(x.url), kind: "slack", tab: "home", anchor: "card:slack", fields: [[x.text, 3], [x.channel, 2], [x.from, 2], [th.thread_summary, 2], [th.last_reply_text, 1], [th.last_reply_from, 1]] });
       }
       // 팔로업 channel highlights → their own card (card:watch:<channel>), or the Slack card's fold when dashboard.watch_cards is off.
       const wOff = d.config && d.config.dashboard && d.config.dashboard.watch_cards === false;

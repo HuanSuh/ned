@@ -184,10 +184,11 @@ export function threadActivity(t: SlackThread): number {
 
 type Row = { url: string; channel: string; from: string; text: string; ts: string };
 
+/** Group mentions (reason "group") are never followed as threads — too noisy, and the ask wasn't mine alone. */
 function rowsWithPrio(s: SlackBlock): [Row, number][] {
   return [
-    ...s.items.map((x): [Row, number] => [x, 0]),
-    ...s.all.map((x): [Row, number] => [x, 1]),
+    ...s.items.filter((x) => x.reason !== "group").map((x): [Row, number] => [x, 0]),
+    ...s.all.filter((x) => x.reason !== "group").map((x): [Row, number] => [x, 1]),
     ...s.watch.flatMap((w) => w.highlights.map((h): [Row, number] => [{ ...h, channel: w.channel }, h.needs_me ? 0 : 2])),
   ];
 }

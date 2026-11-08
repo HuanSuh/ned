@@ -130,6 +130,15 @@ heartbeat / briefing 의 `{{FILTERS}}` 에도 팔로업 목록이 붙어 needs_m
 permalink(쿼리·해시 무시)로 같은 처리를 한 번 더 한다 — 확인한 DM 은 그 대화의 그 이전 메시지까지 닫는다. 이름은 콜론 제거·소문자, 한글 커스텀 이모지 가능.
 설정 → "답 필요 해제 이모지" 칩 입력(쉼표·엔터로 추가).
 
+**그룹 멘션** (`config.filters.slack.group_mentions`, 기본 `[]`, 최대 8): 내가 속한 Slack 유저그룹 멘션(원문 `<!subteam^S…|@이름>`)은
+`<@me>` 검색에 안 걸리므로 그룹마다 따로 찾는다. 항목은 유저그룹 ID(`S0ABC123`, 소문자로 넣어도 대문자로) 또는 핸들(`@Mobile-Dev` → `mobile-dev`, 소문자; 공백 제거·대소문자 무시 중복 제거;
+`normalizeGroupMentions`). 그룹이 있을 때만 items 규칙에 "그룹 멘션은 위 그룹 규칙을 따른다"·우선순위에 `> group` 이 붙는다(`{{GROUP_ITEMS_RULE}}`·`{{GROUP_PRIO}}`). 프롬프트 `{{GROUP_MENTIONS}}`(`groupMentionsPrompt`): 비어 있으면 `""`(프롬프트·턴 수 그대로), 있으면 멘션·DM·스레드
+검색과 **같은 턴에** 그룹마다 `slack_search_public_and_private` 한 번 — `keywords: ["<!subteam^S…>"]`(ID) / `keywords: ["\"@핸들\""]`(핸들).
+도구 설명상 `keywords` 배열은 **AND** 라서 여러 그룹·표기를 한 검색에 넣을 수 없다 → 그룹 수만큼 검색(결과 0이어도 다른 표기로 재검색 안 함).
+결과 `reason: "group"`: `all` 엔 모두(answered 규칙 동일), `items` 엔 그룹에 구체적 질문·요청을 했고 아무도(나 포함) 답하지 않은 것만.
+같은 permalink 가 여러 검색에 걸리면 `dedupeSlack` 이 하나로 합치고 reason 은 dm > mention > thread > group(answered 는 OR).
+그룹 멘션은 스레드 팔로업(`syncThreadsFromList`/`threadCandidates`) 대상에서 뺀다. 대시보드 칩 "그룹"(👥).
+
 **Agenda 잡** (`src/agenda.ts`, `src/agenda-context.ts`, `prompts/agenda-lists.md`, `prompts/agenda-context.md`): 대시보드 HOME 탭용
 구조화 데이터. 시작 직후 1회(전 소스), 이후 1분마다 틱을 돌며 **소스별 주기**(`agenda_source_minutes.<slack|mail|calendar|jira|github>`,
 null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 모아 한 번에 갱신한다(`src/schedule.ts`; 마지막 실행 =
@@ -239,7 +248,7 @@ Agenda 응답 형태:
 - jira: `assignee = currentUser() AND statusCategory != Done`, 마감 오름차순 → 갱신 내림차순, 최대 25
 - github: 내 리뷰 요청 PR + 변경 요청/승인된 내 열린 PR, 최대 20
 - mail: `unread` 는 최근 2일 안 읽은 받은편지함 스레드 수(최대 50, 50 에 닿으면 `unread_capped: true` → 홈은 "50+통"), `items` 는 최근 3일 중 사람이 보낸 업무 메일로 내 행동이 필요한 것(최대 10, 급한 순). 선별은 검색 결과의 발신자·제목·스니펫으로 한다(1단계는 스레드를 열지 않음). 답장 초안용 `context: { from, to, subject, body_excerpt(인용 제거, ≤1500자), attachments[], message_id, reply_to, collected_at }` 는 2단계가 reason `reply|approval|request` 항목만 `get_thread`(PLAIN_TEXT)로 읽어 채운다. 읽음 처리 등 쓰기는 하지 않는다. `mail: null` 은 아직 안 가져옴(mail 도입 전 agenda.json) 또는 gmail 소스 꺼짐. `GET /api/agenda`·`POST /api/agenda/refresh` 응답에는 `mail_enabled`(= `sources.gmail`)가 붙고, false 면 홈은 메일 묶음을 숨긴다
-- slack: 최근 24시간, 나를 멘션했거나 DM/스레드에서 질문·요청했고 내가 아직 답하지 않은 것(최대 10, 급한 순). 1단계는 검색 3번(멘션 `<@me>` / `is:dm` / `is:thread with:<@me>`)뿐이고 스레드를 열지 않는다(답했는지는 검색 context 로 판단, 애매하면 넣음; 해제 이모지로 내가 리액션한 메시지도 답한 것 — 위 "답 필요 해제 이모지"). Slack epoch ts 는 ISO 로 바꾼다. `items[]` 와 `watch` 의 `needs_me` 하이라이트에는 2단계가 `slack_read_thread`/`slack_read_channel` 로 읽은 `context: { participants[], messages[{from,ts,text}](최근 5개, 각 ≤300자), collected_at }` 가 붙는다(같은 permalink 의 `all[]` 행에도 같이). 응답에는 `slack_enabled`(= `sources.slack`)가 붙고, false 면 홈은 Slack 카드를 숨긴다
+- slack: 최근 24시간, 나를 멘션했거나 DM/스레드에서 질문·요청했고 내가 아직 답하지 않은 것(최대 10, 급한 순). 1단계는 검색 3번(멘션 `<@me>` / `is:dm` / `is:thread with:<@me>`, + 그룹 멘션 그룹마다 1번 — 아래 "그룹 멘션")뿐이고 스레드를 열지 않는다(답했는지는 검색 context 로 판단, 애매하면 넣음; 해제 이모지로 내가 리액션한 메시지도 답한 것 — 위 "답 필요 해제 이모지"). Slack epoch ts 는 ISO 로 바꾼다. `items[]` 와 `watch` 의 `needs_me` 하이라이트에는 2단계가 `slack_read_thread`/`slack_read_channel` 로 읽은 `context: { participants[], messages[{from,ts,text}](최근 5개, 각 ≤300자), collected_at }` 가 붙는다(같은 permalink 의 `all[]` 행에도 같이). 응답에는 `slack_enabled`(= `sources.slack`)가 붙고, false 면 홈은 Slack 카드를 숨긴다
 
 ### 답장 초안 · 보내기 (`src/drafts.ts`, `src/actions.ts`, `prompts/draft.md`)
 
@@ -416,7 +425,7 @@ Todo 항목: `{id, title, done, created_at, done_at|null, due|null, note|null}` 
 ~/.ned/
   config.yaml            설정 (없으면 기본값으로 생성). heartbeat_minutes, signal_check_minutes, heartbeat_skip_unchanged(true),
                          briefing_time, quiet_hours, sources.{gmail,slack,jira,github,sentry,calendar},
-                         persona (ned|alfred|oracle|jarvis), filters.{slack.exclude_channels, slack.watch_channels, slack.ack_reactions, slack.ack_check_max, jira.exclude_projects} (트래킹 제외 / 팔로업 채널 / 답 필요 해제 이모지 / 한 run 에 검색할 이모지 수(3), ack_reactions·ack_check_max 외 기본 []),
+                         persona (ned|alfred|oracle|jarvis), filters.{slack.exclude_channels, slack.watch_channels, slack.ack_reactions, slack.ack_check_max, slack.group_mentions, jira.exclude_projects} (트래킹 제외 / 팔로업 채널 / 답 필요 해제 이모지 / 한 run 에 검색할 이모지 수(3) / 집계할 유저그룹 ID·핸들(최대 8), ack_reactions·ack_check_max 외 기본 []),
                          port, claude_model, claude_max_turns, session_stale_minutes, agenda_refresh_minutes, notify,
                          actions.{slack_send=false, gmail_draft=true, gmail_send=false, session_send=true,
                                   jira_comment=false, jira_transition=false, github_review=false, calendar_rsvp=false} (POST /api/send 허용),

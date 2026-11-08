@@ -4,6 +4,8 @@ import {
   ackedSet,
   buildListsPrompt,
   collapseDMs,
+  dedupeSlack,
+  groupMentionToken,
   isEmptyPayload,
   normalize,
   normalizeCalendar,
@@ -276,5 +278,55 @@ describe("slack ack reactions (filters.slack.ack_reactions)", () => {
     // With followed channels, needs_me highlights count as candidates too.
     const w = buildListsPrompt(cfg({ filters: normalizeFilters({ slack: { watch_channels: ["ops"] } }) }), ["slack"]);
     expect(w).toContain("`needs_me` 하이라이트 후보");
+  });
+});
+
+describe("slack group mentions (filters.slack.group_mentions)", () => {
+  it("no groups → prompt byte-identical to the template without the group placeholders", async () => {
+    const fs = await import("node:fs"), path = await import("node:path");
+    const orig = fs.readFileSync(path.resolve(__dirname, "../../../prompts/agenda-lists.md"), "utf8");
+    expect(orig).toContain("{{GROUP_ITEMS_RULE}}");
+    const stripped = orig.replace(/\{\{GROUP_(MENTIONS|REASON|ITEMS_RULE|PRIO)\}\}/g, "");
+    const now = new Date("2026-11-06T01:00:00Z");
+    const withGroups = buildListsPrompt(cfg(), ["slack"], now);
+    expect(buildListsPrompt(cfg(), ["slack"], now, stripped)).toBe(withGroups);
+    expect(withGroups).toContain("남에게 묻는 것은 뺀다. 애매하면");
+    expect(withGroups).toContain("(dm > mention > thread).");
+  });
+  it("no groups → placeholder empty, prompt has no group search or group reason", () => {
+    const p = buildListsPrompt(cfg(), ["slack"]);
+    expect(p).not.toContain("{{");
+    expect(p).not.toContain("subteam");
+    expect(p).not.toContain("group");
+    expect(p).toContain('"reason":"mention|dm|thread","count":1');
+  });
+  it("groups → one search per group in the same turn (keywords are AND'd), ID and handle tokens, reason group", () => {
+    const p = buildListsPrompt(cfg({ filters: normalizeFilters({ slack: { group_mentions: ["S0ABC1234", "@mobile-dev"] } }) }), ["slack"]);
+    expect(p).not.toContain("{{");
+    expect(p).toContain('`keywords: ["<!subteam^S0ABC1234>"]`');
+    expect(p).toContain('`keywords: ["\\"@mobile-dev\\""]`');
+    expect(p).toContain("같은 턴에");
+    expect(p).toContain("dm > mention > thread > group");
+    expect(p).toContain("(dm > mention > thread > group).");
+    expect(p).toContain("남에게 묻는 것은 뺀다 (그룹 멘션은 위 그룹 규칙을 따른다).");
+    expect(p).toContain('"reason":"mention|dm|thread|group"');
+    expect(groupMentionToken("S0ABC1234")).toBe("<!subteam^S0ABC1234>");
+    expect(groupMentionToken("ios")).toBe('"@ios"');
+  });
+  it("reason group parses; same message as a mention collapses to mention (dm > mention > thread > group)", () => {
+    const u = slackUrl("C5", "1762390000000500"), g = slackUrl("C6", "1762390000000600");
+    const p = normalize({
+      slack: {
+        items: [{ channel: "#dev", reason: "group", url: g, ts: "1762390000.000600", text: "@mobile 확인 부탁" }],
+        all: [
+          { channel: "#dev", reason: "group", url: `${u}?thread_ts=1&cid=C5`, ts: "1762390000.000500", text: "hi", answered: true },
+          { channel: "#dev", reason: "mention", url: u, ts: "1762390000.000500", text: "hi" },
+          { channel: "#dev", reason: "group", url: g, ts: "1762390000.000600", text: "@mobile 확인 부탁" },
+        ],
+      },
+    }, cfg(), AT);
+    expect(p.slack!.items.map((x) => x.reason)).toEqual(["group"]);
+    expect(p.slack!.all.map((x) => [x.reason, x.answered])).toEqual([["mention", true], ["group", false]]);
+    expect(dedupeSlack([{ url: u, reason: "thread" as const }, { url: u, reason: "dm" as const }])).toEqual([{ url: u, reason: "dm" }]);
   });
 });

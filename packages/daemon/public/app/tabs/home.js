@@ -109,7 +109,7 @@ export function renderTodoGroups() {
           <div class="ra">${draftFor("slack", x, srcKey("slack", x))}${openIcon(u)}${srcCheck("slack", x)}</div></div>`;
     }),
     empty: unavailable || (slack ? "답할 Slack 없음." : "다음 새로고침 때 Slack 도 가져올게."),
-    sum: si.length || wNeed.length ? esc([si.length ? `${counts([["멘션", si.filter((x) => x.reason === "mention").length], ["DM", si.filter((x) => x.reason === "dm").length], ["스레드", si.filter((x) => x.reason === "thread").length]])} 답 필요` : "", wNeed.length ? `팔로업 채널 ${wNeed.length}건 확인` : ""].filter(Boolean).join(" · ")) : "",
+    sum: si.length || wNeed.length ? esc([si.length ? `${counts([["멘션", si.filter((x) => x.reason === "mention").length], ["DM", si.filter((x) => x.reason === "dm").length], ["스레드", si.filter((x) => x.reason === "thread").length], ["그룹", si.filter((x) => x.reason === "group").length]])} 답 필요` : "", wNeed.length ? `팔로업 채널 ${wNeed.length}건 확인` : ""].filter(Boolean).join(" · ")) : "",
     pv: si[0] && (threadPreview(si[0], safeUrl(si[0].url), slRow(si[0])[2]) || preview(slRow(si[0])[2], si[0].text || "(내용 없음)", safeUrl(si[0].url), `<span class="chipx">${esc(si[0].channel)}</span>`)),
   });
 
