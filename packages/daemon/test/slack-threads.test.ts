@@ -63,6 +63,12 @@ describe("syncThreadsFromList", () => {
     expect(t.root_text).toBe("배포 언제 해요?");
     expect(th.find((x) => x.key.startsWith("C9"))!.prio).toBe(2);
   });
+  it("group mentions (reason group) never become thread records / candidates", () => {
+    const g = item({ reason: "group", url: link("C7", ts(10)), ts: iso(ts(10)) });
+    const th = syncThreadsFromList([], block({ items: [g], all: [{ ...g, answered: false }] }), NOW);
+    expect(th).toEqual([]);
+    expect(threadCandidates(th, 5, NOW)).toEqual([]);
+  });
   it("keeps what earlier reads learned; drops unlisted threads quiet for over a week", () => {
     const old = (sec - 8 * 86400).toFixed(6);
     const prev: SlackThread[] = [

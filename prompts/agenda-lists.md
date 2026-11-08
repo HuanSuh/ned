@@ -23,13 +23,13 @@
 내 user_id 는 `slack_search_public_and_private` 도구 설명에 있다 (`Current logged in user's user_id is U…`) → 아래 `<ME>`.
 검색 세 번 (모두 `after: "{{SLACK_SINCE}}"`, `sort: "timestamp"`, `limit: 20`, `include_bots: false`, `response_format: "detailed"`, `max_context_length: 200`):
 - 멘션 `keywords: ["<@ME>"]` → `"mention"` / DM `filters: "is:dm"`, `channel_types: "im,mpim"` → `"dm"` / 스레드 `filters: "is:thread with:<@ME>"` → `"thread"`
-- **확인 완료 조건**: 멘션·DM·참여 스레드에서 그 뒤에 **내 답글이 보이거나, 내가 해제 이모지로 리액션한 메시지**(아래 `acked` — 해제 이모지 블록이 없으면 빈 집합)는 확인 완료다.
+{{GROUP_MENTIONS}}- **확인 완료 조건**: 멘션·DM·참여 스레드에서 그 뒤에 **내 답글이 보이거나, 내가 해제 이모지로 리액션한 메시지**(아래 `acked` — 해제 이모지 블록이 없으면 빈 집합)는 확인 완료다.
 - `items` (최대 10, 급한 순): 다른 사람이 **나에게** 질문·요청·확인·의견을 구했고, 검색 결과 context 상 그 뒤에 내 답이 안 보이고 `acked` 도 아닌 것. 단순 공유·감사·인사·봇·내 메시지·남에게 묻는 것은 뺀다. 애매하면 넣는다. 같은 대화는 하나만 (dm > mention > thread).
   - DM 은 같은 대화(permalink 의 같은 채널 ID)당 가장 최근 1건만, 답 안 한 메시지가 여러 개면 `count` 에 개수.
   - `channel` `#채널`/`DM`/`그룹 DM`, `from` 표시 이름, `text` 나에게 바라는 것 한국어 한 줄(40자 안팎 요약), `url` permalink 그대로, `ts` ISO-8601.
 - `all` (최신순, 최대 {{ALL_LIMIT}}): 나를 멘션했거나 DM 한 메시지 전부 (봇 제외, 중복 제거, 고르지 않음). **`items` 에 넣은 항목도 반드시 `all` 에 포함한다** (같은 `url`). `text` 원문 한 줄(80자 안팎), `answered` 그 뒤 내 답이 보이거나 `acked` 면 true.
 - `summary`: 위 말투로 한 문장 (40자 안팎). 볼 게 없으면 `""`.
-- 출력 키: `"slack":{"summary":"","items":[{"channel":"","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread","count":1}],"all":[{"channel":"","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread","answered":false}]{{ACK_KEY}}{{WATCH_KEY}}}`
+- 출력 키: `"slack":{"summary":"","items":[{"channel":"","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread{{GROUP_REASON}}","count":1}],"all":[{"channel":"","from":"","text":"","url":"","ts":"ISO","reason":"mention|dm|thread{{GROUP_REASON}}","answered":false}]{{ACK_KEY}}{{WATCH_KEY}}}`
 <!--@/slack-->
 <!--@ack-->
 

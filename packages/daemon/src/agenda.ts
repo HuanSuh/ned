@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { extractJson, llmDisabled, runClaude } from "./claude.js";
-import { ACK_CHECK_MAX_DEFAULT, filtersPrompt, jqlExclude, watchChannels, type NedConfig } from "./config.js";
+import { ACK_CHECK_MAX_DEFAULT, filtersPrompt, isGroupId, jqlExclude, watchChannels, type NedConfig } from "./config.js";
 import { personaPrompt } from "./persona.js";
 import { AGENDA_PATH, AGENDA_RAW_PATH, log, readJson, writeJsonAtomic } from "./paths.js";
 import { applyThreadState, syncDmsFromList, syncThreadsFromList, type SlackThread, type ThreadRowFields } from "./slack-threads.js";
@@ -111,7 +111,8 @@ export interface MailAllItem {
   unread: boolean;
 }
 
-export type SlackReason = "mention" | "dm" | "thread";
+/** "group": a mention of one of my user groups (filters.slack.group_mentions) — never followed as a thread. */
+export type SlackReason = "mention" | "dm" | "thread" | "group";
 
 export interface SlackItem extends ThreadRowFields {
   /** "#channel" or "DM" / "그룹 DM". */
@@ -293,7 +294,23 @@ const str = (v: unknown): string => (typeof v === "string" ? v : v == null ? "" 
 const RSVPS: Rsvp[] = ["accepted", "needsAction", "declined", "tentative", "organizer"];
 const REASONS: GithubItem["reason"][] = ["review_requested", "my_pr_changes_requested", "my_pr_approved"];
 const MAIL_REASONS: MailReason[] = ["reply", "approval", "deadline", "request"];
-const SLACK_REASONS: SlackReason[] = ["mention", "dm", "thread"];
+const SLACK_REASONS: SlackReason[] = ["mention", "dm", "thread", "group"];
+/** Same message found by several searches: keep the strongest reason (dm > mention > thread > group). */
+const SLACK_RANK: Record<SlackReason, number> = { dm: 0, mention: 1, thread: 2, group: 3 };
+
+/** One row per permalink (slackUrlKey), first position kept, reason upgraded to the strongest seen; answered = any. */
+export function dedupeSlack<T extends { url: string; reason: SlackReason; answered?: boolean }>(list: T[]): T[] {
+  const at = new Map<string, number>(), out: T[] = [];
+  for (const x of list) {
+    const k = x.url ? slackUrlKey(x.url) : "";
+    const i = k ? at.get(k) : undefined;
+    if (i === undefined) { if (k) at.set(k, out.length); out.push(x); continue; }
+    const cur = out[i];
+    const best = SLACK_RANK[x.reason] < SLACK_RANK[cur.reason] ? { ...cur, reason: x.reason } : cur;
+    out[i] = "answered" in cur || "answered" in x ? { ...best, answered: cur.answered === true || x.answered === true } : best;
+  }
+  return out;
+}
 
 /** Slack "1730860000.123456" (epoch seconds) → ISO; ISO/other strings pass through. */
 function slackTs(v: unknown): string {
@@ -515,8 +532,8 @@ export function normalize(raw: Partial<Record<keyof AgendaPayload, unknown>>, cf
       for (const x of slack.all) if (isAcked(x)) x.answered = true;
       for (const w of slack.watch) for (const h of w.highlights) if (isAcked(h)) h.needs_me = false;
     }
-    slack.items = collapseDMs(slack.items.filter(keepCh));
-    slack.all = supersetSlack(slack.items, collapseDMs(slack.all.filter(keepCh)));
+    slack.items = collapseDMs(dedupeSlack(slack.items.filter(keepCh)));
+    slack.all = supersetSlack(slack.items, collapseDMs(dedupeSlack(slack.all.filter(keepCh))));
     // The prompt lets all[] skip context for rows already in items[]: share it by permalink, both ways.
     const byUrl = new Map<string, SlackContext>();
     for (const x of [...slack.items, ...slack.all]) if (x.context && x.url) byUrl.set(x.url, x.context);
@@ -599,6 +616,26 @@ export function ackCheckEmojis(cfg: NedConfig): string[] {
   return (s.ack_reactions ?? []).slice(0, Math.max(1, s.ack_check_max ?? ACK_CHECK_MAX_DEFAULT));
 }
 
+/** Search keyword for one group mention: an ID matches the raw `<!subteam^S…>` token, a handle its "@handle" text. */
+export function groupMentionToken(g: string): string {
+  return isGroupId(g) ? `<!subteam^${g}>` : `"@${g}"`;
+}
+
+/**
+ * {{GROUP_MENTIONS}} in agenda-lists.md: "" without groups (prompt unchanged). Slack `keywords` are AND'd (tool description:
+ * "All elements are AND'd"), so the groups can't share one search — one search per group, in the same turn as the others.
+ */
+export function groupMentionsPrompt(groups: string[], since: string): string {
+  if (!groups.length) return "";
+  const list = groups.map((g) => `\`keywords: [${JSON.stringify(groupMentionToken(g))}]\``).join(", ");
+  return [
+    `- 그룹 멘션 (내가 속한 유저그룹): 위 검색과 **같은 턴에** 그룹마다 한 번씩 (같은 인자, \`after: "${since}"\`) — ${list} → \`"group"\`. 결과가 0이어도 다른 표기로 다시 찾지 않는다.`,
+    "  - `all` 에는 그룹 멘션도 모두 넣는다 (`answered` 규칙 동일). `items` 에는 **그룹에 구체적인 질문·요청**을 했는데 그 뒤에 **아무도(나 포함) 답하지 않은** 것만 — 공지·공유·참고용은 넣지 않는다.",
+    "  - 같은 메시지가 여러 검색에 걸리면 하나만, reason 우선순위 dm > mention > thread > group.",
+    "",
+  ].join("\n");
+}
+
 /** Phase-1 prompt for one call covering `keys` (prompts/agenda-lists.md: lists only, no per-item context). */
 export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = new Date()): string {
   const cr = calendarRange(now), cb = rangeBounds(cr.from, cr.to);
@@ -609,6 +646,7 @@ export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = 
   // Each ack emoji is one extra Slack search: only the first ack_check_max of them, and only when there are candidates (prompt).
   const ack = keys.includes("slack") ? ackCheckEmojis(cfg) : [];
   if (ack.length) keep.add("ack");
+  const groups = keys.includes("slack") ? cfg.filters.slack.group_mentions ?? [] : [];
   const select = `select:${keys.flatMap((k) => LIST_TOOLS[k]).join(",")}`;
   const since = String(Math.floor(now.getTime() / 1000) - 24 * 3600);
   return pickSections(fs.readFileSync(path.join(PROMPTS_DIR, "agenda-lists.md"), "utf8"), keep)
@@ -621,6 +659,8 @@ export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = 
     .replaceAll("{{CAL_END}}", cb.end)
     .replaceAll("{{ALL_LIMIT}}", String(cfg.agenda_all_limit))
     .replaceAll("{{WATCH_CHANNELS}}", watch.map((c) => `#${c}`).join(", "))
+    .replaceAll("{{GROUP_MENTIONS}}", () => groupMentionsPrompt(groups, since))
+    .replaceAll("{{GROUP_REASON}}", groups.length ? "|group" : "")
     .replaceAll("{{ACK_EMOJIS}}", ack.map((e) => `:${e}:`).join(" "))
     .replaceAll("{{ACK_EXAMPLE}}", ack.length ? `\`hasmy::${ack[0]}:\`` : "")
     .replaceAll("{{ACK_WATCH_COND}}", watch.length ? " 또는 팔로업 채널의 `needs_me` 하이라이트 후보" : "")
