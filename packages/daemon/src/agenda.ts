@@ -8,6 +8,7 @@ import { extractJson, llmDisabled, runClaude } from "./claude.js";
 import { ACK_CHECK_MAX_DEFAULT, filtersPrompt, isGroupId, jqlExclude, watchChannels, type NedConfig } from "./config.js";
 import { personaPrompt } from "./persona.js";
 import { AGENDA_PATH, AGENDA_RAW_PATH, log, readJson, writeJsonAtomic } from "./paths.js";
+import { ACK_LOOKBACK_HOURS, collectWindow, gmailAfter, historyUpsert, noteCollected, openSlack, recording, type CollectWindow, type UpsertCtx } from "./history.js";
 import { applyThreadState, syncDmsFromList, syncThreadsFromList, type SlackThread, type ThreadRowFields } from "./slack-threads.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -636,9 +637,37 @@ export function groupMentionsPrompt(groups: string[], since: string): string {
   ].join("\n");
 }
 
+/** Search windows of one phase-1 call (src/history.ts collectWindow). Absent = the full window (Slack 24 h, mail 3 d). */
+export interface ListWindows {
+  slack?: CollectWindow;
+  mail?: CollectWindow;
+  /** ms: the ack-emoji search's `after` — reaches back to the oldest open ask Ned remembers (incremental runs). */
+  ackSince?: number;
+  /** Open Slack asks in the history: the ack search runs even when this run's results have no candidate. */
+  openAsks?: number;
+  /** Incremental runs: each 팔로업 channel's current summary ("#ch" → text), so the model updates instead of restarting. */
+  watchPrev?: Record<string, string>;
+}
+
+/** The windows for a call covering `keys` at `now` (history anchors, open asks, previous watch summaries). */
+export function listWindows(cfg: NedConfig, keys: readonly AgendaSourceKey[], now: number, prevSlack: SlackBlock | null = null): ListWindows {
+  const w: ListWindows = {};
+  if (keys.includes("slack")) {
+    w.slack = collectWindow("slack", cfg, now);
+    if (!w.slack.full) {
+      const o = openSlack(cfg, now, Math.min(cfg.history.display.slack_hours, ACK_LOOKBACK_HOURS));
+      w.openAsks = o.n;
+      w.ackSince = Math.min(w.slack.since, o.oldest);
+      w.watchPrev = Object.fromEntries((prevSlack?.watch ?? []).filter((x) => x.summary).map((x) => [x.channel, x.summary]));
+    }
+  }
+  if (keys.includes("mail")) w.mail = collectWindow("mail", cfg, now);
+  return w;
+}
+
 /** Phase-1 prompt for one call covering `keys` (prompts/agenda-lists.md: lists only, no per-item context). */
-/** `tpl`: the template text (tests pass a variant); defaults to prompts/agenda-lists.md. */
-export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = new Date(), tpl = fs.readFileSync(path.join(PROMPTS_DIR, "agenda-lists.md"), "utf8")): string {
+/** `tpl`: the template text (tests pass a variant); defaults to prompts/agenda-lists.md. `win`: incremental windows (listWindows). */
+export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = new Date(), tpl = fs.readFileSync(path.join(PROMPTS_DIR, "agenda-lists.md"), "utf8"), win: ListWindows = {}): string {
   const cr = calendarRange(now), cb = rangeBounds(cr.from, cr.to);
   const watch = keys.includes("slack") ? watchChannels(cfg.filters) : [];
   const keep = new Set<string>(keys);
@@ -649,7 +678,18 @@ export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = 
   if (ack.length) keep.add("ack");
   const groups = keys.includes("slack") ? cfg.filters.slack.group_mentions ?? [] : [];
   const select = `select:${keys.flatMap((k) => LIST_TOOLS[k]).join(",")}`;
-  const since = String(Math.floor(now.getTime() / 1000) - 24 * 3600);
+  const since = String(win.slack ? Math.floor(win.slack.since / 1000) : Math.floor(now.getTime() / 1000) - 24 * 3600);
+  const ackSince = win.ackSince !== undefined ? String(Math.floor(win.ackSince / 1000)) : since;
+  const sInc = !!win.slack && !win.slack.full, mInc = !!win.mail && !win.mail.full;
+  const slackIncr = sInc
+    ? "- **증분 수집**: `after` 는 지난 수집 직전이다 — 그 뒤에 온 새 메시지만 본다 (이전 항목은 Ned 가 기억한다). 새 것이 없으면 `\"items\":[]`, `\"all\":[]` 로 바로 끝낸다. 범위를 넓혀 다시 찾지 않는다.\n"
+    : "";
+  const prev = Object.entries(win.watchPrev ?? {});
+  const watchPrev = sInc && watch.length
+    ? `- **증분**: 채널마다 \`after\` 뒤 새 메시지만 본다. 새 메시지가 없으면 그 채널은 \`summary: ""\`, \`highlights: []\`, \`recent: []\` (Ned 가 이전 것을 유지한다). 있으면 아래 이전 요약에 새 내용을 반영해 \`summary\` 를 다시 쓴다.\n${prev.map(([c, t]) => `  - ${c} 이전 요약: ${JSON.stringify(t.slice(0, 400))}\n`).join("")}`
+    : "";
+  const ackOpen = sInc && (win.openAsks ?? 0) > 0 ? ` — 단, 지금은 Ned 가 기억하는 열린 항목이 ${win.openAsks}건 있으니 후보가 없어도 한다` : "";
+  const mailIncr = mInc ? "- **증분 수집**: 두 번째 검색은 지난 수집 이후(`after:` 날짜)만 본다 — 이전 항목은 Ned 가 기억한다. 새 것이 없으면 `items: []`.\n" : "";
   return pickSections(tpl, keep)
     .replaceAll("{{NOW}}", isoLocal(now))
     .replaceAll("{{TZ}}", Intl.DateTimeFormat().resolvedOptions().timeZone)
@@ -672,13 +712,28 @@ export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = 
     .replaceAll("{{PERSONA}}", () => personaPrompt(cfg.persona))
     .replaceAll("{{FILTERS}}", () => filtersPrompt(cfg.filters))
     .replaceAll("{{JQL_EXCLUDE}}", () => (jqlExclude(cfg.filters) ? ` ${jqlExclude(cfg.filters)}` : ""))
+    .replaceAll("{{SLACK_RANGE}}", sInc ? "지난 수집 이후 나에게 온 것 (증분)" : "최근 24시간, 나에게 온 것")
+    .replaceAll("{{SLACK_INCR}}", () => slackIncr)
+    .replaceAll("{{WATCH_PREV}}", () => watchPrev)
+    .replaceAll("{{ACK_OPEN}}", () => ackOpen)
+    .replaceAll("{{ACK_SINCE}}", ackSince)
+    .replaceAll("{{MAIL_ITEMS_RANGE}}", mInc ? `after:${gmailAfter(win.mail!.since)}` : "newer_than:3d")
+    .replaceAll("{{MAIL_INCR}}", () => mailIncr)
     .replaceAll("{{SLACK_SINCE}}", since);
+}
+
+/** What a list answer carries besides the lists: my own Slack messages, acked permalinks, mail threads I answered last. */
+export function listExtras(raw: Partial<Record<keyof AgendaPayload, unknown>> | null): Pick<UpsertCtx, "mine" | "acked" | "replied"> {
+  const sl = raw?.slack && typeof raw.slack === "object" ? (raw.slack as Record<string, unknown>) : {};
+  const ml = raw?.mail && typeof raw.mail === "object" ? (raw.mail as Record<string, unknown>) : {};
+  const strs = (v: unknown, n: number) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim()).slice(0, n) : []);
+  return { mine: strs(sl.mine, 50), acked: ackedSet(sl.acked_urls), replied: strs(ml.replied, 30) };
 }
 
 /** `ned prompt agenda`: every phase-1 prompt this config would send, in start order. */
 export function buildPrompt(cfg: NedConfig, now = new Date()): string {
   return listCalls(cfg, false)
-    .map((c) => `===== ${c.id} (${c.keys.join("+")}, model ${c.model ?? "default"}, maxTurns ${c.maxTurns}) =====\n${buildListsPrompt(cfg, c.keys, now)}`)
+    .map((c) => `===== ${c.id} (${c.keys.join("+")}, model ${c.model ?? "default"}, maxTurns ${c.maxTurns}) =====\n${buildListsPrompt(cfg, c.keys, now, undefined, listWindows(cfg, c.keys, now.getTime(), readAgenda().slack))}`)
     .join("\n\n");
 }
 
@@ -779,9 +834,23 @@ function setSourceStatus(keys: AgendaSourceKey[], s: SourceStatus): void {
   });
 }
 
-/** Merge one finished call's keys into agenda.json (item-level context carry-over) and mark them done. */
-function mergeSources(payload: AgendaPayload, keys: AgendaSourceKey[], meta: { started: number; cost: number; now: number }): Agenda {
-  return patchAgenda((a) => {
+export interface MergeMeta {
+  started: number;
+  cost: number;
+  /** The run's reference time (its prompts' "now"). */
+  now: number;
+  /** The windows the call searched + what it reported besides the lists (history upsert). */
+  win?: ListWindows;
+  extras?: Pick<UpsertCtx, "mine" | "acked" | "replied">;
+}
+
+/**
+ * Merge one finished call's keys into agenda.json (item-level context carry-over) and mark them done. With the history
+ * on, the call's lists are recorded first (historyUpsert) and Slack / mail remember this run as the next window's anchor.
+ */
+export function mergeSources(payload: AgendaPayload, keys: AgendaSourceKey[], meta: MergeMeta, cfg: NedConfig): Agenda {
+  const a = patchAgenda((a) => {
+    historyUpsert(payload, keys, cfg, { now: meta.now, win: { slack: meta.win?.slack, mail: meta.win?.mail }, ...meta.extras });
     carryContexts(a, payload, keys);
     a.sources_status ??= {};
     for (const k of keys) {
@@ -793,6 +862,8 @@ function mergeSources(payload: AgendaPayload, keys: AgendaSourceKey[], meta: { s
     if (keys.includes("calendar")) a.calendar_range = calendarRange(new Date(meta.now));
     a.updated_at = Date.now();
   });
+  for (const k of ["slack", "mail"] as const) if (keys.includes(k) && recording(cfg, k)) noteCollected(k, meta.now, meta.win?.[k]?.full ?? true);
+  return a;
 }
 
 /** github without an LLM: the three `gh search prs` queries in parallel. null when gh is missing / unauthenticated / failing. */
@@ -913,17 +984,24 @@ async function doRefresh(cfg: NedConfig, want: AgendaSourceKey[]): Promise<Agend
 
   const runCall = async (c: ListCall, order: number): Promise<void> => {
     const started = Date.now();
+    // Slack / mail: incremental windows from the history (first run / every FULL_RESCAN_HOURS: the full window).
+    const win = listWindows(cfg, c.keys, now, readAgenda().slack);
+    const incremental = (["slack", "mail"] as const).some((k) => win[k] && !win[k]!.full);
+    if (win.slack || win.mail) log(`agenda[${c.id}]: window ${(["slack", "mail"] as const).filter((k) => win[k]).map((k) => `${k} ${win[k]!.full ? `full (${win[k]!.reason})` : `since ${new Date(win[k]!.since).toISOString().slice(11, 16)}Z`}`).join(", ")}`);
+    let extras: MergeMeta["extras"] = {};
     const parse = (text: string): AgendaPayload | null => {
       const j = extractJson<Partial<Record<keyof AgendaPayload, unknown>>>(text);
+      if (j) extras = listExtras(j);
       return j ? normalize(j, cfg, new Date(now).toISOString()) : null;
     };
     let payload: AgendaPayload | null = null, cost = 0, turns = 0, error = "", raw = "";
     if (stub) {
       const s = await stubList(c.keys, order);
+      extras = listExtras(s.raw);
       payload = normalize(s.raw, cfg, new Date(now).toISOString());
     } else {
       const run = () =>
-        runClaude(buildListsPrompt(cfg, c.keys, new Date(now)), {
+        runClaude(buildListsPrompt(cfg, c.keys, new Date(now), undefined, win), {
           allowedTools: listTools(c.keys),
           tools: c.keys.includes("github") ? ["ToolSearch", "Bash"] : ["ToolSearch"],
           maxTurns: c.maxTurns,
@@ -935,7 +1013,8 @@ async function doRefresh(cfg: NedConfig, want: AgendaSourceKey[]): Promise<Agend
       cost = res.cost_usd;
       turns = res.num_turns;
       payload = res.ok ? parse(res.text) : null;
-      if (payload && emptyFor(payload, c.keys)) {
+      // An incremental window is usually empty (nothing new) — that's the point, not a connector hiccup.
+      if (payload && !incremental && emptyFor(payload, c.keys)) {
         // Seen live: the claude.ai connectors hadn't attached yet when ToolSearch ran (daemon start), so the
         // call came back []. One delayed retry usually finds them; a second empty answer is taken as real.
         log(`agenda[${c.id}]: empty on first try ($${cost.toFixed(2)}, ${turns} turns) — retrying once in 20s`);
@@ -960,7 +1039,7 @@ async function doRefresh(cfg: NedConfig, want: AgendaSourceKey[]): Promise<Agend
       log(`agenda[${c.id}]: failed at +${at}s — ${error.slice(0, 300)}`);
       return;
     }
-    const a = mergeSources(payload, c.keys, { started, cost, now });
+    const a = mergeSources(payload, c.keys, { started, cost, now, win, extras }, cfg);
     finished.push(`${c.id}+${at}s`);
     const unchanged = c.keys.filter((k) => a.sources_status?.[k]?.unchanged);
     log(`agenda[${c.id}]: ${describe(a, c.keys)} — $${cost.toFixed(2)}, ${turns} turns, ${Math.round((Date.now() - started) / 1000)}s, merged at +${at}s${unchanged.length ? ` (unchanged: ${unchanged.join(",")})` : ""}`);
@@ -982,7 +1061,7 @@ async function doRefresh(cfg: NedConfig, want: AgendaSourceKey[]): Promise<Agend
     (async () => {
       const gh = await ghP;
       if (gh) {
-        mergeSources({ ...emptyAgenda(now), github: gh }, ["github"], { started: t0, cost: 0, now });
+        mergeSources({ ...emptyAgenda(now), github: gh }, ["github"], { started: t0, cost: 0, now }, cfg);
         finished.push(`github+${Math.round((Date.now() - t0) / 1000)}s`);
         log(`agenda[github]: ${gh.length} prs via gh (no LLM), merged at +${Math.round((Date.now() - t0) / 1000)}s`);
       }

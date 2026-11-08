@@ -357,6 +357,17 @@ jira/github `{open}`(목록에서 빠지면 false, 다시 보이면 true) · cal
 읽기·쓰기 수 ms. 하루 한 번(`meta.json` `last_prune_day`) `keep_days` 넘게 안 보인 레코드를 지우고(0 = 파일 삭제), `HISTORY_SOURCES` 파일만 만진다.
 `history.enabled=false` 면 기록·prune 모두 안 한다.
 
+**증분 수집** (`collectWindow`, `listWindows`, `prompts/agenda-lists.md`): Slack·메일 1단계 호출은 `meta.json` 의 `collect.<src>.last_ok_at`
+(마지막으로 병합에 성공한 run 의 기준 시각) − `OVERLAP_MINUTES`(30) 이후만 검색한다 — Slack `{{SLACK_SINCE}}` = `max(now−24h, last_ok−30m)`,
+메일 items 검색 `{{MAIL_ITEMS_RANGE}}` = `after:YYYY/MM/DD`(Gmail 은 날짜를 태평양 자정으로 읽으므로 UTC−8 날짜 — `gmailAfter`).
+이력 파일이 없거나(첫 실행) 성공 기록이 없거나 `last_full_at` 이 `FULL_RESCAN_HOURS`(6) 지났으면 전체 창(Slack 24h, 메일 3d), 그 소스가
+기록되지 않으면(`history.enabled=false`·`keep_days.<src>=0`) 늘 전체 창 = 예전 프롬프트와 byte 동일. 메일 `is:unread newer_than:2d` 검색(안 읽음 수·`all`)은
+늘 전체. 증분 프롬프트는 "새 것이 없으면 `items:[]`, `all:[]` 로 끝" 문구를 넣고, 빈 결과 20초 재시도(`emptyFor`)는 전체 창 호출에서만 한다.
+출력에 `slack.mine`(검색 결과에 보인 내 메시지 permalink)·`mail.replied`(마지막 메시지가 나인 스레드 id)가 추가돼 증분 창 밖의 옛 항목을
+답함 처리한다. 해제 이모지 검색 `{{ACK_SINCE}}` 는 증분일 때 이력의 가장 오래된 열린 항목까지(최대 표시 구간·7일), 열린 항목이 있으면 후보가 없어도 돈다.
+팔로업 채널은 증분일 때 이전 요약(`{{WATCH_PREV}}`)을 받아 새 메시지가 있을 때만 다시 쓴다. 전체 창 run 은 반환된 가장 오래된 행보다 새로운데
+목록에 없는 열린 항목을 닫는다(검색 상한 20 으로 밀린 옛 행은 그대로). `ned prompt agenda` 는 지금 쓸 창 그대로 출력.
+
 ## Obsidian 아카이브 (`src/archive.ts`, `src/vault.ts`, `src/outputs.ts`)
 
 `config.archive` (기본 꺼짐): `enabled`, `vault` (절대 경로, `~/` 펼침), `folder` (기본 `Ned`, `..`·점으로 시작하는 세그먼트 거부),
