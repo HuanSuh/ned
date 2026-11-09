@@ -78,8 +78,10 @@ attention id 가 없는 소스 항목도 같은 저장소·엔드포인트를 �
 `finalizeSlackView`·`openSlack`/`isCurrent`(`slackRecReviewed`, agenda `slack.threads` 로 스레드 조회)·대시보드 카드/이력/팔로업이 같은 규칙.
 예전 `slack:<ch>:<ts>@<답글 ts>` 표시는 `readReviewed` 가 기본 키로 접고(여럿이면 최대) 다음 `setReviewed` 가 새 형식으로만 다시 쓴다;
 그런 키로 POST 해도 기본 키로 저장. 접두사는 맞는데 나머지가 비었거나 공백이 있는 키(`slack:` 등)는 400.
-Slack ✓ 는 `markThreadSeen` 으로 그 스레드의 `seen_reply_ts = max(last_reply_ts, search_latest_ts, thread_ts)` 도 남긴다(해제 시 삭제) —
-`hasNewSinceMe` 는 그보다 새 ts 가 있을 때만 참이라 ✓ 직후 수집이 다시 "새 답글"로 열지 않는다.
+Slack ✓ 는 `markThreadSeen` 으로 그 스레드의 `seen_reply_ts` 에 **마크 시각**(reviewed.json 값, Slack ts 형식 `markTs` = `(ms/1000).toFixed(6)`)도
+남긴다(해제 시 삭제). `hasNewSinceMe` = `new_since_me > 0 && latestTs(t) > seen_reply_ts` 라 ✓ 판정(마크 ms ≥ 스레드 최신 ts)과 같은 순간을 본다 —
+✓ 전에 달렸지만 늦게 수집된 답글은 행도 "새 답글"(reopen·팔로업 needs_me·heartbeat·+N 칩)도 열지 않고, ✓ 뒤 답글은 둘 다 연다.
+이 규칙 전 레코드의 `seen_reply_ts`(그때 본 답글 ts)는 형식이 같아 그대로 읽는다(마크보다 약간 이른 기준이 될 뿐, 마이그레이션 없음).
 
 **알림 설정** (`config.notifications`): `{enabled, kinds:{session,email,slack,jira,github,sentry,calendar}, briefing,
 summary_threshold (기본 3), quiet_delivery: skip|silent (기본 skip), sound}`. 읽을 때·`PUT /api/config` 모두 깊게 머지하고
@@ -179,10 +181,13 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
     지금처럼 읽고, 같은 ts 라도 마지막 읽기가 `THREAD_RECHECK_MINUTES`(6시간) 지났으면 1회 재확인(`recheck` — 1단계는 최신 20건만 봐서
     조용해 보이는 스레드도 움직일 수 있다). 후보가 0이면 claude 를 부르지 않고, 로그에 `agenda-threads: … skipped unchanged N thread(s), M DM(s)` 를 남긴다.
     `read_search_ts` 가 없는 예전 기록은 `last_reply_ts` 와 비교한다(예전 규칙).
-    읽은 스레드의 마지막 메시지 ts 가 `search_latest_ts` 보다 이르면(모델이 답글 ts 를 비우거나 원글 ts 로 채워 원글만 남는 경우)
-    `last_reply_ts` 를 `search_latest_ts` 로 올리고 `WARN agenda-threads: last_reply_ts behind search …`(채널·thread ts·두 값·ts 없음/같은 ts
-    개수) 1줄 + `agenda-threads: trace model output …`(그 스레드의 모델 출력) 1줄을 남긴다. DM 은 대상 아님. 이미 잘못 기록된 예전 레코드는
-    확인 판정·`seen_reply_ts`·`hasNewSinceMe` 가 모두 `max(…)` 로 읽어 별도 마이그레이션 없이 맞게 동작한다.
+    스레드 읽기 결과 검사(DM 은 대상 아님; 경고마다 `WARN agenda-threads: …` 1줄 + `agenda-threads: trace model output …` 1줄):
+    ① **신뢰 불가** — 답글이 있어야 하는데(`reply_count > 0` 또는 `search_latest_ts > thread_ts`) ts 를 읽을 수 있는 메시지가 원글뿐이거나,
+    같은 ts 가 겹침(원글 ts 를 답글에 재사용) → last_reply_*·new_since_me·요약·recent 를 덮어쓰지 않고 유지(`checked_at`·`read_search_ts` 는
+    갱신 — 재읽기 루프 없음). ② **뒤처짐** — 마지막 메시지 ts < `search_latest_ts` → `last_reply_ts` 를 그 값으로 올리고 `last_reply_from` 은 비움,
+    `last_reply_text` 는 `(답글 내용 미확인)`(`UNKNOWN_REPLY`), 내 마지막 답보다 뒤면 `new_since_me ≥ 1`. heartbeat 키는 `@last_reply_ts` 라
+    나중에 같은 답글을 제대로 읽어도 알림이 다시 가지 않는다. 프롬프트(threads 절)는 각 메시지 자신의 ts, 원글 ts·`known_last_reply_ts` 재사용 금지,
+    모르면 ts `""` 로 두고 메시지는 빼지 말라고 지시한다. 이미 잘못 기록된 예전 레코드는 확인 판정·`hasNewSinceMe` 가 `max(…)` 로 읽어 마이그레이션 없이 동작.
   - **일일 예산**: 배치 직전마다 오늘(로컬 날짜) 총 `claude -p` 비용(`~/.ned/costs.json`, agenda·agenda_context·heartbeat·draft·calendar·
     action 합산)이 `agenda_daily_budget_usd`(기본 15) 이상이면 멈추고 `context_status.stopped = "budget"`. 1단계 목록은 예산과 무관하게 돈다.
 - 동시에 여러 번 요청돼도 실행 중인 1단계 한 번을 공유한다(busy guard). 2단계는 워커 하나가 소스 큐(Slack 우선)를 순서대로 처리한다.

@@ -154,5 +154,6 @@ Slack·메일 항목(소스 카드 행, Ned 액션 아이템, 인박스 상세, 
 에러 문자열은 화면에 그대로 늘어놓지 않는다. `errBadge()` 가 경고색 ⚠ 아이콘만 그리고(`title` = 어디서 + 짧은 요약 — `API Error: 400 {…}` 은 JSON 안의 `message` 를 꺼내 요약), 누르면 팝오버에 전체 메시지 · 발생 시각 · `다시 시도`(해당 잡 재실행) · `로그 복사` · 닫기(Esc/바깥 클릭). 쓰는 곳: 홈 상단 agenda 갱신 실패(다시 시도 = agenda 새로고침), 헤더 daemon 상태(연결 실패 / state.json 이 멈춤 / 대시보드에서 실행한 점검 실패), 답장 초안 모달(초안 생성·전송 실패), 캘린더 범위 조회 실패. 토스트도 짧은 요약만.
 - 메일·Slack·Jira·GitHub 카드 항목(전체 보기 포함)과 인박스 '기타' 의 같은 소스 항목에도 체크가 있다(소스별 안정 키, 위 daemon README). 체크하거나 그 행에서 초안을 만들면 카드 아래 `확인 완료 N` 으로 접히고, 카드 배지·요약·미리보기·인사말 카운트는 미확인만 센다.
   Slack 은 스레드 메타와 무관한 `slack:<채널>:<ts>` 키, 다시 열림은 체크 시각보다 늦은 `max(행 ts, thread.last_reply_ts, thread.search_latest_ts)` —
-  홈 카드·지난 N일 이력·팔로업(별도 카드/접힘)이 같은 키·같은 판정. 키를 못 만든 행은 ✓ 가 비활성(`data-review-nokey`, 클릭되면 토스트),
+  홈 카드·지난 N일 이력·팔로업(별도 카드/접힘)이 같은 키·같은 판정. 키를 못 만든 행은 ✓ 가 비활성(`aria-disabled` + `.nokey` 흐림 — `disabled` 가 아니라 클릭이 와서 `data-review-nokey` 위임 핸들러가 토스트),
+  "+N 새 답글" 칩(`slackthread.js newReplies`)은 `seen_reply_ts`(= ✓ 시각) 이후 답글만 센다,
   POST 실패면 낙관 갱신을 되돌리고 토스트(`reviewed.js reviewSource`).
