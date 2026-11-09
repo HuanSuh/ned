@@ -120,7 +120,8 @@ Slack(2) → 메일(1)·Jira(1) → GitHub(2). 읽을 때·`PUT /api/config`(보
 400 `{ field: "dashboard.slack_team_id" }`, 손으로 고친 config.yaml 이면 읽을 때 무시. 팀 ID 자동 감지는 없음(Slack 토큰 없음, 수집 데이터에
 team 필드 없음). 열기는 대시보드(`features/openlink.js`) → Ned.app `openLink` 메시지 핸들러(`apps/menubar/…/DashboardWindow.swift`
 `DeepLink.open`: 앱 미설치·열기 실패면 웹 URL, `open link: …` 로그 한 줄). 앱 딥링크는 Ned.app 창에서만 — 브라우저로 연 대시보드는
-메시지 핸들러가 없어 늘 웹 URL 을 바로 연다(딥링크 시도·폴백 타이머 없음).
+메시지 핸들러가 없어 늘 웹 URL 을 바로 연다(딥링크 시도·폴백 타이머 없음). WKWebView 탐색(`decidePolicyFor`·`createWebViewWith`)으로
+직접 들어온 `slack://`·`figma://`·`notion://` 는 웹 URL 이 없어 앱이 없으면 아무것도 안 열림(로그 한 줄) — 대시보드는 이 경로를 쓰지 않는다.
 
 **트래킹 제외** (`config.filters`): `slack.exclude_channels`(채널명, `#` 없이) · `jira.exclude_projects`(프로젝트 키, 대문자 영숫자만 —
 JQL 에 그대로 들어가므로 그 밖의 값은 버린다). heartbeat.md · briefing.md · agenda-lists.md 의 `{{FILTERS}}` 가

@@ -220,6 +220,8 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
         let url = action.request.url
+        // A raw slack:// · figma:// · notion:// navigation carries no web URL, so with the app missing nothing opens
+        // (one note line). The dashboard never does this today — openlink.js posts {deep, web} to OpenLinkHandler.
         if let url, DeepLink.isDeep(url) {
             DeepLink.open(url, web: nil)
             decisionHandler(.cancel)
@@ -237,6 +239,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if let url = action.request.url {
+            // Same as decidePolicyFor: a bare deep link has no web fallback (not a path the dashboard uses).
             if DeepLink.isDeep(url) { DeepLink.open(url, web: nil) } else { NSWorkspace.shared.open(url) }
         }
         return nil
