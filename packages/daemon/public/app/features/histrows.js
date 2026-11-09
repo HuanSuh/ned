@@ -1,6 +1,42 @@
-/* 수집 이력 rows (GET /api/history items → html): day separators, state chips. Pure — no fetch, no DOM (histview.js renders). */
+/* 수집 이력 rows (GET /api/history items → html): day separators, state chips, ✎ / ⋯ / ✓ per row.
+ * Pure — no fetch, no DOM (histview.js renders). */
+import { draftFor } from "./draftref.js";
+import { srcCheck, srcKey } from "./revkeys.js";
+import { S } from "../state.js";
 import { openIcon } from "../ui/icons.js";
 import { WEEK, esc, ext, hhmm, midnight, safeUrl, toMs } from "../util.js";
+
+const KIND = { slack: "slack", mail: "email", jira: "jira", github: "github", calendar: "calendar" };
+/**
+ * A history row (HistoryRow: key, source, ts, url, channel, item = the record's own fields) → the item shape the cards
+ * hand to draftFor / srcCheck, so refs and 확인 keys match the card's row for the same message / thread:
+ * Slack → url · channel · from · text · ts (+ the followed thread from agenda slack.threads, for the `@reply` 확인 key);
+ * mail → thread id · from · subject · snippet · why, with the row's ts (a newer message reopens it, like `received`).
+ * null for a source with no item.
+ */
+export function histTarget(x, threads = S.agenda?.slack?.threads || []) {
+  const kind = KIND[x?.source], it = x?.item || {};
+  if (!kind) return null;
+  if (kind === "slack") {
+    const url = it.url || x.url || "";
+    const m = /\/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})/.exec(url), tt = /[?&]thread_ts=([\d.]+)/.exec(url)?.[1];
+    const key = m ? `${m[1]}:${tt || `${m[2]}.${m[3]}`}` : "";
+    const thread = key ? threads.find((t) => t.key === key) : undefined;
+    return { kind, item: { url, channel: it.channel || it.watch?.channel || x.channel || "", from: it.from || "", text: it.text || it.ask || it.watch?.text || x.title || "", ts: it.ts || x.ts, ...(thread ? { thread } : {}) } };
+  }
+  if (kind === "email") return { kind, item: { ...it, url: it.url || x.url, ts: x.ts } };
+  return { kind, item: { ...it, url: it.url || x.url } };
+}
+/** Does the record still want something from me (→ full-strength ✎; the rest are dimmed until hover)? */
+const wantsMe = (x) => { const s = x.state || {}; return x.source === "slack" ? (s.need || x.item?.watch?.needs_me) && !s.answered && !s.acked : x.source === "mail" ? !!s.needs_action : false; };
+/** ✎ (Slack · 메일, origin "history") or ⋯ (Jira · GitHub · 캘린더), then ✓ for Slack · 메일 — same keys as the cards. */
+export function histAct(x) {
+  const t = histTarget(x);
+  if (!t) return "";
+  const own = t.kind === "slack" || t.kind === "email";
+  const btn = draftFor(t.kind, t.item, own ? srcKey(t.kind, t.item) : "", { origin: "history", soft: !wantsMe(x) });
+  return btn + (own ? srcCheck(t.kind, t.item) : "");
+}
 
 const ICON = { slack: "💬", mail: "✉️", jira: "📋", github: "🐙", calendar: "📅" };
 
@@ -31,8 +67,8 @@ export function histChips(x) {
   return out.join("");
 }
 
-/** Rows newest first with a day separator whenever the local day changes. Pure (tests). */
-export function histHtml(items, total = items.length, today = midnight()) {
+/** Rows newest first with a day separator whenever the local day changes. Pure (tests). `act(row)` → the row's buttons. */
+export function histHtml(items, total = items.length, today = midnight(), act = histAct) {
   if (!items.length) return `<div class="gnone">이 기간에 모은 항목 없음.</div>`;
   let html = "", lastDay = "";
   for (const x of items) {
@@ -40,7 +76,7 @@ export function histHtml(items, total = items.length, today = midnight()) {
     if (head !== lastDay) { html += `<div class="hday">${esc(head)}</div>`; lastDay = head; }
     const u = safeUrl(x.url);
     html += `<div class="ti hist${x.current ? " cur" : ""}"><span class="ic">${ICON[x.source] || "·"}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.title || "(내용 없음)")) : esc(x.title || "(내용 없음)")}</span>
-      <div class="sb">${x.detail ? `<span class="d">${esc(x.detail)}</span>` : ""}${histChips(x)}${ms ? `<span>${esc(hhmm(ms))}</span>` : ""}</div></div><div class="ra">${openIcon(u)}</div></div>`;
+      <div class="sb">${x.detail ? `<span class="d">${esc(x.detail)}</span>` : ""}${histChips(x)}${ms ? `<span>${esc(hhmm(ms))}</span>` : ""}</div></div><div class="ra">${act ? act(x) : ""}${openIcon(u)}</div></div>`;
   }
   if (total > items.length) html += `<div class="gnone">최근 ${items.length}건만 — 전체 ${total}건 (검색 ⌘K 로 더 찾기).</div>`;
   return html;
