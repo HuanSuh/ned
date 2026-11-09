@@ -84,7 +84,7 @@ describe("slackView", () => {
     const m1 = /archives\/(C1)\/p(\d{10})(\d{6})/.exec(v.items[1].url)!;
     (v.items[1] as { thread?: { last_reply_ts: string } }).thread = { last_reply_ts: "1999999999.000100" } as never;
     finalizeSlackView(v, { [`slack:C0:${m[2]}.${m[3]}`]: NOW, [`slack:C1:${m1[2]}.${m1[3]}`]: NOW });
-    // C0 reviewed → out; C1's mark predates its newest reply (key carries @last_reply_ts) → stays
+    // C0 reviewed → out; C1's mark predates its thread's newest reply (activity = max(row ts, last_reply_ts)) → stays
     expect(v.items.map((x) => x.url.split("/")[4])).toEqual(["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10"]);
   });
 });

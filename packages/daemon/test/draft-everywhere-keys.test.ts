@@ -42,11 +42,11 @@ const histRow = (s: SlackBlock) => {
 beforeEach(() => { S.agenda = { reviewed: {}, slack: { threads: [] } }; });
 
 describe("✓ key: card row = 이력 row = 팔로업 row = daemon", () => {
-  it("one `slack:<ch>:<ts>@<last reply>` key everywhere", () => {
+  it("one `slack:<ch>:<ts>` key everywhere (thread metadata never in the key)", () => {
     const s = block();
     const card = s.items[0];
     expect(card.thread?.last_reply_ts).toBe(LATE);
-    const want = `slack:C1:${ROOT}@${LATE}`;
+    const want = `slack:C1:${ROOT}`;
     expect(slackReviewKey(card)).toBe(want); // daemon (history.ts)
     expect(srcKey("slack", card)).toBe(want); // card row (reviewed.js)
     expect(reviewKeys(srcCheck("slack", card))).toEqual([want]);

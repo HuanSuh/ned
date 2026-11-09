@@ -1,5 +1,6 @@
 import { DEFAULT_NOTIFICATIONS, type NedNotifications, type PersonaId } from "./config.js";
 import { REVIEWED_PATH, STATE_PATH, readJson, writeJsonAtomic } from "./paths.js";
+import { foldReviewMarks } from "./review-keys.js";
 import type { SessionView } from "./sessions.js";
 
 export type AttentionKind = "session" | "email" | "slack" | "jira" | "github" | "sentry" | "calendar" | "other";
@@ -85,7 +86,11 @@ export const readSourceReviewed = (): Reviewed => Object.fromEntries(Object.entr
 
 /** Attention id (or a SOURCE_KEY) → reviewed at (ms). */
 export type Reviewed = Record<string, number>;
-export const readReviewed = (): Reviewed => readJson<Reviewed>(REVIEWED_PATH, {});
+/**
+ * reviewed.json, old thread-aware Slack keys (`slack:<ch>:<ts>@<reply ts>`) folded into `slack:<ch>:<ts>` (largest
+ * mark) — review-keys.ts foldReviewMarks. The file itself is rewritten in the new shape on the next setReviewed.
+ */
+export const readReviewed = (): Reviewed => foldReviewMarks(readJson<Reviewed>(REVIEWED_PATH, {}));
 
 /**
  * Mark / unmark an attention item as 확인 완료 (persisted in reviewed.json, entries kept 7 days).
