@@ -1,7 +1,7 @@
 /* Reply-draft modal: POST /api/draft → 3 drafts, edit, regenerate → POST /api/send. */
 import { postJson } from "../api.js";
 import { init as initActions } from "./actions.js";
-import { applyMentions, asksHtml } from "./draftasks.js";
+import { applyMentions, asksHtml, missingMentions } from "./draftasks.js";
 import { clean, parseDraftAttr } from "./draftref.js";
 import { SRC_KEY_RE, reviewAttention, reviewSource } from "./reviewed.js";
 import { resumePending, sendAndWait } from "./sendjob.js";
@@ -53,7 +53,7 @@ export async function requestDraft(hint) {
   const r = await postJson("/api/draft", clean({ source: DR.source, ref: DR.ref, hint: hint || undefined, origin: DR.origin || undefined })).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
   if (!DR.open) { S.drafting = false; renderHeader(); return; }
   if (r.ok && r.data) {
-    DR.resp = r.data; DR.tab = (r.data.drafts?.[1] || r.data.drafts?.[0])?.id ?? null; DR.edits = {}; DR.mention = false; // 멘션 제안 toggle: off by default
+    DR.resp = r.data; DR.tab = (r.data.drafts?.[1] || r.data.drafts?.[0])?.id ?? null; DR.edits = {}; DR.mention = false; DR.mentionAdded = {}; // 멘션 제안 toggle: off by default
     // drafting a reply counts as having looked at it
     if (DR.att && SRC_KEY_RE.test(DR.att)) { if (!(S.agenda?.reviewed || {})[DR.att]) reviewSource(DR.att, true); }
     else { const a = DR.att && S.state?.attention.find((x) => x.id === DR.att); if (a && !a.reviewed_at) reviewAttention(DR.att, true); }
@@ -95,11 +95,18 @@ export function draftActions() {
 }
 export const curDraft = () => DR.resp?.drafts?.find((d) => d.id === DR.tab) || null;
 export const curText = () => (DR.tab in DR.edits ? DR.edits[DR.tab] : applyMentions(curDraft()?.text || "", DR.resp?.mentions, !!DR.mention));
-/** 멘션 제안 toggle: flips DR.mention; edited texts get the mentions added (never twice) or stripped from the front. */
+/**
+ * 멘션 제안 toggle: flips DR.mention. Edited texts get the missing mentions added (never twice); turning it off strips
+ * only what the toggle added (DR.mentionAdded per tab) — a mention the user typed stays.
+ */
 export function toggleMention() {
   const ms = DR.resp?.mentions; if (!ms?.length) return;
   DR.mention = !DR.mention;
-  for (const k of Object.keys(DR.edits)) DR.edits[k] = applyMentions(DR.edits[k], ms, DR.mention);
+  DR.mentionAdded ||= {};
+  for (const k of Object.keys(DR.edits)) {
+    if (DR.mention) { DR.mentionAdded[k] = missingMentions(DR.edits[k], ms); DR.edits[k] = applyMentions(DR.edits[k], ms, true); }
+    else { DR.edits[k] = applyMentions(DR.edits[k], DR.mentionAdded[k] || [], false); delete DR.mentionAdded[k]; }
+  }
   $("dm-text").dataset.tab = ""; // repaint the textarea with the new text
   DR.confirm = null; renderDraft();
 }
@@ -193,7 +200,10 @@ export function init() {
     if (e.target.closest("[data-dconfirm]")) return runAction(DR.confirm);
     if (e.target.closest("[data-dcancel]")) { DR.confirm = null; renderDraft(); }
   });
-  $("dm-text").addEventListener("input", (e) => { if (DR.tab != null) DR.edits[DR.tab] = e.target.value; if (DR.confirm) { DR.confirm = null; renderDraft(); } });
+  $("dm-text").addEventListener("input", (e) => {
+    // first edit of a tab while the toggle is on: the mentions it shows were added by the toggle (strip them on off)
+    if (DR.tab != null && DR.mention && !(DR.tab in DR.edits)) (DR.mentionAdded ||= {})[DR.tab] = missingMentions(curDraft()?.text || "", DR.resp?.mentions);
+    if (DR.tab != null) DR.edits[DR.tab] = e.target.value; if (DR.confirm) { DR.confirm = null; renderDraft(); } });
   $("dm-regen").addEventListener("click", () => requestDraft($("dm-hint").value.trim()));
   $("dm-hint").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing && !(e.metaKey || e.ctrlKey)) { e.preventDefault(); requestDraft(e.target.value.trim()); } });
   // Modal keys win over page shortcuts: Esc closes (or backs out of the confirm step), ⌘⏎ / Ctrl⏎ runs the primary action.

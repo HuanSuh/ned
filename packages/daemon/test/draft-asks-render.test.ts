@@ -1,7 +1,7 @@
 /** 초안 모달 "답할 것" 목록·멘션 제안 토글 (public/app/features/draftasks.js, 순수 — node 에서 렌더). */
 import { describe, expect, it } from "vitest";
 // @ts-expect-error — plain browser ES module (public/app), no types
-import { applyMentions, asksHtml, isTwoPass, mentionLabel } from "../public/app/features/draftasks.js";
+import { applyMentions, asksHtml, isTwoPass, mentionLabel, missingMentions } from "../public/app/features/draftasks.js";
 
 const base = { id: "x", source: "slack", context: { summary: "", excerpt: "" }, drafts: [{ id: "x-0", label: "짧게", text: "넵" }], meta: { mode: "2pass" }, mentions: [] };
 
@@ -58,5 +58,10 @@ describe("applyMentions", () => {
     expect(applyMentions("<@U0KIM> 확인했어요", ms, false)).toBe("확인했어요");
     expect(applyMentions("확인했어요", ms, false)).toBe("확인했어요");
     expect(applyMentions("<@U0KIM> <@U0LEE> 네", ["<@U0KIM>", "<@U0LEE>"], false)).toBe("네");
+  });
+  it("missingMentions: 토글이 넣을(=넣은) 것만 — 사용자가 이미 쓴 멘션은 제외라 끌 때도 안 지움", () => {
+    expect(missingMentions("<@U0KIM> 네", ["<@U0KIM>", "<@U0LEE>"])).toEqual(["<@U0LEE>"]);
+    const added = missingMentions("<@U0KIM> 네", ms); // user typed it → toggle added nothing
+    expect(applyMentions(applyMentions("<@U0KIM> 네", ms, true), added, false)).toBe("<@U0KIM> 네");
   });
 });

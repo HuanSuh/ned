@@ -30,9 +30,13 @@ export function asksHtml(r, { mentionOn = false } = {}) {
   return `<div class="dask-box" role="group" aria-label="답할 것"><div class="dask-h">답할 것${open.length ? ` ${open.length}` : ""}</div>${none}${list}${mention}</div>`;
 }
 
+/** The suggested mentions the text doesn't contain yet (= what applyMentions(…, true) would prepend). */
+export const missingMentions = (text, mentions) => (Array.isArray(mentions) ? mentions : []).filter((m) => m && !String(text ?? "").includes(m));
+
 /**
  * Draft text with the suggested mentions at the front (`on`) or without them (`!on`). On: only the mentions the text
- * doesn't already contain are prepended (an edited text never gets a duplicate). Off: strips a leading run of them.
+ * doesn't already contain are prepended (an edited text never gets a duplicate). Off: strips a leading run of the
+ * given mentions — the modal passes only the ones its toggle added, so a mention the user typed stays.
  */
 export function applyMentions(text, mentions, on) {
   const t = String(text ?? "");
