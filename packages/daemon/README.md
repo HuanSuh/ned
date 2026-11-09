@@ -372,25 +372,27 @@ agenda 에서 이어 붙이고, 그 다음 `finalizeSlackView` 가 ✓ 확인 �
 내 메시지로 이력의 옛 항목을 답함 처리(`historyFromThreads`)하고 그 행을 바로 items 에서 뺀다(`applyAnswered`). Jira/GitHub/캘린더는 스냅샷 그대로.
 `history.enabled=false`(또는 그 소스 `keep_days` 0)면 예전처럼 이번 목록 그대로. 구간 밖 열린 요청의 스레드·DM 도 계속 2단계 재확인 대상이다 —
 `slack-threads.ts` `followed`: items 행(prio 0)이면 48시간 활동 필터(`THREAD_FOLLOW_HOURS`)와 무관, 읽은 뒤 새 메시지가 없으면 6시간마다 재확인.
-`/api/history` 의 `current` 도 구간 안이거나 열린 요청이면 true.
+prio 는 `finalizeSlackView`(✓ 제외·10건) 뒤의 items 로 다시 매긴다(`mergeSources` 가 sync 를 한 번 더) — ✓ 한 옛 요청은 재확인 대상에서 빠진다.
+스레드 200·DM 50 상한에서는 prio 0 을 먼저 남긴다. `/api/history` 의 `current` 도 구간 안이거나 ✓ 안 한 열린 요청이면 true.
 
 **이름·채널명 안정화**: Ned 는 `users.info` 를 따로 부르지 않고 1단계 검색 결과에서 모델이 `from`/`channel` 을 옮겨 적는다. 프롬프트 규칙 —
 `from` = 표시 이름 → 실명 → 사용자명 → 사용자 ID(`U…`), Slack Connect 외부 사용자도 같게, "알 수 없음"·빈 값 금지 / `channel` = 결과의 채널
-이름 그대로 `#` 붙여서. 데몬 쪽 — `upsertSlack`/`fillSlack` 은 새 `from` 이 비었거나 자리표시(`namelessFrom`)면 레코드의 기존 이름을 유지하고,
-채널명은 permalink 의 채널 ID 기준으로 하나로 맞춘다(`slackChannelNames`): (1) 팔로업·제외 채널 설정 이름이 그 ID 레코드가 보인 이름과 같으면 설정 표기,
-(2) 그 ID 레코드들이 보인 이름(`item.channel_seen`, 원문) 중 가장 많은 것(동률은 최신), (3) 처음 보는 ID 면 이번 응답. upsert 때마다 모든 레코드의
+이름 그대로 `#` 붙여서. 데몬 쪽 — `upsertSlack`/`fillSlack` 은 새 `from` 이 비었거나 자리표시(`namelessFrom`)거나 사용자 ID(`U…`/`W…`)뿐이면 레코드의 기존 실명을 유지하고(`pickName`),
+채널명은 permalink 의 채널 ID 기준으로 하나로 맞춘다(`slackChannelNames`): 그 ID 레코드들이 보인 이름(`item.channel_seen`, 원문) 중 가장 많은 것(동률은 최신)
+— 그 이름이 팔로업·제외 채널 설정과 대소문자·`#` 만 다르거나 설정 이름이 과반이면 설정 표기, 처음 보는 ID 면 이번 응답. 한 번 잘못 쓴 제외 채널명으로 채널 전체가 숨지 않는다. upsert 때마다 모든 레코드의
 `item.channel` 을 그 이름으로 쓰고, `slackView` 도 같은 이름으로 조립한다(이전 레코드는 `channel` 을 원문으로 간주). 채널 이름이 바뀌면 새 이름의
 레코드가 많아지거나 옛 레코드가 보관 기간으로 지워질 때 넘어간다.
 
 **증분 수집** (`collectWindow`, `listWindows`, `prompts/agenda-lists.md`): Slack·메일 1단계 호출은 `meta.json` 의 `collect.<src>.last_ok_at`
 (마지막으로 병합에 성공한 run 의 기준 시각) − `OVERLAP_MINUTES`(30) 이후만 검색한다 — Slack `{{SLACK_SINCE}}` = `max(now−collect.slack_hours, last_ok−30m)`,
 메일 items 검색 `{{MAIL_ITEMS_RANGE}}` = `after:YYYY/MM/DD`(Gmail 은 날짜를 태평양 자정으로 읽으므로 UTC−8 날짜 — `gmailAfter`).
-이력 파일이 없거나(첫 실행) 성공 기록이 없거나 `last_full_at` 이 `FULL_RESCAN_HOURS`(6) 지났으면 전체 창(Slack `history.collect.slack_hours` 기본 24h(1~168, `slackFullHours`) — 프롬프트 `{{SLACK_RANGE}}` "최근 N시간", 메일 3d), 그 소스가
+이력 파일이 없거나(첫 실행) 성공 기록이 없거나 `last_full_at` 이 `FULL_RESCAN_HOURS`(6) 지났으면 전체 창(Slack `history.collect.slack_hours` 기본 24h(1~168, 표시 구간 이상 — 증분 하한이라 짧으면 꺼져 있던 공백이 빠짐, Slack 보관 기간 ≥ ceil(수집 창/24)일, `slackFullHours`) — 프롬프트 `{{SLACK_RANGE}}` "최근 N시간", 메일 3d), 그 소스가
 기록되지 않으면(`history.enabled=false`·`keep_days.<src>=0`) 늘 전체 창 = 예전 프롬프트와 byte 동일. 메일 `is:unread newer_than:2d` 검색(안 읽음 수·`all`)은
 늘 전체. 증분 프롬프트는 "새 것이 없으면 `items:[]`, `all:[]` 로 끝" 문구를 넣고, 빈 결과 20초 재시도(`emptyFor`)는 전체 창 호출에서만 한다.
 출력에 `slack.mine`(검색 결과에 보인 내 메시지 permalink)·`mail.replied`(마지막 메시지가 나인 스레드 id)가 추가돼 증분 창 밖의 옛 항목을
-답함 처리한다. 해제 이모지 검색 `{{ACK_SINCE}}` = `min(수집 창 시작, 이력의 가장 오래된 열린 요청)` — 기간 제한 없음(카드가 그 요청을 계속 보여 주므로), 전체·증분 모두.
-열린 요청이 있으면 후보가 없어도 돈다(`{{ACK_OPEN}}`). 열린 요청 수·가장 오래된 시각은 `openSlack`(제외 채널 뺌).
+답함 처리한다. 해제 이모지 검색 `{{ACK_SINCE}}` = `min(수집 창 시작, ACK_LOOKBACK_HOURS(7일) 안의 가장 오래된 열린 요청)`, 전체·증분 모두(이모지당 20건 상한이라 더
+넓히지 않는다). 7일보다 오래된 열린 요청은 ✓ 확인 완료나 내 답글(`mine`·2단계)로만 해제된다. 열린 요청이 있으면 후보가 없어도 돈다(`{{ACK_OPEN}}`).
+열린 요청 수·가장 오래된 시각은 `openSlack`(제외 채널·✓ 확인 완료 — `slackRecReviewed`, 기본 키나 `<키>@<마지막 답글>` — 뺌).
 팔로업 채널은 증분일 때 이전 요약(`{{WATCH_PREV}}`)을 받아 새 메시지가 있을 때만 다시 쓴다. 전체 창 run 은 반환된 가장 오래된 행보다 새로운데
 목록에 없는 열린 항목을 닫는다(검색 상한 20 으로 밀린 옛 행은 그대로). `ned prompt agenda` 는 지금 쓸 창 그대로 출력.
 기준 시각(`noteCollected`)은 진짜 수집일 때만 옮긴다: 응답 JSON 에 그 소스 키가 없으면(`missingKeys` — 실패 취급, 이력에도 안 씀),

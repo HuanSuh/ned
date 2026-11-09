@@ -21,7 +21,7 @@ import { collapseDMs, dedupeSlack, slackConvKey, slackUrlKey, supersetMail, supe
 import { HISTORY_SOURCES, watchChannels, type HistorySource, type NedConfig } from "./config.js";
 import { NED_HOME, localDay, log, readJson } from "./paths.js";
 import { threadRef, type SlackThread } from "./slack-threads.js";
-import type { Reviewed } from "./state.js";
+import { readReviewed, type Reviewed } from "./state.js";
 
 export const HISTORY_DIR = path.join(NED_HOME, "history");
 export const HISTORY_META_PATH = path.join(HISTORY_DIR, "meta.json");
@@ -35,6 +35,11 @@ export const FULL_RESCAN_HOURS = 6;
 export const MAIL_FULL_DAYS = 3;
 /** Hours a full Slack search looks back (history.collect.slack_hours, 1..168, default 24). */
 export const slackFullHours = (cfg: Pick<NedConfig, "history">): number => cfg.history?.collect?.slack_hours ?? 24;
+/**
+ * Slack ack-emoji search (hasmy:: filters by message date, 20 hits per emoji) reaches back at most this far. An open ask
+ * older than this is released only by ✓ 확인 완료 or my reply (`mine` / phase 2), not by an ack emoji.
+ */
+export const ACK_LOOKBACK_HOURS = 7 * 24;
 /** Mail unread count / `all` search window (always searched whole — it is the unread count). */
 export const MAIL_UNREAD_DAYS = 2;
 
@@ -362,7 +367,7 @@ export function upsertSlack(map: Map<string, SlackRec>, s: SlackBlock, ctx: Upse
 
 function fillSlack(it: SlackHistItem, x: { channel: string; from: string; url: string; ts: string; text: string }): void {
   if (!it.channel) it.channel_seen = it.channel = x.channel;
-  if (!it.from || (namelessFrom(it.from) && !namelessFrom(x.from))) it.from = x.from;
+  it.from = it.from ? (weakName(it.from) ? pickName(x.from, it.from) : it.from) : x.from;
   if (!it.url) it.url = x.url;
   if (!it.ts) it.ts = x.ts;
   if (!it.text) it.text = x.text;
@@ -373,16 +378,27 @@ export function namelessFrom(v: string | undefined | null): boolean {
   const t = String(v ?? "").trim().replace(/^\((.*)\)$/, "$1").trim();
   return !t || /^(알\s*수\s*없음|알\s*수\s*없는\s*사용자|이름\s*없음|이름\s*미상|없음|미상|unknown(\s+user)?|no\s*name|n\/a|null|undefined|[?\-–—_.]+)$/i.test(t);
 }
-/** This list's `from` unless it names nobody — then the record's earlier one (an external user's name doesn't flip to "알 수 없음"). */
-export const pickName = (fresh: string | undefined, prev: string | undefined): string => (!namelessFrom(fresh) ? fresh! : prev || fresh || "");
+/** A bare Slack user id (`U0123ABC` / `W…`) — the last-resort `from`, weaker than any real name. */
+const userIdName = (v: string | undefined | null): boolean => /^[UW][A-Z0-9]{6,}$/.test(String(v ?? "").trim());
+/** Names nobody or only a user id: an earlier real name wins over it. */
+const weakName = (v: string | undefined | null): boolean => namelessFrom(v) || userIdName(v);
+/**
+ * This list's `from` unless it is weak (empty / placeholder / bare user id) and the record already has a better one —
+ * an external user's name doesn't flip to "알 수 없음" or `U…` run to run.
+ */
+export function pickName(fresh: string | undefined, prev: string | undefined): string {
+  if (!weakName(fresh)) return fresh!;
+  if (prev && (!weakName(prev) || namelessFrom(fresh))) return prev;
+  return fresh || prev || "";
+}
 
 /** Channel id of a Slack permalink (`/archives/<ID>/`), or "". */
 export const slackChannelId = (url: string | undefined): string => /\/archives\/([A-Z0-9]+)\//.exec(url ?? "")?.[1] ?? "";
 const chanKey = (c: string) => c.trim().replace(/^#+/, "").toLowerCase();
 
 /**
- * One name per Slack channel id, from the history: (1) a 팔로업 / 제외 channel name from settings that one of the id's
- * records was seen as (settings' spelling), else (2) the name its records were seen as most often (ties → the newest),
+ * One name per Slack channel id, from the history: (1) a 팔로업 / 제외 channel name from settings when it is the id's most
+ * seen name (case / "#" aside) or seen in a majority of its records (settings' spelling), else (2) the name its records were seen as most often (ties → the newest),
  * else nothing (callers keep this answer's name). Counts `channel_seen` (the raw answers), so a renamed channel takes
  * over once its new name outnumbers the old one (old records age out with keep_days).
  */
@@ -401,7 +417,10 @@ export function slackChannelNames(recs: Iterable<SlackRec>, cfg?: Pick<NedConfig
   const out = new Map<string, string>();
   for (const [id, m] of seen) {
     const ranked = [...m.entries()].sort((a, b) => b[1].n - a[1].n || b[1].at - a[1].at);
-    const fromCfg = ranked.find(([n]) => conf.has(chanKey(n)));
+    const total = ranked.reduce((t, [, c]) => t + c.n, 0);
+    // A settings name only fixes the spelling of what the history already says: it must be the most seen name (up to
+    // case / "#"), or a majority on its own — one mistyped row must not rename (or exclude) the whole channel.
+    const fromCfg = conf.has(chanKey(ranked[0][0])) ? ranked[0] : ranked.find(([n, c]) => conf.has(chanKey(n)) && c.n * 2 > total);
     out.set(id, fromCfg ? `#${conf.get(chanKey(fromCfg[0]))}` : ranked[0][0]);
   }
   return out;
@@ -627,6 +646,19 @@ export function slackReviewKey(x: { url: string; thread?: { last_reply_ts?: stri
   return lr && lr !== `${m[2]}.${m[3]}` ? `${base}@${lr}` : base;
 }
 
+/**
+ * A Slack record marked ✓ 확인 완료 at or after its time — by its base key or any thread-aware `<base>@<last_reply>` key
+ * (the dashboard keys a thread row by its latest reply). Such an ask is closed for openSlack / isCurrent too.
+ */
+export function slackRecReviewed(marks: Reviewed, r: Pick<SlackRec, "item" | "ts">): boolean {
+  const base = slackReviewKey({ url: r.item.url });
+  if (!base) return false;
+  const t = ms(r.ts);
+  if (revAt(marks, base, t)) return true;
+  for (const [k, at] of Object.entries(marks)) if (k.startsWith(`${base}@`) && at >= t) return true;
+  return false;
+}
+
 const byRank = (a: HistRecord<{ rank?: number; rank_at?: number }>, b: HistRecord<{ rank?: number; rank_at?: number }>) =>
   (b.state.rank_at ?? 0) - (a.state.rank_at ?? 0) || (a.state.rank ?? 99) - (b.state.rank ?? 99) || ms(b.ts) - ms(a.ts);
 
@@ -689,7 +721,8 @@ export function slackView(cfg: NedConfig, fresh: SlackBlock, prev: SlackBlock | 
   const keepPrev = viewItems.length && !ctx.full ? prev?.summary ?? "" : "";
   const summary = !ctx.full && freshEmpty ? keepPrev : fresh.summary || keepPrev;
   // all stays the display window: only in-window asks are added to it (the dashboard's 전체 = all ∪ items anyway).
-  return { summary, items: viewItems, all: supersetSlack(viewItems.filter((x) => ms(x.ts) >= lo), viewAll), watch };
+  const recAt = new Map(shown.map((r) => [r.item.url, ms(r.ts)]));
+  return { summary, items: viewItems, all: supersetSlack(viewItems.filter((x) => (recAt.get(x.url) ?? ms(x.ts)) >= lo), viewAll), watch };
 }
 
 /** After thread state (applyThreadState): drop 확인 완료 rows from items (thread-aware key), cap at 10. */
@@ -720,12 +753,14 @@ export function mailView(cfg: NedConfig, fresh: MailBlock, prev: MailBlock | nul
 }
 
 /**
- * Open Slack asks in the history (any age — the card keeps them, see slackView), excluded channels left out: how many,
- * and the oldest one's time (ms). The ack-emoji search reaches back to it so an old ask can still be released.
+ * Open Slack asks in the history within `hours` (default: any age — the card keeps them, see slackView), excluded
+ * channels and ✓ 확인 완료 left out: how many, and the oldest one's time (ms). The ack-emoji search reaches back to it.
  */
-export function openSlack(cfg: NedConfig, now: number, recs: SlackRec[] = readHistory<SlackRec>("slack")): { n: number; oldest: number } {
+export function openSlack(cfg: NedConfig, now: number, opts: { hours?: number; recs?: SlackRec[]; marks?: Reviewed } = {}): { n: number; oldest: number } {
   if (!recording(cfg, "slack")) return { n: 0, oldest: now };
-  const open = recs.filter((r) => openAsk(r) && !excludedSlack(cfg, r));
+  const recs = opts.recs ?? readHistory<SlackRec>("slack"), marks = opts.marks ?? readReviewed();
+  const lo = opts.hours ? now - opts.hours * H : -Infinity;
+  const open = recs.filter((r) => openAsk(r) && ms(r.ts) >= lo && !excludedSlack(cfg, r) && !slackRecReviewed(marks, r));
   return { n: open.length, oldest: open.reduce((m, r) => Math.min(m, ms(r.ts) || now), now) };
 }
 
@@ -782,8 +817,8 @@ export function currentKeys(a: Agenda): Record<HistorySource, Set<string>> {
 }
 
 /** Is the record part of what the card shows now (HistoryRow.current)? */
-function isCurrent(r: HistRecord, cfg: NedConfig, now: number, cur: Record<HistorySource, Set<string>>): boolean {
-  if (r.source === "slack") return historyDisplay(cfg, "slack") ? ms(r.ts) >= now - cfg.history.display.slack_hours * H || openAsk(r as SlackRec) : cur.slack.has(r.key);
+function isCurrent(r: HistRecord, cfg: NedConfig, now: number, cur: Record<HistorySource, Set<string>>, marks: Reviewed): boolean {
+  if (r.source === "slack") return historyDisplay(cfg, "slack") ? ms(r.ts) >= now - cfg.history.display.slack_hours * H || (openAsk(r as SlackRec) && !slackRecReviewed(marks, r as SlackRec)) : cur.slack.has(r.key);
   if (r.source === "mail") return historyDisplay(cfg, "mail") ? ms(r.ts) >= now - cfg.history.display.mail_days * D : cur.mail.has(r.key);
   if (r.source === "jira" || r.source === "github") return r.state.open === true && cur[r.source].has(r.key);
   return cur.calendar.has(r.key);
@@ -817,6 +852,7 @@ export function queryHistory(cfg: NedConfig, agenda: Agenda, qy: HistoryQuery, n
   const toks = String(qy.q ?? "").toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8);
   const ch = String(qy.channel ?? "").replace(/^#+/, "").toLowerCase();
   const cur = currentKeys(agenda);
+  const marks = readReviewed();
   const rows: HistoryRow[] = [];
   for (const r of readHistory(qy.source)) {
     if (ms(r.ts) < lo || excludedSlack(cfg, r)) continue;
@@ -830,7 +866,7 @@ export function queryHistory(cfg: NedConfig, agenda: Agenda, qy: HistoryQuery, n
       const hay = `${d.title} ${d.detail}`.toLowerCase();
       if (!toks.every((t) => hay.includes(t))) continue;
     }
-    rows.push({ key: r.key, source: r.source, ts: r.ts, first_seen: r.first_seen, last_seen: r.last_seen, current: isCurrent(r, cfg, now, cur), ...d, state: r.state, item: r.item });
+    rows.push({ key: r.key, source: r.source, ts: r.ts, first_seen: r.first_seen, last_seen: r.last_seen, current: isCurrent(r, cfg, now, cur, marks), ...d, state: r.state, item: r.item });
   }
   rows.sort((a, b) => ms(b.ts) - ms(a.ts));
   return { source: qy.source, days, items: rows.slice(0, limit), total: rows.length };

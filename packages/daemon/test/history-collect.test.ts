@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import YAML from "yaml";
 import { buildListsPrompt, listExtras, listWindows, refreshAgenda, type SlackBlock } from "../src/agenda.js";
 import { DEFAULT_CONFIG, HISTORY_SOURCES, loadConfig, normalizeFilters, normalizeHistory, type NedConfig } from "../src/config.js";
-import { HISTORY_META_PATH, collectWindow, historyFile, historyStatus, namelessFrom, readHistory, readHistoryMeta, slackChannelNames, slackView, upsertSlack, type SlackRec } from "../src/history.js";
+import { HISTORY_META_PATH, collectWindow, historyFile, historyStatus, namelessFrom, pickName, readHistory, readHistoryMeta, slackChannelNames, slackView, upsertSlack, type SlackRec } from "../src/history.js";
 import { AGENDA_PATH, CONFIG_PATH, NED_HOME } from "../src/paths.js";
 
 const H = 3600_000;
@@ -88,6 +88,11 @@ describe("Slack names: external users' from, one channel name per channel id", (
   it("a later empty / placeholder from keeps the record's earlier name; a real one replaces it", () => {
     expect(["", "  ", "알 수 없음", "(알 수 없음)", "(이름 없음)", "Unknown", "unknown user", "?"].every(namelessFrom)).toBe(true);
     expect(["김철수", "kim.cs", "U0123ABC"].some(namelessFrom)).toBe(false);
+    // a bare user id doesn't overwrite a real name; it does beat a placeholder; a real name beats an id
+    expect(pickName("U0123ABC", "Kim (Partner)")).toBe("Kim (Partner)");
+    expect(pickName("U0123ABC", "알 수 없음")).toBe("U0123ABC");
+    expect(pickName("알 수 없음", "U0123ABC")).toBe("U0123ABC");
+    expect(pickName("Kim", "U0123ABC")).toBe("Kim");
     const m = new Map<string, SlackRec>();
     upsertSlack(m, block([row("C0TESTCHAN1", T - H, "#project-orbit-하늘", "Kim (Partner)")]), { now: T });
     for (const ph of ["", "알 수 없음", "(이름 없음)"]) {
@@ -121,14 +126,27 @@ describe("Slack names: external users' from, one channel name per channel id", (
     expect(new Set(v.items.filter((x) => x.url.includes(ID)).map((x) => x.channel))).toEqual(new Set(["#project-orbit-하늘"]));
   });
 
-  it("a 팔로업 / 제외 channel name from settings wins when the id's history was seen as it", () => {
+  it("a 팔로업 / 제외 channel name from settings fixes the spelling when it is the id's most seen name", () => {
     const m = new Map<string, SlackRec>();
     const c = cfg({ filters: normalizeFilters({ slack: { watch_channels: ["Project-orbit-하놀"] } }) });
-    upsertSlack(m, block([row("C7", T - 3 * H, "#project-orbit-하늘", "a"), row("C7", T - 2 * H, "#project-orbit-하늘", "b"), row("C7", T - H, "#project-orbit-하놀", "c")]), { now: T, cfg: c });
+    upsertSlack(m, block([row("C7", T - 3 * H, "#project-orbit-하늘", "a"), row("C7", T - 2 * H, "#project-orbit-하놀", "b"), row("C7", T - H, "#project-orbit-하놀", "c")]), { now: T, cfg: c });
     expect(new Set([...m.values()].map((r) => r.item.channel))).toEqual(new Set(["#Project-orbit-하놀"]));
     // not matching any seen name → majority as usual
     const other = cfg({ filters: normalizeFilters({ slack: { exclude_channels: ["random"] } }) });
-    expect(slackChannelNames(m.values(), other).get("C7")).toBe("#project-orbit-하늘");
+    expect(slackChannelNames(m.values(), other).get("C7")).toBe("#project-orbit-하놀");
+  });
+
+  it("a settings name seen only once (1 vs 3) doesn't win; one mistyped row as an excluded channel doesn't hide the channel", () => {
+    const c = cfg({ filters: normalizeFilters({ slack: { exclude_channels: ["random"], watch_channels: ["ops"] } }) });
+    const m = new Map<string, SlackRec>();
+    upsertSlack(m, block([row("C5", T - 4 * H, "#dev", "a"), row("C5", T - 3 * H, "#dev", "b"), row("C5", T - 2 * H, "#dev", "c"), row("C5", T - H, "#random", "d")]), { now: T, cfg: c });
+    expect(new Set([...m.values()].map((r) => r.item.channel))).toEqual(new Set(["#dev"]));
+    const v = slackView(c, block([]), null, { now: T, full: true }, [...m.values()].map((r) => ({ ...r, state: { ...r.state, need: true } })));
+    expect(v.items).toHaveLength(4); // nothing hidden as #random
+    // the settings name as the most seen one (case aside) or a majority still wins
+    const m2 = new Map<string, SlackRec>();
+    upsertSlack(m2, block([row("C6", T - 3 * H, "#OPS", "a"), row("C6", T - 2 * H, "#OPS", "b"), row("C6", T - H, "#op", "c")]), { now: T, cfg: c });
+    expect(slackChannelNames(m2.values(), c).get("C6")).toBe("#ops");
   });
 });
 

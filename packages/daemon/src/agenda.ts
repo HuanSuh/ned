@@ -8,7 +8,7 @@ import { extractJson, llmDisabled, runClaude } from "./claude.js";
 import { ACK_CHECK_MAX_DEFAULT, filtersPrompt, isGroupId, jqlExclude, watchChannels, type NedConfig } from "./config.js";
 import { personaPrompt } from "./persona.js";
 import { AGENDA_PATH, AGENDA_RAW_PATH, log, readJson, writeJsonAtomic } from "./paths.js";
-import { collectWindow, finalizeSlackView, slackFullHours, gmailAfter, historyDisplay, historyUpsert, mailView, noteCollected, openSlack, recording, slackView, type CollectWindow, type UpsertCtx } from "./history.js";
+import { ACK_LOOKBACK_HOURS, collectWindow, finalizeSlackView, slackFullHours, gmailAfter, historyDisplay, historyUpsert, mailView, noteCollected, openSlack, recording, slackView, type CollectWindow, type UpsertCtx } from "./history.js";
 import { readReviewed } from "./state.js";
 import { applyThreadState, syncDmsFromList, syncThreadsFromList, type SlackThread, type ThreadRowFields } from "./slack-threads.js";
 
@@ -642,9 +642,9 @@ export function groupMentionsPrompt(groups: string[], since: string): string {
 export interface ListWindows {
   slack?: CollectWindow;
   mail?: CollectWindow;
-  /** ms: the ack-emoji search's `after` — reaches back to the oldest open ask Ned remembers (any age, full runs too). */
+  /** ms: the ack-emoji search's `after` — reaches back to the oldest open ask Ned remembers (≤ ACK_LOOKBACK_HOURS, full runs too). */
   ackSince?: number;
-  /** Open Slack asks in the history (any age): the ack search runs even when this run's results have no candidate. */
+  /** Open Slack asks in the history within ACK_LOOKBACK_HOURS (not ✓): the ack search runs even when this run's results have no candidate. */
   openAsks?: number;
   /** Incremental runs: each 팔로업 channel's current summary ("#ch" → text), so the model updates instead of restarting. */
   watchPrev?: Record<string, string>;
@@ -655,8 +655,9 @@ export function listWindows(cfg: NedConfig, keys: readonly AgendaSourceKey[], no
   const w: ListWindows = {};
   if (keys.includes("slack")) {
     w.slack = collectWindow("slack", cfg, now);
-    // The card keeps open asks of any age (slackView): the ack search reaches back to the oldest one, full runs too.
-    const o = openSlack(cfg, now);
+    // The card keeps open asks of any age (slackView); the ack search (20 hits per emoji) reaches back to the oldest one
+    // within ACK_LOOKBACK_HOURS, full runs too. Older ones are released by ✓ or my reply only.
+    const o = openSlack(cfg, now, { hours: ACK_LOOKBACK_HOURS });
     if (o.n) {
       w.openAsks = o.n;
       w.ackSince = Math.min(w.slack.since, o.oldest);
@@ -877,7 +878,12 @@ export function mergeSources(payload: AgendaPayload, keys: AgendaSourceKey[], me
     if (view("slack")) payload.slack = slackView(cfg, payload.slack!, a.slack, vctx("slack"));
     if (view("mail")) payload.mail = mailView(cfg, payload.mail!, a.mail, vctx("mail"), reviewed);
     carryContexts(a, payload, keys);
-    if (view("slack")) finalizeSlackView(payload.slack!, reviewed); // after thread state: 확인 완료 keys carry the latest reply
+    if (view("slack")) {
+      finalizeSlackView(payload.slack!, reviewed); // after thread state: 확인 완료 keys carry the latest reply
+      // Thread / DM priorities from the final items (✓ dropped, capped): a reviewed old ask isn't "확인 필요" for phase 2.
+      payload.slack!.threads = syncThreadsFromList(payload.slack!.threads, payload.slack!);
+      payload.slack!.dms = syncDmsFromList(payload.slack!.dms, payload.slack!);
+    }
     a.sources_status ??= {};
     for (const k of keys) {
       const sig = sourceSignature(k, payload);

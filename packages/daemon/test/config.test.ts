@@ -108,7 +108,12 @@ describe("normalizers", () => {
     expect(DEFAULT_CONFIG.history.collect).toEqual({ slack_hours: 24 });
     expect(normalizeHistory({}).collect.slack_hours).toBe(24);
     expect(normalizeHistory({ collect: { slack_hours: 96 } }).collect.slack_hours).toBe(96);
-    expect(normalizeHistory({ collect: { slack_hours: 0 } }).collect.slack_hours).toBe(1);
+    expect(normalizeHistory({ collect: { slack_hours: 0 }, display: { slack_hours: 1 } }).collect.slack_hours).toBe(1);
+    // never below the display window (incremental runs floor at it), and Slack keep ≥ the collect window in days
+    expect(normalizeHistory({ collect: { slack_hours: 1 } }).collect.slack_hours).toBe(24);
+    expect(normalizeHistory({ collect: { slack_hours: 6 }, display: { slack_hours: 48 } }).collect.slack_hours).toBe(48);
+    expect(normalizeHistory({ collect: { slack_hours: 96 }, keep_days: { slack: 1 } }).keep_days.slack).toBe(4);
+    expect(normalizeHistory({ collect: { slack_hours: 96 }, keep_days: { slack: 0 } }).keep_days.slack).toBe(0);
     expect(normalizeHistory({ collect: { slack_hours: 500 } }).collect.slack_hours).toBe(168);
     expect(normalizeHistory({ collect: { slack_hours: 36.6 } }).collect.slack_hours).toBe(37);
     for (const junk of ["", null, "abc", true]) expect(normalizeHistory({ collect: { slack_hours: junk } }).collect.slack_hours).toBe(24);

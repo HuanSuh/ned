@@ -10,7 +10,7 @@ import YAML from "yaml";
 import { buildListsPrompt, listWindows, readAgenda, refreshAgenda, type SlackBlock } from "../src/agenda.js";
 import { mergeThreads } from "../src/agenda-context.js";
 import { DEFAULT_CONFIG, HISTORY_SOURCES, loadConfig, normalizeFilters, normalizeHistory, type NedConfig } from "../src/config.js";
-import { HISTORY_META_PATH, finalizeSlackView, historyFile, mailView, openSlack, readHistory, slackView, type MailRec, type SlackRec } from "../src/history.js";
+import { HISTORY_META_PATH, finalizeSlackView, historyFile, mailView, openSlack, queryHistory, readHistory, slackView, type MailRec, type SlackRec } from "../src/history.js";
 import { AGENDA_PATH, CONFIG_PATH, NED_HOME, REVIEWED_PATH } from "../src/paths.js";
 import { threadCandidates } from "../src/slack-threads.js";
 
@@ -112,8 +112,26 @@ describe("open asks outside the display window (11/6 external mention case)", ()
   it("openSlack counts open asks of any age (oldest = the 3-day-old one), excluded channels left out", () => {
     const recs = [srec("C7", OLD, { need: true }), srec("C1", NOW - H, { need: true }), srec("C2", NOW - 5 * D, { need: true, answered: true }), srec("C3", NOW - 6 * D, { need: true }, { channel: "#random" })];
     const c = cfg({ filters: normalizeFilters({ slack: { exclude_channels: ["random"] } }) });
-    expect(openSlack(c, NOW, recs)).toEqual({ n: 2, oldest: OLD });
-    expect(openSlack(cfg(), NOW, [])).toEqual({ n: 0, oldest: NOW });
+    expect(openSlack(c, NOW, { recs, marks: {} })).toEqual({ n: 2, oldest: OLD });
+    expect(openSlack(cfg(), NOW, { recs: [], marks: {} })).toEqual({ n: 0, oldest: NOW });
+    // within the ack lookback only: a 10-day-old open ask isn't counted (✓ / my reply release it)
+    const ten = [srec("C8", NOW - 10 * D, { need: true })];
+    expect(openSlack(cfg(), NOW, { recs: ten, marks: {} }).n).toBe(1);
+    expect(openSlack(cfg(), NOW, { recs: ten, marks: {}, hours: 7 * 24 }).n).toBe(0);
+  });
+  it("all ⊇ in-window items by the record's time, not the item's raw ts", () => {
+    const recs = [srec("C1", NOW - H, { need: true }, { ts: "어제쯤" }), srec("C2", NOW - 2 * H, { need: true })];
+    const v = slackView(cfg({ agenda_all_limit: 1 }), blank(), null, { now: NOW, full: false }, recs);
+    expect(v.all.map((x) => x.url.split("/")[4]).sort()).toEqual(["C1", "C2"]);
+  });
+  it("✓ 확인 완료 closes an old ask for openSlack too (base key or thread-aware key)", () => {
+    const r = srec("C7", OLD, { need: true });
+    const m = /archives\/C7\/p(\d{10})(\d{6})/.exec(r.item.url)!;
+    const base = `slack:C7:${m[1]}.${m[2]}`;
+    expect(openSlack(cfg(), NOW, { recs: [r], marks: {} }).n).toBe(1);
+    expect(openSlack(cfg(), NOW, { recs: [r], marks: { [base]: NOW } }).n).toBe(0);
+    expect(openSlack(cfg(), NOW, { recs: [r], marks: { [`${base}@1999999999.000100`]: NOW } }).n).toBe(0);
+    expect(openSlack(cfg(), NOW, { recs: [r], marks: { [base]: OLD - D } }).n).toBe(1); // a mark older than the ask doesn't count
   });
 });
 
@@ -210,6 +228,26 @@ describe("mergeSources → agenda.json from the history", () => {
     await refreshAgenda(loadConfig(), { sources: ["slack"] });
     expect(readAgenda().slack!.items).toEqual([]);
     expect(readHistory<SlackRec>("slack").find((r) => r.key === u.replace("https://", ""))!.state.answered).toBe(true);
+  });
+  it("✓ on a 3-day-old ask: off the card, openSlack 0, its thread no longer prio 0, /api/history current=false", async () => {
+    writeCfg();
+    const old = Date.now() - 3 * D, u = url("C7", old);
+    fixture({ slack: { summary: "", items: [ask(u, old)], all: [] } });
+    await refreshAgenda(loadConfig(), { sources: ["slack"] });
+    expect(readAgenda().slack!.threads!.find((x) => x.channel_id === "C7")!.prio).toBe(0);
+    const m = /archives\/C7\/p(\d{10})(\d{6})/.exec(u)!;
+    fs.writeFileSync(REVIEWED_PATH, JSON.stringify({ [`slack:C7:${m[1]}.${m[2]}`]: Date.now() }));
+    fixture({ slack: { summary: "", items: [], all: [] } });
+    await refreshAgenda(loadConfig(), { sources: ["slack"] });
+    const a = readAgenda();
+    expect(a.slack!.items).toEqual([]);
+    expect(openSlack(loadConfig(), Date.now()).n).toBe(0);
+    expect(listWindows(loadConfig(), ["slack"], Date.now()).openAsks).toBeUndefined();
+    const th = a.slack!.threads?.find((x) => x.channel_id === "C7");
+    expect(th?.prio ?? 3).not.toBe(0);
+    if (th) expect(threadCandidates([th], 5, Date.now() + 7 * H)).toEqual([]);
+    const row = queryHistory(loadConfig(), a, { source: "slack", days: 30 }).items.find((x) => x.url === u)!;
+    expect(row.current).toBe(false);
   });
   it("a 3-day-old open ask is answered when phase 2 sees my reply in its thread", async () => {
     writeCfg();

@@ -190,6 +190,9 @@ export function threadActivity(t: SlackThread): number {
 
 type Row = { url: string; channel: string; from: string; text: string; ts: string };
 
+/** Cap order: 확인 필요 (prio 0) first — an old open ask's thread must survive the cap — then the most recent activity. */
+const keepOrder = (a: SlackThread, b: SlackThread) => Number(b.prio === 0) - Number(a.prio === 0) || threadActivity(b) - threadActivity(a);
+
 /** Group mentions (reason "group") are never followed as threads — too noisy, and the ask wasn't mine alone. */
 function rowsWithPrio(s: SlackBlock): [Row, number][] {
   return [
@@ -226,7 +229,7 @@ export function syncThreadsFromList(prev: SlackThread[] | undefined, next: Slack
   return [...byKey.values()]
     .map((t) => (listed.has(t.key) ? t : { ...t, prio: t.prio === 9 ? 3 : t.prio }))
     .filter((t) => listed.has(t.key) || threadActivity(t) >= keepAfter)
-    .sort((a, b) => threadActivity(b) - threadActivity(a))
+    .sort(keepOrder)
     .slice(0, MAX_THREADS);
 }
 
@@ -282,7 +285,7 @@ export function syncDmsFromList(prev: SlackThread[] | undefined, next: SlackBloc
   return [...byKey.values()]
     .map((t) => (listed.has(t.key) ? t : { ...t, prio: t.prio === 9 ? 3 : t.prio }))
     .filter((t) => listed.has(t.key) || threadActivity(t) >= keepAfter)
-    .sort((a, b) => threadActivity(b) - threadActivity(a))
+    .sort(keepOrder)
     .slice(0, MAX_DMS);
 }
 
