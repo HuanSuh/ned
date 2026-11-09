@@ -95,10 +95,16 @@ export function followState(t: SlackThread, now = Date.now()): FollowState {
   return now - (Date.parse(t.checked_at) || 0) >= THREAD_RECHECK_MINUTES * 60_000 ? "recheck" : "unchanged";
 }
 
-/** Active (within THREAD_FOLLOW_HOURS) records skipped because nothing moved since their last read. */
+/**
+ * Still followed by phase 2: activity within THREAD_FOLLOW_HOURS, or a row of the card's "확인 필요" (prio 0) — an old
+ * unanswered ask stays on the card (history.ts slackView), so its thread / DM keeps being re-read (THREAD_RECHECK_MINUTES)
+ * until my reply there answers it.
+ */
+export const followed = (t: SlackThread, now = Date.now()): boolean => t.prio === 0 || threadActivity(t) >= now / 1000 - THREAD_FOLLOW_HOURS * 3600;
+
+/** Followed records skipped because nothing moved since their last read. */
 export function unchangedCount(list: SlackThread[] | undefined, now = Date.now()): number {
-  const since = now / 1000 - THREAD_FOLLOW_HOURS * 3600;
-  return (list ?? []).filter((t) => threadActivity(t) >= since && followState(t, now) === "unchanged").length;
+  return (list ?? []).filter((t) => followed(t, now) && followState(t, now) === "unchanged").length;
 }
 
 /** What a list row carries about its thread (cards / drafts). */
@@ -184,6 +190,9 @@ export function threadActivity(t: SlackThread): number {
 
 type Row = { url: string; channel: string; from: string; text: string; ts: string };
 
+/** Cap order: 확인 필요 (prio 0) first — an old open ask's thread must survive the cap — then the most recent activity. */
+const keepOrder = (a: SlackThread, b: SlackThread) => Number(b.prio === 0) - Number(a.prio === 0) || threadActivity(b) - threadActivity(a);
+
 /** Group mentions (reason "group") are never followed as threads — too noisy, and the ask wasn't mine alone. */
 function rowsWithPrio(s: SlackBlock): [Row, number][] {
   return [
@@ -220,22 +229,21 @@ export function syncThreadsFromList(prev: SlackThread[] | undefined, next: Slack
   return [...byKey.values()]
     .map((t) => (listed.has(t.key) ? t : { ...t, prio: t.prio === 9 ? 3 : t.prio }))
     .filter((t) => listed.has(t.key) || threadActivity(t) >= keepAfter)
-    .sort((a, b) => threadActivity(b) - threadActivity(a))
+    .sort(keepOrder)
     .slice(0, MAX_THREADS);
 }
 
 /**
- * Threads phase 2 should re-read now, at most `n`: activity within THREAD_FOLLOW_HOURS, and either never read,
+ * Threads phase 2 should re-read now, at most `n`: followed (activity within THREAD_FOLLOW_HOURS or 확인 필요), and either never read,
  * phase 1 saw a newer message than at the last read, or the last read is THREAD_RECHECK_MINUTES old (followState).
  * Order: known-new first, then never read, then by where it was seen (needs me first), then the stalest read.
  */
 export function threadCandidates(threads: SlackThread[] | undefined, n: number, now = Date.now()): SlackThread[] {
   if (n <= 0) return [];
-  const since = now / 1000 - THREAD_FOLLOW_HOURS * 3600;
   const newer = (t: SlackThread) => followState(t, now) === "moved";
   const checked = (t: SlackThread) => (t.checked_at ? Date.parse(t.checked_at) || 0 : 0);
   return (threads ?? [])
-    .filter((t) => threadActivity(t) >= since)
+    .filter((t) => followed(t, now))
     .filter((t) => followState(t, now) !== "unchanged")
     .sort((a, b) => Number(newer(b)) - Number(newer(a)) || Number(!b.checked_at) - Number(!a.checked_at) || a.prio - b.prio || checked(a) - checked(b))
     .slice(0, n);
@@ -277,7 +285,7 @@ export function syncDmsFromList(prev: SlackThread[] | undefined, next: SlackBloc
   return [...byKey.values()]
     .map((t) => (listed.has(t.key) ? t : { ...t, prio: t.prio === 9 ? 3 : t.prio }))
     .filter((t) => listed.has(t.key) || threadActivity(t) >= keepAfter)
-    .sort((a, b) => threadActivity(b) - threadActivity(a))
+    .sort(keepOrder)
     .slice(0, MAX_DMS);
 }
 
@@ -288,11 +296,10 @@ export function syncDmsFromList(prev: SlackThread[] | undefined, next: SlackBloc
 export function dmCandidates(dms: SlackThread[] | undefined, n = DM_BATCH_MAX, now = Date.now()): SlackThread[] {
   const cap = Math.min(n, DM_BATCH_MAX);
   if (cap <= 0) return [];
-  const since = now / 1000 - THREAD_FOLLOW_HOURS * 3600;
   const newer = (t: SlackThread) => followState(t, now) === "moved";
   const checked = (t: SlackThread) => (t.checked_at ? Date.parse(t.checked_at) || 0 : 0);
   return (dms ?? [])
-    .filter((t) => threadActivity(t) >= since)
+    .filter((t) => followed(t, now))
     .filter((t) => followState(t, now) !== "unchanged")
     .sort((a, b) => a.prio - b.prio || Number(newer(b)) - Number(newer(a)) || Number(!b.checked_at) - Number(!a.checked_at) || checked(a) - checked(b))
     .slice(0, cap);

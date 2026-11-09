@@ -406,3 +406,19 @@ describe("end to end (NED_NO_LLM fixtures, temp NED_HOME)", () => {
     }
   });
 });
+
+describe("thread cap keeps 확인 필요 threads (MAX_THREADS)", () => {
+  it("an old open ask's thread survives 200 newer unlisted ones; DMs likewise", async () => {
+    const { syncThreadsFromList, syncDmsFromList } = await import("../src/slack-threads.js");
+    const now = Date.now(), sec = Math.floor(now / 1000);
+    const prev = Array.from({ length: 220 }, (_, i) => ({ key: `C9:${sec - i}.000100`, channel_id: "C9", thread_ts: `${sec - i}.000100`, channel: "#x", url: "", prio: 1, first_seen_at: "", reply_count: 0, new_since_me: 0, participants: [], recent: [], search_latest_ts: `${sec - i}.000100` }));
+    const oldTs = sec - 5 * 86400;
+    const ask = { channel: "#a", from: "kim", text: "확인?", url: `https://x.slack.com/archives/C1/p${oldTs}000100`, ts: new Date(oldTs * 1000).toISOString(), reason: "mention" as const };
+    const out = syncThreadsFromList(prev, { summary: "", items: [ask], all: [], watch: [] }, now);
+    expect(out).toHaveLength(200);
+    expect(out.find((t) => t.channel_id === "C1")?.prio).toBe(0);
+    const dprev = Array.from({ length: 60 }, (_, i) => ({ ...prev[i], key: `dm:D${i}`, channel_id: `D${i}`, thread_ts: "" }));
+    const dm = { ...ask, channel: "DM", url: `https://x.slack.com/archives/DOLD/p${oldTs}000100`, reason: "dm" as const };
+    expect(syncDmsFromList(dprev, { summary: "", items: [dm], all: [], watch: [] }, now).find((t) => t.key === "dm:DOLD")?.prio).toBe(0);
+  });
+});

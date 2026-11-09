@@ -88,31 +88,37 @@ export interface NedHistory {
   display: { slack_hours: number; mail_days: number };
   /** 보관 기간 per source, whole days 0..365 (0 = don't record that source). Never below its display window. */
   keep_days: Record<HistorySource, number>;
+  /** 수집 창: how far back a full Slack search (first run / every 6 h re-search / history off) looks, 1..168 h, ≥ display.slack_hours. */
+  collect: { slack_hours: number };
 }
 export const DEFAULT_HISTORY: NedHistory = {
   enabled: true,
   display: { slack_hours: 24, mail_days: 3 },
+  collect: { slack_hours: 24 },
   keep_days: { slack: 30, mail: 30, jira: 90, github: 90, calendar: 90 },
 };
 
 /**
  * Merge a (partial) history patch over `base`: enabled boolean; display clamped (slack 1..168 h, mail 1..14 d); keep_days
- * integers 0..365. A keep below its display window is raised to it (Slack: ceil(hours / 24) days) — 0 stays 0 (off).
+ * integers 0..365; collect.slack_hours 1..168 h, raised to display.slack_hours. Slack keep ≥ ceil(collect h / 24) days. A keep below its display window is raised to it (Slack: ceil(hours / 24) days) — 0 stays 0 (off).
  */
 export function normalizeHistory(raw: unknown, base: NedHistory = DEFAULT_HISTORY): NedHistory {
   const r = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
   const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
-  const d = obj(r.display), k = obj(r.keep_days);
-  const bd = base.display ?? DEFAULT_HISTORY.display, bk = base.keep_days ?? DEFAULT_HISTORY.keep_days;
+  const d = obj(r.display), k = obj(r.keep_days), c = obj(r.collect);
+  const bd = base.display ?? DEFAULT_HISTORY.display, bk = base.keep_days ?? DEFAULT_HISTORY.keep_days, bc = base.collect ?? DEFAULT_HISTORY.collect;
   const int = (v: unknown, min: number, max: number, fb: number) => {
     const n = Number(v);
     return v == null || v === "" || typeof v === "boolean" || !Number.isFinite(n) ? fb : Math.max(min, Math.min(max, Math.round(n)));
   };
   const display = { slack_hours: int(d.slack_hours, 1, 168, bd.slack_hours), mail_days: int(d.mail_days, 1, 14, bd.mail_days) };
+  // The full Slack window never shorter than what the card shows: incremental runs floor at it, so a short one would lose
+  // the stretch the daemon slept through for good.
+  const collect = { slack_hours: Math.max(display.slack_hours, int(c.slack_hours, 1, 168, bc.slack_hours ?? DEFAULT_HISTORY.collect.slack_hours)) };
   const keep_days = Object.fromEntries(HISTORY_SOURCES.map((s) => [s, int(k[s], 0, 365, bk[s] ?? DEFAULT_HISTORY.keep_days[s])])) as Record<HistorySource, number>;
-  const floor: Partial<Record<HistorySource, number>> = { slack: Math.ceil(display.slack_hours / 24), mail: display.mail_days };
+  const floor: Partial<Record<HistorySource, number>> = { slack: Math.ceil(collect.slack_hours / 24), mail: display.mail_days };
   for (const [s, min] of Object.entries(floor) as [HistorySource, number][]) if (keep_days[s] > 0 && keep_days[s] < min) keep_days[s] = min;
-  return { enabled: typeof r.enabled === "boolean" ? r.enabled : base.enabled !== false, display, keep_days };
+  return { enabled: typeof r.enabled === "boolean" ? r.enabled : base.enabled !== false, display, keep_days, collect };
 }
 
 export interface NedArchive {

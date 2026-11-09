@@ -294,6 +294,7 @@
               <div class="ntf hist" id="c-hist">
                 <label class="ck non"><input type="checkbox" id="c-hist-on"> 수집 이력 기록 (끄면 예전처럼 마지막으로 가져온 목록만)</label>
                 <div class="nrow"><span class="lab">표시 구간</span><div class="inl"><label for="c-hist-slack-h">Slack</label><input id="c-hist-slack-h" type="number" min="1" max="168" step="1" style="width:72px"><span class="hint">시간 (1~168)</span><label for="c-hist-mail-d">메일</label><input id="c-hist-mail-d" type="number" min="1" max="14" step="1" style="width:64px"><span class="hint">일 (1~14)</span></div></div>
+                <div class="nrow"><span class="lab">수집 창</span><div class="inl"><label for="c-hist-collect-slack-h">Slack 전체 재검색</label><input id="c-hist-collect-slack-h" type="number" min="1" max="168" step="1" style="width:72px"><span class="hint">시간 (1~168, 기본 24 — 첫 수집·6시간마다 다시 볼 범위, 평소엔 지난 수집 이후만. 표시 구간보다 짧으면 표시 구간으로 맞춤)</span></div></div>
                 <div class="nrow"><span class="lab">보관 기간</span><div class="inl">
                   <label for="c-keep-slack">Slack</label><input id="c-keep-slack" type="number" min="0" max="365" step="1" style="width:64px">
                   <label for="c-keep-mail">메일</label><input id="c-keep-mail" type="number" min="0" max="365" step="1" style="width:64px">

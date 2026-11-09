@@ -7,18 +7,18 @@
 
 Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub·Sentry)를 모아 보여 주는 로컬 대시보드(탭: 홈·인박스·타임라인·설정). 전역 키: h 홈, i 인박스, r 지금 점검, ⌘K·/ 검색, ⌘J 통신기.
 - **홈**: 일정(일/주, ＋·드래그로 일정 만들기, ⋯ 수락/미정/거절), 할 일(NED 액션 아이템 / 개인 할 일 — 구분선·접기, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, 이력 7/30일, ↻ 소스별 갱신), 팔로업 채널 카드(멘션 없어도 따라가는 Slack 채널 요약, "나한테" 강조).
-- **인박스**: 우선(attention)·기타(업데이트/참고)·기록(브리핑) 3탭 + "장비실"(세션 상태, 대화창 출처 배지). 키 j/k·e·⏎·1/2/3.
-- **타임라인**: 세션 이벤트와 브리핑을 시간순으로(유형·워크트리 필터).
+- **인박스**: 우선·기타·기록(브리핑) 3탭 + "장비실"(세션 상태, 대화창 출처 배지). 키 j/k·e·⏎·1/2/3.
+- **타임라인**: 세션 이벤트·브리핑 시간순(유형·워크트리 필터)
 - **순찰/브리핑**: "지금 점검"(r) = 소스를 새로 가져와 판단 → 알림·attention. 자동 순찰은 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑은 `briefing_time` — 실패하면 10분 뒤 재시도(최대 3회).
 - **야간·유휴 감속**: 조용한 시간·유휴(`idle_schedule`)엔 자동 순찰·홈 갱신을 늦추거나 멈춤(`quiet_schedule.mode` normal/slow/pause). 홈 상단 칩. 수동 실행은 늘 즉시.
 - **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기를 확인 카드로 제안, 텍스트만 고쳐 실행; `actions.chat_session_create` 면 새 세션도; 회의·문서·메일 정리는 노트로 저장), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글 피드.
 - **답장 초안 ✎**: 연필 → 초안 3개 → 복사/열기/보내기. 실제 쓰기는 설정 → 쓰기 액션에서 켠 것만: `actions.slack_send`·`gmail_draft`(기본 켬)·`gmail_send`·`session_send`(기본 켬)·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯ 메뉴.
 - **확인 완료 ✓**: 항목을 처리됨으로 접음(바뀌면 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`, 앞 `ack_check_max`개만 검색)면 자동 해제.
-- **Gmail 읽음 표시**(`actions.gmail_mark_read`, 기본 꺼짐): 메일 ✓ 때 Gmail 도 읽음.
-- **검색 ⌘K**: 전체 통합 검색(초성, 수집 이력 포함).
+- **Gmail 읽음 표시**(`actions.gmail_mark_read`, 기본 끔): 메일 ✓ 면 Gmail 도 읽음.
+- **검색 ⌘K**: 통합 검색(초성, 수집 이력 포함).
 - **아카이브(Obsidian)**: 설정 → 아카이브에 볼트 `archive.vault` + 켜기 `archive.enabled` → 매일 `<archive.folder>/Daily/YYYY-MM/날짜.md` 에 브리핑·순찰·보낸 것·결과물·들어온 것·통계 자동 기록(Claude 호출 없음, 마커 밖 메모 보존). `archive.daily_embed` = 내 데일리 노트에 embed 한 줄.
-- **수집 이력**: 가져온 항목을 소스별로 보관(`history.keep_days.*`). 수집은 새 것만(증분), Slack·메일 카드·순찰·초안은 이력에서 표시 구간(`history.display.*`, 24시간·3일)만큼.
-- **설정**(바꾼 뒤 하단 "저장"): 외형(테마 `dashboard.theme` 시스템/라이트/다크, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(`heartbeat_minutes`, `signal_check_minutes`, `briefing_time`, `agenda_refresh_minutes`, `agenda_source_minutes.*`, `quiet_schedule.*`, `idle_schedule.*`) · 쓰기 액션(`actions.*`, 기본 말투 `reply_tone`, 소스별 답장 말투 `reply_tone_by_source.*`, 오늘 한 액션 로그) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(모델 `claude_model`, 최대 턴 `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd` $15 — 닿으면 자동 실행·대화 멈춤). 저장마다 백업 10개 → "이전 설정으로 되돌리기".
+- **수집 이력**: 가져온 항목을 소스별로 보관(`history.keep_days.*`). 수집은 새 것만(증분, Slack 전체 재검색 창 `history.collect.slack_hours`), 카드·순찰·초안은 이력의 표시 구간(`history.display.*`) — Slack 미답 요청은 기간 무관 유지.
+- **설정**(하단 "저장"): 외형(테마 `dashboard.theme` 시스템/라이트/다크, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(`heartbeat_minutes`, `signal_check_minutes`, `briefing_time`, `agenda_refresh_minutes`, `agenda_source_minutes.*`, `quiet_schedule.*`, `idle_schedule.*`) · 쓰기 액션(`actions.*`, 기본 말투 `reply_tone`, 소스별 답장 말투 `reply_tone_by_source.*`, 오늘 한 액션 로그) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(모델 `claude_model`, 최대 턴 `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd` $15 — 닿으면 자동 실행·대화 멈춤). 저장마다 백업 10개(되돌리기).
 
 ## 상세
 
@@ -50,7 +50,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 레이아웃: 위 = 확인 필요 그룹(스크롤), 아래 = 개인 할 일(입력폼 고정, 목록 스크롤, 최소 ≈180px — 항목이 적으면 내용만큼). 기본 60/40, 개인 할 일이 짧으면 남는 높이는 위로. 사이 구분선 드래그(↑↓ 키도)로 비율 조절·브라우저에 저장(`ned.todo.split`), 더블클릭 = 기본값. "개인 할 일" 헤더 클릭 = 접기/펼치기(`ned.todo.meFold`, 접히면 위가 전부; n·검색 이동 시 자동 펼침). 좁은 화면(<1100px, 자유 배치 아님)은 구분선 없이 자연 높이.
 
 ### 홈 — 소스 카드 (메일·Jira·Slack·GitHub)
-- 보여 주는 것: 📬 메일 확인 필요(결재/마감/답장/확인, 안 읽은 N) · 📋 Jira 내 이슈(마감 지난/오늘/진행 중) · 💬 Slack 답할 것(DM/멘션/스레드/그룹, 답 필요/답함/새 답글) · 🐙 GitHub 리뷰 요청(리뷰 요청/변경 요청/승인됨). 접힘/펼침, 메일·Slack 은 `확인 필요 | 전체`(전체 = 표시 구간 — 메일 `history.display.mail_days`·Slack `history.display.slack_hours` — 의 스레드·멘션·DM).
+- 보여 주는 것: 📬 메일 확인 필요(결재/마감/답장/확인, 안 읽은 N) · 📋 Jira 내 이슈(마감 지난/오늘/진행 중) · 💬 Slack 답할 것(DM/멘션/스레드/그룹, 답 필요/답함/새 답글) · 🐙 GitHub 리뷰 요청(리뷰 요청/변경 요청/승인됨). 접힘/펼침, 메일·Slack 은 `확인 필요 | 전체`(전체 = 표시 구간 — 메일 `history.display.mail_days`·Slack `history.display.slack_hours` — 의 스레드·멘션·DM; Slack 확인 필요는 기간 무관 — 답 안 한 요청은 답·해제 이모지·✓ 까지 남음).
 - 데이터: agenda.json — 소스별 `claude -p`(커넥터 읽기) 또는 GitHub 는 `gh search prs`. 소스별 주기마다 자동, 답장 맥락은 백그라운드 수집("맥락 수집 N/M"). Slack 스레드·DM 의 최근 대화는 갱신마다 다시 읽되, 마지막으로 읽은 뒤 새 메시지가 안 보이면 건너뜀(6시간마다 한 번은 재확인).
 - 언제: 답할 메시지·리뷰·마감 이슈를 소스별로 훑을 때.
 - 버튼·설정: 카드 ↻(그 소스만 지금 갱신), ⚠ 오류 배지, 항목 ✎ 초안·열기·✓ 확인. **이력 `표시 구간 | 지난 7일 | 30일`**(메일·Slack 은 전체 보기 위, Jira·GitHub 은 목록 아래): 표시 구간 밖까지 Ned 가 모은 항목을 날짜 구분선과 함께 최신순(최대 200, 지금 카드에 있는 건 "지금", 상태 칩 답함/답 필요/안 읽음/목록에서 빠짐), 카드별 기억(`ned.cardhist.<카드>`). `sources.*`, `agenda_source_minutes.*`, `dashboard.card_order`/`card_span`, `agenda_all_limit`.
@@ -108,10 +108,11 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 ### 수집 이력 · 수집/표시 구간
 - 보여 주는 것: 데몬이 소스 목록을 가져올 때마다 항목을 `~/.ned/history/<소스>.json` 에 key 기준으로 기록(같은 항목은 갱신) — Slack(permalink)·메일(스레드 id)·Jira(이슈 키)·GitHub(PR url)·캘린더(이벤트 id). 항목마다 처음 본 때·마지막 본 때와 상태(Slack 답함·해제 이모지·답 필요, 메일 안 읽음·행동 필요, Jira/GitHub 목록에 있음 `open` — 빠지면 false·다시 보이면 true, 캘린더 RSVP).
 - 데이터: Claude 호출 없음 — 데몬이 씀(임시 파일 → rename). 하루 한 번 보관 기간이 지난 항목을 지움(마지막 정리 일자 `~/.ned/history/meta.json`), 그 폴더의 Ned 파일만. 파일이 깨졌으면 `<소스>.json.corrupt-<시각>` 으로 옮기고 빈 이력·전체 창 수집으로 다시 시작. 트래킹 제외 채널은 이력 목록·검색에도 안 나옴.
-- 표시 구간: Slack·메일 카드, 순찰 프롬프트, 초안·대화 맥락이 보는 `agenda.json` 의 slack/mail 블록은 이번 목록이 아니라 **이력에서 표시 구간만큼 다시 조립**(Slack `history.display.slack_hours` 기본 24시간, 메일 `history.display.mail_days` 기본 3일). 확인 필요 = 구간 안·답 안 함·해제 이모지 아님·✓ 확인 완료 아님(최대 10, 목록이 매긴 급한 순), 전체 = 구간 안 전부(`agenda_all_limit`). DM 은 대화당 한 줄, 제외 채널은 뺌. 새 것이 없는 수집 뒤에도 카드는 그대로이고 "변화 없음"(무변경 순찰 건너뛰기·2단계 건너뛰기)은 이 조립 결과로 판단. 스레드·DM 을 2단계가 다시 읽다 내 답을 보면 바로 답함 처리. Jira·GitHub·캘린더 카드는 지금처럼 마지막 목록(이력엔 기록만).
-- 수집 구간(증분): Slack·메일 목록은 매번 전체 창을 다시 읽지 않고 **지난 성공 수집 − 30분 이후**만 검색(Slack `after`, 메일 두 번째 검색 `after:날짜`). 첫 실행·이력 파일이 없을 때·마지막 전체 검색이 6시간 넘었을 때는 전체 창(Slack 24시간, 메일 3일). 새 것이 없으면 모델은 빈 목록만 내고 끝(빈 결과 재시도도 안 함). 메일 안 읽음 수는 늘 최근 2일 전체. 증분 결과에 보인 **내 메시지**(`mine`)·내가 마지막으로 보낸 메일 스레드(`replied`)로 이전 항목을 답함 처리, 해제 이모지 검색은 기억하는 열린 항목까지 거슬러 봄(이번 결과 밖의 기억하는 항목도 해제). 증분 결과가 비었거나 응답에 그 소스가 없으면(재시작 직후 커넥터 미연결 등) 다음 수집 기준 시각을 옮기지 않아 그 구간을 다시 봄. 이력 쓰기가 실패하면 그 회차는 가져온 목록을 그대로 보여 줌. 설정 키 없음(상수).
+- 표시 구간: Slack·메일 카드, 순찰 프롬프트, 초안·대화 맥락이 보는 `agenda.json` 의 slack/mail 블록은 이번 목록이 아니라 **이력에서 표시 구간만큼 다시 조립**(Slack `history.display.slack_hours` 기본 24시간, 메일 `history.display.mail_days` 기본 3일). 확인 필요 = 답 안 함·해제 이모지 아님·✓ 확인 완료 아님(최대 10, 목록이 매긴 급한 순) — **Slack 은 기간 무관**: 답 안 한 요청은 표시 구간이 지나도 내 답글·해제 이모지·✓ 로 해제되거나 보관 기간(`history.keep_days.slack`)이 지나 지워질 때까지 남음(메일은 구간 안만). 전체 = 구간 안 전부(`agenda_all_limit`). DM 은 대화당 한 줄, 제외 채널은 뺌. 새 것이 없는 수집 뒤에도 카드는 그대로이고 "변화 없음"(무변경 순찰 건너뛰기·2단계 건너뛰기)은 이 조립 결과로 판단. 스레드·DM 을 2단계가 다시 읽다 내 답을 보면 바로 답함 처리 — 구간 밖에 남은 요청의 스레드·DM 도 계속 다시 읽음(새 메시지 없으면 6시간마다). Jira·GitHub·캘린더 카드는 지금처럼 마지막 목록(이력엔 기록만).
+- 수집 구간(증분): Slack·메일 목록은 매번 전체 창을 다시 읽지 않고 **지난 성공 수집 − 30분 이후**만 검색(Slack `after`, 메일 두 번째 검색 `after:날짜`). 첫 실행·이력 파일이 없을 때·마지막 전체 검색이 6시간 넘었을 때는 전체 창(Slack `history.collect.slack_hours` 기본 24시간, 메일 3일). 새 것이 없으면 모델은 빈 목록만 내고 끝(빈 결과 재시도도 안 함). 메일 안 읽음 수는 늘 최근 2일 전체. 증분 결과에 보인 **내 메시지**(`mine`)·내가 마지막으로 보낸 메일 스레드(`replied`)로 이전 항목을 답함 처리, 해제 이모지 검색은 기억하는 가장 오래된 열린 요청까지 거슬러 봄(최대 7일, 전체 재검색 때도 — 이번 결과 밖의 기억하는 항목도 해제). 7일보다 오래된 열린 요청은 ✓ 확인 완료나 내 답글(검색에 보인 내 메시지·2단계 스레드 재확인)로만 해제. ✓ 한 요청은 열린 요청으로 세지 않음(이모지 검색·스레드 재확인 대상 아님). 증분 결과가 비었거나 응답에 그 소스가 없으면(재시작 직후 커넥터 미연결 등) 다음 수집 기준 시각을 옮기지 않아 그 구간을 다시 봄. 이력 쓰기가 실패하면 그 회차는 가져온 목록을 그대로 보여 줌. 증분 간격(30분 겹침)·전체 재검색 주기(6시간)·메일 창은 상수.
+- 이름·채널명: Slack 보낸 사람은 표시 이름 → 실명 → 사용자명 → 사용자 ID 순(Slack Connect 외부 사용자도 같게), 이번 수집에서 이름이 비거나 "알 수 없음"이면 이력에 있던 이름 유지. 채널명은 채널 ID 기준으로 하나로 — 그 채널에서 가장 많이 본 이름(설정의 팔로업·제외 채널 이름과 대소문자·`#` 만 다르면 설정 표기, 설정 이름이 과반이면 그것) > 이번 응답(실행마다 철자가 흔들려도 같은 이름, 한 번 잘못 쓴 이름으로 채널이 바뀌거나 숨지 않음).
 - API: `GET /api/history?source=slack|mail|jira|github|calendar&days=7&q=&channel=`(최신순 최대 200, 표시 구간 안·열린 항목은 `current: true`) · `GET /api/history/status`(소스별 건수·일수·바이트, 마지막 수집·전체 재검색 시각, 다음 수집 창, 마지막 정리).
-- 설정: 설정 → 수집·보관 — `history.enabled`(기본 켬 — 끄면 기록 안 함, 예전처럼 마지막 목록만) · 보관 기간 `history.keep_days.slack`·`history.keep_days.mail`(30)·`history.keep_days.jira`·`history.keep_days.github`·`history.keep_days.calendar`(90), 0~365일, 0 = 그 소스 기록 안 함. 표시 구간 `history.display.slack_hours`(24, 1~168)·`history.display.mail_days`(3, 1~14) — 보관이 표시보다 짧으면 표시에 맞춰 늘림.
+- 설정: 설정 → 수집·보관 — `history.enabled`(기본 켬 — 끄면 기록 안 함, 예전처럼 마지막 목록만) · 보관 기간 `history.keep_days.slack`·`history.keep_days.mail`(30)·`history.keep_days.jira`·`history.keep_days.github`·`history.keep_days.calendar`(90), 0~365일, 0 = 그 소스 기록 안 함. 표시 구간 `history.display.slack_hours`(24, 1~168)·`history.display.mail_days`(3, 1~14) — 보관이 표시보다 짧으면 표시에 맞춰 늘림. 수집 창 `history.collect.slack_hours`(24, 1~168) — Slack 전체 재검색이 거슬러 보는 시간(이력에 없던 지난 멘션을 한 번 다시 모을 때 잠깐 늘렸다 되돌림). 표시 구간보다 짧으면 표시 구간으로 맞추고(증분 수집의 하한이라 짧으면 꺼져 있던 동안이 빠짐), Slack 보관 기간도 수집 창(일) 이상으로 맞춤.
 
 ### 야간 모드 · 유휴 모드 (자동 작업 감속)
 - 보여 주는 것: 조용한 시간이나 유휴 상태에서 자동 순찰·홈 소스 갱신(과 그 뒤 답장 맥락 수집)을 느리게(모든 주기 × 배수) 하거나 멈춤. 홈 상단 칩 "야간 모드 · 느리게 ×6 · 08:00 재개" / "유휴 모드 · 멈춤 · 활동 시 재개"(둘 다면 유휴 표시). 감속이 없으면 칩 없음.
@@ -196,7 +197,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - **알림**: 알림 켜기 `notifications.enabled` · 소스별 `notifications.kinds.*` · 아침 브리핑 알림 `notifications.briefing` · 소리 `notifications.sound` · 묶음 기준 `notifications.summary_threshold`(기본 3) · 조용한 시간 `quiet_hours`(기본 23:00~08:00) · 그 시간엔 보내지 않음/소리 없이 `notifications.quiet_delivery`.
 - **순찰 주기**: heartbeat 간격 `heartbeat_minutes`(10) · 신호 조회 최소 간격 `signal_check_minutes`(60) · "바뀐 게 없으면 순찰 건너뛰기" `heartbeat_skip_unchanged`(켬) · 아침 브리핑 시각 `briefing_time`(09:00) · 홈 자동 갱신 기본 주기 `agenda_refresh_minutes`(60) · 소스별 주기 Slack/메일/캘린더/Jira/GitHub `agenda_source_minutes.*`(비우면 기본) · 조용한 시간 동작 `quiet_schedule.*` · 유휴 시 동작 `idle_schedule.*`(위 "야간 모드 · 유휴 모드").
 - **쓰기 액션**: 기본 말투 `reply_tone` · 소스별 그룹 토글 `actions.*`(위 "쓰기 액션") · 답장 말투 `reply_tone_by_source.*` · 오늘 한 액션.
-- **수집·보관**: 수집 이력 기록 `history.enabled`(`c-hist-on`) · 표시 구간 Slack 시간 `history.display.slack_hours`·메일 일 `history.display.mail_days` · 보관 기간 Slack/메일/Jira/GitHub/캘린더 `history.keep_days.*`(0 = 기록 안 함) · 상태 줄(소스별 건수·일수·크기, 마지막 수집·전체 재검색, 다음 수집 창 — `/api/history/status`).
+- **수집·보관**: 수집 이력 기록 `history.enabled`(`c-hist-on`) · 표시 구간 Slack 시간 `history.display.slack_hours`·메일 일 `history.display.mail_days` · 수집 창 Slack 전체 재검색 시간 `history.collect.slack_hours`(`c-hist-collect-slack-h`, 24) · 보관 기간 Slack/메일/Jira/GitHub/캘린더 `history.keep_days.*`(0 = 기록 안 함) · 상태 줄(소스별 건수·일수·크기, 마지막 수집·전체 재검색, 다음 수집 창 — `/api/history/status`).
 - **아카이브**: 켜기 `archive.enabled` · 볼트 경로 `archive.vault` · Ned 폴더 `archive.folder` · 담을 것 `archive.include.*` · 내 데일리 노트 embed `archive.daily_embed` · 상태·"지금 쓰기"(위 "아카이브 — Obsidian").
 - **Claude**: 모델 `claude_model`(비우면 기본) · 최대 턴 `claude_max_turns`(25) · 하루 사용 상한 `agenda_daily_budget_usd`(15, 닿으면 자동 실행과 대화가 멈춤, 버튼 실행은 계속).
 - **저장·되돌리기**:
@@ -236,6 +237,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `archive.include.briefings` · `archive.include.updates` · `archive.include.actions` · `archive.include.outputs` · `archive.include.sessions` · `archive.include.history` | true · true · true · true · false · true | 아카이브 → 담을 것 |
 | `history.enabled` | true | 수집·보관 → 수집 이력 기록 |
 | `history.display.slack_hours` · `history.display.mail_days` | 24 · 3 | 수집·보관 → 표시 구간 |
+| `history.collect.slack_hours` | 24 (1~168) | 수집·보관 → 수집 창 (Slack 전체 재검색) |
 | `history.keep_days.slack` · `history.keep_days.mail` · `history.keep_days.jira` · `history.keep_days.github` · `history.keep_days.calendar` | 30 · 30 · 90 · 90 · 90 (0 = 기록 안 함) | 수집·보관 → 보관 기간 |
 | `persona` | ned | UI 없음 (ned/alfred/oracle/jarvis — 말투·테마·통신기 이름) |
 | `port` | 7777 | UI 없음 (`NED_PORT` 가 우선) |
@@ -272,6 +274,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `c-int-slack` · `c-int-mail` · `c-int-calendar` · `c-int-jira` · `c-int-github` | 순찰 주기 → 소스별 주기 | `agenda_source_minutes.*` |
 | `c-hist-on` | 수집·보관 → 수집 이력 기록 | `history.enabled` |
 | `c-hist-slack-h` · `c-hist-mail-d` | 수집·보관 → 표시 구간 Slack(시간) · 메일(일) | `history.display.slack_hours` · `history.display.mail_days` |
+| `c-hist-collect-slack-h` | 수집·보관 → 수집 창 Slack 전체 재검색(시간) | `history.collect.slack_hours` |
 | `c-keep-slack` · `c-keep-mail` · `c-keep-jira` · `c-keep-github` · `c-keep-calendar` | 수집·보관 → 보관 기간 | `history.keep_days.*` |
 | `c-tone` | 쓰기 액션 → 기본 말투 | `reply_tone` |
 | `c-model` | Claude → 모델 | `claude_model` |

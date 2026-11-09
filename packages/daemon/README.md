@@ -222,8 +222,8 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 | GET | `/api/actions` | `sent-actions.log` 최근 50건 (최신 먼저) |
 | POST | `/api/sessions/create` | 대화창에서 세션 만들기 (`actions.chat_session_create`, 기본 off) `{repo, worktree:{mode:"new"\|"existing", name}, model:"opus"\|"sonnet"(기본 opus), prompt}`. 400 입력/미등록 레포/없는 기존 워크트리, 403 꺼짐, 409 대화창 출처로 살아 있는 세션 2개(상한), 202 `{job_id}` — 아래 "세션 만들기" |
 | GET | `/api/sessions/create/:job_id` | 세션 만들기 작업 `{state, stage, elapsed_ms, result?{ok, detail, session:{worktree_path, handle, stage}}}` (`stage`: worktree_create\|agent_launch → agent_boot → prompt_send → submit_confirm) |
-| GET | `/api/history?source=&days=7&q=&channel=&limit=200` | 수집 이력 한 소스(`slack\|mail\|jira\|github\|calendar`, 아니면 400): `ts` 가 `days`(1~90) 안인 레코드 최신순 최대 200 → `{source, days, total, items: [{key, source, ts, first_seen, last_seen, current, title, detail, url, channel?, state, item}]}`. `current` = 지금 카드에 있음(Slack·메일: 표시 구간 안, Jira·GitHub: `open` 이고 agenda 목록에 있음, 캘린더: agenda 목록에 있음). `q` 는 공백으로 나눈 토큰이 제목·상세에 모두 있어야(대소문자 무시), `channel` 은 Slack 채널(팔로업 행 포함) |
-| GET | `/api/history/status` | `{enabled, display, sources: {<src>: {keep_days, recording, count, days, bytes, oldest, newest}}, collect: {slack\|mail: {last_ok_at, last_full_at, next: {full, reason, since}}}, last_prune_day, overlap_minutes, full_rescan_hours}` |
+| GET | `/api/history?source=&days=7&q=&channel=&limit=200` | 수집 이력 한 소스(`slack\|mail\|jira\|github\|calendar`, 아니면 400): `ts` 가 `days`(1~90) 안인 레코드 최신순 최대 200 → `{source, days, total, items: [{key, source, ts, first_seen, last_seen, current, title, detail, url, channel?, state, item}]}`. `current` = 지금 카드에 있음(Slack: 표시 구간 안 또는 열린 요청, 메일: 표시 구간 안, Jira·GitHub: `open` 이고 agenda 목록에 있음, 캘린더: agenda 목록에 있음). `q` 는 공백으로 나눈 토큰이 제목·상세에 모두 있어야(대소문자 무시), `channel` 은 Slack 채널(팔로업 행 포함) |
+| GET | `/api/history/status` | `{enabled, display, sources: {<src>: {keep_days, recording, count, days, bytes, oldest, newest}}, collect: {slack\|mail: {last_ok_at, last_full_at, full_hours, next: {full, reason, since}}}, last_prune_day, overlap_minutes, full_rescan_hours}` |
 | GET | `/api/archive/status` | Obsidian 아카이브 상태 `{ enabled, vault, folder, check: {ok, obsidian, path, error?} \| null, today_rel, today_url (obsidian://, 파일 있을 때), last_write_at, last_write_path, last_error, last_error_at, last_embed: {day, result}, pending_days }` — 아래 "Obsidian 아카이브" |
 | POST | `/api/archive/flush` | 오늘(+대기 중인 날) 리포트를 지금 씀 → `{ ok, written: [day], error?, status }` · 409 아카이브 꺼짐 · 500 쓰기 실패(`status.last_error`) |
 | GET | `/api/outputs?limit=50` | 정리 결과물 목록(최신순, `markdown` 뺌) `[{ id, ts, kind, title, sources, chat_id?, message_ts?, vault_rel?, vault_path?, obsidian_url?, vault_error? }]` |
@@ -361,24 +361,38 @@ jira/github `{open}`(목록에서 빠지면 false, 다시 보이면 true) · cal
 
 **표시 원천 = 이력** (`slackView`, `mailView`, `finalizeSlackView` — `agenda.ts` `mergeSources`): 소스 키를 upsert 한 직후, 그 run 의
 slack/mail 블록을 이력 + `history.display` 구간으로 다시 만들어 agenda.json 에 쓴다 → heartbeat·drafts·chat·server·search·agenda-context 는
-수정 없이 긴 구간을 본다. Slack items = 구간 안 `need && !answered && !acked`(정렬: 마지막으로 뽑힌 run 의 순서 → 최신), all = 구간 안
-멘션·DM·스레드·그룹 행(최신순, `agenda_all_limit`, items 포함 보장), DM collapse·dedupe·제외 채널은 기존 함수 재사용, watch = 팔로업 채널
+수정 없이 긴 구간을 본다. Slack items = `need && !answered && !acked`(`openAsk`) — **기간 무관**: 답 안 한 요청은 표시 구간이 지나도
+답함(내 답글·`mine`·2단계)·해제 이모지·✓ 확인 완료·보관 기간 prune 전까지 남는다(정렬: 마지막으로 뽑힌 run 의 순서 → 최신). all = 구간 안
+멘션·DM·스레드·그룹 행(최신순, `agenda_all_limit`, 구간 안 items 포함 보장 — 구간 밖 열린 요청은 items 에만), DM collapse·dedupe·제외 채널은 기존 함수 재사용, watch = 팔로업 채널
 이력 행(하이라이트 needs_me 먼저 5개 + 최신 3개, 증분 run 이 요약을 비우면 이전 요약 유지). context·threads 는 `carryContexts` 가 이전
 agenda 에서 이어 붙이고, 그 다음 `finalizeSlackView` 가 ✓ 확인 완료(reviewed.json, 대시보드 `srcKey`/`srcRevAt` 과 같은 규칙 — 스레드면
 `@last_reply_ts`)를 items 에서 빼고 10개로 자른다. 메일 items = `needs_action` && 확인 완료 아님(최대 10), all = 구간 안 스레드(최신순, `unread`),
 `unread` 수·summary 는 이번 run. 증분 run 의 빈 summary 는 열린 항목이 남아 있으면 이전 것을 유지. 서명(`sourceSignature`)은 이 뷰로 계산 —
 새 것이 없는 증분 run 은 `unchanged: true` 라 heartbeat skip·2단계 skip 이 그대로 동작한다. 2단계 `mergeThreads` 는 읽은 스레드의 내 마지막 답·DM 의
 내 메시지로 이력의 옛 항목을 답함 처리(`historyFromThreads`)하고 그 행을 바로 items 에서 뺀다(`applyAnswered`). Jira/GitHub/캘린더는 스냅샷 그대로.
-`history.enabled=false`(또는 그 소스 `keep_days` 0)면 예전처럼 이번 목록 그대로.
+`history.enabled=false`(또는 그 소스 `keep_days` 0)면 예전처럼 이번 목록 그대로. 구간 밖 열린 요청의 스레드·DM 도 계속 2단계 재확인 대상이다 —
+`slack-threads.ts` `followed`: items 행(prio 0)이면 48시간 활동 필터(`THREAD_FOLLOW_HOURS`)와 무관, 읽은 뒤 새 메시지가 없으면 6시간마다 재확인.
+prio 는 `finalizeSlackView`(✓ 제외·10건) 뒤의 items 로 다시 매긴다(`mergeSources` 가 sync 를 한 번 더) — ✓ 한 옛 요청은 재확인 대상에서 빠진다.
+스레드 200·DM 50 상한에서는 prio 0 을 먼저 남긴다. `/api/history` 의 `current` 도 구간 안이거나 ✓ 안 한 열린 요청이면 true.
+
+**이름·채널명 안정화**: Ned 는 `users.info` 를 따로 부르지 않고 1단계 검색 결과에서 모델이 `from`/`channel` 을 옮겨 적는다. 프롬프트 규칙 —
+`from` = 표시 이름 → 실명 → 사용자명 → 사용자 ID(`U…`), Slack Connect 외부 사용자도 같게, "알 수 없음"·빈 값 금지 / `channel` = 결과의 채널
+이름 그대로 `#` 붙여서. 데몬 쪽 — `upsertSlack`/`fillSlack` 은 새 `from` 이 비었거나 자리표시(`namelessFrom`)거나 사용자 ID(`U…`/`W…`)뿐이면 레코드의 기존 실명을 유지하고(`pickName`),
+채널명은 permalink 의 채널 ID 기준으로 하나로 맞춘다(`slackChannelNames`): 그 ID 레코드들이 보인 이름(`item.channel_seen`, 원문) 중 가장 많은 것(동률은 최신)
+— 그 이름이 팔로업·제외 채널 설정과 대소문자·`#` 만 다르거나 설정 이름이 과반이면 설정 표기, 처음 보는 ID 면 이번 응답. 한 번 잘못 쓴 제외 채널명으로 채널 전체가 숨지 않는다. upsert 때마다 모든 레코드의
+`item.channel` 을 그 이름으로 쓰고, `slackView` 도 같은 이름으로 조립한다(이전 레코드는 `channel` 을 원문으로 간주). 채널 이름이 바뀌면 새 이름의
+레코드가 많아지거나 옛 레코드가 보관 기간으로 지워질 때 넘어간다.
 
 **증분 수집** (`collectWindow`, `listWindows`, `prompts/agenda-lists.md`): Slack·메일 1단계 호출은 `meta.json` 의 `collect.<src>.last_ok_at`
-(마지막으로 병합에 성공한 run 의 기준 시각) − `OVERLAP_MINUTES`(30) 이후만 검색한다 — Slack `{{SLACK_SINCE}}` = `max(now−24h, last_ok−30m)`,
+(마지막으로 병합에 성공한 run 의 기준 시각) − `OVERLAP_MINUTES`(30) 이후만 검색한다 — Slack `{{SLACK_SINCE}}` = `max(now−collect.slack_hours, last_ok−30m)`,
 메일 items 검색 `{{MAIL_ITEMS_RANGE}}` = `after:YYYY/MM/DD`(Gmail 은 날짜를 태평양 자정으로 읽으므로 UTC−8 날짜 — `gmailAfter`).
-이력 파일이 없거나(첫 실행) 성공 기록이 없거나 `last_full_at` 이 `FULL_RESCAN_HOURS`(6) 지났으면 전체 창(Slack 24h, 메일 3d), 그 소스가
+이력 파일이 없거나(첫 실행) 성공 기록이 없거나 `last_full_at` 이 `FULL_RESCAN_HOURS`(6) 지났으면 전체 창(Slack `history.collect.slack_hours` 기본 24h(1~168, 표시 구간 이상 — 증분 하한이라 짧으면 꺼져 있던 공백이 빠짐, Slack 보관 기간 ≥ ceil(수집 창/24)일, `slackFullHours`) — 프롬프트 `{{SLACK_RANGE}}` "최근 N시간", 메일 3d), 그 소스가
 기록되지 않으면(`history.enabled=false`·`keep_days.<src>=0`) 늘 전체 창 = 예전 프롬프트와 byte 동일. 메일 `is:unread newer_than:2d` 검색(안 읽음 수·`all`)은
 늘 전체. 증분 프롬프트는 "새 것이 없으면 `items:[]`, `all:[]` 로 끝" 문구를 넣고, 빈 결과 20초 재시도(`emptyFor`)는 전체 창 호출에서만 한다.
 출력에 `slack.mine`(검색 결과에 보인 내 메시지 permalink)·`mail.replied`(마지막 메시지가 나인 스레드 id)가 추가돼 증분 창 밖의 옛 항목을
-답함 처리한다. 해제 이모지 검색 `{{ACK_SINCE}}` 는 증분일 때 이력의 가장 오래된 열린 항목까지(최대 표시 구간·7일), 열린 항목이 있으면 후보가 없어도 돈다.
+답함 처리한다. 해제 이모지 검색 `{{ACK_SINCE}}` = `min(수집 창 시작, ACK_LOOKBACK_HOURS(7일) 안의 가장 오래된 열린 요청)`, 전체·증분 모두(이모지당 20건 상한이라 더
+넓히지 않는다). 7일보다 오래된 열린 요청은 ✓ 확인 완료나 내 답글(`mine`·2단계)로만 해제된다. 열린 요청이 있으면 후보가 없어도 돈다(`{{ACK_OPEN}}`).
+열린 요청 수·가장 오래된 시각은 `openSlack`(제외 채널·✓ 확인 완료 — `slackRecReviewed`, 기본 키나 `<키>@<마지막 답글>` — 뺌).
 팔로업 채널은 증분일 때 이전 요약(`{{WATCH_PREV}}`)을 받아 새 메시지가 있을 때만 다시 쓴다. 전체 창 run 은 반환된 가장 오래된 행보다 새로운데
 목록에 없는 열린 항목을 닫는다(검색 상한 20 으로 밀린 옛 행은 그대로). `ned prompt agenda` 는 지금 쓸 창 그대로 출력.
 기준 시각(`noteCollected`)은 진짜 수집일 때만 옮긴다: 응답 JSON 에 그 소스 키가 없으면(`missingKeys` — 실패 취급, 이력에도 안 씀),
@@ -479,7 +493,7 @@ detail `이력 · M/D · …`, `tab: home` / `anchor: card:<slack|mail|jira|gh|c
                          draft_context_max_age_minutes=180 (agenda 맥락 → fast 초안), draft_fast_model="sonnet", drafts_pregenerate=false,
                          agenda_all_limit=20 (mail/slack all[] 상한), agenda_context_batch=5 (2단계 배치 크기),
                          agenda_daily_budget_usd=15 (2단계 일일 예산), agenda_light_model="sonnet" (agenda 전 호출 모델, null = claude_model),
-                         history.{enabled=true, display.{slack_hours=24, mail_days=3}, keep_days.{slack=30, mail=30, jira=90, github=90, calendar=90}} (수집 이력)
+                         history.{enabled=true, display.{slack_hours=24, mail_days=3}, collect.{slack_hours=24}, keep_days.{slack=30, mail=30, jira=90, github=90, calendar=90}} (수집 이력)
   state.json             menu bar / 대시보드가 읽는 단일 뷰 (sessions, attention, last_briefing, daily_failed_at, quiet …)
   cursor.json            heartbeat 가 처리한 마지막 이벤트 ts
   events/YYYY-MM-DD.jsonl  훅(packages/hook/ned-hook.sh)이 append 하는 이벤트. 로컬 날짜 기준

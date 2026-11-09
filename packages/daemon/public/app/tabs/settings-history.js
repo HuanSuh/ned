@@ -1,4 +1,4 @@
-/* 설정 → 수집·보관 (config.history, src/history.ts): 이력 기록 켜기, 표시 구간(Slack 시간 · 메일 일), 소스별 보관 기간.
+/* 설정 → 수집·보관 (config.history, src/history.ts): 이력 기록 켜기, 표시 구간(Slack 시간 · 메일 일), 수집 창(Slack 전체 재검색 시간), 소스별 보관 기간.
  * Fields save with the form (readHistorySettings → PUT /api/config { history }); the status line reads
  * GET /api/history/status (소스별 건수 · 일수 · 크기, 마지막 증분/전체 수집, 다음 수집 창). */
 import { api } from "../api.js";
@@ -12,6 +12,7 @@ export function renderHistorySettings(c) {
   $("c-hist-on").checked = h.enabled !== false;
   $("c-hist-slack-h").value = h.display?.slack_hours ?? 24;
   $("c-hist-mail-d").value = h.display?.mail_days ?? 3;
+  $("c-hist-collect-slack-h").value = h.collect?.slack_hours ?? 24;
   for (const [k] of KEEP_SRC) $(`c-keep-${k}`).value = h.keep_days?.[k] ?? "";
   syncHistoryEnabled();
   loadHistoryStatus();
@@ -22,6 +23,7 @@ export function readHistorySettings() {
   return {
     enabled: $("c-hist-on").checked,
     display: { slack_hours: num("c-hist-slack-h"), mail_days: num("c-hist-mail-d") },
+    collect: { slack_hours: num("c-hist-collect-slack-h") },
     keep_days: Object.fromEntries(KEEP_SRC.map(([k]) => [k, num(`c-keep-${k}`)])),
   };
 }
@@ -44,7 +46,8 @@ export function historyStatusHtml(s) {
     const c = s.collect?.[k]; if (!c) return "";
     const last = c.last_ok_at ? `마지막 수집 ${esc(mdhm(c.last_ok_at))}` : "아직 수집 안 함";
     const full = c.last_full_at ? ` · 마지막 전체 재검색 ${esc(mdhm(c.last_full_at))}` : "";
-    const next = c.next ? ` · 다음: ${c.next.full ? "전체" : `증분 (${esc(mdhm(c.next.since))} 이후)`}` : "";
+    const win = k === "slack" && c.full_hours ? ` ${c.full_hours}시간` : "";
+    const next = c.next ? ` · 다음: ${c.next.full ? `전체${win}` : `증분 (${esc(mdhm(c.next.since))} 이후)`}` : "";
     return `<span class="hint">${esc(label)}: ${last}${full}${next}</span>`;
   };
   parts.push(col("slack", "Slack"), col("mail", "메일"));

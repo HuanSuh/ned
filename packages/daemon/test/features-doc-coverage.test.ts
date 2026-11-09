@@ -50,6 +50,7 @@ function configKeys(): string[] {
     ...sub("history"),
     ...sub("history.display"),
     ...sub("history.keep_days"),
+    ...sub("history.collect"),
   ];
 }
 

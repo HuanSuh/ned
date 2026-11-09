@@ -21,7 +21,7 @@ daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙�
 | `app/ui/toast.js` | `toast()` |
 | `app/tabs/home.js` · `inbox.js` · `timeline.js` · `settings.js` | 탭별 렌더와 그 탭 안 이벤트 |
 | `app/tabs/settings-archive.js` | 설정 → 아카이브(`config.archive`): 켜기·볼트 경로·Ned 폴더·담을 것·데일리 노트 embed(`readArchive` → 저장 PUT), 상태 줄(`GET /api/archive/status` — 볼트 배지·마지막 쓰기·마지막 오류, "지금 쓰기" = `POST /api/archive/flush`) |
-| `app/tabs/settings-history.js` | 설정 → 수집·보관(`config.history`): 이력 기록 켜기·표시 구간(Slack 시간·메일 일)·소스별 보관 기간(`readHistorySettings` → 저장 PUT), 상태 줄(`GET /api/history/status`) |
+| `app/tabs/settings-history.js` | 설정 → 수집·보관(`config.history`): 이력 기록 켜기·표시 구간(Slack 시간·메일 일)·수집 창(Slack 전체 재검색 시간 `collect.slack_hours`, `c-hist-collect-slack-h`)·소스별 보관 기간(`readHistorySettings` → 저장 PUT), 상태 줄(`GET /api/history/status`) |
 | `app/features/histview.js` | 카드의 수집 이력 토글 `표시 구간 \| 지난 7일 \| 30일`(`histBar`, `histList` — `GET /api/history`, 카드별 `ned.cardhist.<id>`, agenda `updated_at` 바뀌면 다시 받음): 메일·Slack 전체 보기, Jira·GitHub 목록 아래, 팔로업 카드(`channel=`), 일정 calnav "이력" |
 | `app/features/histrows.js` | 이력 행 렌더(순수): 날짜 구분선(`dayHead` 오늘/어제/M/D (요일)), 상태 칩, "지금" 표시 |
 | `app/features/calendar.js` | 일정 패널(일/주, `/api/calendar` 범위, `ned.cal`) |
