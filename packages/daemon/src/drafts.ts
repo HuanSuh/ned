@@ -218,11 +218,17 @@ export function transcriptTail(transcriptPath: string | undefined, maxMsgs = 12,
   }
 }
 
-/** Stable cache key for a (source, ref). Sessions also key on their latest event so a moved-on session redrafts. */
+/**
+ * Stable cache key for a (source, ref). Sessions also key on their latest event so a moved-on session redrafts.
+ * Slack: thread_ts defaults to the message's own ts outside DMs — the send does the same (a reply goes into that
+ * thread) — so a 팔로업 ✎ (thread_ts = ts spelled out) and a card / 이력 ✎ (none) share one draft id: same 1h cache,
+ * same pregenerated draft, same 10-min already-sent guard.
+ */
 export function refKey(source: DraftSource, ref: DraftRef): string {
   if (source === "slack") {
     const t = slackTarget(ref);
-    return `slack:${t.channel_id ?? ""}:${t.thread_ts ?? ""}:${t.ts ?? ""}:${t.channel_id ? "" : ref.url ?? ref.text ?? ""}`;
+    const thread = t.thread_ts ?? (t.channel_id?.startsWith("D") ? undefined : t.ts);
+    return `slack:${t.channel_id ?? ""}:${thread ?? ""}:${t.ts ?? ""}:${t.channel_id ? "" : ref.url ?? ref.text ?? ""}`;
   }
   if (source === "email") return `email:${ref.thread_id ?? ""}:${ref.message_id ?? ""}:${ref.thread_id || ref.message_id ? "" : ref.url ?? ref.text ?? ""}`;
   if (source === "jira") return `jira:${jiraTarget(ref).key ?? ""}`;
@@ -358,13 +364,15 @@ function sourceGuide(req: DraftRequest, fast: AgendaCtx | null = null, prefetche
   const preview = [ref.title && `제목: ${ref.title}`, ref.text && `미리보기: ${ref.text}`].filter(Boolean).join("\n") || "(없음)";
   if (req.source === "slack") {
     const t = slackTarget(ref);
-    const parent = t.thread_ts ?? t.ts;
+    // A DM message with no thread: the conversation is the channel itself (same choice as contextRule).
+    const dm = !!t.channel_id?.startsWith("D") && !t.thread_ts;
+    const parent = dm ? undefined : t.thread_ts ?? t.ts;
     const guide = [
       "Slack 메시지에 대한 답장.",
       parent && t.channel_id
         ? `- \`mcp__claude_ai_Slack__slack_read_thread\` 로 channel_id=\`${t.channel_id}\`, message_ts=\`${parent}\` 스레드를 읽는다 (response_format: concise).`
         : t.channel_id
-          ? `- \`mcp__claude_ai_Slack__slack_read_channel\` 로 channel_id=\`${t.channel_id}\` 최근 메시지 20개만 읽고 답할 메시지를 찾는다.`
+          ? `- \`mcp__claude_ai_Slack__slack_read_channel\` 로 channel_id=\`${t.channel_id}\` 최근 메시지 ${dm ? THREAD_READ_LIMIT : 20}개만 읽고 답할 메시지를 찾는다.`
           : "- 채널 정보가 없다. 도구를 쓰지 말고 미리보기만으로 쓴다.",
       "- 답할 대상은 스레드의 마지막 질문·요청이다 (내가 이미 답한 부분은 반복하지 않는다).",
       "- `reply_meta` 는 빈 문자열로 둔다.",

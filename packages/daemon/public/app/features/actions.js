@@ -146,7 +146,8 @@ export function inject(root = document) {
     const item = kind === "jira" ? (S.agenda?.jira || []).find((j) => j.url === href) || { url: href, key: /^[A-Z]/.test(key) ? key : undefined, title: ti.querySelector(".tt")?.textContent }
       : kind === "github" ? (S.agenda?.github || []).find((g) => g.url === href) || { url: href, title: ti.querySelector(".tt")?.textContent }
       : (cal ||= calByUrl()).get(href) || { url: href, title: ti.querySelector(".tt")?.textContent };
-    const b = axBtn(kind, item, "card"); if (b) ra.insertAdjacentHTML("afterbegin", b);
+    // 지난 N일 이력 rows (histrows.js, `.ti.hist`) keep their own origin when the ⋯ comes from here.
+    const b = axBtn(kind, item, ti.classList.contains("hist") ? "history" : "card"); if (b) ra.insertAdjacentHTML("afterbegin", b);
   }
   // Calendar day view: all-day rows and timed blocks' first line.
   for (const row of root.querySelectorAll(".allday .ad, .cev .t1")) {

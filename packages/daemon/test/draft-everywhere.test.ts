@@ -21,7 +21,7 @@ const { startServer } = await import("../src/server.js");
 const { loadConfig } = await import("../src/config.js");
 const { AGENDA_PATH, CONFIG_PATH } = await import("../src/paths.js");
 const { ACTION_ORIGINS, SENT_ACTIONS_LOG, buildActionPrompt, gate, parseOrigin, parseSendRequest } = await import("../src/actions.js");
-const { DRAFT_CTX_FRESH_HOURS, agendaContext, buildDraftPrompt, contextRule, generateDraft, parseDraftRequest } = await import("../src/drafts.js");
+const { DRAFT_CTX_FRESH_HOURS, agendaContext, buildDraftPrompt, contextRule, draftIdOf, generateDraft, parseDraftRequest, pregenCandidates, refKey } = await import("../src/drafts.js");
 
 const cfg: NedConfig = { ...DEFAULT_CONFIG, draft_context_max_age_minutes: 180 };
 const URL1 = "https://x.slack.com/archives/C111/p1700000000000100";
@@ -119,9 +119,42 @@ describe("Slack context rule (DRAFT_CTX_FRESH_HOURS)", () => {
     expect(contextRule({ source: "slack", ref: { url: DM_URL } }, null, null)).toMatch(/slack_read_channel` 로 channel_id=`D222`, limit=50/);
   });
 
+  it("DM without a thread: the whole prompt says read_channel only — guide and rule agree", () => {
+    writeAgenda({ ...agendaWith(10), slack: { summary: "", items: [], all: [], watch: [] } } as Agenda);
+    const { prompt } = buildDraftPrompt({ source: "slack", ref: { url: DM_URL } }, cfg, null);
+    expect(prompt).toContain(RULE);
+    expect(prompt).not.toContain("slack_read_thread");
+    expect(prompt.match(/slack_read_channel` 로 channel_id=`D222`/g)).toHaveLength(2);
+    // a DM reply inside a thread still reads that thread
+    const threaded = buildDraftPrompt({ source: "slack", ref: { url: DM_URL, thread_ts: "1699999999.000001" } }, cfg, null).prompt;
+    expect(threaded).toContain("slack_read_thread` 로 channel_id=`D222`, message_ts=`1699999999.000001`");
+    expect(threaded).not.toContain("slack_read_channel");
+  });
+
   it("other sources never get the rule", () => {
     expect(contextRule({ source: "email", ref: { thread_id: "t" } }, null, null)).toBe("");
     expect(buildDraftPrompt({ source: "jira", ref: { url: "https://a.atlassian.net/browse/AB-1" } }, cfg, null).prompt).not.toContain(RULE);
+  });
+});
+
+describe("one draft per message, wherever ✎ was pressed (refKey)", () => {
+  const watchRef = { url: URL1, channel: "C111", ts: "1700000000.000100", thread_ts: "1700000000.000100", title: "#dev · kim" }; // 팔로업 ✎ (draftref slackRef thread:true)
+  const cardRef = { url: URL1, channel: "C111", ts: "1700000000.000100", title: "dev · kim" }; // card / 이력 ✎
+
+  it("팔로업 (thread_ts = ts spelled out) and card / 이력 (none) share the draft id", () => {
+    expect(refKey("slack", watchRef)).toBe(refKey("slack", cardRef));
+    expect(draftIdOf(refKey("slack", watchRef))).toBe(draftIdOf(refKey("slack", { url: URL1 })));
+  });
+
+  it("a pregenerated draft (pregenCandidates ref) is the one a needs_me 팔로업 ✎ opens", () => {
+    const [cand] = pregenCandidates(agendaWith(10));
+    expect(cand.source).toBe("slack");
+    expect(draftIdOf(refKey("slack", watchRef))).toBe(draftIdOf(refKey(cand.source, cand.ref)));
+  });
+
+  it("a real thread reply keeps its own key; DMs never get ts as thread", () => {
+    expect(refKey("slack", { ...cardRef, thread_ts: "1699999999.000001" })).not.toBe(refKey("slack", cardRef));
+    expect(refKey("slack", { url: DM_URL })).toBe("slack:D222::1700000000.000200:");
   });
 });
 

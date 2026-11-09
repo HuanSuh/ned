@@ -179,7 +179,7 @@ function sentBody(d: DayData): string {
     const url = e.event?.html_link || /https:\/\/[^\s"')]+/.exec(e.result ?? "")?.[0] || e.ref?.url;
     const what = `${SRC_KO[e.source] ?? e.source} ${MODE_KO[e.mode] ?? e.mode}`;
     const tgt = one(actionTarget(e), 100);
-    return `- ${hm(Date.parse(e.ts))} ${what}${tgt ? ` · ${link(tgt, url)}` : url ? ` · ${link("링크", url)}` : ""}${e.text ? ` — “${one(e.text, 100)}”` : ""}${e.origin && ORIGIN_KO[e.origin] ? ` (${ORIGIN_KO[e.origin]})` : ""}`;
+    return `- ${hm(Date.parse(e.ts))} ${what}${tgt ? ` · ${link(tgt, url)}` : url ? ` · ${link("링크", url)}` : ""}${e.text ? ` — “${one(e.text, 100)}”` : ""}${e.origin && Object.hasOwn(ORIGIN_KO, e.origin) ? ` (${ORIGIN_KO[e.origin]})` : ""}`;
   });
   return ["## ✉️ 보낸 것", "", ...(lines.length ? lines : ["_(오늘 보낸 것 없음)_"])].join("\n");
 }

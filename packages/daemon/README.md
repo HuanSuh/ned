@@ -294,7 +294,8 @@ Agenda 응답 형태:
   mail `items` 중 reason `reply|approval|request`, 맥락이 신선한 것)을 순서대로 최대 6개 fast 경로로 생성해 캐시한다(모달이 바로 열림).
   `GET /api/draft/status` → `{ pregenerated, skipped_cached, failed, cost_usd, last_run_ts, running }` (마지막 실행 기준, 로그에 총 비용).
 - 초안은 **사용자 본인 목소리**: `{{PERSONA}}` 를 쓰지 않고 요청 `tone` → `config.reply_tone_by_source[source]`(slack/email/session, null 이면 건너뜀) → `config.reply_tone`(기본 말투, 기본 `간결하고 정중한 존댓말, 핵심 먼저`) 순으로 고른다 (`draftTone`). 대시보드는 `tone` 을 보내지 않고 서버가 정한다.
-- 캐시: `~/.ned/drafts/<id>.json`, id = sha1(source + ref 키) 앞 16자. 1시간 안이고 hint·tone 이 같으면 `cached: true` 로 그대로
+- 캐시: `~/.ned/drafts/<id>.json`, id = sha1(source + ref 키) 앞 16자 (Slack ref 키의 thread_ts 는 없으면 DM 이 아닌 한 ts —
+  보내기와 같은 기본값이라 팔로업 ✎(thread_ts 명시)와 카드·이력 ✎ 가 같은 초안·미리 생성 캐시·10분 중복 방지를 공유). 1시간 안이고 hint·tone 이 같으면 `cached: true` 로 그대로
   (session 은 마지막 이벤트 ts 도 키에 들어가 세션이 진행되면 새로 쓴다). `force: true` 면 무시. 같은 키 동시 요청은 실행 하나를 공유.
 - `meta` 는 보내기에 쓸 주소: slack 은 channel_id/thread_ts, email 은 모델이 스레드에서 찾은 `message_id`(답장할 마지막 메시지)·
   `reply_to`·`subject`. `POST /api/send` 에 `draft_id` 를 넘기면 이 meta 를 캐시에서 읽어 쓴다.

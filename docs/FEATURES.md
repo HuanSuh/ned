@@ -144,7 +144,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 보여 주는 것: 맥락 요약·발췌 + 초안 3개(짧게/보통/정중하게), 편집 가능, "다시 생성"(힌트).
 - 어디서: 홈 소스 카드 행, 카드의 이력 "지난 7일/30일" 행(Slack·메일; Jira·GitHub·캘린더는 ⋯), 팔로업 채널 카드의 모든 행·최근 대화·요약 줄(위 "팔로업 채널 카드"), 인박스·장비실. 팔로업에서 연 초안은 원글 ts 를 thread_ts 로 써서 스레드 답글.
 - 데이터: 백그라운드로 모은 답장 맥락(신선하면 — `draft_context_max_age_minutes` 180분 — 빠른 경로) 또는 커넥터로 스레드를 읽어 생성. **Slack 은 모은 발췌가 없거나 6시간보다 오래됐으면** 프롬프트가 먼저 `slack_read_thread`(limit 50, 스레드 없는 DM 은 `slack_read_channel`)로 대화 전체를 읽고 그 맥락으로 쓰게 함 — 오래된 스레드도 지난 결론을 놓치지 않게(6시간 이내 발췌면 지금처럼 바로). 캐시 `~/.ned/drafts/`(1시간). 초안을 열면 항목은 확인 완료.
-- 출처: 초안·보내기 요청에 어디서 열었는지(`origin` card / history / watch, 대화창은 chat)가 실려 `~/.ned/sent-actions.log` 와 설정 → 오늘 한 액션의 출처 칩(카드 / 지난 N일 / 팔로업 / 대화창)에 남음. 예전 기록(출처 없음)은 칩 없이 그대로. `actions.chat_write` 는 대화창 출처에만 걸림.
+- 출처: 초안·보내기 요청에 어디서 열었는지(`origin` card / history / watch, 대화창은 chat)가 실려 `~/.ned/sent-actions.log` 와 설정 → 오늘 한 액션의 출처 칩(카드 / 지난 N일 / 팔로업 / 대화창)에 남음. 예전 기록(출처 없음)은 칩 없이 그대로. 인박스·장비실(세션) ✎ 는 일부러 출처 없음(칩 없음). `actions.chat_write` 는 대화창 출처에만 걸림.
 - 언제: Slack·메일 답장, 세션에 지시, Jira 코멘트, PR 리뷰 문구를 빨리 쓰고 싶을 때.
 - 키·설정: ⌘⏎ 주 액션, Esc 닫기. 말투 = `reply_tone`(기본 "간결하고 정중한 존댓말, 핵심 먼저") / 소스별 `reply_tone_by_source.slack|email|session`. 미리 생성 `drafts_pregenerate`(config.yaml 만).
 

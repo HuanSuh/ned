@@ -163,5 +163,6 @@ describe("refs / chips", () => {
     expect(originChip("watch")).toContain(">팔로업<");
     expect(originChip(undefined)).toBe("");
     expect(originChip("evil")).toBe("");
+    for (const proto of ["constructor", "toString", "__proto__", "hasOwnProperty"]) expect(originChip(proto)).toBe("");
   });
 });
