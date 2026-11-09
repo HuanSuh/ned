@@ -23,10 +23,13 @@
 내 user_id 는 `slack_search_public_and_private` 도구 설명에 있다 (`Current logged in user's user_id is U…`) → 아래 `<ME>`.
 검색 세 번 (모두 `after: "{{SLACK_SINCE}}"`, `sort: "timestamp"`, `limit: 20`, `include_bots: false`, `response_format: "detailed"`, `max_context_length: 200`):
 - 멘션 `keywords: ["<@ME>"]` → `"mention"` / DM `filters: "is:dm"`, `channel_types: "im,mpim"` → `"dm"` / 스레드 `filters: "is:thread with:<@ME>"` → `"thread"`
-{{GROUP_MENTIONS}}{{SLACK_INCR}}- **확인 완료 조건**: 멘션·DM·참여 스레드에서 그 뒤에 **내 답글이 보이거나, 내가 해제 이모지로 리액션한 메시지**(아래 `acked` — 해제 이모지 블록이 없으면 빈 집합)는 확인 완료다.
+{{GROUP_MENTIONS}}{{SLACK_INCR}}- **이름·채널 규칙** (`items`·`all`·`watch` 모두):
+  - `from`: 검색 결과에 보이는 보낸 사람의 **표시 이름(display name) → 없으면 실명(real name) → 없으면 사용자명(username) → 그래도 없으면 사용자 ID(`U…`/`W…`) 그대로**. Slack Connect 외부 사용자(다른 워크스페이스)도 같은 규칙이다. `"알 수 없음"`·`"(이름 없음)"`·빈 문자열은 쓰지 않는다.
+  - `channel`: 검색 결과의 채널 이름을 **글자 하나 바꾸지 말고 그대로** `#` 붙여서 (번역·음역·추측·오타 수정 금지). DM 은 `DM`, 그룹 DM 은 `그룹 DM`.
+- **확인 완료 조건**: 멘션·DM·참여 스레드에서 그 뒤에 **내 답글이 보이거나, 내가 해제 이모지로 리액션한 메시지**(아래 `acked` — 해제 이모지 블록이 없으면 빈 집합)는 확인 완료다.
 - `items` (최대 10, 급한 순): 다른 사람이 **나에게** 질문·요청·확인·의견을 구했고, 검색 결과 context 상 그 뒤에 내 답이 안 보이고 `acked` 도 아닌 것. 단순 공유·감사·인사·봇·내 메시지·남에게 묻는 것은 뺀다{{GROUP_ITEMS_RULE}}. 애매하면 넣는다. 같은 대화는 하나만 (dm > mention > thread{{GROUP_PRIO}}).
   - DM 은 같은 대화(permalink 의 같은 채널 ID)당 가장 최근 1건만, 답 안 한 메시지가 여러 개면 `count` 에 개수.
-  - `channel` `#채널`/`DM`/`그룹 DM`, `from` 표시 이름, `text` 나에게 바라는 것 한국어 한 줄(40자 안팎 요약), `url` permalink 그대로, `ts` ISO-8601.
+  - `channel` `#채널`/`DM`/`그룹 DM`, `from` 보낸 사람 (둘 다 위 이름·채널 규칙), `text` 나에게 바라는 것 한국어 한 줄(40자 안팎 요약), `url` permalink 그대로, `ts` ISO-8601.
 - `all` (최신순, 최대 {{ALL_LIMIT}}): 나를 멘션했거나 DM 한 메시지 전부 (봇 제외, 중복 제거, 고르지 않음). **`items` 에 넣은 항목도 반드시 `all` 에 포함한다** (같은 `url`). `text` 원문 한 줄(80자 안팎), `answered` 그 뒤 내 답이 보이거나 `acked` 면 true.
 - `mine`: 위 검색 결과에 보인 **내가 보낸** 메시지의 permalink 를 **그대로** (최신순, 최대 30, 없으면 `[]`) — Ned 가 그 대화·스레드의 이전 항목을 답함으로 친다.
 - `summary`: 위 말투로 한 문장 (40자 안팎). 볼 게 없으면 `""`.
@@ -45,8 +48,8 @@
 
 ### slack.watch — 팔로업 채널: {{WATCH_CHANNELS}}
 - 위 검색과 **같은 턴에** 채널마다 `slack_search_public_and_private` 한 번: `filters: "in:#<채널>"`, 나머지 인자는 위와 같다. 찾지 못한 채널은 `summary: ""`, `highlights: []`, `recent: []`. 트래킹 제외 채널은 조회하지 않는다.
-{{WATCH_PREV}}- 채널마다 하나: `summary` 지난 24시간 정해진 것·물은 것 2~3줄(`\n` 구분, 잡담뿐이면 `""`), `highlights` 의미 있는 메시지 최대 5개(결정·질문·요청·마감·장애·공지): `from`, `text`(한 줄 ≤200자 요약), `ts`, `url` permalink, `needs_me`(나를 향한 질문·요청, 내 일에 영향 주는 결정, 마감 — 이미 처리됐으면 false), `reason`(25자 안팎). needs_me 를 먼저.
-- `recent`: 같은 검색 결과에서 **가장 최근 메시지 최대 3개, 최신순** — 고르지 않는다 (잡담이어도, highlights 와 겹쳐도 넣는다). `from` 표시 이름, `text` 원문 한 줄(≤120자, 넘치면 자름), `ts`, `url` permalink. 결과가 없으면 `[]`.
+{{WATCH_PREV}}- 채널마다 하나: `summary` 지난 24시간 정해진 것·물은 것 2~3줄(`\n` 구분, 잡담뿐이면 `""`), `highlights` 의미 있는 메시지 최대 5개(결정·질문·요청·마감·장애·공지): `from`(위 이름 규칙), `text`(한 줄 ≤200자 요약), `ts`, `url` permalink, `needs_me`(나를 향한 질문·요청, 내 일에 영향 주는 결정, 마감 — 이미 처리됐으면 false), `reason`(25자 안팎). needs_me 를 먼저.
+- `recent`: 같은 검색 결과에서 **가장 최근 메시지 최대 3개, 최신순** — 고르지 않는다 (잡담이어도, highlights 와 겹쳐도 넣는다). `from`(위 이름 규칙), `text` 원문 한 줄(≤120자, 넘치면 자름), `ts`, `url` permalink. 결과가 없으면 `[]`.
 <!--@/watch-->
 <!--@mail-->
 

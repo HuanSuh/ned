@@ -7,9 +7,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import YAML from "yaml";
-import { buildListsPrompt, listExtras, listWindows, refreshAgenda } from "../src/agenda.js";
+import { buildListsPrompt, listExtras, listWindows, refreshAgenda, type SlackBlock } from "../src/agenda.js";
 import { DEFAULT_CONFIG, HISTORY_SOURCES, loadConfig, normalizeFilters, normalizeHistory, type NedConfig } from "../src/config.js";
-import { HISTORY_META_PATH, collectWindow, historyFile, historyStatus, readHistory, readHistoryMeta } from "../src/history.js";
+import { HISTORY_META_PATH, collectWindow, historyFile, historyStatus, namelessFrom, readHistory, readHistoryMeta, slackChannelNames, slackView, upsertSlack, type SlackRec } from "../src/history.js";
 import { AGENDA_PATH, CONFIG_PATH, NED_HOME } from "../src/paths.js";
 
 const H = 3600_000;
@@ -76,6 +76,59 @@ describe("history.collect.slack_hours (전체 재검색 창)", () => {
     // no window passed → still the configured full window
     expect(buildListsPrompt(c96, ["slack"], NOW)).toContain(`after: "${sec(now - 96 * H)}"`);
     expect(historyStatus(c96, now).collect.slack).toMatchObject({ full_hours: 96, next: { full: true, since: now - 96 * H } });
+  });
+});
+
+describe("Slack names: external users' from, one channel name per channel id", () => {
+  const u = (ch: string, t: number) => `https://x.slack.com/archives/${ch}/p${Math.floor(t / 1000)}000100`;
+  const row = (ch: string, t: number, channel: string, from: string) => ({ channel, from, text: "일정 재확인 부탁", url: u(ch, t), ts: new Date(t).toISOString(), reason: "mention" as const });
+  const block = (items: ReturnType<typeof row>[]): SlackBlock => ({ summary: "", items, all: [], watch: [] });
+  const T = NOW.getTime();
+
+  it("a later empty / placeholder from keeps the record's earlier name; a real one replaces it", () => {
+    expect(["", "  ", "알 수 없음", "(알 수 없음)", "(이름 없음)", "Unknown", "unknown user", "?"].every(namelessFrom)).toBe(true);
+    expect(["김철수", "kim.cs", "U0123ABC"].some(namelessFrom)).toBe(false);
+    const m = new Map<string, SlackRec>();
+    upsertSlack(m, block([row("C0TESTCHAN1", T - H, "#project-orbit-하늘", "Kim (Partner)")]), { now: T });
+    for (const ph of ["", "알 수 없음", "(이름 없음)"]) {
+      upsertSlack(m, block([row("C0TESTCHAN1", T - H, "#project-orbit-하늘", ph)]), { now: T + 1 });
+      expect([...m.values()][0].item.from).toBe("Kim (Partner)");
+    }
+    upsertSlack(m, block([row("C0TESTCHAN1", T - H, "#project-orbit-하늘", "김파트너")]), { now: T + 2 });
+    expect([...m.values()][0].item.from).toBe("김파트너");
+    // first sight with a placeholder, then a real name from the 팔로업 search fills it
+    const m2 = new Map<string, SlackRec>();
+    upsertSlack(m2, block([row("C9", T - H, "#a", "알 수 없음")]), { now: T });
+    upsertSlack(m2, { ...block([]), watch: [{ channel: "#a", summary: "", highlights: [], recent: [{ from: "Lee", text: "x", ts: new Date(T - H).toISOString(), url: u("C9", T - H) }] }] }, { now: T + 1 });
+    expect([...m2.values()][0].item.from).toBe("Lee");
+  });
+
+  it("channel name per channel id: the most seen spelling wins over this run's typo, in records and the view", () => {
+    const m = new Map<string, SlackRec>();
+    const ID = "C0TESTCHAN1";
+    upsertSlack(m, block([row(ID, T - 5 * H, "#project-orbit-하늘", "a"), row(ID, T - 4 * H, "#project-orbit-하늘", "b")]), { now: T - 4 * H });
+    upsertSlack(m, block([row(ID, T - 3 * H, "#project-orbit-하놀", "c")]), { now: T - 3 * H });
+    upsertSlack(m, block([row(ID, T - 2 * H, "#project-orbit-하눌", "d"), row("C2", T - 2 * H, "#other", "e")]), { now: T - 2 * H });
+    const recs = [...m.values()];
+    expect(new Set(recs.filter((r) => r.item.url.includes(ID)).map((r) => r.item.channel))).toEqual(new Set(["#project-orbit-하늘"]));
+    expect(recs.find((r) => r.item.url.includes("/C2/"))!.item.channel).toBe("#other"); // a new id: this answer's name
+    expect(recs.find((r) => r.item.from === "c")!.item.channel_seen).toBe("#project-orbit-하놀"); // the raw answer is kept for counting
+    expect(slackChannelNames(recs).get(ID)).toBe("#project-orbit-하늘");
+    // the view normalizes rows built from older records too
+    const legacy: SlackRec[] = recs.map((r) => ({ ...r, item: { ...r.item, channel_seen: undefined, channel: r.item.from === "d" ? "#project-orbit-하눌" : r.item.channel } }));
+    for (const r of legacy) { r.state.need = true; }
+    const v = slackView(cfg(), block([]), null, { now: T, full: true }, legacy);
+    expect(new Set(v.items.filter((x) => x.url.includes(ID)).map((x) => x.channel))).toEqual(new Set(["#project-orbit-하늘"]));
+  });
+
+  it("a 팔로업 / 제외 channel name from settings wins when the id's history was seen as it", () => {
+    const m = new Map<string, SlackRec>();
+    const c = cfg({ filters: normalizeFilters({ slack: { watch_channels: ["Project-orbit-하놀"] } }) });
+    upsertSlack(m, block([row("C7", T - 3 * H, "#project-orbit-하늘", "a"), row("C7", T - 2 * H, "#project-orbit-하늘", "b"), row("C7", T - H, "#project-orbit-하놀", "c")]), { now: T, cfg: c });
+    expect(new Set([...m.values()].map((r) => r.item.channel))).toEqual(new Set(["#Project-orbit-하놀"]));
+    // not matching any seen name → majority as usual
+    const other = cfg({ filters: normalizeFilters({ slack: { exclude_channels: ["random"] } }) });
+    expect(slackChannelNames(m.values(), other).get("C7")).toBe("#project-orbit-하늘");
   });
 });
 

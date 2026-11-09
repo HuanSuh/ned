@@ -330,3 +330,22 @@ describe("slack group mentions (filters.slack.group_mentions)", () => {
     expect(dedupeSlack([{ url: u, reason: "thread" as const }, { url: u, reason: "dm" as const }])).toEqual([{ url: u, reason: "dm" }]);
   });
 });
+
+describe("Slack name / channel rules in the prompts (external users, stable channel names)", () => {
+  it("list prompt: from = display → real → username → user id, no placeholders; channel copied verbatim; watch refers to it", () => {
+    const p = buildListsPrompt(cfg({ filters: normalizeFilters({ slack: { watch_channels: ["ops"] } }) }), ["slack"]);
+    expect(p).toContain("표시 이름(display name) → 없으면 실명(real name) → 없으면 사용자명(username) → 그래도 없으면 사용자 ID");
+    expect(p).toContain("Slack Connect 외부 사용자");
+    expect(p).toContain('`"알 수 없음"`·`"(이름 없음)"`·빈 문자열은 쓰지 않는다');
+    expect(p).toContain("채널 이름을 **글자 하나 바꾸지 말고 그대로** `#` 붙여서");
+    expect(p).toMatch(/highlights` [^\n]*`from`\(위 이름 규칙\)/);
+    expect(p).not.toMatch(/\{\{/);
+  });
+  it("phase-2 prompts carry the same from rule", async () => {
+    const { buildContextPrompt, buildThreadPrompt } = await import("../src/agenda-context.js");
+    const ctx = buildContextPrompt("slack", [{ src: "slack", key: slackUrl("C1", "1762390000000100"), from: "kim", text: "x", ts: AT }]);
+    expect(ctx).toContain("사용자 ID(`U…`) 그대로 (Slack Connect 외부 사용자도 같게");
+    const th = buildThreadPrompt([], cfg());
+    expect(th).toContain("사용자 ID(`U…`) 그대로 (Slack Connect 외부 사용자도 같게");
+  });
+});

@@ -54,7 +54,10 @@ export interface HistRecord<S extends object = Record<string, any>, I extends ob
 }
 
 export interface SlackHistItem {
+  /** Channel name normalized per channel id (slackChannelNames) — what every view shows. */
   channel: string;
+  /** The name the latest list wrote for it, as is (slackChannelNames counts these). Absent in older records. */
+  channel_seen?: string;
   from: string;
   /** Raw one-line text (all[] / recent), else the ask. */
   text: string;
@@ -255,6 +258,8 @@ export interface UpsertCtx {
   acked?: Set<string>;
   /** Mail: thread ids whose last message is mine (`replied`). */
   replied?: string[];
+  /** Slack channel names from settings (팔로업 / 제외 channels) win when they match a channel id's history. */
+  cfg?: Pick<NedConfig, "filters">;
 }
 
 const SLACK_RANK: Record<SlackReason, number> = { dm: 0, mention: 1, thread: 2, group: 3 };
@@ -287,8 +292,8 @@ export function upsertSlack(map: Map<string, SlackRec>, s: SlackBlock, ctx: Upse
     returned.add(k);
     if (ms(x.ts)) oldest = Math.min(oldest, ms(x.ts));
     const r = touch(map, "slack", k, x.ts, now, newSlack), st = r.state, it = r.item;
-    it.channel = x.channel || it.channel;
-    it.from = x.from || it.from;
+    if (x.channel) it.channel_seen = it.channel = x.channel;
+    it.from = pickName(x.from, it.from);
     it.url = x.url || it.url;
     it.ts = x.ts || it.ts;
     const i = itemIdx.get(k);
@@ -344,6 +349,8 @@ export function upsertSlack(map: Map<string, SlackRec>, s: SlackBlock, ctx: Upse
   markMine(map, ctx.mine ?? [], "answered");
   // An acked DM closes that conversation up to the acked message (same rule as agenda normalize()).
   markMine(map, [...(ctx.acked ?? [])].filter((k) => /\/archives\/D[A-Z0-9]+\//.test(k)).map((k) => `https://${k}`), "acked", true);
+  // One name per channel id (the model spells it differently run to run): settings > most seen > this answer.
+  normalizeSlackChannels(map, ctx.cfg);
   // A full search is authoritative for what it returned: an ask it no longer lists isn't open any more. Only rows newer
   // than the oldest one returned (each search is capped, older rows may simply have fallen off), never on an empty answer.
   const win = ctx.win?.slack;
@@ -354,11 +361,63 @@ export function upsertSlack(map: Map<string, SlackRec>, s: SlackBlock, ctx: Upse
 }
 
 function fillSlack(it: SlackHistItem, x: { channel: string; from: string; url: string; ts: string; text: string }): void {
-  if (!it.channel) it.channel = x.channel;
-  if (!it.from) it.from = x.from;
+  if (!it.channel) it.channel_seen = it.channel = x.channel;
+  if (!it.from || (namelessFrom(it.from) && !namelessFrom(x.from))) it.from = x.from;
   if (!it.url) it.url = x.url;
   if (!it.ts) it.ts = x.ts;
   if (!it.text) it.text = x.text;
+}
+
+/** A `from` that names nobody: empty or a placeholder the model wrote instead of a name ("알 수 없음", "(이름 없음)", "unknown"…). */
+export function namelessFrom(v: string | undefined | null): boolean {
+  const t = String(v ?? "").trim().replace(/^\((.*)\)$/, "$1").trim();
+  return !t || /^(알\s*수\s*없음|알\s*수\s*없는\s*사용자|이름\s*없음|이름\s*미상|없음|미상|unknown(\s+user)?|no\s*name|n\/a|null|undefined|[?\-–—_.]+)$/i.test(t);
+}
+/** This list's `from` unless it names nobody — then the record's earlier one (an external user's name doesn't flip to "알 수 없음"). */
+export const pickName = (fresh: string | undefined, prev: string | undefined): string => (!namelessFrom(fresh) ? fresh! : prev || fresh || "");
+
+/** Channel id of a Slack permalink (`/archives/<ID>/`), or "". */
+export const slackChannelId = (url: string | undefined): string => /\/archives\/([A-Z0-9]+)\//.exec(url ?? "")?.[1] ?? "";
+const chanKey = (c: string) => c.trim().replace(/^#+/, "").toLowerCase();
+
+/**
+ * One name per Slack channel id, from the history: (1) a 팔로업 / 제외 channel name from settings that one of the id's
+ * records was seen as (settings' spelling), else (2) the name its records were seen as most often (ties → the newest),
+ * else nothing (callers keep this answer's name). Counts `channel_seen` (the raw answers), so a renamed channel takes
+ * over once its new name outnumbers the old one (old records age out with keep_days).
+ */
+export function slackChannelNames(recs: Iterable<SlackRec>, cfg?: Pick<NedConfig, "filters">): Map<string, string> {
+  const seen = new Map<string, Map<string, { n: number; at: number }>>();
+  for (const r of recs) {
+    const id = slackChannelId(r.item.url), name = (r.item.channel_seen ?? r.item.channel ?? "").trim();
+    if (!id || !name) continue;
+    let m = seen.get(id);
+    if (!m) seen.set(id, (m = new Map()));
+    const c = m.get(name) ?? { n: 0, at: 0 };
+    m.set(name, { n: c.n + 1, at: Math.max(c.at, ms(r.ts)) });
+  }
+  const conf = new Map<string, string>();
+  for (const c of [...(cfg?.filters.slack.watch_channels ?? []), ...(cfg?.filters.slack.exclude_channels ?? [])]) if (!conf.has(chanKey(c))) conf.set(chanKey(c), c.replace(/^#+/, ""));
+  const out = new Map<string, string>();
+  for (const [id, m] of seen) {
+    const ranked = [...m.entries()].sort((a, b) => b[1].n - a[1].n || b[1].at - a[1].at);
+    const fromCfg = ranked.find(([n]) => conf.has(chanKey(n)));
+    out.set(id, fromCfg ? `#${conf.get(chanKey(fromCfg[0]))}` : ranked[0][0]);
+  }
+  return out;
+}
+
+/**
+ * Every record gets its channel id's name (slackChannelNames); a 팔로업 tag (item.watch.channel) keeps the settings'
+ * name it was filed under. Legacy records first keep their stored name as what was seen.
+ */
+function normalizeSlackChannels(map: Map<string, SlackRec>, cfg?: Pick<NedConfig, "filters">): void {
+  for (const r of map.values()) if (r.item.channel_seen === undefined && r.item.channel) r.item.channel_seen = r.item.channel;
+  const names = slackChannelNames(map.values(), cfg);
+  for (const r of map.values()) {
+    const n = names.get(slackChannelId(r.item.url));
+    if (n) r.item.channel = n;
+  }
 }
 
 /**
@@ -455,7 +514,7 @@ export function historyUpsert(p: AgendaPayload, keys: readonly AgendaSourceKey[]
     if (!recording(cfg, src)) continue;
     try {
       const map = loadMap<HistRecord>(src);
-      if (src === "slack" && p.slack) upsertSlack(map as unknown as Map<string, SlackRec>, p.slack, ctx);
+      if (src === "slack" && p.slack) upsertSlack(map as unknown as Map<string, SlackRec>, p.slack, { cfg, ...ctx });
       else if (src === "mail" && p.mail) upsertMail(map as unknown as Map<string, MailRec>, p.mail, ctx);
       else if (src === "jira") upsertList<JiraItem>(map, src, p.jira, (j) => j.key, (j) => j.updated, () => ({ open: true }), ctx.now, true);
       else if (src === "github") upsertList<GithubItem>(map, src, p.github, (g) => g.url, (g) => g.updated, () => ({ open: true }), ctx.now, true);
@@ -590,7 +649,12 @@ export const openAsk = (r: SlackRec): boolean => !!r.state.reason && r.state.nee
 export function slackView(cfg: NedConfig, fresh: SlackBlock, prev: SlackBlock | null, ctx: ViewCtx, recs: SlackRec[] = readHistory<SlackRec>("slack")): SlackBlock {
   const lo = ctx.now - cfg.history.display.slack_hours * H;
   const ex = new Set(cfg.filters.slack.exclude_channels.map((c) => c.toLowerCase()));
-  const shown = recs.filter((r) => !ex.has(r.item.channel.replace(/^#/, "").toLowerCase()));
+  const names = slackChannelNames(recs, cfg);
+  const named = (r: SlackRec): SlackRec => {
+    const n = names.get(slackChannelId(r.item.url));
+    return n && n !== r.item.channel ? { ...r, item: { ...r.item, channel: n } } : r;
+  };
+  const shown = recs.map(named).filter((r) => !ex.has(r.item.channel.replace(/^#/, "").toLowerCase()));
   const inWin = shown.filter((r) => ms(r.ts) >= lo);
   const rows = inWin.filter((r) => r.state.reason);
   const all: SlackAllItem[] = [...rows]

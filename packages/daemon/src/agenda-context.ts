@@ -73,7 +73,7 @@ export function buildContextPrompt(src: CtxSource, batch: CtxCandidate[]): strin
           "- `thread_ts` 가 있으면 `slack_read_thread`(channel_id, message_ts=thread_ts, response_format `concise`, limit 30).",
           "- 없고 채널이 `D…`(DM)이면 `slack_read_channel`(channel_id, latest=ts 보다 1초 뒤, limit 6, response_format `concise`).",
           "- 그 밖(채널 메시지)은 `slack_read_thread`(channel_id, message_ts=ts, response_format `concise`, limit 30) — 답글이 없으면 그 메시지 하나.",
-          "- 옮길 것: 대상 메시지(ts)까지의 **최근 최대 5개, 오래된 순**, 각 `text` 원문 최대 300자 (넘치면 자름). 내가 보낸 메시지는 `from` 을 `나` 로. `participants` 는 대화에 나온 표시 이름.",
+          "- 옮길 것: 대상 메시지(ts)까지의 **최근 최대 5개, 오래된 순**, 각 `text` 원문 최대 300자 (넘치면 자름). 내가 보낸 메시지는 `from` 을 `나` 로, 나머지는 표시 이름 → 없으면 실명 → 없으면 사용자명 → 그래도 없으면 사용자 ID(`U…`) 그대로 (Slack Connect 외부 사용자도 같게, \"알 수 없음\"·빈 값 금지). `participants` 는 대화에 나온 사람 이름(같은 규칙).",
         ].join("\n")
       : [
           "- 스레드마다 `get_thread`(threadId, messageFormat `PLAIN_TEXT`).",
