@@ -8,6 +8,9 @@ import type { Agenda } from "../src/agenda.js";
 import type { ClaudeRunOptions, ClaudeRunResult } from "../src/claude.js";
 import { DEFAULT_CONFIG, type NedConfig } from "../src/config.js";
 
+const FAIL = "__FAIL__";
+const QUEUE = Symbol.for("queue");
+const queue = (...xs: unknown[]) => Object.assign(xs, { [QUEUE]: true });
 type Call = { prompt: string; opts: ClaudeRunOptions };
 const calls: Call[] = [];
 const replies: { pass1?: unknown; pass2?: unknown; legacy?: unknown } = {};
@@ -20,9 +23,13 @@ vi.mock("../src/claude.js", async (orig) => {
     runClaude: async (prompt: string, opts: ClaudeRunOptions): Promise<ClaudeRunResult> => {
       calls.push({ prompt, opts });
       const which = prompt.includes("1단계: 추출") ? "pass1" : prompt.includes("2단계: 작성") ? "pass2" : "legacy";
-      const r = replies[which];
+      // A reply may be a queue (array tagged with QUEUE) consumed one per call; FAIL = the run itself failed (ok: false).
+      let r = replies[which];
+      if (Array.isArray(r) && (r as unknown as { [QUEUE]?: boolean })[QUEUE]) r = (r as unknown[]).length > 1 ? (r as unknown[]).shift() : (r as unknown[])[0];
+      const cost = which === "pass1" ? 0.02 : 0.01;
+      if (r === FAIL) return { ok: false, text: "", cost_usd: cost, num_turns: 0, duration_ms: 5, error: "timeout after 240s" };
       const text = typeof r === "string" ? r : JSON.stringify(r ?? {});
-      return { ok: true, text, cost_usd: which === "pass1" ? 0.02 : 0.01, num_turns: 1, duration_ms: 5 };
+      return { ok: true, text, cost_usd: cost, num_turns: 1, duration_ms: 5 };
     },
   };
 });
@@ -63,7 +70,7 @@ describe("2-pass golden", () => {
   it("(a) 내가 이미 답한 질문 → answered, [답할 대상] 에 없음", async () => {
     const q = minsAgo(60), mine = minsAgo(50), r = minsAgo(40);
     writeAgenda(agendaWith([{ from: "kim", ts: q, text: "배포 언제 해요?" }, { from: "나", ts: mine, text: "금요일에 합니다" }, { from: "kim", ts: r, text: "👍" }]));
-    replies.pass1 = { transcript: [], asks: [{ who: "kim", what: "배포 일정", due: "", status: "open", answered_in: "", asked_in: [q] }], participants: [{ name: "kim" }] };
+    replies.pass1 = { transcript: [], asks: [{ who: "kim", what: "배포 일정", due: "", status: "answered", answered_in: mine, asked_in: [q] }], participants: [{ name: "kim" }] };
     replies.pass2 = { summary: "확인 반응", excerpt: "", mentions: [], drafts: drafts3([]) };
     const res = await generateDraft({ source: "slack", ref: { url: URL_FAST }, force: true }, cfg);
     expect(res.mode).toBe("fast");
@@ -142,6 +149,7 @@ describe("2-pass golden", () => {
     const res = await generateDraft({ source: "slack", ref: { channel: "C222", ts: root, thread_ts: root }, force: true }, cfg);
     expect(res.mode).toBe("full");
     expect(res.asks.map((a) => a.status)).toEqual(["answered", "answered", "open", "open"]);
+    expect(res.asks.map((a) => !!a.before_reply)).toEqual([false, false, true, false]); // 미답 원글 질문 = 이전, 재확인 = 이후
     const p1 = pass(1)[0];
     expect(p1.opts).toMatchObject({ allowedTools: expect.arrayContaining(["mcp__claude_ai_Slack__slack_read_thread"]), maxTurns: 8 });
     expect(p1.prompt).toContain(`message_ts=\`${root}\``);
@@ -174,8 +182,42 @@ describe("2-pass golden", () => {
     replies.pass1 = { transcript: [], asks: [{ who: "kim", what: "어제 건", status: "open", answered_in: "", asked_in: [t0] }, { who: "kim", what: "오늘 배포 여부", status: "open", answered_in: "", asked_in: [t1] }], participants: [] };
     replies.pass2 = { summary: "", excerpt: "", mentions: [], drafts: drafts3([1]) };
     const res = await generateDraft({ source: "slack", ref: { url: URL_FAST }, force: true }, cfg);
-    expect(res.asks.map((a) => a.status)).toEqual(["answered", "open"]);
+    // No daemon demotion: the model's open stays open; the one from before my reply is flagged before_reply.
+    expect(res.asks.map((a) => [a.status, !!a.before_reply])).toEqual([["open", true], ["open", false]]);
     expect(section(pass(2)[0].prompt, "### [답할 대상]")).not.toContain("어제 건은요?");
+    expect(pass(2)[0].prompt).toContain("1. kim — 어제 건 [내 마지막 답글 이전 질문 — 아직 답 안 됨]");
+  });
+
+  it("(M2) 대기성 답글: 질문 → 내 '확인해 볼게요' → 상대 '넵' → open 1 유지, before_reply", async () => {
+    const q = minsAgo(90), hold = minsAgo(80), ok = minsAgo(70);
+    writeAgenda(agendaWith([{ from: "kim", ts: q, text: "이번 주 배포 가능할까요?" }, { from: "나", ts: hold, text: "확인해 볼게요" }, { from: "kim", ts: ok, text: "넵" }]));
+    replies.pass1 = { transcript: [], asks: [{ who: "kim", what: "이번 주 배포 가능 여부", status: "open", answered_in: "", asked_in: [q] }], participants: [] };
+    replies.pass2 = { summary: "배포 가능 여부", excerpt: "", mentions: [], drafts: drafts3([1]) };
+    const res = await generateDraft({ source: "slack", ref: { url: URL_FAST }, force: true }, cfg);
+    expect(res.asks).toEqual([{ who: "kim", what: "이번 주 배포 가능 여부", due: "", status: "open", answered_in: "", before_reply: true }]);
+    const p2 = pass(2)[0].prompt;
+    expect(p2).toContain("답할 것이 1개다");
+    expect(p2).not.toContain("짧은 리액션/확인형");
+    expect(pass(1)[0].prompt).toContain("나중에 답하겠다는");
+  });
+
+  it("(M3) 내가 마지막 + 힌트 → 리액션 '만' 문구 없음, 독촉/후속 + 힌트 우선", async () => {
+    writeAgenda(agendaWith([{ from: "kim", ts: minsAgo(90), text: "자료 주세요" }, { from: "나", ts: minsAgo(60), text: "공유드렸습니다. 확인 부탁드려요" }]));
+    replies.pass1 = { transcript: [], asks: [{ who: "kim", what: "자료", status: "answered", answered_in: minsAgo(60), asked_in: [minsAgo(90)] }], participants: [] };
+    replies.pass2 = { summary: "", excerpt: "", mentions: [], drafts: drafts3([]) };
+    await generateDraft({ source: "slack", ref: { url: URL_FAST }, hint: "확인했는지 다시 물어봐 줘", force: true }, cfg);
+    const p2 = pass(2)[0].prompt;
+    expect(p2).not.toContain("으로만 쓴다");
+    expect(p2).toContain("후속 확인(정중한 독촉)");
+    expect(p2).toContain("힌트를 우선한다");
+  });
+
+  it("(M3) Jira open 0 (다른 사람 메시지는 있음) → 진행 상황 공유", async () => {
+    replies.pass1 = { transcript: [{ ts: "2026-11-01T00:00:00Z", from: "나", mine: true, text: "작업 시작" }, { ts: "2026-11-02T00:00:00Z", from: "qa", mine: false, text: "고생하세요" }], asks: [], participants: [] };
+    replies.pass2 = { summary: "", excerpt: "", mentions: [], drafts: drafts3([]) };
+    await generateDraft({ source: "jira", ref: { url: "https://acme.atlassian.net/browse/ABC-13" }, force: true }, cfg);
+    expect(pass(2)[0].prompt).toContain("진행 상황 공유(무엇을 했고 다음에 무엇을 할지)를 짧게 쓴다");
+    expect(pass(2)[0].prompt).not.toContain("짧은 리액션/확인형");
   });
 
   it("(f) 메일: 내 주소(SENT) 메시지 = mine, reply_meta 로 회신 주소", async () => {
@@ -234,8 +276,27 @@ describe("2-pass golden", () => {
     };
     replies.pass2 = { summary: "QA 일정", excerpt: "", mentions: ["<@U0KIM>", "<@UFAKE>"], drafts: drafts3([1]) };
     const res = await generateDraft({ source: "slack", ref: { channel: "C333", ts: "1762300800.000100" }, force: true }, cfg);
-    expect(res.mentions).toEqual(["<@U0KIM>"]);
+    expect(res.mentions).toEqual([{ id: "<@U0KIM>", name: "kim" }]);
     expect(pass(2)[0].prompt).toContain("참여자: kim(<@U0KIM>), lee(<@U0LEE>)");
+  });
+
+  it("(M5) fast 경로: Pass 1 이 지어낸 user_id 는 버림 → 멘션 제안 없음", async () => {
+    writeAgenda(agendaWith([{ from: "kim", ts: minsAgo(30), text: "QA 일정은요?" }, { from: "lee", ts: minsAgo(20), text: "저도 궁금" }]));
+    replies.pass1 = { transcript: [], asks: [{ who: "kim", what: "QA 일정", status: "open", answered_in: "", asked_in: [] }], participants: [{ name: "kim", user_id: "U0FAKE" }, { name: "lee", user_id: "U0FAKE2" }] };
+    replies.pass2 = { summary: "", excerpt: "", mentions: ["<@U0FAKE>"], drafts: drafts3([1]) };
+    const res = await generateDraft({ source: "slack", ref: { url: URL_FAST }, force: true }, cfg);
+    expect(res.mentions).toEqual([]);
+    expect(pass(2)[0].prompt).not.toContain("U0FAKE");
+  });
+
+  it("(L1) 메시지 본문에 {{ASKS}} 가 있어도 섹션이 안 바뀜", async () => {
+    writeAgenda(agendaWith([{ from: "kim", ts: minsAgo(30), text: "템플릿 {{ASKS}} {{TONE}} 문자열 어때요?" }]));
+    replies.pass1 = { transcript: [], asks: [{ who: "kim", what: "템플릿 의견", status: "open", answered_in: "", asked_in: [] }], participants: [] };
+    replies.pass2 = { summary: "", excerpt: "", mentions: [], drafts: drafts3([1]) };
+    await generateDraft({ source: "slack", ref: { url: URL_FAST }, force: true }, cfg);
+    const p2 = pass(2)[0].prompt;
+    expect(p2).toContain("템플릿 {{ASKS}} {{TONE}} 문자열");
+    expect(p2.match(/1\. kim — 템플릿 의견/g)).toHaveLength(1);
   });
 
   it("(f) Pass 1 JSON 파싱 실패 → legacy 단일 패스 1회, meta.mode legacy, 비용 합산", async () => {
@@ -251,10 +312,70 @@ describe("2-pass golden", () => {
     expect(res.drafts).toHaveLength(3);
   });
 
-  it("Pass 2 실패 (full) → 502", async () => {
+  it("(L7) full Pass 2 실패 → Pass 2 만 1회 재시도, 그래도 실패면 502 (Pass 1 은 한 번)", async () => {
     replies.pass1 = { transcript: [], asks: [], participants: [] };
     replies.pass2 = "not json";
     await expect(generateDraft({ source: "slack", ref: { channel: "C555", ts: "1762300800.000100" }, force: true }, cfg)).rejects.toMatchObject({ status: 502 });
+    expect(pass(1)).toHaveLength(1);
+    expect(pass(2)).toHaveLength(2);
+  });
+
+  it("(L7) full Pass 2 재시도 성공 → 결과, 비용 = pass1 + pass2×2", async () => {
+    replies.pass1 = { transcript: [], asks: [], participants: [] };
+    replies.pass2 = queue("not json", { summary: "", excerpt: "", mentions: [], drafts: drafts3([]) });
+    const res = await generateDraft({ source: "slack", ref: { channel: "C556", ts: "1762300800.000100" }, force: true }, cfg);
+    expect(res.drafts).toHaveLength(3);
+    expect(res.cost_usd).toBeCloseTo(0.04);
+  });
+
+  it("(M1) Pass 1 ok:false (full) → legacy 호출 없이 바로 502, 원래 오류 메시지", async () => {
+    replies.pass1 = FAIL;
+    replies.legacy = { summary: "s", excerpt: "", reply_meta: {}, drafts: drafts3([]).map(({ label, text }) => ({ label, text })) };
+    await expect(generateDraft({ source: "slack", ref: { channel: "C557", ts: "1762300800.000100" }, force: true }, cfg)).rejects.toMatchObject({ status: 502, message: expect.stringContaining("timeout after 240s") });
+    expect(calls.filter((c) => c.prompt.startsWith("# Ned reply draft\n"))).toHaveLength(0);
+    expect(pass(2)).toHaveLength(0);
+  });
+
+  it("(M1) Pass 1 ok:false (fast) → full 2-pass 로 1회, legacy 없음, 비용 합산", async () => {
+    writeAgenda(agendaWith([{ from: "kim", ts: minsAgo(30), text: "리뷰 언제?" }]));
+    replies.pass1 = queue(FAIL, { transcript: [{ ts: "1762300800.000100", from: "kim", mine: false, text: "리뷰 언제?" }], asks: [{ who: "kim", what: "리뷰 시점", status: "open", answered_in: "", asked_in: ["1762300800.000100"] }], participants: [] });
+    replies.pass2 = { summary: "", excerpt: "", mentions: [], drafts: drafts3([1]) };
+    const res = await generateDraft({ source: "slack", ref: { url: URL_FAST }, force: true }, cfg);
+    expect(res.mode).toBe("full");
+    expect(res.meta.mode).toBe("2pass");
+    expect(pass(1).map((c) => c.opts.maxTurns)).toEqual([1, 8]);
+    expect(calls.filter((c) => c.prompt.startsWith("# Ned reply draft\n"))).toHaveLength(0);
+    expect(res.cost_usd).toBeCloseTo(0.05); // fast pass1 0.02 + full pass1 0.02 + pass2 0.01
+  });
+
+  it("(테스트 공백 1·L4) fast Pass 2 실패 → full 2-pass 폴백, 비용 합산이 캐시 파일에도", async () => {
+    writeAgenda(agendaWith([{ from: "kim", ts: minsAgo(30), text: "리뷰 언제?" }]));
+    replies.pass1 = { transcript: [{ ts: "1762300800.000100", from: "kim", mine: false, text: "리뷰 언제?" }], asks: [{ who: "kim", what: "리뷰 시점", status: "open", answered_in: "", asked_in: [] }], participants: [] };
+    replies.pass2 = queue("not json", { summary: "", excerpt: "", mentions: [], drafts: drafts3([1]) });
+    const res = await generateDraft({ source: "slack", ref: { url: URL_FAST }, force: true }, cfg);
+    expect(res.mode).toBe("full");
+    expect(res.cost_usd).toBeCloseTo(0.06); // fast (0.02 + 0.01) + full (0.02 + 0.01)
+    const { DRAFTS_DIR } = await import("../src/drafts.js");
+    expect(JSON.parse(fs.readFileSync(`${DRAFTS_DIR}/${res.id}.json`, "utf8")).cost_usd).toBeCloseTo(0.06);
+  });
+
+  it("(L6) full 경로도 팔로업 스레드의 my_last_ts 로 구획 (내 답글이 Pass 1 의 25개 밖)", async () => {
+    const root = "1762300800.000100";
+    // agenda excerpt is stale (→ full path) but the followed-thread read knows my last reply ts.
+    const a = agendaWith([{ from: "kim", ts: minsAgo(600), text: "x" }], { my_last_ts: "1762300900.000100" });
+    a.slack!.items[0].url = `https://x.slack.com/archives/C777/p1762300800000100`;
+    a.slack!.items[0].context!.collected_at = minsAgo(600);
+    writeAgenda(a);
+    replies.pass1 = {
+      transcript: [{ ts: "1762300850.000100", from: "kim", mine: false, text: "옛 질문?" }, { ts: "1762301000.000100", from: "kim", mine: false, text: "새 질문?" }],
+      asks: [], participants: [],
+    };
+    replies.pass2 = { summary: "", excerpt: "", mentions: [], drafts: drafts3([]) };
+    const res = await generateDraft({ source: "slack", ref: { channel: "C777", ts: root }, force: true }, cfg);
+    expect(res.mode).toBe("full");
+    const target = section(pass(2)[0].prompt, "### [답할 대상]");
+    expect(target).toContain("새 질문?");
+    expect(target).not.toContain("옛 질문?");
   });
 
   it("session / github 은 legacy 그대로", async () => {

@@ -46,7 +46,19 @@ export interface DraftAsk {
   /** ts of my message that answered it ("" = unknown / open). */
   answered_in: string;
   asked_in: string[];
+  /** Open, but only asked at/before my last reply (e.g. after "확인해 볼게요") — still to answer; the modal shows "이전". */
+  before_reply?: boolean;
 }
+
+/**
+ * One-pass `{{KEY}}` substitution: every placeholder is replaced from `vals` in a single scan, so untrusted text
+ * inserted for one key (a message containing `{{ASKS}}`) is never expanded again. Unknown keys stay as they are.
+ */
+export function fillTemplate(tpl: string, vals: Record<string, string>): string {
+  return tpl.replace(/\{\{(\w+)\}\}/g, (m, k: string) => (Object.prototype.hasOwnProperty.call(vals, k) ? vals[k] : m));
+}
+
+const oneLine = (v: string) => v.replace(/\s+/g, " ").trim();
 
 /** [맥락] caps: the newest DRAFT_CTX_MAX_MSGS messages, then oldest dropped until the text fits DRAFT_CTX_MAX_CHARS. */
 export const DRAFT_CTX_MAX_MSGS = 20;
@@ -94,7 +106,7 @@ export function normalizeTranscript(raw: unknown): TranscriptMsg[] {
   const rows = raw
     .filter((m): m is Record<string, unknown> => !!m && typeof m === "object")
     .map((m, i) => {
-      const from = str(m.from).trim().slice(0, 80);
+      const from = oneLine(str(m.from)).slice(0, 80);
       const uid = str(m.user_id).trim();
       const msg: TranscriptMsg = {
         ts: str(m.ts).trim(),
@@ -133,8 +145,14 @@ export function segment(transcript: TranscriptMsg[], opts: { myLastTs?: string }
     // The thread knows a later message of mine than the transcript shows: cut after the last message at/before it.
     let j = -1;
     for (let i = msgs.length - 1; i >= 0; i--) if (tsSec(msgs[i].ts) <= extra) { j = i; break; }
+    if (j >= cut) myTs = opts.myLastTs ?? myTs;
+    else {
+      // My transcript message (ts unknown) sits after myLastTs: its time is at least the newest known ts up to it.
+      const known = msgs.slice(0, cut + 1).map((m) => m.ts).filter((t) => Number.isFinite(tsSec(t)));
+      const near = known.length ? known.reduce((a, b) => (tsSec(b) > tsSec(a) ? b : a)) : "";
+      myTs = tsSec(near) > extra ? near : opts.myLastTs ?? myTs;
+    }
     if (j > cut) cut = j;
-    myTs = opts.myLastTs ?? myTs;
   }
   const before = msgs.slice(0, cut + 1).map(seg);
   const target = msgs.slice(cut + 1).map(seg);
@@ -184,9 +202,9 @@ export function normalizeAsks(raw: unknown): DraftAsk[] {
     .map((a) => {
       const asked = Array.isArray(a.asked_in) ? a.asked_in.map(str) : [str(a.asked_in)];
       return {
-        who: str(a.who).trim().slice(0, 80),
-        what: str(a.what).replace(/\s+/g, " ").trim().slice(0, 300),
-        due: str(a.due).trim().slice(0, 60),
+        who: oneLine(str(a.who)).slice(0, 80),
+        what: oneLine(str(a.what)).slice(0, 300),
+        due: oneLine(str(a.due)).slice(0, 60),
         status: (a.status === "answered" ? "answered" : "open") as AskStatus,
         answered_in: str(a.answered_in).trim(),
         asked_in: asked.map((t) => t.trim()).filter(Boolean),
@@ -197,21 +215,18 @@ export function normalizeAsks(raw: unknown): DraftAsk[] {
 }
 
 /**
- * Daemon correction of Pass 1 asks (→ asks_final): an `open` ask that was only asked in messages at/before my last
- * reply is demoted to `answered` (my reply came after it); one asked (again) after my last reply — a 재확인 request —
- * stays open. Partial answers stay open too: when another ask from the same message was judged `answered`, the model
- * weighed my reply item by item, so its `open` for the rest is trusted (원글 질문 3개 중 2개만 답함 → 나머지 1개 open).
- * Asks without `asked_in` keep the model's status. Questions the model missed are not invented.
+ * Daemon pass over Pass 1 asks (→ asks_final). The model's `status` is kept as is — Pass 1 is told to mark `answered`
+ * only when my message actually answered it, and a holding reply ("확인해 볼게요") doesn't. An `open` ask asked only
+ * in messages at/before my last reply (ts compared as numbers) gets `before_reply: true` — still answered by Pass 2,
+ * shown as "이전" in the modal. Asked (again) after my last reply, or no usable ts → no flag. Missed questions are not invented.
  */
 export function reconcileAsks(asks: DraftAsk[], s: Pick<Segments, "my_last_ts">): DraftAsk[] {
   const cut = tsSec(s.my_last_ts);
-  const judged = new Set(asks.filter((a) => a.status === "answered").flatMap((a) => a.asked_in));
   return asks.map((a) => {
-    if (a.status !== "open" || !Number.isFinite(cut)) return a;
+    const { before_reply: _b, ...rest } = a;
+    if (a.status !== "open" || !Number.isFinite(cut)) return rest;
     const when = a.asked_in.map(tsSec).filter(Number.isFinite);
-    if (!when.length || when.some((t) => t > cut)) return a;
-    if (a.asked_in.some((t) => judged.has(t))) return a;
-    return { ...a, status: "answered", answered_in: a.answered_in || s.my_last_ts };
+    return when.length && when.every((t) => t <= cut) ? { ...rest, before_reply: true } : rest;
   });
 }
 
@@ -222,7 +237,7 @@ export function renderAsks(asks: DraftAsk[]): string {
   const open = openAsks(asks);
   const done = asks.filter((a) => a.status === "answered");
   const out: string[] = [];
-  out.push(open.length ? open.map((a, i) => `${i + 1}. ${a.who || "?"} — ${a.what}${a.due ? ` (마감: ${a.due})` : ""}`).join("\n") : "(없음 — 답할 질문·요청이 없다)");
+  out.push(open.length ? open.map((a, i) => `${i + 1}. ${a.who || "?"} — ${a.what}${a.due ? ` (마감: ${a.due})` : ""}${a.before_reply ? " [내 마지막 답글 이전 질문 — 아직 답 안 됨]" : ""}`).join("\n") : "(없음 — 답할 질문·요청이 없다)");
   if (done.length) out.push("", "이미 답한 것 (다시 답하지 않는다):", ...done.map((a) => `- ${a.who || "?"} — ${a.what}`));
   return out.join("\n");
 }
@@ -244,7 +259,7 @@ export function normalizeExtract(raw: unknown): Extracted | null {
       if (typeof p === "string") return p.trim() ? { name: p.trim().slice(0, 80) } : null;
       if (!p || typeof p !== "object") return null;
       const r = p as Record<string, unknown>;
-      const name = str(r.name).trim().slice(0, 80);
+      const name = oneLine(str(r.name)).slice(0, 80);
       const uid = str(r.user_id).trim();
       return name ? (/^[UW][A-Z0-9]+$/.test(uid) ? { name, user_id: uid } : { name }) : null;
     })
@@ -268,18 +283,24 @@ export function mergeParticipants(t: TranscriptMsg[], extra: Participant[] = [])
   return [...by.values()];
 }
 
+/** A suggested mention: `id` = `<@U…>` (what goes into the text), `name` = the participant's name (the chip label). */
+export interface DraftMention {
+  id: string;
+  name: string;
+}
+
 /**
  * Pass 2's `mentions`, kept only when they can help: Slack, ≥2 other participants, and each one a `<@U…>` of a known
- * participant (no invented ids).
+ * participant (no invented ids). The caller decides which participant ids count as known (fast path: transcript only).
  */
-export function filterMentions(raw: unknown, participants: Participant[], source: string): string[] {
+export function filterMentions(raw: unknown, participants: Participant[], source: string): DraftMention[] {
   if (source !== "slack" || !Array.isArray(raw)) return [];
-  const ids = new Set(participants.map((p) => p.user_id).filter(Boolean));
   if (participants.length < 2) return [];
-  const out: string[] = [];
+  const byId = new Map(participants.filter((p) => p.user_id).map((p) => [p.user_id as string, p.name]));
+  const out: DraftMention[] = [];
   for (const m of raw) {
-    const id = str(m).match(/^<@([UW][A-Z0-9]+)>$/)?.[1];
-    if (id && ids.has(id) && !out.includes(`<@${id}>`)) out.push(`<@${id}>`);
+    const id = str(m && typeof m === "object" ? (m as Record<string, unknown>).id : m).match(/^<@([UW][A-Z0-9]+)>$/)?.[1];
+    if (id && byId.has(id) && !out.some((x) => x.id === `<@${id}>`)) out.push({ id: `<@${id}>`, name: byId.get(id) ?? "" });
   }
   return out.slice(0, 3);
 }

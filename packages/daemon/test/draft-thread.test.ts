@@ -4,6 +4,7 @@ import {
   DRAFT_CTX_MAX_CHARS,
   DRAFT_CTX_MAX_MSGS,
   REACTION_LABEL,
+  fillTemplate,
   filterMentions,
   isReaction,
   normalizeCovers,
@@ -54,6 +55,18 @@ describe("segment", () => {
     expect(none.my_last_ts).toBe("");
   });
 
+  it("mine message without ts + myLastTs: cut stays at my message, my_last_ts = the newer known time", () => {
+    // myLastTs older than my (ts-less) message → keep my message as the cut; its time ≥ the newest known ts before it.
+    const t = normalizeTranscript([m("1700000001.0", "kim", "q1?"), m("1700000003.0", "kim", "q2?"), m("", "나", "a", true), m("1700000006.0", "kim", "q3?")]);
+    const s = segment(t, { myLastTs: "1700000002.0" });
+    expect(s.target.map((x) => x.text)).toEqual(["q3?"]);
+    expect(s.my_last_ts).toBe("1700000003.0");
+    // myLastTs newer than everything up to my ts-less message → it moves the cut forward and is the boundary.
+    const s2 = segment(t, { myLastTs: "1700000007.0" });
+    expect(s2.target).toEqual([]);
+    expect(s2.my_last_ts).toBe("1700000007.0");
+  });
+
   it("myLastTs newer than the transcript's own mine moves the cut; older than the excerpt → all target", () => {
     const t = normalizeTranscript([m("1700000001.0", "kim", "q1?"), m("1700000003.0", "kim", "q2?"), m("1700000005.0", "kim", "q3?")]);
     const s = segment(t, { myLastTs: "1700000004.0" });
@@ -93,15 +106,19 @@ describe("renderSegments", () => {
 
 describe("reconcileAsks / renderAsks", () => {
   const ask = (what: string, asked_in: string[], status: "open" | "answered" = "open"): DraftAsk => ({ who: "kim", what, due: "", status, answered_in: "", asked_in });
-  it("open asked only before my last reply → answered; asked again after → open; unknown asked_in → model status", () => {
-    const r = reconcileAsks([ask("A", ["1700000001.0"]), ask("B", ["1700000001.0", "1700000009.0"]), ask("C", [])], { my_last_ts: "1700000005.0" });
-    expect(r.map((a) => a.status)).toEqual(["answered", "open", "open"]);
-    expect(r[0].answered_in).toBe("1700000005.0");
-    expect(reconcileAsks([ask("A", ["1"])], { my_last_ts: "" })[0].status).toBe("open");
+  it("model status kept; open asked only before my last reply → before_reply; asked again after / no ts → no flag", () => {
+    const r = reconcileAsks([ask("A", ["1700000001.0"]), ask("B", ["1700000001.0", "1700000009.0"]), ask("C", []), ask("D", ["1700000001.0"], "answered")], { my_last_ts: "1700000005.0" });
+    expect(r.map((a) => a.status)).toEqual(["open", "open", "open", "answered"]);
+    expect(r.map((a) => !!a.before_reply)).toEqual([true, false, false, false]);
+    expect(reconcileAsks([ask("A", ["1"])], { my_last_ts: "" })[0].before_reply).toBeUndefined();
   });
-  it("partial answer: a sibling ask from the same message judged answered → the open one stays open", () => {
-    const r = reconcileAsks([ask("Q1", ["1700000001.0"], "answered"), ask("Q2", ["1700000001.0"]), ask("Q3", ["1700000002.0"])], { my_last_ts: "1700000005.0" });
-    expect(r.map((a) => a.status)).toEqual(["answered", "open", "answered"]);
+  it("ts compared as numbers: ISO asked_in vs Slack-ts cut, and '9.0' vs '10.0' (string order would be wrong)", () => {
+    const iso = new Date(1700000001 * 1000).toISOString();
+    expect(reconcileAsks([ask("A", [iso])], { my_last_ts: "1700000005.000100" })[0].before_reply).toBe(true);
+    expect(reconcileAsks([ask("A", ["1700000009.0"])], { my_last_ts: "1700000010.0" })[0].before_reply).toBe(true);
+  });
+  it("renderAsks marks before_reply asks for Pass 2 (still to answer)", () => {
+    expect(renderAsks([{ ...ask("A", ["1"]), before_reply: true }])).toContain("1. kim — A [내 마지막 답글 이전 질문 — 아직 답 안 됨]");
   });
   it("renderAsks numbers open ones and lists answered as don't-repeat", () => {
     const out = renderAsks([ask("A", [], "answered"), ask("B", []), { ...ask("C", []), due: "금요일" }]);
@@ -109,6 +126,16 @@ describe("reconcileAsks / renderAsks", () => {
     expect(out).toContain("2. kim — C (마감: 금요일)");
     expect(out).toContain("이미 답한 것");
     expect(renderAsks([])).toContain("(없음");
+  });
+});
+
+describe("fillTemplate / whitespace", () => {
+  it("one pass: a value containing {{ASKS}} is not expanded again; unknown keys stay", () => {
+    expect(fillTemplate("A={{A}} B={{B}} X={{X}}", { A: "{{B}}", B: "b" })).toBe("A={{B}} B=b X={{X}}");
+  });
+  it("from / who / due collapse whitespace", () => {
+    expect(normalizeTranscript([{ ts: "1", from: " kim \n lee ", text: "x" }])[0].from).toBe("kim lee");
+    expect(normalizeExtract({ asks: [{ who: "a \n b", what: "w", due: " 금 \t 요일 " }] })!.asks[0]).toMatchObject({ who: "a b", due: "금 요일" });
   });
 });
 
@@ -123,7 +150,7 @@ describe("normalizeExtract / mentions / covers", () => {
   });
   it("filterMentions: slack only, ≥2 participants, known ids only", () => {
     const parts = [{ name: "kim", user_id: "U1" }, { name: "lee", user_id: "U2" }];
-    expect(filterMentions(["<@U1>", "<@U9>", "@lee", "<@U1>"], parts, "slack")).toEqual(["<@U1>"]);
+    expect(filterMentions(["<@U1>", "<@U9>", "@lee", "<@U1>", { id: "<@U2>" }], parts, "slack")).toEqual([{ id: "<@U1>", name: "kim" }, { id: "<@U2>", name: "lee" }]);
     expect(filterMentions(["<@U1>"], parts.slice(0, 1), "slack")).toEqual([]);
     expect(filterMentions(["<@U1>"], parts, "email")).toEqual([]);
   });

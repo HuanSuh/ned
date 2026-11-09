@@ -7,6 +7,7 @@ import { parseOrigin, type ActionOrigin } from "./origin.js";
 import { readAgenda, type Agenda, type MailContext, type SlackContext } from "./agenda.js";
 import { extractJson, llmDisabled, runClaude, type ClaudeRunResult } from "./claude.js";
 import {
+  fillTemplate,
   filterMentions,
   mergeParticipants,
   normalizeCovers,
@@ -19,6 +20,7 @@ import {
   segment,
   type AskStatus,
   type DraftAsk,
+  type DraftMention,
   type Participant,
   type Segments,
   type TranscriptMsg,
@@ -105,6 +107,8 @@ export interface DraftAskView {
   due: string;
   status: AskStatus;
   answered_in: string;
+  /** Open but asked only before my last reply (e.g. after "확인해 볼게요") — the modal shows a small "이전" chip. */
+  before_reply?: boolean;
 }
 
 export interface DraftResult {
@@ -118,8 +122,11 @@ export interface DraftResult {
   drafts: { id: string; label: DraftLabel; text: string; covers?: number[] }[];
   /** 2-pass: asks after the daemon's correction (asks_final); [] for legacy and older cache files. */
   asks: DraftAskView[];
-  /** 2-pass Slack: suggested `<@U…>` mentions (≥2 participants, a specific `who`); the modal's toggle prepends them. */
-  mentions: string[];
+  /**
+   * 2-pass Slack: suggested mentions `{id: "<@U…>", name}` (≥2 participants, a specific `who`, an id seen in the thread);
+   * the modal's toggle prepends the ids. Older cache files may hold plain `"<@U…>"` strings.
+   */
+  mentions: (DraftMention | string)[];
   cost_usd: number;
   cached: boolean;
   created_at: number;
@@ -504,15 +511,16 @@ export function buildDraftPrompt(req: DraftRequest, cfg: NedConfig, fast: Agenda
   const s = sourceGuide(req, fast, prefetched);
   const rule = !fast && req.source === "slack" ? contextRule(req, fast, ctx === undefined ? agendaContext(req) : ctx) : "";
   const tone = draftTone(req, cfg);
-  const prompt = template
-    .replace("{{NOW}}", () => new Date().toLocaleString("ko-KR"))
-    .replace("{{TOOL_RULES}}", () => (fast ? `${NO_TOOL_RULES}\n${FAST_OUTPUT_RULE}` : req.source === "session" || req.source === "github" ? NO_TOOL_RULES : TOOL_RULES))
-    .replace("{{CONTEXT_RULE}}", () => rule)
-    .replace("{{TONE}}", () => tone)
-    .replace("{{HINT}}", () => req.hint ?? "(없음)")
-    .replace("{{SOURCE_GUIDE}}", () => s.guide)
-    .replace("{{REF}}", () => s.ref)
-    .replace("{{CONTEXT}}", () => s.context);
+  const prompt = fillTemplate(template, {
+    NOW: new Date().toLocaleString("ko-KR"),
+    TOOL_RULES: fast ? `${NO_TOOL_RULES}\n${FAST_OUTPUT_RULE}` : req.source === "session" || req.source === "github" ? NO_TOOL_RULES : TOOL_RULES,
+    CONTEXT_RULE: rule,
+    TONE: tone,
+    HINT: req.hint ?? "(없음)",
+    SOURCE_GUIDE: s.guide,
+    REF: s.ref,
+    CONTEXT: s.context,
+  });
   return { prompt, meta: s.meta };
 }
 
@@ -554,7 +562,10 @@ export function extractTools(source: DraftSource): string[] {
   return draftTools(source);
 }
 
-const EXTRACT_FULL_TRANSCRIPT = "읽은 대화의 메시지를 **오래된 순으로 모두**(최대 40개, 넘으면 최근 40개) 옮긴다. `text` 는 원문 그대로 최대 500자(요약·번역 금지), 내 메시지는 `from` `나` + `mine: true`.";
+/** Full-path Pass 1 transcript cap (output tokens = latency / timeout risk): EXTRACT_MAX_MSGS × EXTRACT_MAX_CHARS. */
+export const EXTRACT_MAX_MSGS = 25;
+export const EXTRACT_MAX_CHARS = 250;
+const EXTRACT_FULL_TRANSCRIPT = `읽은 대화의 메시지를 오래된 순으로 **최대 ${EXTRACT_MAX_MSGS}개** 옮긴다 — 내 마지막 메시지와 그 뒤 메시지는 모두 넣고, 남는 자리는 그 앞의 최근 메시지로 채운다(오래된 앞부분은 뺀다). \`text\` 는 원문 그대로 최대 ${EXTRACT_MAX_CHARS}자(넘치면 자름, 요약·번역 금지), 내 메시지는 \`from\` \`나\` + \`mine: true\`.`;
 
 /** Pass 1 source guide (what to read, who "I" am, how to fill transcript) for the 2-pass sources. */
 function extractGuide(req: DraftRequest, fast: AgendaCtx | null): { guide: string; ref: string; context: string; me: string; transcript: string; extra: string; meta: DraftMeta } {
@@ -639,39 +650,56 @@ function extractGuide(req: DraftRequest, fast: AgendaCtx | null): { guide: strin
 export function buildExtractPrompt(req: DraftRequest, fast: AgendaCtx | null = null): { prompt: string; meta: DraftMeta } {
   const template = fs.readFileSync(path.join(PROMPTS_DIR, "draft-extract.md"), "utf8");
   const g = extractGuide(req, fast);
-  const prompt = template
-    .replace("{{NOW}}", () => new Date().toLocaleString("ko-KR"))
-    .replace("{{TOOL_RULES}}", () => (fast ? "- 도구는 없다. 아래 대화만으로 **한 번에** JSON 을 출력한다." : TOOL_RULES))
-    .replace("{{ME_RULE}}", () => g.me)
-    .replace("{{TRANSCRIPT_RULE}}", () => g.transcript)
-    .replace("{{SOURCE_GUIDE}}", () => g.guide)
-    .replace("{{REF}}", () => g.ref)
-    .replace("{{CONTEXT}}", () => g.context)
-    .replace("{{SCHEMA_EXTRA}}", () => g.extra);
+  const prompt = fillTemplate(template, {
+    NOW: new Date().toLocaleString("ko-KR"),
+    TOOL_RULES: fast ? "- 도구는 없다. 아래 대화만으로 **한 번에** JSON 을 출력한다." : TOOL_RULES,
+    ME_RULE: g.me,
+    TRANSCRIPT_RULE: g.transcript,
+    SOURCE_GUIDE: g.guide,
+    REF: g.ref,
+    CONTEXT: g.context,
+    SCHEMA_EXTRA: g.extra,
+  });
   return { prompt, meta: g.meta };
 }
 
 const WRITE_SOURCE_RULES: Partial<Record<DraftSource, string>> = {
   slack: "- Slack: 초안 본문에 멘션을 넣지 않는다 (Ned 가 토글로 붙인다). `mentions` 에는 참여자(나 제외)가 2명 이상이고 특정 항목의 `who` 에게 답해야 할 때만, 위 참여자 목록에 있는 `<@U…>` 를 넣는다. 아니면 `[]`.",
   email: "- 메일: 인사(\"안녕하세요, ○○님.\")로 시작해도 되지만 서명은 넣지 않는다. `mentions` 는 `[]`.",
-  jira: "- Jira 코멘트: 평문. 다른 사람 언급은 이름만(멘션 문법 금지). 답할 것이 없으면 진행 상황 공유(무엇을 했고 다음에 무엇을 할지)를 짧게. `mentions` 는 `[]`.",
+  jira: "- Jira 코멘트: 평문. 다른 사람 언급은 이름만(멘션 문법 금지). `mentions` 는 `[]`.",
 };
+
+export const HINT_FIRST_RULE = "사용자 힌트가 있으면 **힌트를 우선한다** (아래 규칙과 부딪히면 힌트대로).";
+
+/**
+ * Pass 2's main instruction by situation: open asks → answer 1..n; none and nobody else wrote after me → a follow-up
+ * (독촉) / extra update; none on Jira → progress update; none otherwise → a short reaction / ack. A hint always wins.
+ */
+export function writeOpenRule(source: DraftSource, seg: Segments, open: number, hint?: string): string {
+  const covers = Array.from({ length: open }, (_, i) => i + 1).join(",");
+  const others = seg.target.some((m) => !m.mine);
+  const rule = open
+    ? `답할 것이 ${open}개다 — 각 초안은 1번부터 ${open}번까지 **모두** 답한다 (covers = [${covers}]).`
+    : !others
+      ? "내 마지막 메시지 뒤로 새 메시지가 없다 — 후속 확인(정중한 독촉)이나 추가 공유를 쓴다. covers 는 []."
+      : source === "jira"
+        ? "답할 질문·요청이 없다 — 진행 상황 공유(무엇을 했고 다음에 무엇을 할지)를 짧게 쓴다. covers 는 []."
+        : `답할 질문·요청이 없다 — 짧은 리액션/확인형${hint ? "으로" : "으로만"} 쓴다(예: "확인했어요, 감사합니다"). 세 초안 모두 1~2문장, covers 는 [].`;
+  return hint ? `${rule} ${HINT_FIRST_RULE}` : rule;
+}
 
 /** Pass 2 prompt (prompts/draft-write.md): segments + numbered open asks, no tools. */
 export function buildWritePrompt(req: DraftRequest, cfg: NedConfig, seg: Segments, participants: Participant[], asks: DraftAsk[]): string {
   const template = fs.readFileSync(path.join(PROMPTS_DIR, "draft-write.md"), "utf8");
-  const n = openAsks(asks).length;
-  const openRule = n
-    ? `답할 것이 ${n}개다 — 각 초안은 1번부터 ${n}번까지 **모두** 답한다 (covers = [${Array.from({ length: n }, (_, i) => i + 1).join(",")}]).`
-    : `답할 질문·요청이 없다 — 짧은 리액션/확인형으로만 쓴다(예: "확인했어요, 감사합니다"). 세 초안 모두 1~2문장, covers 는 [].`;
-  return template
-    .replace("{{NOW}}", () => new Date().toLocaleString("ko-KR"))
-    .replace("{{OPEN_RULE}}", () => openRule)
-    .replace("{{TONE}}", () => draftTone(req, cfg))
-    .replace("{{HINT}}", () => req.hint ?? "(없음)")
-    .replace("{{SOURCE_RULES}}", () => WRITE_SOURCE_RULES[req.source] ?? "")
-    .replace("{{SEGMENTS}}", () => renderSegments(seg, participants))
-    .replace("{{ASKS}}", () => renderAsks(asks));
+  return fillTemplate(template, {
+    NOW: new Date().toLocaleString("ko-KR"),
+    OPEN_RULE: writeOpenRule(req.source, seg, openAsks(asks).length, req.hint),
+    TONE: draftTone(req, cfg),
+    HINT: req.hint ?? "(없음)",
+    SOURCE_RULES: WRITE_SOURCE_RULES[req.source] ?? "",
+    SEGMENTS: renderSegments(seg, participants),
+    ASKS: renderAsks(asks),
+  });
 }
 
 interface LlmWrite {
@@ -687,7 +715,7 @@ function targetExcerpt(seg: Segments): string {
   return ((([...t].reverse().find((m) => !m.reaction) ?? t[t.length - 1])?.text) ?? "").slice(0, 300);
 }
 
-const askView = (a: DraftAsk): DraftAskView => ({ who: a.who, what: a.what, due: a.due, status: a.status, answered_in: a.answered_in });
+const askView = (a: DraftAsk): DraftAskView => ({ who: a.who, what: a.what, due: a.due, status: a.status, answered_in: a.answered_in, ...(a.before_reply ? { before_reply: true } : {}) });
 
 /** NED_NO_LLM: asks guessed from [답할 대상] (a `?` or a request ending), so the modal's list is exercised without claude. */
 const STUB_ASK_RE = /[?？]|부탁|요청|주세요|줘요|해줘|될까|할까|인가요|나요|까요/;
@@ -762,10 +790,14 @@ const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
 /**
  * 2-pass draft (Slack / 메일 / Jira). Pass 1 extracts transcript + asks (fast: no tools on the agenda excerpt, fast model,
  * 1 turn; full: the read tools, maxTurns 8); the daemon re-segments at my last message and corrects the asks; Pass 2
- * (no tools, fast model, 1 turn) answers the open asks 1:1. Pass 1 unparseable → one legacy single-pass run (meta.mode
- * "legacy"). Pass 2 failure: fast → the full 2-pass path once (like legacy), else DraftError 502.
+ * (no tools, fast model, 1 turn) answers the open asks 1:1.
+ * Failures: Pass 1 ran but its JSON is unusable → one legacy single-pass run (meta.mode "legacy"). Pass 1 didn't run
+ * (timeout / no connector / spawn error) → fast: the full 2-pass path once; full: DraftError 502 (no 2nd 4-minute wait).
+ * Pass 2 failure → fast: the full 2-pass path once; full: Pass 2 alone once more, then 502. Every fallback's result
+ * carries (and caches) the summed cost.
  */
 async function runTwoPass(req: DraftRequest, cfg: NedConfig, id: string, tone: string, hint: string, fast: AgendaCtx | null, fallback: boolean): Promise<DraftResult> {
+  const prior = (r: DraftResult, extra: number) => withCost(id, r, extra);
   const mode: DraftMode = fast ? "fast" : "full";
   const context_age_minutes = fast ? fast.age : null;
   const p1 = buildExtractPrompt(req, fast);
@@ -782,20 +814,30 @@ async function runTwoPass(req: DraftRequest, cfg: NedConfig, id: string, tone: s
     r1 = fast
       ? await runClaude(p1.prompt, fastOpts)
       : await runClaude(p1.prompt, { allowedTools: extractTools(req.source), tools: ["ToolSearch"], maxTurns: 8, model: cfg.claude_model, timeoutMs: 4 * 60_000, job: "draft" });
-    extracted = r1.ok ? normalizeExtract(extractJson(r1.text)) : null;
+    if (!r1.ok) {
+      log(`draft: pass 1 failed to run ${req.source} ${id} (${mode}, ${secs(Date.now() - started)}) — ${(r1.error ?? r1.text).slice(0, 300)}`);
+      if (fast && fallback) {
+        log(`draft: ${req.source} ${id} — fast path failed, falling back to full`);
+        return prior(await runTwoPass(req, cfg, id, tone, hint, null, false), r1.cost_usd);
+      }
+      throw new DraftError(`draft failed: ${(r1.error ?? "claude failed").slice(0, 300)}`, 502);
+    }
+    extracted = normalizeExtract(extractJson(r1.text));
     if (!extracted) {
-      log(`draft: pass 1 failed ${req.source} ${id} (${mode}, $${r1.cost_usd.toFixed(3)}, ${secs(Date.now() - started)}) — ${(r1.error ?? r1.text).slice(0, 300)} → legacy single pass`);
-      const r = await runLegacy(req, cfg, id, tone, hint, fast, fallback);
-      return { ...r, cost_usd: r.cost_usd + r1.cost_usd };
+      log(`draft: pass 1 output unparseable ${req.source} ${id} (${mode}, $${r1.cost_usd.toFixed(3)}, ${secs(Date.now() - started)}) — ${r1.text.slice(0, 300)} → legacy single pass`);
+      return prior(await runLegacy(req, cfg, id, tone, hint, fast, fallback), r1.cost_usd);
     }
   }
   const t1 = Date.now() - started;
-  // Transcript: fast = the excerpt Ned has (+ the thread's my_last_reply_ts); full = what Pass 1 read; nothing → the list preview.
-  const own = fast ? fastTranscript(fast) : { transcript: extracted.transcript };
+  // Transcript: fast = the excerpt Ned has (+ the thread's my_last_reply_ts); full = what Pass 1 read (+ the followed
+  // thread's my_last_reply_ts, when Ned knows it: my reply may sit outside Pass 1's 25 messages); nothing → the list preview.
+  const known = !fast && req.source === "slack" ? agendaContext(req) : null;
+  const own = fast ? fastTranscript(fast) : { transcript: extracted.transcript, myLastTs: known?.kind === "slack" ? known.ctx.my_last_ts : undefined };
   let transcript = own.transcript;
   if (!transcript.length && (req.ref.text || req.ref.title)) transcript = normalizeTranscript([{ ts: req.ref.ts ?? "", from: "?", mine: false, text: req.ref.text ?? req.ref.title }]);
-  const seg = segment(transcript, { myLastTs: "myLastTs" in own ? own.myLastTs : undefined });
-  const participants = mergeParticipants(transcript, extracted.participants);
+  const seg = segment(transcript, { myLastTs: own.myLastTs });
+  // fast: the excerpt carries no user ids, so Pass 1's ids can't be checked against anything — drop them (no mentions).
+  const participants = mergeParticipants(transcript, fast ? extracted.participants.map((p) => ({ name: p.name })) : extracted.participants);
   const asks = reconcileAsks(llmDisabled() ? stubAsks(seg) : extracted.asks, seg);
   const open = openAsks(asks).length;
   const prompt2 = buildWritePrompt(req, cfg, seg, participants, asks);
@@ -811,22 +853,30 @@ async function runTwoPass(req: DraftRequest, cfg: NedConfig, id: string, tone: s
     r2 = await runClaude(prompt2, fastOpts);
     parsed = r2.ok ? extractJson<LlmWrite>(r2.text) : null;
   }
-  const drafts = parsed ? normalizeDrafts(id, parsed.drafts, open) : [];
+  let drafts = parsed ? normalizeDrafts(id, parsed.drafts, open) : [];
+  let pass2Cost = r2.cost_usd;
   if (!drafts.length) {
     log(`draft: pass 2 failed ${req.source} ${id} (${mode}) — ${(r2.error ?? r2.text).slice(0, 300)}`);
     if (fast && fallback) {
       log(`draft: ${req.source} ${id} — fast path failed, falling back to full`);
-      const r = await runTwoPass(req, cfg, id, tone, hint, null, false);
-      return { ...r, cost_usd: r.cost_usd + r1.cost_usd + r2.cost_usd };
+      return prior(await runTwoPass(req, cfg, id, tone, hint, null, false), r1.cost_usd + r2.cost_usd);
     }
-    throw new DraftError(`draft failed: ${(r2.error ?? "unparseable model output").slice(0, 300)}`, 502);
+    if (!fast && !llmDisabled()) {
+      // The (expensive) read already happened: retry only the cheap write once.
+      log(`draft: ${req.source} ${id} — retrying pass 2 once`);
+      r2 = await runClaude(prompt2, fastOpts);
+      pass2Cost += r2.cost_usd;
+      parsed = r2.ok ? extractJson<LlmWrite>(r2.text) : null;
+      drafts = parsed ? normalizeDrafts(id, parsed.drafts, open) : [];
+    }
+    if (!drafts.length) throw new DraftError(`draft failed: ${(r2.error ?? "unparseable model output").slice(0, 300)}`, 502);
   }
   const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
   const rm = extracted.reply_meta;
   const meta: DraftMeta = req.source === "email"
     ? { ...p1.meta, message_id: p1.meta.message_id ?? s(rm.message_id), reply_to: p1.meta.reply_to ?? s(rm.reply_to), subject: p1.meta.subject ?? s(rm.subject), mode: "2pass" }
     : { ...p1.meta, mode: "2pass" };
-  const cost = r1.cost_usd + r2.cost_usd;
+  const cost = r1.cost_usd + pass2Cost;
   const result: DraftResult = {
     id,
     source: req.source,
@@ -848,8 +898,19 @@ async function runTwoPass(req: DraftRequest, cfg: NedConfig, id: string, tone: s
     writeJsonAtomic(draftFile(id), result);
   }
   const total = Date.now() - started;
-  log(`draft: ${req.source} ${id} (${mode}, 2pass) — ${drafts.length} drafts, ${open} open asks; pass 1 $${r1.cost_usd.toFixed(3)} ${secs(t1)} · pass 2 $${r2.cost_usd.toFixed(3)} ${secs(total - t1)} · total $${cost.toFixed(3)} ${secs(total)}`);
+  log(`draft: ${req.source} ${id} (${mode}, 2pass) — ${drafts.length} drafts, ${open} open asks; pass 1 $${r1.cost_usd.toFixed(3)} ${secs(t1)} · pass 2 $${pass2Cost.toFixed(3)} ${secs(total - t1)} · total $${cost.toFixed(3)} ${secs(total)}`);
   return result;
+}
+
+/** A fallback's result plus the cost of the runs before it — also written to the cache file, so a cache hit reports it. */
+function withCost(id: string, r: DraftResult, extra: number): DraftResult {
+  if (!extra) return r;
+  const out = { ...r, cost_usd: r.cost_usd + extra };
+  if (!llmDisabled() && !r.cached) {
+    fs.mkdirSync(DRAFTS_DIR, { recursive: true });
+    writeJsonAtomic(draftFile(id), out);
+  }
+  return out;
 }
 
 async function runLegacy(req: DraftRequest, cfg: NedConfig, id: string, tone: string, hint: string, fast: AgendaCtx | null, fallback = true): Promise<DraftResult> {
@@ -899,7 +960,7 @@ async function runLegacy(req: DraftRequest, cfg: NedConfig, id: string, tone: st
     if (fast && fallback) {
       log(`draft: ${req.source} ${id} — fast path failed, falling back to full`);
       const r = await runLegacy(req, cfg, id, tone, hint, null, false);
-      return { ...r, cost_usd: r.cost_usd + res.cost_usd };
+      return withCost(id, r, res.cost_usd);
     }
     throw new DraftError(`draft failed: ${(res.error ?? "unparseable model output").slice(0, 300)}`, 502);
   }
