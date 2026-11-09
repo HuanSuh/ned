@@ -122,6 +122,8 @@ export interface SlackThreadView {
   new_since_me: number;
   my_last_reply_at?: string;
   seen_reply_ts?: string;
+  /** Newest ts phase 1 saw in the thread — the ✓ rule takes max(last_reply_ts, this, row ts) (review-keys.ts). */
+  search_latest_ts?: string;
   /** Every kept message (≤ RECENT_KEEP), oldest first — the row shows the last 3, the history panel all. */
   recent: ThreadMessage[];
 }
@@ -327,7 +329,7 @@ export function applyDmState(s: SlackBlock): void {
  * One slack_read_thread result (model JSON) → the thread's latest state. Mutates `threads`; returns the keys updated.
  * Raw shape: {key, reply_count, my_last_reply_ts, new_since_me, participants[], messages[{from, ts, text}]} — `나` = me.
  */
-export function mergeThreadReads(threads: SlackThread[], raw: unknown[], now = Date.now()): string[] {
+export function mergeThreadReads(threads: SlackThread[], raw: unknown[], now = Date.now(), warn?: (msg: string, raw: unknown) => void): string[] {
   const byKey = new Map(threads.map((t) => [t.key, t]));
   const nowIso = new Date(now).toISOString();
   const done: string[] = [];
@@ -336,12 +338,15 @@ export function mergeThreadReads(threads: SlackThread[], raw: unknown[], now = D
     const o = r as Record<string, unknown>;
     const t = byKey.get(str(o.key));
     if (!t) continue;
-    const msgs: ThreadMessage[] = (Array.isArray(o.messages) ? o.messages : [])
-      .filter((m): m is Record<string, unknown> => !!m && typeof m === "object")
+    const given = (Array.isArray(o.messages) ? o.messages : []).filter((m): m is Record<string, unknown> => !!m && typeof m === "object");
+    const msgs: ThreadMessage[] = given
       .map((m) => ({ from: oneLine(str(m.from), 80), ts: slackTsStr(m.ts), text: oneLine(str(m.text), TEXT_MAX) }))
       .filter((m) => m.ts && (m.text || m.from))
       .map((m) => ({ ...m, at: tsIso(m.ts) }))
       .sort((a, b) => tsNum(a.ts) - tsNum(b.ts));
+    // Messages the model gave without a usable ts are dropped (and replies stamped with the root's ts collapse onto it):
+    // either way the read's newest ts can fall behind what phase 1 saw — corrected below, and reported.
+    const dropped = given.length - msgs.length, dupes = msgs.length - new Set(msgs.map((m) => m.ts)).size;
     t.checked_at = nowIso;
     t.read_search_ts = t.search_latest_ts ?? ""; // what phase 1 had seen when this read happened (skip-unchanged)
     done.push(t.key);
@@ -358,6 +363,13 @@ export function mergeThreadReads(threads: SlackThread[], raw: unknown[], now = D
     t.last_reply_at = last.at;
     t.last_reply_from = last.from;
     t.last_reply_text = oneLine(last.text, LINE_MAX);
+    // Defensive (threads only — a DM read is a channel window, see dmCandidates): the read can't be older than what
+    // phase 1 already saw in this thread.
+    if (t.thread_ts && tsNum(t.search_latest_ts) > tsNum(t.last_reply_ts)) {
+      warn?.(`agenda-threads: last_reply_ts behind search — ${t.channel_id} thread ${t.thread_ts}: read ${t.last_reply_ts} < search ${t.search_latest_ts} (messages ${given.length}, no-ts ${dropped}, same-ts ${dupes}) → raised to search`, r);
+      t.last_reply_ts = slackTsStr(t.search_latest_ts);
+      t.last_reply_at = tsIso(t.last_reply_ts);
+    }
     const replies = msgs.filter((m) => tsNum(m.ts) > tsNum(t.thread_ts)).length;
     t.reply_count = Math.max(Math.trunc(Number(o.reply_count)) || 0, replies);
     const mine = [...msgs].reverse().find(me);
@@ -386,12 +398,30 @@ export function threadContext(t: SlackThread): SlackContext | undefined {
 
 export function threadView(t: SlackThread): SlackThreadView {
   const v: SlackThreadView = { key: t.key, thread_ts: t.thread_ts, reply_count: t.reply_count, new_since_me: t.new_since_me, recent: t.recent.slice(-RECENT_KEEP) };
-  for (const k of ["root_text", "root_from", "thread_summary", "last_reply_ts", "last_reply_at", "last_reply_from", "last_reply_text", "my_last_reply_at", "seen_reply_ts"] as const) if (t[k]) v[k] = t[k];
+  for (const k of ["root_text", "root_from", "thread_summary", "last_reply_ts", "last_reply_at", "last_reply_from", "last_reply_text", "my_last_reply_at", "seen_reply_ts", "search_latest_ts"] as const) if (t[k]) v[k] = t[k];
   return v;
 }
 
-/** Someone replied after my last message, and the user hasn't marked that reply seen. */
-export const hasNewSinceMe = (t: SlackThread | SlackThreadView): boolean => t.new_since_me > 0 && !!t.last_reply_ts && !(t.seen_reply_ts && tsNum(t.seen_reply_ts) >= tsNum(t.last_reply_ts));
+/**
+ * Newest ts known for a thread: max(last_reply_ts, search_latest_ts, thread_ts) as a Slack ts ("" when none). Phase 2
+ * may have recorded last_reply_ts = the root while phase 1 already saw a newer reply, so every "how far is it" check
+ * takes the max — old records need no migration.
+ */
+export function latestTs(t: Pick<SlackThread, "last_reply_ts" | "search_latest_ts" | "thread_ts">): string {
+  let best = "", n = -Infinity;
+  for (const v of [t.last_reply_ts, t.search_latest_ts, t.thread_ts]) {
+    const x = tsNum(v);
+    if (Number.isFinite(x) && x > n) { n = x; best = slackTsStr(v); }
+  }
+  return best;
+}
+
+/** Someone replied after my last message, and nothing newer than what the user marked seen (seen_reply_ts) is unseen. */
+export const hasNewSinceMe = (t: SlackThread | SlackThreadView): boolean => {
+  if (!(t.new_since_me > 0) || !t.last_reply_ts) return false;
+  if (!t.seen_reply_ts) return true;
+  return tsNum(latestTs(t)) > tsNum(t.seen_reply_ts);
+};
 
 /**
  * Thread state → list rows (mutates `s`): every row gets `thread`; a thread read also refreshes the rows' draft
@@ -443,13 +473,14 @@ export function applyThreadState(s: SlackBlock): void {
 }
 
 /**
- * 확인 완료 on a Slack row (review key `slack:<channel>:<ts>[@<last_reply_ts>]`): remember the thread's current
- * last reply as seen. Returns true when a thread matched.
+ * 확인 완료 on a Slack row (review key `slack:<channel>:<ts>`; an old `@…` suffix is ignored): remember the thread's
+ * newest known ts (latestTs = max(last_reply_ts, search_latest_ts, thread_ts)) as seen, so only a message after it
+ * reopens the thread. Un-review clears it. Returns true when a thread matched.
  */
 export function markThreadSeen(s: SlackBlock | null, reviewKey: string, reviewed: boolean): boolean {
-  const m = /^slack:([A-Z0-9]+):(\d+\.\d+)(?:@(\d+\.\d+))?$/.exec(reviewKey);
+  const m = /^slack:([A-Z0-9]+):(\d+\.\d+)(?:@[^\s]*)?$/.exec(reviewKey);
   if (!s?.threads?.length || !m) return false;
-  const [, ch, ts, at] = m;
+  const [, ch, ts] = m;
   const rowKeys = new Set(rowsWithPrio(s).map(([x]) => threadRef(x.url)).filter((r) => r && r.channel_id === ch && r.ts === ts).map((r) => `${r!.channel_id}:${r!.thread_ts}`));
   rowKeys.add(`${ch}:${ts}`);
   let hit = false;
@@ -457,7 +488,7 @@ export function markThreadSeen(s: SlackBlock | null, reviewKey: string, reviewed
   for (const t of s.threads) {
     if (!rowKeys.has(t.key) && !(t.channel_id === ch && (t.search_latest_ts === ts || t.recent.some((m) => m.ts === ts)))) continue;
     hit = true;
-    if (reviewed) t.seen_reply_ts = at || t.last_reply_ts || t.thread_ts;
+    if (reviewed) t.seen_reply_ts = latestTs(t) || t.thread_ts;
     else delete t.seen_reply_ts;
   }
   if (hit) applyThreadState(s);

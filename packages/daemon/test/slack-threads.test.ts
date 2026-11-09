@@ -203,13 +203,13 @@ describe("applyThreadState (reopen)", () => {
 });
 
 describe("확인 완료 keyed by the latest reply", () => {
-  it("markThreadSeen stores the reply ts from the key; a newer reply makes it new again", () => {
+  it("markThreadSeen stores the thread's newest known ts (an old `@…` key suffix is ignored); a newer reply makes it new again", () => {
     const s = block({ all: [{ ...item(), answered: true }] });
     s.threads = syncThreadsFromList([], s, NOW);
     mergeThreadReads(s.threads, [{ key: `C1:${ROOT}`, messages: [{ from: "나", ts: MINE, text: "a" }, { from: "Kim", ts: ts(5), text: "b" }] }], NOW);
     applyThreadState(s);
     expect(hasNewSinceMe(s.threads[0])).toBe(true);
-    expect(markThreadSeen(s, `slack:C1:${ROOT}@${ts(5)}`, true)).toBe(true);
+    expect(markThreadSeen(s, `slack:C1:${ROOT}@${ROOT}`, true)).toBe(true); // suffix (even a stale one) doesn't matter
     expect(s.threads[0].seen_reply_ts).toBe(ts(5));
     expect(hasNewSinceMe(s.threads[0])).toBe(false);
     expect(s.all[0].thread?.seen_reply_ts).toBe(ts(5));
