@@ -72,7 +72,14 @@ $0.36 · 1턴 · 46초 — 이전(커넥터 직접 조회) $2.09–2.34 · 12–
 attention id 가 없는 소스 항목도 같은 저장소·엔드포인트를 쓴다 — 키는 네임스페이스로: `mail:<thread id>`,
 `slack:<채널 id>:<ts>`(permalink 에서; 못 뽑으면 링크), `jira:<KEY>`, `github:<repo>#<n>` (id 는 URL 인코딩, 없는 attention 이어도
 이 형식이면 받는다). 30일 보관. `GET /api/agenda` 의 `reviewed` 에 이 키들만 실어 보내고, agenda 가 같은 항목을 다시 가져와도
-키가 같아 유지된다(항목이 표시 뒤에 갱신되면 — received / ts / updated 가 더 늦으면 — 다시 열림).
+키가 같아 유지된다. 키·판정은 `src/review-keys.ts` 한 곳(대시보드 `revkeys.js` 는 복제, `test/review-keys-shared.test.ts` 가 같은
+픽스처로 양쪽 검증): Slack 키는 permalink 의 채널·메시지 ts 만(스레드 메타와 무관). 다시 열림 = 표시 시각 < 항목의 마지막 변경
+(`activityMs` — 메일 `received`, Jira·GitHub `updated`, Slack `max(행 ts, thread.last_reply_ts, thread.search_latest_ts)`).
+`finalizeSlackView`·`openSlack`/`isCurrent`(`slackRecReviewed`, agenda `slack.threads` 로 스레드 조회)·대시보드 카드/이력/팔로업이 같은 규칙.
+예전 `slack:<ch>:<ts>@<답글 ts>` 표시는 `readReviewed` 가 기본 키로 접고(여럿이면 최대) 다음 `setReviewed` 가 새 형식으로만 다시 쓴다;
+그런 키로 POST 해도 기본 키로 저장. 접두사는 맞는데 나머지가 비었거나 공백이 있는 키(`slack:` 등)는 400.
+Slack ✓ 는 `markThreadSeen` 으로 그 스레드의 `seen_reply_ts = max(last_reply_ts, search_latest_ts, thread_ts)` 도 남긴다(해제 시 삭제) —
+`hasNewSinceMe` 는 그보다 새 ts 가 있을 때만 참이라 ✓ 직후 수집이 다시 "새 답글"로 열지 않는다.
 
 **알림 설정** (`config.notifications`): `{enabled, kinds:{session,email,slack,jira,github,sentry,calendar}, briefing,
 summary_threshold (기본 3), quiet_delivery: skip|silent (기본 skip), sound}`. 읽을 때·`PUT /api/config` 모두 깊게 머지하고
@@ -172,6 +179,10 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
     지금처럼 읽고, 같은 ts 라도 마지막 읽기가 `THREAD_RECHECK_MINUTES`(6시간) 지났으면 1회 재확인(`recheck` — 1단계는 최신 20건만 봐서
     조용해 보이는 스레드도 움직일 수 있다). 후보가 0이면 claude 를 부르지 않고, 로그에 `agenda-threads: … skipped unchanged N thread(s), M DM(s)` 를 남긴다.
     `read_search_ts` 가 없는 예전 기록은 `last_reply_ts` 와 비교한다(예전 규칙).
+    읽은 스레드의 마지막 메시지 ts 가 `search_latest_ts` 보다 이르면(모델이 답글 ts 를 비우거나 원글 ts 로 채워 원글만 남는 경우)
+    `last_reply_ts` 를 `search_latest_ts` 로 올리고 `WARN agenda-threads: last_reply_ts behind search …`(채널·thread ts·두 값·ts 없음/같은 ts
+    개수) 1줄 + `agenda-threads: trace model output …`(그 스레드의 모델 출력) 1줄을 남긴다. DM 은 대상 아님. 이미 잘못 기록된 예전 레코드는
+    확인 판정·`seen_reply_ts`·`hasNewSinceMe` 가 모두 `max(…)` 로 읽어 별도 마이그레이션 없이 맞게 동작한다.
   - **일일 예산**: 배치 직전마다 오늘(로컬 날짜) 총 `claude -p` 비용(`~/.ned/costs.json`, agenda·agenda_context·heartbeat·draft·calendar·
     action 합산)이 `agenda_daily_budget_usd`(기본 15) 이상이면 멈추고 `context_status.stopped = "budget"`. 1단계 목록은 예산과 무관하게 돈다.
 - 동시에 여러 번 요청돼도 실행 중인 1단계 한 번을 공유한다(busy guard). 2단계는 워커 하나가 소스 큐(Slack 우선)를 순서대로 처리한다.
@@ -407,7 +418,7 @@ slack/mail 블록을 이력 + `history.display` 구간으로 다시 만들어 ag
 멘션·DM·스레드·그룹 행(최신순, `agenda_all_limit`, 구간 안 items 포함 보장 — 구간 밖 열린 요청은 items 에만), DM collapse·dedupe·제외 채널은 기존 함수 재사용, watch = 팔로업 채널
 이력 행(하이라이트 needs_me 먼저 5개 + 최신 3개, 증분 run 이 요약을 비우면 이전 요약 유지). context·threads 는 `carryContexts` 가 이전
 agenda 에서 이어 붙이고, 그 다음 `finalizeSlackView` 가 ✓ 확인 완료(reviewed.json, 대시보드 `srcKey`/`srcRevAt` 과 같은 규칙 — 스레드면
-`@last_reply_ts`)를 items 에서 빼고 10개로 자른다. 메일 items = `needs_action` && 확인 완료 아님(최대 10), all = 구간 안 스레드(최신순, `unread`),
+마지막 답글·1단계 최신 ts 까지 본 표시만)를 items 에서 빼고 10개로 자른다. 메일 items = `needs_action` && 확인 완료 아님(최대 10), all = 구간 안 스레드(최신순, `unread`),
 `unread` 수·summary 는 이번 run. 증분 run 의 빈 summary 는 열린 항목이 남아 있으면 이전 것을 유지. 서명(`sourceSignature`)은 이 뷰로 계산 —
 새 것이 없는 증분 run 은 `unchanged: true` 라 heartbeat skip·2단계 skip 이 그대로 동작한다. 2단계 `mergeThreads` 는 읽은 스레드의 내 마지막 답·DM 의
 내 메시지로 이력의 옛 항목을 답함 처리(`historyFromThreads`)하고 그 행을 바로 items 에서 뺀다(`applyAnswered`). Jira/GitHub/캘린더는 스냅샷 그대로.
@@ -433,7 +444,7 @@ prio 는 `finalizeSlackView`(✓ 제외·10건) 뒤의 items 로 다시 매긴�
 출력에 `slack.mine`(검색 결과에 보인 내 메시지 permalink)·`mail.replied`(마지막 메시지가 나인 스레드 id)가 추가돼 증분 창 밖의 옛 항목을
 답함 처리한다. 해제 이모지 검색 `{{ACK_SINCE}}` = `min(수집 창 시작, ACK_LOOKBACK_HOURS(7일) 안의 가장 오래된 열린 요청)`, 전체·증분 모두(이모지당 20건 상한이라 더
 넓히지 않는다). 7일보다 오래된 열린 요청은 ✓ 확인 완료나 내 답글(`mine`·2단계)로만 해제된다. 열린 요청이 있으면 후보가 없어도 돈다(`{{ACK_OPEN}}`).
-열린 요청 수·가장 오래된 시각은 `openSlack`(제외 채널·✓ 확인 완료 — `slackRecReviewed`, 기본 키나 `<키>@<마지막 답글>` — 뺌).
+열린 요청 수·가장 오래된 시각은 `openSlack`(제외 채널·✓ 확인 완료 — `slackRecReviewed` — 기본 키, 스레드 새 답글 뒤면 다시 열림 — 뺌).
 팔로업 채널은 증분일 때 이전 요약(`{{WATCH_PREV}}`)을 받아 새 메시지가 있을 때만 다시 쓴다. 전체 창 run 은 반환된 가장 오래된 행보다 새로운데
 목록에 없는 열린 항목을 닫는다(검색 상한 20 으로 밀린 옛 행은 그대로). `ned prompt agenda` 는 지금 쓸 창 그대로 출력.
 기준 시각(`noteCollected`)은 진짜 수집일 때만 옮긴다: 응답 JSON 에 그 소스 키가 없으면(`missingKeys` — 실패 취급, 이력에도 안 씀),

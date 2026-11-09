@@ -25,7 +25,7 @@ daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙�
 | `app/features/histview.js` | 카드의 수집 이력 토글 `표시 구간 \| 지난 7일 \| 30일`(`histBar`, `histList` — `GET /api/history`, 카드별 `ned.cardhist.<id>`, agenda `updated_at` 바뀌면 다시 받음): 메일·Slack 전체 보기, Jira·GitHub 목록 아래, 팔로업 카드(`channel=`), 일정 calnav "이력" |
 | `app/features/histrows.js` | 이력 행 렌더(순수): 날짜 구분선(`dayHead` 오늘/어제/M/D (요일)), 상태 칩, "지금" 표시, 행 버튼 `histAct` — Slack·메일 ✎(origin `history`) + ✓, Jira·GitHub·캘린더 ⋯. `histTarget(row)` 가 `/api/history` 행의 `item` 을 카드 항목 모양으로(Slack url·channel·from·text·ts + 따라가는 스레드, 메일 thread id + 행 ts) 바꿔 ref·확인 키가 카드와 같게 |
 | `app/features/draftref.js` | (순수) 초안·액션 ref(`slackRef(x, {thread})`·`mailRef`·`jiraRef`·`githubRef`·`calRef`), ✎ `draftBtn(source, ref, att, {origin, soft, note, pick, title})`·`draftFor(kind, item, att, opts\|origin)`, ⋯ `axBtn(kind, item, origin)`, 액션 로그 출처 칩 `originChip`. drafts.js·actions.js 가 다시 내보냄 |
-| `app/features/revkeys.js` | (순수) 소스 항목 확인 키 `srcKey`·`srcRevAt`·`srcCheck`(✓)·`withFold` — reviewed.js 가 다시 내보냄 |
+| `app/features/revkeys.js` | (순수) 소스 항목 확인 키 `srcKey`·`srcRevAt`·`srcCheck`(✓; 키 없는 행은 비활성 "확인 키 없음")·`withFold`·`applyReviewMark`(낙관 갱신 + 되돌리기) — 키·판정(`activityMs`·`reviewedAt`·`foldReviewMarks`)은 `src/review-keys.ts` 복제(같은 픽스처 테스트), reviewed.js 가 다시 내보냄 |
 | `app/features/watchrow.js` | (순수) 팔로업 행 공용 — 별도 카드(watchcards.js)와 Slack 카드 접힘(cards.js `watchFoldHtml`)이 같은 것을 씀: `watchRow`(모든 하이라이트 ✎, needs_me 아니면 흐림), `watchRecent`(최근 대화 ✎), `watchSummary`/`summaryAct`(요약 줄 ✎ — watchsum.js `summaryTarget`: 1개 → 그 메시지, 여럿 → 모달 고르기 단계, 없음 → recent[0] + "가장 최근 메시지 기준" 안내). 모두 origin `watch`, 원글 ts 를 thread_ts 로 |
 | `app/features/calendar.js` | 일정 패널(일/주, `/api/calendar` 범위, `ned.cal`) |
 | `app/features/cards.js` | 소스 카드(메일·Jira·Slack·GitHub), `packCards`(행 배치), `unionAll`(전체 뷰) |
@@ -153,3 +153,6 @@ Slack·메일 항목(소스 카드 행, Ned 액션 아이템, 인박스 상세, 
 
 에러 문자열은 화면에 그대로 늘어놓지 않는다. `errBadge()` 가 경고색 ⚠ 아이콘만 그리고(`title` = 어디서 + 짧은 요약 — `API Error: 400 {…}` 은 JSON 안의 `message` 를 꺼내 요약), 누르면 팝오버에 전체 메시지 · 발생 시각 · `다시 시도`(해당 잡 재실행) · `로그 복사` · 닫기(Esc/바깥 클릭). 쓰는 곳: 홈 상단 agenda 갱신 실패(다시 시도 = agenda 새로고침), 헤더 daemon 상태(연결 실패 / state.json 이 멈춤 / 대시보드에서 실행한 점검 실패), 답장 초안 모달(초안 생성·전송 실패), 캘린더 범위 조회 실패. 토스트도 짧은 요약만.
 - 메일·Slack·Jira·GitHub 카드 항목(전체 보기 포함)과 인박스 '기타' 의 같은 소스 항목에도 체크가 있다(소스별 안정 키, 위 daemon README). 체크하거나 그 행에서 초안을 만들면 카드 아래 `확인 완료 N` 으로 접히고, 카드 배지·요약·미리보기·인사말 카운트는 미확인만 센다.
+  Slack 은 스레드 메타와 무관한 `slack:<채널>:<ts>` 키, 다시 열림은 체크 시각보다 늦은 `max(행 ts, thread.last_reply_ts, thread.search_latest_ts)` —
+  홈 카드·지난 N일 이력·팔로업(별도 카드/접힘)이 같은 키·같은 판정. 키를 못 만든 행은 ✓ 가 비활성(`data-review-nokey`, 클릭되면 토스트),
+  POST 실패면 낙관 갱신을 되돌리고 토스트(`reviewed.js reviewSource`).
