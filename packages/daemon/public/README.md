@@ -21,11 +21,14 @@ daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙�
 | `app/ui/toast.js` | `toast()` |
 | `app/tabs/home.js` · `inbox.js` · `timeline.js` · `settings.js` | 탭별 렌더와 그 탭 안 이벤트 |
 | `app/tabs/settings-archive.js` | 설정 → 아카이브(`config.archive`): 켜기·볼트 경로·Ned 폴더·담을 것·데일리 노트 embed(`readArchive` → 저장 PUT), 상태 줄(`GET /api/archive/status` — 볼트 배지·마지막 쓰기·마지막 오류, "지금 쓰기" = `POST /api/archive/flush`) |
+| `app/tabs/settings-links.js` | 설정 → 외형 → 링크 열기(`config.dashboard.open_links_in_app`·`open_links_in_app_by_service.*`·`slack_team_id`): `c-openapp`·`c-openapp-svc`(`data-olsvc`, 마스터가 꺼지면 흐려짐)·`c-slack-team`(`T…` 아니면 줄 아래 안내 + 저장 안 함) — `readLinkPrefs` 가 `dashboard` 에 합쳐져 저장 PUT, 더티 스냅샷에도 포함 |
 | `app/tabs/settings-history.js` | 설정 → 수집·보관(`config.history`): 이력 기록 켜기·표시 구간(Slack 시간·메일 일)·수집 창(Slack 전체 재검색 시간 `collect.slack_hours`, `c-hist-collect-slack-h`)·소스별 보관 기간(`readHistorySettings` → 저장 PUT), 상태 줄(`GET /api/history/status`) |
 | `app/features/histview.js` | 카드의 수집 이력 토글 `표시 구간 \| 지난 7일 \| 30일`(`histBar`, `histList` — `GET /api/history`, 카드별 `ned.cardhist.<id>`, agenda `updated_at` 바뀌면 다시 받음): 메일·Slack 전체 보기, Jira·GitHub 목록 아래, 팔로업 카드(`channel=`), 일정 calnav "이력" |
 | `app/features/histrows.js` | 이력 행 렌더(순수): 날짜 구분선(`dayHead` 오늘/어제/M/D (요일)), 상태 칩, "지금" 표시, 행 버튼 `histAct` — Slack·메일 ✎(origin `history`) + ✓, Jira·GitHub·캘린더 ⋯. `histTarget(row)` 가 `/api/history` 행의 `item` 을 카드 항목 모양으로(Slack url·channel·from·text·ts + 따라가는 스레드, 메일 thread id + 행 ts) 바꿔 ref·확인 키가 카드와 같게 |
 | `app/features/draftref.js` | (순수) 초안·액션 ref(`slackRef(x, {thread})`·`mailRef`·`jiraRef`·`githubRef`·`calRef`), ✎ `draftBtn(source, ref, att, {origin, soft, note, pick, title})`·`draftFor(kind, item, att, opts\|origin)`, ⋯ `axBtn(kind, item, origin)`, 액션 로그 출처 칩 `originChip`. drafts.js·actions.js 가 다시 내보냄 |
 | `app/features/revkeys.js` | (순수) 소스 항목 확인 키 `srcKey`·`srcRevAt`·`srcCheck`(✓; 키 없는 행은 비활성 "확인 키 없음")·`withFold`·`applyReviewMark`(낙관 갱신 + 되돌리기) — 키·판정(`activityMs`·`reviewedAt`·`foldReviewMarks`)은 `src/review-keys.ts` 복제(같은 픽스처 테스트), reviewed.js 가 다시 내보냄 |
+| `app/features/links.js` | (순수) 링크를 앱으로 열기 규칙 테이블 — 웹 URL → `slack://`·`figma://`·`notion://` (`toDeepLink(url, config.dashboard, linkCtxOf(config.dashboard))`, 토글 off·Slack 팀 ID 없음·비대상 → null). `src/links.ts` 복제(`test/links-shared.test.ts` 같은 픽스처) |
+| `app/features/openlink.js` | 링크 열기 공통 경로 `openLink(web)`: 딥링크 있으면 Ned.app(`webkit.messageHandlers.openLink`)에 `{deep, web}` / 일반 브라우저면 `location = deep` 후 1.5초 안에 hidden·blur 없으면 `window.open(web)`(`tryDeepThenWeb`, 환경 주입), 없으면 `window.open(web)`. `init()` = document 클릭 위임 하나: 외부 `a[href^="http"]` 의 수정키 없는 왼쪽 클릭만 `preventDefault` + `openLink` — 그래서 링크 만드는 곳(`util.js ext`, `ui/icons.js`, `tabs/inbox.js`, `chat-core.js`, `chat-action.js`, `drafts.js`)은 `href`=웹 URL·`target=_blank` 그대로. 인박스 ⏎(main.js)·통신기 메시지(comms.js)·검색 ⏎(`window.NED.openLink`)도 이 함수 |
 | `app/features/watchrow.js` | (순수) 팔로업 행 공용 — 별도 카드(watchcards.js)와 Slack 카드 접힘(cards.js `watchFoldHtml`)이 같은 것을 씀: `watchRow`(모든 하이라이트 ✎, needs_me 아니면 흐림), `watchRecent`(최근 대화 ✎), `watchSummary`/`summaryAct`(요약 줄 ✎ — watchsum.js `summaryTarget`: 1개 → 그 메시지, 여럿 → 모달 고르기 단계, 없음 → recent[0] + "가장 최근 메시지 기준" 안내). 모두 origin `watch`, 원글 ts 를 thread_ts 로 |
 | `app/features/calendar.js` | 일정 패널(일/주, `/api/calendar` 범위, `ned.cal`) |
 | `app/features/cards.js` | 소스 카드(메일·Jira·Slack·GitHub), `packCards`(행 배치), `unionAll`(전체 뷰) |
@@ -43,7 +46,7 @@ daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙�
 규칙
 - 모듈은 필요한 이름만 `import` 한다. 순환 import 는 허용(함수 안에서만 쓰는 이름) — **모듈 최상위에서 다른 모듈의 `const` 를 실행 시점에 읽지 말 것**(TDZ). 최상위 부수효과(리스너 등록 등)는 `export function init()` 안에 두고 `main.js` 의 init 목록에 넣는다. 목록 순서 = document 리스너 순서(예: 오류 팝오버의 Esc 가 페이지 키보다 먼저).
 - 다른 모듈의 `let` 을 대입하지 않는다(ES import 는 읽기 전용) — 상태는 `S`/`ui` 속성으로.
-- id·class·`localStorage` 키(`ned.*`)는 `search.js` 와 사용자 저장 상태가 기대므로 바꾸지 않는다. `window.NED = { store, api, nav }` (`nav.go(view)`, `nav.tab(t)`, `nav.view()`); `data` 키는 일부러 없다 — `search.js` 는 자체 30초 캐시로 API 를 읽는다.
+- id·class·`localStorage` 키(`ned.*`)는 `search.js` 와 사용자 저장 상태가 기대므로 바꾸지 않는다. `window.NED = { store, api, nav, openLink }` (`nav.go(view)`, `nav.tab(t)`, `nav.view()`; `openLink(url)` = features/openlink.js); `data` 키는 일부러 없다 — `search.js` 는 자체 30초 캐시로 API 를 읽는다.
 - 한 모듈 ~600줄 이하.
 
 새 탭 추가: `index.html` 에 `<main class="view page" id="v-<name>" hidden>` + `nav#views` 에 `<a href="#<name>" data-v="<name>">` → `app/tabs/<name>.js` 에 `render<Name>()`(+필요하면 `init()`) → `main.js` 의 `VIEWS` 에 이름, `renderAll` 에 `if (ui.view === "<name>") render<Name>();`, init 목록에 추가 → 스타일은 `css/<name>.css` 를 `responsive.css` 앞에 링크.

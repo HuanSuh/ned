@@ -206,6 +206,24 @@ describe("normalizers", () => {
     expect(slackTeamIdError({ slack_team_id: "acme" })).toMatch(/T 로 시작/);
     expect(slackTeamIdError({ slack_team_id: 5 })).toMatch(/T 로 시작/);
   });
+  it("normalizeDashboard.open_links_in_app(+_by_service): default on, booleans only, absent keeps base's", () => {
+    expect(DEFAULT_DASHBOARD.open_links_in_app).toBe(true);
+    expect(DEFAULT_DASHBOARD.open_links_in_app_by_service).toEqual({ slack: true, figma: true, notion: true });
+    const d = normalizeDashboard({});
+    expect(d.open_links_in_app).toBe(true);
+    expect(d.open_links_in_app_by_service).toEqual({ slack: true, figma: true, notion: true });
+    const off = normalizeDashboard({ open_links_in_app: false, open_links_in_app_by_service: { figma: false, jira: false } });
+    expect(off.open_links_in_app).toBe(false);
+    expect(off.open_links_in_app_by_service).toEqual({ slack: true, figma: false, notion: true }); // unknown service dropped
+    const kept = normalizeDashboard({ locked: true, open_links_in_app_by_service: { notion: false } }, off);
+    expect(kept.open_links_in_app).toBe(false);
+    expect(kept.open_links_in_app_by_service).toEqual({ slack: true, figma: false, notion: false });
+    const junk = normalizeDashboard({ open_links_in_app: "yes", open_links_in_app_by_service: ["slack"] }, off);
+    expect(junk.open_links_in_app).toBe(false);
+    expect(junk.open_links_in_app_by_service).toEqual(off.open_links_in_app_by_service);
+    // an old saved dashboard without the keys (base from config.yaml) → on
+    expect(normalizeDashboard({}, { ...DEFAULT_DASHBOARD, open_links_in_app: undefined, open_links_in_app_by_service: undefined } as never).open_links_in_app_by_service).toEqual({ slack: true, figma: true, notion: true });
+  });
   it("loadConfig: dashboard.slack_team_id from config.yaml, junk → \"\"", () => {
     write({ dashboard: { slack_team_id: "T0ABC1234" } });
     expect(loadConfig().dashboard.slack_team_id).toBe("T0ABC1234");

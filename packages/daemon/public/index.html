@@ -173,6 +173,13 @@
                   <span class="hint">넓은 화면에선 홈에서 패널 머리(⠿)·모서리를 끌어 옮기고 크기를 바꿔 — 놓으면 바로 저장돼.<br>여기서 순서(↑/↓)·폭(1열/2열)을 바꿔 저장하면 그 순서로 다시 짜. 좁은 화면에선 위→아래 한 줄씩.</span>
                   <div class="clbar" id="c-cards-bar"></div>
                   <div class="clay"><div class="cllist" id="c-cards" role="list" aria-labelledby="cl-lab"></div><div class="clprev" id="c-cards-prev" aria-hidden="true"></div></div></div>
+                <div class="f full"><span class="lab" id="ol-lab">링크 열기</span>
+                  <label class="ck"><input type="checkbox" id="c-openapp" aria-describedby="c-openapp-h"> 링크를 앱으로 열기</label>
+                  <div class="toggles" id="c-openapp-svc" role="group" aria-label="앱으로 열 서비스">
+                    <label><input type="checkbox" data-olsvc="slack">Slack</label><label><input type="checkbox" data-olsvc="figma">Figma</label><label><input type="checkbox" data-olsvc="notion">Notion</label>
+                  </div>
+                  <span class="hint" id="c-openapp-h">Slack·Figma·Notion 링크를 브라우저 대신 설치된 앱으로 열어(중간 "앱에서 열기" 탭이 안 남아). 앱이 없으면 웹으로. ⌘-클릭은 늘 웹.</span></div>
+                <div class="f"><label for="c-slack-team">Slack 팀 ID</label><input id="c-slack-team" type="text" placeholder="T0ABC1234" spellcheck="false" autocapitalize="characters" aria-describedby="c-slack-team-h"><span class="hint" id="c-slack-team-h">Slack 앱 → 워크스페이스 이름 → 워크스페이스 설정 URL 또는 about 에서 T… ID. 비우면 Slack 링크는 웹으로 열려.</span><span class="hint" id="c-slack-team-msg" role="status"></span></div>
               </div>
             </div>
           </section>
