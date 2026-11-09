@@ -8,8 +8,8 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import YAML from "yaml";
 import { buildListsPrompt, listExtras, listWindows, refreshAgenda } from "../src/agenda.js";
-import { DEFAULT_CONFIG, HISTORY_SOURCES, loadConfig, normalizeFilters, type NedConfig } from "../src/config.js";
-import { HISTORY_META_PATH, historyFile, readHistory, readHistoryMeta } from "../src/history.js";
+import { DEFAULT_CONFIG, HISTORY_SOURCES, loadConfig, normalizeFilters, normalizeHistory, type NedConfig } from "../src/config.js";
+import { HISTORY_META_PATH, collectWindow, historyFile, historyStatus, readHistory, readHistoryMeta } from "../src/history.js";
 import { AGENDA_PATH, CONFIG_PATH, NED_HOME } from "../src/paths.js";
 
 const H = 3600_000;
@@ -60,6 +60,22 @@ describe("buildListsPrompt windows", () => {
   it("a full (rescan) window reads like the old prompt", () => {
     const p = buildListsPrompt(cfg(), ["slack", "mail"], NOW, undefined, { slack: { full: true, since: NOW.getTime() - 24 * H, reason: "rescan" }, mail: { full: true, since: 0, reason: "rescan" } });
     expect(p).toBe(buildListsPrompt(cfg(), ["slack", "mail"], NOW));
+  });
+});
+
+describe("history.collect.slack_hours (전체 재검색 창)", () => {
+  it("collectWindow's full window and the prompt follow the setting; history off too; status reports it", () => {
+    const c96 = cfg({ history: normalizeHistory({ collect: { slack_hours: 96 } }) });
+    const now = NOW.getTime();
+    expect(collectWindow("slack", c96, now)).toEqual({ full: true, since: now - 96 * H, reason: "first" });
+    expect(collectWindow("slack", cfg({ history: normalizeHistory({ enabled: false, collect: { slack_hours: 48 } }) }), now)).toMatchObject({ full: true, since: now - 48 * H, reason: "off" });
+    expect(collectWindow("mail", c96, now).since).toBe(now - 72 * H); // mail unchanged (3 d)
+    const p = buildListsPrompt(c96, ["slack"], NOW, undefined, listWindows(c96, ["slack"], now));
+    expect(p).toContain("## slack — 최근 96시간, 나에게 온 것");
+    expect(p).toContain(`after: "${sec(now - 96 * H)}"`);
+    // no window passed → still the configured full window
+    expect(buildListsPrompt(c96, ["slack"], NOW)).toContain(`after: "${sec(now - 96 * H)}"`);
+    expect(historyStatus(c96, now).collect.slack).toMatchObject({ full_hours: 96, next: { full: true, since: now - 96 * H } });
   });
 });
 

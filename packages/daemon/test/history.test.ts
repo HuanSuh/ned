@@ -42,7 +42,7 @@ beforeEach(wipe);
 describe("normalizeHistory", () => {
   it("defaults", () => {
     expect(normalizeHistory(undefined)).toEqual(DEFAULT_HISTORY);
-    expect(DEFAULT_CONFIG.history).toEqual({ enabled: true, display: { slack_hours: 24, mail_days: 3 }, keep_days: { slack: 30, mail: 30, jira: 90, github: 90, calendar: 90 } });
+    expect(DEFAULT_CONFIG.history).toEqual({ enabled: true, display: { slack_hours: 24, mail_days: 3 }, keep_days: { slack: 30, mail: 30, jira: 90, github: 90, calendar: 90 }, collect: { slack_hours: 24 } });
   });
   it("clamps ranges, keeps 0 (off), raises keep below the display window", () => {
     const h = normalizeHistory({ enabled: false, display: { slack_hours: 500, mail_days: 0 }, keep_days: { slack: 0, mail: -3, jira: 1000, github: "12", calendar: null } });

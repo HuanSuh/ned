@@ -8,7 +8,7 @@ import { extractJson, llmDisabled, runClaude } from "./claude.js";
 import { ACK_CHECK_MAX_DEFAULT, filtersPrompt, isGroupId, jqlExclude, watchChannels, type NedConfig } from "./config.js";
 import { personaPrompt } from "./persona.js";
 import { AGENDA_PATH, AGENDA_RAW_PATH, log, readJson, writeJsonAtomic } from "./paths.js";
-import { collectWindow, finalizeSlackView, gmailAfter, historyDisplay, historyUpsert, mailView, noteCollected, openSlack, recording, slackView, type CollectWindow, type UpsertCtx } from "./history.js";
+import { collectWindow, finalizeSlackView, slackFullHours, gmailAfter, historyDisplay, historyUpsert, mailView, noteCollected, openSlack, recording, slackView, type CollectWindow, type UpsertCtx } from "./history.js";
 import { readReviewed } from "./state.js";
 import { applyThreadState, syncDmsFromList, syncThreadsFromList, type SlackThread, type ThreadRowFields } from "./slack-threads.js";
 
@@ -638,7 +638,7 @@ export function groupMentionsPrompt(groups: string[], since: string): string {
   ].join("\n");
 }
 
-/** Search windows of one phase-1 call (src/history.ts collectWindow). Absent = the full window (Slack 24 h, mail 3 d). */
+/** Search windows of one phase-1 call (src/history.ts collectWindow). Absent = the full window (Slack history.collect.slack_hours, mail 3 d). */
 export interface ListWindows {
   slack?: CollectWindow;
   mail?: CollectWindow;
@@ -680,7 +680,8 @@ export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = 
   if (ack.length) keep.add("ack");
   const groups = keys.includes("slack") ? cfg.filters.slack.group_mentions ?? [] : [];
   const select = `select:${keys.flatMap((k) => LIST_TOOLS[k]).join(",")}`;
-  const since = String(win.slack ? Math.floor(win.slack.since / 1000) : Math.floor(now.getTime() / 1000) - 24 * 3600);
+  const fullH = slackFullHours(cfg);
+  const since = String(win.slack ? Math.floor(win.slack.since / 1000) : Math.floor(now.getTime() / 1000) - fullH * 3600);
   const ackSince = win.ackSince !== undefined ? String(Math.floor(win.ackSince / 1000)) : since;
   const sInc = !!win.slack && !win.slack.full, mInc = !!win.mail && !win.mail.full;
   const slackIncr = sInc
@@ -714,7 +715,7 @@ export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = 
     .replaceAll("{{PERSONA}}", () => personaPrompt(cfg.persona))
     .replaceAll("{{FILTERS}}", () => filtersPrompt(cfg.filters))
     .replaceAll("{{JQL_EXCLUDE}}", () => (jqlExclude(cfg.filters) ? ` ${jqlExclude(cfg.filters)}` : ""))
-    .replaceAll("{{SLACK_RANGE}}", sInc ? "지난 수집 이후 나에게 온 것 (증분)" : "최근 24시간, 나에게 온 것")
+    .replaceAll("{{SLACK_RANGE}}", sInc ? "지난 수집 이후 나에게 온 것 (증분)" : `최근 ${fullH}시간, 나에게 온 것`)
     .replaceAll("{{SLACK_INCR}}", () => slackIncr)
     .replaceAll("{{WATCH_PREV}}", () => watchPrev)
     .replaceAll("{{ACK_OPEN}}", () => ackOpen)

@@ -31,9 +31,10 @@ export const historyFile = (src: HistorySource): string => path.join(HISTORY_DIR
 /** Incremental collection: overlap with the last successful run, and how often a full window is re-searched anyway. */
 export const OVERLAP_MINUTES = 30;
 export const FULL_RESCAN_HOURS = 6;
-/** Full collection windows (what every run searched before the history store). */
-export const SLACK_FULL_HOURS = 24;
+/** Full collection windows: Slack = history.collect.slack_hours (slackFullHours, default 24 h), mail fixed. */
 export const MAIL_FULL_DAYS = 3;
+/** Hours a full Slack search looks back (history.collect.slack_hours, 1..168, default 24). */
+export const slackFullHours = (cfg: Pick<NedConfig, "history">): number => cfg.history?.collect?.slack_hours ?? 24;
 /** Mail unread count / `all` search window (always searched whole — it is the unread count). */
 export const MAIL_UNREAD_DAYS = 2;
 
@@ -202,12 +203,12 @@ export interface CollectWindow {
 }
 
 /**
- * Slack / mail phase-1 search window. Full (Slack 24 h, mail 3 d) when the source isn't recorded, on the first run (no
+ * Slack / mail phase-1 search window. Full (Slack history.collect.slack_hours, mail 3 d) when the source isn't recorded, on the first run (no
  * history file or no successful run yet) and when the last full search is FULL_RESCAN_HOURS old; else incremental:
  * max(full start, last successful run − OVERLAP_MINUTES).
  */
 export function collectWindow(src: "slack" | "mail", cfg: Pick<NedConfig, "history">, now: number, meta: HistoryMeta = readHistoryMeta(), hasFile = historyUsable(src)): CollectWindow {
-  const fullSince = now - (src === "slack" ? SLACK_FULL_HOURS * H : MAIL_FULL_DAYS * D);
+  const fullSince = now - (src === "slack" ? slackFullHours(cfg) * H : MAIL_FULL_DAYS * D);
   if (!recording(cfg, src)) return { full: true, since: fullSince, reason: "off" };
   const c = meta.collect[src];
   if (!hasFile || !c || !Number.isFinite(c.last_ok_at) || !c.last_ok_at) return { full: true, since: fullSince, reason: "first" };
@@ -806,7 +807,7 @@ export function historyStatus(cfg: NedConfig, now = Date.now()) {
   ) as Record<HistorySource, HistorySourceStatus>;
   const win = (src: "slack" | "mail") => {
     const w = collectWindow(src, cfg, now, meta);
-    return { ...meta.collect[src], next: { full: w.full, reason: w.reason, since: w.since } };
+    return { ...meta.collect[src], full_hours: src === "slack" ? slackFullHours(cfg) : MAIL_FULL_DAYS * 24, next: { full: w.full, reason: w.reason, since: w.since } };
   };
   return { enabled: cfg.history.enabled, display: cfg.history.display, sources, collect: { slack: win("slack"), mail: win("mail") }, last_prune_day: meta.last_prune_day, overlap_minutes: OVERLAP_MINUTES, full_rescan_hours: FULL_RESCAN_HOURS };
 }
