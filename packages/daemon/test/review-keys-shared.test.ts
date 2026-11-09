@@ -9,8 +9,13 @@ import type { SlackAllItem, SlackBlock } from "../src/agenda.js";
 import { finalizeSlackView, slackRecReviewed } from "../src/history.js";
 import { REVIEWED_PATH } from "../src/paths.js";
 import * as server from "../src/review-keys.js";
-import { applyThreadState, hasNewSinceMe, markThreadSeen, mergeThreadReads, syncThreadsFromList } from "../src/slack-threads.js";
+import { threadAttention } from "../src/heartbeat.js";
+import { UNKNOWN_REPLY, applyThreadState, hasNewSinceMe, markThreadSeen, markTs, mergeThreadReads, syncThreadsFromList } from "../src/slack-threads.js";
 import { readReviewed, setReviewed } from "../src/state.js";
+// @ts-expect-error — plain browser ES module (public/app), no types
+import { newReplies } from "../public/app/features/slackthread.js";
+// @ts-expect-error — plain browser ES module (public/app), no types
+import { histTarget } from "../public/app/features/histrows.js";
 // @ts-expect-error — plain browser ES module (public/app), no types
 import * as client from "../public/app/features/revkeys.js";
 // @ts-expect-error — plain browser ES module (public/app), no types
@@ -105,9 +110,26 @@ describe("daemon = dashboard on the same rows", () => {
     expect(verdicts()).toEqual([false, false, false]);
   });
 
-  it("srcCheck: a row without a key gets a disabled ✓ titled 확인 키 없음, never a data-review", () => {
+  it("이력 row: record ts ≠ item ts — histTarget (item.ts, else record ts) and slackRecReviewed agree", () => {
+    const u = link("C1", ROOT), key = `slack:C1:${ROOT}`, MARK = msOf(ts(30));
+    const cases = [
+      { item: iso(ts(60)), rec: iso(ts(10)), want: true }, // item.ts older than the mark → closed on both sides, though the record ts is newer
+      { item: "", rec: iso(ts(10)), want: false }, // no item.ts → both use the record ts (after the mark) → open
+      { item: iso(ts(10)), rec: iso(ts(60)), want: false },
+    ];
+    for (const c of cases) {
+      const row = { key: `C1:${ROOT}`, source: "slack", ts: c.rec, url: u, title: "t", detail: "", current: false, state: {}, item: { channel: "#dev", from: "Kim", text: "t", url: u, ...(c.item ? { ts: c.item } : {}) } };
+      S.agenda = { reviewed: { [key]: MARK }, slack: { threads: [] } };
+      const t = histTarget(row);
+      expect(!!client.revAt("slack", t.item), JSON.stringify(c)).toBe(c.want);
+      expect(slackRecReviewed({ [key]: MARK }, { item: row.item as never, ts: c.rec }), JSON.stringify(c)).toBe(c.want);
+    }
+  });
+
+  it("srcCheck: a row without a key gets an inert ✓ (aria-disabled, clickable for the toast) titled 확인 키 없음, never a data-review", () => {
     const html = client.srcCheck("slack", { url: "", text: "x" });
-    expect(html).toContain("disabled");
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).not.toMatch(/\sdisabled[\s>=]/);
     expect(html).toContain('title="확인 키 없음"');
     expect(html).not.toContain("data-review=");
     expect(client.srcCheck("slack", { url: link("C1", ROOT) })).toContain(`data-review="slack:C1:${ROOT}"`);
@@ -132,44 +154,119 @@ describe("markThreadSeen / hasNewSinceMe", () => {
     s.threads = syncThreadsFromList([], s, NOW);
     return s;
   };
-  it("seen = max(last_reply_ts, search_latest_ts, thread_ts); false right after; a newer reply → true; un-review clears", () => {
+  it("seen = the mark time (Slack ts format); false right after; a reply after the mark → true; un-review clears", () => {
     const s = block(), t = s.threads![0];
     Object.assign(t, { last_reply_ts: ROOT, search_latest_ts: SEARCH, new_since_me: 1, my_last_reply_ts: ts(60) }); // live shape
     applyThreadState(s);
     expect(hasNewSinceMe(t)).toBe(true);
     expect(s.items).toHaveLength(1); // reopened
-    expect(markThreadSeen(s, `slack:C1:${ROOT}`, true)).toBe(true);
-    expect(t.seen_reply_ts).toBe(SEARCH);
+    const MARK = msOf(ts(20));
+    expect(markThreadSeen(s, `slack:C1:${ROOT}`, true, MARK)).toBe(true);
+    expect(t.seen_reply_ts).toBe(markTs(MARK));
+    expect(t.seen_reply_ts).toBe(`${(MARK / 1000).toFixed(6)}`);
     expect(hasNewSinceMe(t)).toBe(false);
     expect(s.items).toHaveLength(0); // not reopened by the next pass
     applyThreadState(s);
     expect(s.items).toHaveLength(0);
-    t.search_latest_ts = ts(2); // new reply seen by phase 1
+    t.search_latest_ts = ts(2); // new reply seen by phase 1, after the mark
     expect(hasNewSinceMe(t)).toBe(true);
     expect(markThreadSeen(s, `slack:C1:${ROOT}`, false)).toBe(true);
     expect(t.seen_reply_ts).toBeUndefined();
   });
-});
 
-describe("phase 2: last_reply_ts behind search_latest_ts", () => {
-  it("is raised to search_latest_ts with one warn (channel · ts · both values) and the model entry", () => {
+  it("M1: a reply posted before the ✓ but collected after it → row stays closed, no 새 답글 (daemon, heartbeat, +N chip); a reply after → both open", () => {
+    const s = block(), t = s.threads![0];
+    Object.assign(t, { last_reply_ts: ts(60), search_latest_ts: ts(60), new_since_me: 0, my_last_reply_ts: ts(60) });
+    const MARK = msOf(ts(10)), key = `slack:C1:${ROOT}`, marks = { [key]: MARK };
+    markThreadSeen(s, key, true, MARK);
+    // Next collection: phase 1 sees a reply from 15 min ago (before the mark), phase 2 reads it.
+    t.search_latest_ts = ts(15);
+    mergeThreadReads(s.threads!, [{ key: `C1:${ROOT}`, messages: [{ from: "Kim", ts: ROOT, text: "배포?" }, { from: "나", ts: ts(60), text: "곧" }, { from: "Kim", ts: ts(15), text: "언제?" }] }], NOW);
+    applyThreadState(s);
+    const row = s.all[0];
+    S.agenda = { reviewed: marks, slack: { threads: s.threads } };
+    expect(t.new_since_me).toBe(1);
+    expect(hasNewSinceMe(t)).toBe(false);
+    expect(s.items).toHaveLength(0); // not reopened
+    expect(threadAttention({ slack: s } as never, new Set(), NOW).items).toHaveLength(0); // no heartbeat alert
+    expect(newReplies(row)).toBe(0); // no +N chip
+    expect(client.revAt("slack", row)).toBeGreaterThan(0); // ✓ holds
+    expect(finalizeVerdict(s, marks)).toBe(true);
+    // A reply after the mark: everything opens together.
+    t.search_latest_ts = ts(5);
+    mergeThreadReads(s.threads!, [{ key: `C1:${ROOT}`, messages: [{ from: "Kim", ts: ROOT, text: "배포?" }, { from: "나", ts: ts(60), text: "곧" }, { from: "Kim", ts: ts(15), text: "언제?" }, { from: "Lee", ts: ts(5), text: "?" }] }], NOW);
+    applyThreadState(s);
+    expect(hasNewSinceMe(t)).toBe(true);
+    expect(s.items).toHaveLength(1);
+    expect(threadAttention({ slack: s } as never, new Set(), NOW).items).toHaveLength(1);
+    expect(newReplies(s.all[0])).toBe(2);
+    expect(client.revAt("slack", s.all[0])).toBe(0);
+    expect(finalizeVerdict(s, marks)).toBe(false);
+  });
+});
+/** Does finalizeSlackView drop the C1 row as 확인 완료? (row rebuilt with the current thread view) */
+function finalizeVerdict(s: SlackBlock, marks: Record<string, number>): boolean {
+  const x = { ...s.all[0], reason: "mention" as const };
+  const v: SlackBlock = { summary: "", items: [x], all: [], watch: [], threads: s.threads };
+  finalizeSlackView(v, marks);
+  return v.items.length === 0;
+}
+
+describe("phase 2: untrustworthy reads / last_reply_ts behind search_latest_ts", () => {
+  const setup = () => {
     const row: SlackAllItem = { channel: "#dev", from: "Kim", text: "배포?", url: link("C1", SEARCH, ROOT), ts: iso(SEARCH), reason: "mention", answered: true };
     const threads = syncThreadsFromList([], { summary: "", items: [], all: [row], watch: [] }, NOW);
     expect(threads[0].search_latest_ts).toBe(SEARCH);
     const warns: [string, unknown][] = [];
-    // The model gave the replies no usable ts / the root's ts → only the root survives.
+    return { threads, warns, warn: (msg: string, raw: unknown) => warns.push([msg, raw]) };
+  };
+  const good = (extra: object[] = []) => ({ key: `C1:${ROOT}`, thread_summary: "요약", messages: [{ from: "Kim", ts: ROOT, text: "배포?" }, { from: "나", ts: ts(60), text: "곧" }, { from: "Lee", ts: SEARCH, text: "언제요" }, ...extra] });
+
+  it("only the root survives (replies without ts / with the root's ts) → previous last reply kept, warn with the entry; checked_at moves", () => {
+    const { threads, warns, warn } = setup(), t = threads[0];
+    mergeThreadReads(threads, [good()], NOW - 60_000, warn); // a normal read first
+    expect(t).toMatchObject({ last_reply_ts: SEARCH, last_reply_from: "Lee", last_reply_text: "언제요", new_since_me: 1, summary_ts: SEARCH });
+    expect(warns).toHaveLength(0);
     const entry = { key: `C1:${ROOT}`, reply_count: 2, messages: [{ from: "Kim", ts: ROOT, text: "배포?" }, { from: "Lee", ts: ROOT, text: "곧" }, { from: "Park", ts: "", text: "?" }] };
-    mergeThreadReads(threads, [entry], NOW, (msg, raw) => warns.push([msg, raw]));
-    expect(threads[0].last_reply_ts).toBe(SEARCH);
+    mergeThreadReads(threads, [entry], NOW, warn);
+    expect(t).toMatchObject({ last_reply_ts: SEARCH, last_reply_from: "Lee", last_reply_text: "언제요", new_since_me: 1, summary_ts: SEARCH, thread_summary: "요약" });
+    expect(t.checked_at).toBe(new Date(NOW).toISOString()); // no re-read loop
+    expect(t.read_search_ts).toBe(SEARCH);
     expect(warns).toHaveLength(1);
+    expect(warns[0][0]).toContain("unreliable");
     expect(warns[0][0]).toContain("C1");
     expect(warns[0][0]).toContain(ROOT);
-    expect(warns[0][0]).toContain(SEARCH);
     expect(warns[0][0]).toContain("no-ts 1");
+    expect(warns[0][0]).toContain("same-ts 1");
     expect(warns[0][1]).toBe(entry);
-    // a read that is up to date → no warn
-    mergeThreadReads(threads, [{ key: `C1:${ROOT}`, messages: [{ from: "Kim", ts: ROOT, text: "a" }, { from: "Lee", ts: SEARCH, text: "b" }] }], NOW, (msg, raw) => warns.push([msg, raw]));
+  });
+
+  it("a read that stops before phase 1's newest ts → raised, from/text 미확인 (not the old message), new_since_me ≥ 1, warn", () => {
+    const { threads, warns, warn } = setup(), t = threads[0];
+    const entry = { key: `C1:${ROOT}`, messages: [{ from: "Kim", ts: ROOT, text: "배포?" }, { from: "나", ts: ts(60), text: "곧" }] }; // newest reply missing
+    mergeThreadReads(threads, [entry], NOW, warn);
+    expect(t.last_reply_ts).toBe(SEARCH);
+    expect(t.last_reply_from).toBe("");
+    expect(t.last_reply_text).toBe(UNKNOWN_REPLY);
+    expect(t.new_since_me).toBe(1);
+    expect(hasNewSinceMe(t)).toBe(true);
     expect(warns).toHaveLength(1);
+    expect(warns[0][0]).toContain("raised");
+    expect(warns[0][0]).toContain(SEARCH);
+    // heartbeat: no "<old author>: <old text>" as the new reply; the key is the raised ts, so the real read later doesn't re-alert
+    const hb = threadAttention({ slack: { summary: "", items: [], all: [], watch: [], threads } } as never, new Set(), NOW);
+    expect(hb.items[0].title).toContain(UNKNOWN_REPLY);
+    expect(hb.items[0].title).not.toContain("나:");
+    mergeThreadReads(threads, [good()], NOW, warn);
+    expect(t).toMatchObject({ last_reply_ts: SEARCH, last_reply_from: "Lee", last_reply_text: "언제요" });
+    expect(threadAttention({ slack: { summary: "", items: [], all: [], watch: [], threads } } as never, new Set(hb.keys), NOW).items).toHaveLength(0);
+  });
+
+  it("a normal, up-to-date read → updated, no warn", () => {
+    const { threads, warns, warn } = setup();
+    mergeThreadReads(threads, [good()], NOW, warn);
+    expect(threads[0]).toMatchObject({ last_reply_ts: SEARCH, last_reply_from: "Lee", reply_count: 2 });
+    expect(warns).toHaveLength(0);
   });
 });
 

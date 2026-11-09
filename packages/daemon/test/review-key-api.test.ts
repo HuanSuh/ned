@@ -36,7 +36,7 @@ describe("POST /api/attention/:id/review — source keys", () => {
     for (const k of ["slack:", "mail:", "jira: x", " "]) expect((await review(k)).status, k).toBe(400);
   });
 
-  it("Slack ✓ → /api/agenda reviewed (base key) + thread seen = newest known ts; mail / Jira keys untouched", async () => {
+  it("Slack ✓ → /api/agenda reviewed (base key) + thread seen = the mark time; mail / Jira keys untouched", async () => {
     const M = Date.now() - 60_000, J = Date.now() - 30_000; // inside setReviewed's 30-day keep window
     fs.writeFileSync(REVIEWED_PATH, JSON.stringify({ "mail:th1": M, "jira:AB-1": J }));
     patchAgenda((a) => {
@@ -48,13 +48,16 @@ describe("POST /api/attention/:id/review — source keys", () => {
     });
     const r = await review(`slack:C1:${ROOT}@${ROOT}`); // an old-style key from a stale tab
     expect(r.status).toBe(200);
-    expect((await r.json()).id).toBe(`slack:C1:${ROOT}`);
+    const body = await r.json();
+    expect(body.id).toBe(`slack:C1:${ROOT}`);
     const ag = await (await request("/api/agenda")).json();
-    expect(ag.reviewed[`slack:C1:${ROOT}`]).toBeTypeOf("number");
+    expect(ag.reviewed[`slack:C1:${ROOT}`]).toBe(body.reviewed_at);
     expect(Object.keys(ag.reviewed).some((k: string) => k.includes("@"))).toBe(false);
     expect(ag.reviewed["mail:th1"]).toBe(M);
     expect(ag.reviewed["jira:AB-1"]).toBe(J);
-    expect(readAgenda().slack?.threads?.[0].seen_reply_ts).toBe(SEARCH);
+    // seen = the mark itself (same instant the ✓ rule compares), Slack ts format
+    expect(readAgenda().slack?.threads?.[0].seen_reply_ts).toBe((body.reviewed_at / 1000).toFixed(6));
+    expect(readAgenda().slack?.items ?? []).toHaveLength(0); // not reopened as 새 답글
     // un-review clears both
     expect((await review(`slack:C1:${ROOT}`, false)).status).toBe(200);
     expect((await (await request("/api/agenda")).json()).reviewed[`slack:C1:${ROOT}`]).toBeUndefined();

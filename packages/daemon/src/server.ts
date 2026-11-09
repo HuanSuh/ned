@@ -216,8 +216,8 @@ export function startServer(getConfig: () => NedConfig): void {
     // Source items (mail: / slack: / jira: / github:) have no attention entry; their key is stable across agenda runs.
     if (!SOURCE_KEY.test(id) && !readState().attention.some((a) => a.id === id)) return c.json({ error: "not found" }, 404);
     const at = setReviewed(id, reviewed);
-    // Slack: the thread remembers how far it was seen (newest known ts); only a newer message reopens it.
-    if (id.startsWith("slack:")) try { patchAgenda((a) => void markThreadSeen(a.slack, id, reviewed)); } catch (e) { log(`review: thread seen mark failed — ${String(e).slice(0, 200)}`); }
+    // Slack: the thread remembers the mark time as seen_reply_ts; only a message after it reopens it (same as the ✓ rule).
+    if (id.startsWith("slack:")) try { patchAgenda((a) => void markThreadSeen(a.slack, id, reviewed, at ?? Date.now())); } catch (e) { log(`review: thread seen mark failed — ${String(e).slice(0, 200)}`); }
     // Mail + config.actions.gmail_mark_read: also mark the thread read in Gmail (background job; un-review never re-marks unread).
     let mark_read: MarkReadOutcome | null = null;
     if (reviewed && id.startsWith("mail:")) try { mark_read = await onMailReviewed(id, loadConfig()); } catch (e) { log(`review: gmail mark-read failed — ${String(e).slice(0, 200)}`); }
