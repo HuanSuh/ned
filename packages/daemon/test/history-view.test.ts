@@ -84,7 +84,7 @@ describe("slackView", () => {
     const m1 = /archives\/(C1)\/p(\d{10})(\d{6})/.exec(v.items[1].url)!;
     (v.items[1] as { thread?: { last_reply_ts: string } }).thread = { last_reply_ts: "1999999999.000100" } as never;
     finalizeSlackView(v, { [`slack:C0:${m[2]}.${m[3]}`]: NOW, [`slack:C1:${m1[2]}.${m1[3]}`]: NOW });
-    // C0 reviewed → out; C1's mark predates its newest reply (key carries @last_reply_ts) → stays
+    // C0 reviewed → out; C1's mark predates its thread's newest reply (activity = max(row ts, last_reply_ts)) → stays
     expect(v.items.map((x) => x.url.split("/")[4])).toEqual(["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10"]);
   });
 });
@@ -124,7 +124,7 @@ describe("open asks outside the display window (11/6 external mention case)", ()
     const v = slackView(cfg({ agenda_all_limit: 1 }), blank(), null, { now: NOW, full: false }, recs);
     expect(v.all.map((x) => x.url.split("/")[4]).sort()).toEqual(["C1", "C2"]);
   });
-  it("✓ 확인 완료 closes an old ask for openSlack too (base key or thread-aware key)", () => {
+  it("✓ 확인 완료 closes an old ask for openSlack too (base key or an old thread-aware key, folded)", () => {
     const r = srec("C7", OLD, { need: true });
     const m = /archives\/C7\/p(\d{10})(\d{6})/.exec(r.item.url)!;
     const base = `slack:C7:${m[1]}.${m[2]}`;
@@ -248,6 +248,28 @@ describe("mergeSources → agenda.json from the history", () => {
     if (th) expect(threadCandidates([th], 5, Date.now() + 7 * H)).toEqual([]);
     const row = queryHistory(loadConfig(), a, { source: "slack", days: 30 }).items.find((x) => x.url === u)!;
     expect(row.current).toBe(false);
+  });
+  it("✓ then a reply after the mark in its thread: openSlack (threads) · listWindows (prevSlack.threads) · /api/history current all reopen it; without threads they don't", async () => {
+    writeCfg();
+    const old = Date.now() - 3 * D, u = url("C7", old);
+    fixture({ slack: { summary: "", items: [ask(u, old)], all: [] } });
+    await refreshAgenda(loadConfig(), { sources: ["slack"] });
+    const m = /archives\/C7\/p(\d{10})(\d{6})/.exec(u)!;
+    const mark = Date.now() - H;
+    fs.writeFileSync(REVIEWED_PATH, JSON.stringify({ [`slack:C7:${m[1]}.${m[2]}`]: mark }));
+    const a = readAgenda();
+    const th = a.slack!.threads!.find((x) => x.channel_id === "C7")!;
+    const closed = { ...th, search_latest_ts: `${Math.floor((mark - 60_000) / 1000)}.000100` }; // reply before the mark
+    const opened = { ...th, search_latest_ts: `${Math.floor((mark + 60_000) / 1000)}.000100` }; // reply after the mark
+    const now = Date.now();
+    expect(openSlack(loadConfig(), now).n).toBe(0);
+    expect(openSlack(loadConfig(), now, { threads: [closed] }).n).toBe(0);
+    expect(openSlack(loadConfig(), now, { threads: [opened] }).n).toBe(1);
+    expect(listWindows(loadConfig(), ["slack"], now, { ...a.slack!, threads: [closed] }).openAsks).toBeUndefined();
+    expect(listWindows(loadConfig(), ["slack"], now, { ...a.slack!, threads: [opened] }).openAsks).toBe(1);
+    const cur = (threads: typeof th[]) => queryHistory(loadConfig(), { ...a, slack: { ...a.slack!, threads } }, { source: "slack", days: 30 }).items.find((x) => x.url === u)!.current;
+    expect(cur([closed])).toBe(false);
+    expect(cur([opened])).toBe(true);
   });
   it("a 3-day-old open ask is answered when phase 2 sees my reply in its thread", async () => {
     writeCfg();

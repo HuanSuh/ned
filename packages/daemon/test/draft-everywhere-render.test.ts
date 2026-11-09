@@ -40,13 +40,17 @@ describe("지난 N일 이력 rows", () => {
     expect(reviews(html)).toEqual([srcKey("slack", slackRow.item)]);
   });
 
-  it("Slack row of a followed thread → thread_ts + the card's `@reply` 확인 key", () => {
+  it("Slack row of a followed thread → thread_ts + the card's base 확인 key; a reply after the mark reopens it", () => {
     S.agenda.slack.threads = [{ key: "C9:1700000000.000100", thread_ts: "1700000000.000100", reply_count: 3, last_reply_ts: "1700000500.000100" }];
     const t = histTarget(slackRow);
     expect(t.item.thread.last_reply_ts).toBe("1700000500.000100");
     const html = histAct(slackRow);
     expect(drafts(html)[0].ref.thread_ts).toBe("1700000000.000100");
-    expect(reviews(html)).toEqual(["slack:C9:1700000000.000100@1700000500.000100"]);
+    expect(reviews(html)).toEqual(["slack:C9:1700000000.000100"]); // never thread metadata in the key
+    S.agenda.reviewed = { "slack:C9:1700000000.000100": Date.parse("2026-11-03T00:00:00Z") }; // after row ts + last reply
+    expect(histAct(slackRow)).toContain('aria-pressed="true"');
+    S.agenda.slack.threads[0].search_latest_ts = String(Date.parse("2026-11-04T00:00:00Z") / 1000) + ".000100"; // newer hit
+    expect(histAct(slackRow)).toContain('aria-pressed="false"');
   });
 
   it("mail row → ✎ with the thread id (dimmed: nothing to do) + ✓ on mail:<thread>", () => {

@@ -141,7 +141,12 @@ export function mergeThreads(raw: unknown[], now = Date.now()): string[] {
   patchAgenda((a) => {
     if (!a.slack) return;
     const isDm = (r: unknown) => String((r as { key?: unknown })?.key ?? "").startsWith("dm:");
-    keys = [...mergeThreadReads(a.slack.threads ?? [], raw.filter((r) => !isDm(r)), now), ...mergeThreadReads(a.slack.dms ?? [], raw.filter(isDm), now)];
+    // A read whose newest ts is behind phase 1's (search_latest_ts) is raised to it: one warn line + the model's entry as trace.
+    const warn = (msg: string, entry: unknown) => {
+      log(`WARN ${msg}`);
+      log(`agenda-threads: trace model output ${JSON.stringify(entry).slice(0, 1500)}`);
+    };
+    keys = [...mergeThreadReads(a.slack.threads ?? [], raw.filter((r) => !isDm(r)), now, warn), ...mergeThreadReads(a.slack.dms ?? [], raw.filter(isDm), now, warn)];
     applyThreadState(a.slack);
     // My replies phase 2 just saw answer the older asks in the history too (and leave the view's items now).
     let cfg: NedConfig | null = null;

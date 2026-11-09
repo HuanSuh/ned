@@ -21,6 +21,7 @@ import {
   syncDmsFromList,
   hasNewSinceMe,
   markThreadSeen,
+  markTs,
   mergeThreadReads,
   syncThreadsFromList,
   threadCandidates,
@@ -203,16 +204,17 @@ describe("applyThreadState (reopen)", () => {
 });
 
 describe("확인 완료 keyed by the latest reply", () => {
-  it("markThreadSeen stores the reply ts from the key; a newer reply makes it new again", () => {
+  it("markThreadSeen stores the mark time (an old `@…` key suffix is ignored); a reply after the mark makes it new again", () => {
     const s = block({ all: [{ ...item(), answered: true }] });
     s.threads = syncThreadsFromList([], s, NOW);
     mergeThreadReads(s.threads, [{ key: `C1:${ROOT}`, messages: [{ from: "나", ts: MINE, text: "a" }, { from: "Kim", ts: ts(5), text: "b" }] }], NOW);
     applyThreadState(s);
     expect(hasNewSinceMe(s.threads[0])).toBe(true);
-    expect(markThreadSeen(s, `slack:C1:${ROOT}@${ts(5)}`, true)).toBe(true);
-    expect(s.threads[0].seen_reply_ts).toBe(ts(5));
+    const MARK = NOW - 3 * 60_000; // after ts(5), before ts(1)
+    expect(markThreadSeen(s, `slack:C1:${ROOT}@${ROOT}`, true, MARK)).toBe(true); // suffix (even a stale one) doesn't matter
+    expect(s.threads[0].seen_reply_ts).toBe(markTs(MARK));
     expect(hasNewSinceMe(s.threads[0])).toBe(false);
-    expect(s.all[0].thread?.seen_reply_ts).toBe(ts(5));
+    expect(s.all[0].thread?.seen_reply_ts).toBe(markTs(MARK));
     // Seen at that reply → no longer reopened (back to answered) until the next reply.
     expect(s.items).toHaveLength(0);
     expect(s.all[0].answered).toBe(true);
@@ -221,8 +223,8 @@ describe("확인 완료 keyed by the latest reply", () => {
     applyThreadState(s);
     expect(s.items).toHaveLength(1);
     // A key whose ts is a reply no longer listed still finds the thread through its known messages.
-    expect(markThreadSeen(s, `slack:C1:${ts(1)}@${ts(1)}`, true)).toBe(true);
-    expect(s.threads[0].seen_reply_ts).toBe(ts(1));
+    expect(markThreadSeen(s, `slack:C1:${ts(1)}`, true, NOW)).toBe(true);
+    expect(s.threads[0].seen_reply_ts).toBe(markTs(NOW));
     expect(markThreadSeen(s, `slack:C1:${ROOT}`, false)).toBe(true);
     expect(s.threads[0].seen_reply_ts).toBeUndefined();
     expect(markThreadSeen(s, "jira:APP-1", true)).toBe(false);
@@ -372,8 +374,10 @@ describe("end to end (NED_NO_LLM fixtures, temp NED_HOME)", () => {
       a = readAgenda();
       expect(a.slack?.threads?.[0]).toMatchObject({ last_reply_ts: K, thread_summary: "배포 시각 다시 물음" });
       expect(a.slack?.items[0]?.reopened).toBe(true);
-      patchAgenda((x) => void markThreadSeen(x.slack, `slack:C1:${R}@${K}`, true));
-      expect(readAgenda().slack?.threads?.[0].seen_reply_ts).toBe(K);
+      const mark = Number(K) * 1000 + 1000; // ✓ just after the latest reply
+      patchAgenda((x) => void markThreadSeen(x.slack, `slack:C1:${R}`, true, mark));
+      expect(readAgenda().slack?.threads?.[0].seen_reply_ts).toBe(markTs(mark));
+      expect(hasNewSinceMe(readAgenda().slack!.threads![0])).toBe(false);
     } finally {
       delete process.env.NED_NO_LLM_AGENDA;
       delete process.env.NED_NO_LLM_THREADS;

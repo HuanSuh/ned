@@ -10,7 +10,7 @@ const KIND = { slack: "slack", mail: "email", jira: "jira", github: "github", ca
 /**
  * A history row (HistoryRow: key, source, ts, url, channel, item = the record's own fields) → the item shape the cards
  * hand to draftFor / srcCheck, so refs and 확인 keys match the card's row for the same message / thread:
- * Slack → url · channel · from · text · ts (+ the followed thread from agenda slack.threads, for the `@reply` 확인 key);
+ * Slack → url · channel · from · text · ts (+ the followed thread from agenda slack.threads: a reply after the ✓ reopens it);
  * mail → thread id · from · subject · snippet · why, with the row's ts (a newer message reopens it, like `received`).
  * null for a source with no item.
  */

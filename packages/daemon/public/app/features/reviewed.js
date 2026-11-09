@@ -8,6 +8,7 @@ import { toast } from "../ui/toast.js";
 export const openAtt = () => (S.state?.attention || []).filter((a) => !a.reviewed_at);
 // 확인 완료 keys / ✓ / fold for source items live in features/revkeys.js (pure, node-testable).
 export { SRC_KEY_RE, isOpenSrc, itemMs, revAt, revCls, srcCheck, srcKey, srcRevAt, withFold } from "./revkeys.js";
+import { NO_KEY_TITLE, SRC_KEY_RE, applyReviewMark } from "./revkeys.js";
 /** Optimistic Gmail 읽음 표시: the thread's row in mail.all → read, 안 읽은 count −1 (the next mail refresh sets the real values). */
 export function markThreadReadLocal(agenda, threadId) {
   const m = agenda?.mail, row = m?.all?.find((x) => x.id === threadId);
@@ -25,15 +26,23 @@ async function followMarkRead(mr, threadId) {
   if (!r.ok) toast(`Gmail 읽음 표시 실패 — ${r.data?.error || r.data?.detail || "알 수 없는 오류"}`, 8000);
 }
 export async function reviewSource(key, reviewed) {
-  S.agenda = S.agenda || {}; S.agenda.reviewed = { ...(S.agenda.reviewed || {}) };
-  if (reviewed) S.agenda.reviewed[key] = Date.now(); else delete S.agenda.reviewed[key];
+  S.agenda = S.agenda || {};
+  const m = applyReviewMark(S.agenda.reviewed, key, reviewed);
+  if (!m) { toast(`${NO_KEY_TITLE} — 이 항목은 확인 표시를 저장할 수 없어`); return; } // never POST an empty key
+  S.agenda.reviewed = m.next;
   // 확인 해제 never marks the mail unread again in Gmail (or here).
   const markRead = reviewed && key.startsWith("mail:") && S.config?.actions?.gmail_mark_read === true;
   if (markRead) markThreadReadLocal(S.agenda, key.slice(5));
   renderAll();
   let r = null;
   try { r = await api(`/api/attention/${encodeURIComponent(key)}/review`, { method: "POST", body: JSON.stringify({ reviewed }) }); }
-  catch (e) { console.warn(e); toast(`확인 표시 실패 — ${e.message}`); return; }
+  catch (e) {
+    console.warn(e);
+    S.agenda.reviewed = m.undo(S.agenda.reviewed); // roll the optimistic ✓ back (the Gmail 읽음 guess is left to the next refresh)
+    renderAll();
+    toast(`확인 표시 실패 — ${e.message}`);
+    return;
+  }
   if (r?.mark_read) followMarkRead(r.mark_read, key.slice(5)).catch((e) => console.warn("mark-read", e));
 }
 export async function reviewAttention(id, reviewed) {
@@ -48,6 +57,8 @@ export async function reviewAttention(id, reviewed) {
 /** Listeners + one-time setup; main.js calls every module's init() once, in the old file's order. */
 export function init() {
   document.addEventListener("click", (e) => {
+    // A ✓ with no key is rendered disabled; should a click still land on it, say why nothing happens.
+    if (e.target.closest("[data-review-nokey]")) { e.preventDefault(); e.stopPropagation(); toast(`${NO_KEY_TITLE} — 이 항목은 확인 표시를 저장할 수 없어`); return; }
     const b = e.target.closest("[data-review]"); if (!b) return;
     e.preventDefault(); e.stopPropagation();
     if (SRC_KEY_RE.test(b.dataset.review)) return reviewSource(b.dataset.review, b.getAttribute("aria-pressed") !== "true");

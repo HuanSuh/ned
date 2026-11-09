@@ -28,6 +28,7 @@ import { SOURCE_KEY, readSourceReviewed, readState, setReviewed, writeState } fr
 import { noteActivity, schedulerStatus } from "./scheduler.js";
 import { registerSearch } from "./search.js";
 import { markThreadSeen } from "./slack-threads.js";
+import { SRC_KEY_RE, normalizeReviewKey } from "./review-keys.js";
 import { addTodo, deleteTodo, listTodos, updateTodo } from "./todos.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -206,14 +207,17 @@ export function startServer(getConfig: () => NedConfig): void {
   app.get("/api/check", (c) => c.json(checkStatus()));
   // 확인 완료 toggle: body {reviewed: boolean} (default true). The item stays in attention; counts skip it.
   app.post("/api/attention/:id/review", async (c) => {
-    const id = c.req.param("id");
+    // Old thread-aware Slack keys (`…@<reply ts>`) are stored under their base key (review-keys.ts).
+    const id = normalizeReviewKey(c.req.param("id").trim());
     let reviewed = true;
     try { const b = (await c.req.json()) as { reviewed?: unknown }; if (typeof b?.reviewed === "boolean") reviewed = b.reviewed; } catch { /* no body = mark */ }
+    // A source prefix with an empty / malformed rest (a row whose key couldn't be built) is a client bug, not a lookup.
+    if (!id || (SRC_KEY_RE.test(id) && !SOURCE_KEY.test(id))) return c.json({ error: "bad review key" }, 400);
     // Source items (mail: / slack: / jira: / github:) have no attention entry; their key is stable across agenda runs.
     if (!SOURCE_KEY.test(id) && !readState().attention.some((a) => a.id === id)) return c.json({ error: "not found" }, 404);
     const at = setReviewed(id, reviewed);
-    // Slack: the thread remembers which reply was seen (key carries `@<last_reply_ts>`; a newer reply reopens it).
-    if (id.startsWith("slack:")) try { patchAgenda((a) => void markThreadSeen(a.slack, id, reviewed)); } catch (e) { log(`review: thread seen mark failed — ${String(e).slice(0, 200)}`); }
+    // Slack: the thread remembers the mark time as seen_reply_ts; only a message after it reopens it (same as the ✓ rule).
+    if (id.startsWith("slack:")) try { patchAgenda((a) => void markThreadSeen(a.slack, id, reviewed, at ?? Date.now())); } catch (e) { log(`review: thread seen mark failed — ${String(e).slice(0, 200)}`); }
     // Mail + config.actions.gmail_mark_read: also mark the thread read in Gmail (background job; un-review never re-marks unread).
     let mark_read: MarkReadOutcome | null = null;
     if (reviewed && id.startsWith("mail:")) try { mark_read = await onMailReviewed(id, loadConfig()); } catch (e) { log(`review: gmail mark-read failed — ${String(e).slice(0, 200)}`); }

@@ -21,6 +21,7 @@ import { collapseDMs, dedupeSlack, slackConvKey, slackUrlKey, supersetMail, supe
 import { HISTORY_SOURCES, watchChannels, type HistorySource, type NedConfig } from "./config.js";
 import { NED_HOME, localDay, log, readJson } from "./paths.js";
 import { threadRef, type SlackThread } from "./slack-threads.js";
+import { activityMs, foldReviewMarks, reviewedAt, slackReviewKey } from "./review-keys.js";
 import { readReviewed, type Reviewed } from "./state.js";
 
 export const HISTORY_DIR = path.join(NED_HOME, "history");
@@ -629,34 +630,30 @@ export function pruneHistory(cfg: NedConfig, now = Date.now(), force = false): P
 
 // ---------- views (agenda.json's slack / mail blocks) ----------
 
-/** Same rule as the dashboard's reviewed.js srcRevAt: a mark counts when it is at or after the item's time. */
-function revAt(marks: Reviewed, key: string, itemMs: number): boolean {
-  let at = marks[key] ?? 0;
-  if (!at && key.includes("@")) {
-    const b = marks[key.split("@")[0]], lr = Number(key.split("@")[1]) * 1000;
-    if (b && b >= lr) at = b;
-  }
-  return !!at && at >= itemMs;
-}
-/** reviewed.js srcKey for a Slack row (`slack:<channel>:<ts>[@<last_reply_ts>]`). */
-export function slackReviewKey(x: { url: string; thread?: { last_reply_ts?: string } }): string {
-  const m = /\/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})/.exec(x.url || "");
-  if (!m) return x.url ? `slack:${x.url}` : "";
-  const base = `slack:${m[1]}:${m[2]}.${m[3]}`, lr = x.thread?.last_reply_ts;
-  return lr && lr !== `${m[2]}.${m[3]}` ? `${base}@${lr}` : base;
+/**
+ * A mark counts when it is at or after the item's last change (review-keys.ts, same as the dashboard's revkeys.js).
+ * `marks` is already folded (readReviewed folds old `@…` keys once per read) — no per-call fold here.
+ */
+const revAt = (marks: Reviewed, key: string, actMs: number): boolean => !!reviewedAt(marks, key, actMs);
+export { slackReviewKey };
+
+/** The followed thread a Slack permalink belongs to (agenda slack.threads), if any. */
+export function threadOfUrl(threads: SlackThread[] | undefined, url: string | undefined): SlackThread | undefined {
+  const r = threadRef(url);
+  return r && threads?.length ? threads.find((t) => t.key === `${r.channel_id}:${r.thread_ts}`) : undefined;
 }
 
 /**
- * A Slack record marked ✓ 확인 완료 at or after its time — by its base key or any thread-aware `<base>@<last_reply>` key
- * (the dashboard keys a thread row by its latest reply). Such an ask is closed for openSlack / isCurrent too.
+ * A Slack record marked ✓ 확인 완료 at or after its last change — key `slack:<channel>:<ts>`, last change =
+ * max(record ts, its thread's last_reply_ts / search_latest_ts) (review-keys.ts activityMs). Such an ask is closed
+ * for openSlack / isCurrent too; a reply after the mark opens it again, exactly like the card row.
  */
-export function slackRecReviewed(marks: Reviewed, r: Pick<SlackRec, "item" | "ts">): boolean {
-  const base = slackReviewKey({ url: r.item.url });
-  if (!base) return false;
-  const t = ms(r.ts);
-  if (revAt(marks, base, t)) return true;
-  for (const [k, at] of Object.entries(marks)) if (k.startsWith(`${base}@`) && at >= t) return true;
-  return false;
+export function slackRecReviewed(marks: Reviewed, r: Pick<SlackRec, "item" | "ts">, threads?: SlackThread[]): boolean {
+  const key = slackReviewKey({ url: r.item.url });
+  if (!key) return false;
+  const t = threadOfUrl(threads, r.item.url);
+  // Row ts as the dashboard's 이력 row has it (histrows.js histTarget: item.ts, else the record's ts).
+  return revAt(marks, key, activityMs("slack", { ts: r.item.ts || r.ts, thread: t }));
 }
 
 const byRank = (a: HistRecord<{ rank?: number; rank_at?: number }>, b: HistRecord<{ rank?: number; rank_at?: number }>) =>
@@ -727,7 +724,7 @@ export function slackView(cfg: NedConfig, fresh: SlackBlock, prev: SlackBlock | 
 
 /** After thread state (applyThreadState): drop 확인 완료 rows from items (thread-aware key), cap at 10. */
 export function finalizeSlackView(s: SlackBlock, marks: Reviewed): void {
-  s.items = s.items.filter((x) => !revAt(marks, slackReviewKey(x), ms(x.ts))).slice(0, 10);
+  s.items = s.items.filter((x) => !revAt(marks, slackReviewKey(x), activityMs("slack", { ts: x.ts, thread: x.thread ?? threadOfUrl(s.threads, x.url) }))).slice(0, 10);
 }
 
 /**
@@ -756,11 +753,12 @@ export function mailView(cfg: NedConfig, fresh: MailBlock, prev: MailBlock | nul
  * Open Slack asks in the history within `hours` (default: any age — the card keeps them, see slackView), excluded
  * channels and ✓ 확인 완료 left out: how many, and the oldest one's time (ms). The ack-emoji search reaches back to it.
  */
-export function openSlack(cfg: NedConfig, now: number, opts: { hours?: number; recs?: SlackRec[]; marks?: Reviewed } = {}): { n: number; oldest: number } {
+export function openSlack(cfg: NedConfig, now: number, opts: { hours?: number; recs?: SlackRec[]; marks?: Reviewed; threads?: SlackThread[] } = {}): { n: number; oldest: number } {
   if (!recording(cfg, "slack")) return { n: 0, oldest: now };
-  const recs = opts.recs ?? readHistory<SlackRec>("slack"), marks = opts.marks ?? readReviewed();
+  // Folded once per call (readReviewed already folds; caller-given marks may still carry old `@…` keys).
+  const recs = opts.recs ?? readHistory<SlackRec>("slack"), marks = opts.marks ? foldReviewMarks(opts.marks) : readReviewed();
   const lo = opts.hours ? now - opts.hours * H : -Infinity;
-  const open = recs.filter((r) => openAsk(r) && ms(r.ts) >= lo && !excludedSlack(cfg, r) && !slackRecReviewed(marks, r));
+  const open = recs.filter((r) => openAsk(r) && ms(r.ts) >= lo && !excludedSlack(cfg, r) && !slackRecReviewed(marks, r, opts.threads));
   return { n: open.length, oldest: open.reduce((m, r) => Math.min(m, ms(r.ts) || now), now) };
 }
 
@@ -817,8 +815,8 @@ export function currentKeys(a: Agenda): Record<HistorySource, Set<string>> {
 }
 
 /** Is the record part of what the card shows now (HistoryRow.current)? */
-function isCurrent(r: HistRecord, cfg: NedConfig, now: number, cur: Record<HistorySource, Set<string>>, marks: Reviewed): boolean {
-  if (r.source === "slack") return historyDisplay(cfg, "slack") ? ms(r.ts) >= now - cfg.history.display.slack_hours * H || (openAsk(r as SlackRec) && !slackRecReviewed(marks, r as SlackRec)) : cur.slack.has(r.key);
+function isCurrent(r: HistRecord, cfg: NedConfig, now: number, cur: Record<HistorySource, Set<string>>, marks: Reviewed, threads?: SlackThread[]): boolean {
+  if (r.source === "slack") return historyDisplay(cfg, "slack") ? ms(r.ts) >= now - cfg.history.display.slack_hours * H || (openAsk(r as SlackRec) && !slackRecReviewed(marks, r as SlackRec, threads)) : cur.slack.has(r.key);
   if (r.source === "mail") return historyDisplay(cfg, "mail") ? ms(r.ts) >= now - cfg.history.display.mail_days * D : cur.mail.has(r.key);
   if (r.source === "jira" || r.source === "github") return r.state.open === true && cur[r.source].has(r.key);
   return cur.calendar.has(r.key);
@@ -866,7 +864,7 @@ export function queryHistory(cfg: NedConfig, agenda: Agenda, qy: HistoryQuery, n
       const hay = `${d.title} ${d.detail}`.toLowerCase();
       if (!toks.every((t) => hay.includes(t))) continue;
     }
-    rows.push({ key: r.key, source: r.source, ts: r.ts, first_seen: r.first_seen, last_seen: r.last_seen, current: isCurrent(r, cfg, now, cur, marks), ...d, state: r.state, item: r.item });
+    rows.push({ key: r.key, source: r.source, ts: r.ts, first_seen: r.first_seen, last_seen: r.last_seen, current: isCurrent(r, cfg, now, cur, marks, agenda.slack?.threads), ...d, state: r.state, item: r.item });
   }
   rows.sort((a, b) => ms(b.ts) - ms(a.ts));
   return { source: qy.source, days, items: rows.slice(0, limit), total: rows.length };

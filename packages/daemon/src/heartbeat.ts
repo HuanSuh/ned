@@ -70,7 +70,7 @@ export function threadAttention(a: Agenda, sent: Set<string>, now = Date.now()):
     keys.push(key);
     items.push({
       kind: "slack",
-      title: clip(`${t.channel || "Slack"} 스레드 · 내 답 이후 새 답글 ${t.new_since_me}건 — ${t.last_reply_from ?? ""}: ${t.last_reply_text ?? ""}`, 160),
+      title: clip(`${t.channel || "Slack"} 스레드 · 내 답 이후 새 답글 ${t.new_since_me}건 — ${t.last_reply_from ? `${t.last_reply_from}: ` : ""}${t.last_reply_text ?? ""}`, 160),
       detail: clip(t.thread_summary || t.root_text || "", 200) || undefined,
       url: t.url,
     });

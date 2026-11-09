@@ -659,7 +659,7 @@ export function listWindows(cfg: NedConfig, keys: readonly AgendaSourceKey[], no
     w.slack = collectWindow("slack", cfg, now);
     // The card keeps open asks of any age (slackView); the ack search (20 hits per emoji) reaches back to the oldest one
     // within ACK_LOOKBACK_HOURS, full runs too. Older ones are released by ✓ or my reply only.
-    const o = openSlack(cfg, now, { hours: ACK_LOOKBACK_HOURS });
+    const o = openSlack(cfg, now, { hours: ACK_LOOKBACK_HOURS, threads: prevSlack?.threads });
     if (o.n) {
       w.openAsks = o.n;
       w.ackSince = Math.min(w.slack.since, o.oldest);
