@@ -58,6 +58,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .default()
         cfg.userContentController.add(BootMessageHandler(), name: "ned")
+        cfg.userContentController.add(OpenLinkHandler(), name: "openLink")
         webView = WKWebView(frame: frame, configuration: cfg)
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -219,6 +220,11 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
         let url = action.request.url
+        if let url, DeepLink.isDeep(url) {
+            DeepLink.open(url, web: nil)
+            decisionHandler(.cancel)
+            return
+        }
         if action.targetFrame == nil || !isDashboard(url) {
             if let url, url.scheme != "about" { NSWorkspace.shared.open(url) }
             decisionHandler(.cancel)
@@ -230,7 +236,9 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     /// `target=_blank` and `window.open(...)`: never open a second web view.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = action.request.url { NSWorkspace.shared.open(url) }
+        if let url = action.request.url {
+            if DeepLink.isDeep(url) { DeepLink.open(url, web: nil) } else { NSWorkspace.shared.open(url) }
+        }
         return nil
     }
 
@@ -259,6 +267,56 @@ private final class BootMessageHandler: NSObject, WKScriptMessageHandler {
         MainActor.assumeIsolated {
             DaemonManager.shared.note("boot screen: 다시 시작 clicked")
             DaemonManager.shared.restart()
+        }
+    }
+}
+
+/// 링크를 앱으로 열기: app deep links the dashboard hands over (packages/daemon/src/links.ts LINK_SERVICES).
+/// One fallback path for both the `openLink` message and slack:// · figma:// · notion:// navigations.
+enum DeepLink {
+    static let schemes: Set<String> = ["slack", "figma", "notion"]
+
+    static func isDeep(_ url: URL) -> Bool { schemes.contains(url.scheme?.lowercased() ?? "") }
+
+    /// Open `deep` in its app. No app registered for the scheme, or the open fails → `web` in the default browser
+    /// (nothing when `web` is nil). One DaemonManager note line either way (scheme + app / web host, not the full URL).
+    @MainActor
+    static func open(_ deep: URL, web: URL?) {
+        let ws = NSWorkspace.shared
+        let scheme = deep.scheme ?? "?"
+        guard let app = ws.urlForApplication(toOpen: deep) else {
+            if let web { ws.open(web) }
+            DaemonManager.shared.note("open link: no app for \(scheme):// → \(web.map { "web \($0.host ?? "?")" } ?? "nothing to fall back to")")
+            return
+        }
+        ws.open(deep, configuration: NSWorkspace.OpenConfiguration()) { _, error in
+            let reason = error?.localizedDescription
+            Task { @MainActor in
+                if let reason {
+                    if let web { NSWorkspace.shared.open(web) }
+                    DaemonManager.shared.note("open link: \(scheme):// via \(app.lastPathComponent) failed (\(reason)) → \(web.map { "web \($0.host ?? "?")" } ?? "nothing to fall back to")")
+                } else {
+                    DaemonManager.shared.note("open link: \(scheme):// → \(app.lastPathComponent)")
+                }
+            }
+        }
+    }
+}
+
+/// Dashboard `openLink(web)` (public/app/features/openlink.js) → `{deep, web}`: open in the app, else the web URL.
+/// Only the dashboard page (http://127.0.0.1:<port>) may post; deep must be one of DeepLink.schemes, web http(s).
+private final class OpenLinkHandler: NSObject, WKScriptMessageHandler {
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let body = message.body as? [String: Any],
+              let deepStr = body["deep"] as? String, let deep = URL(string: deepStr), DeepLink.isDeep(deep) else { return }
+        let web = (body["web"] as? String).flatMap { URL(string: $0) }.flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
+        let src = message.frameInfo.request.url
+        MainActor.assumeIsolated {
+            guard let src, src.scheme == "http", src.host == "127.0.0.1" || src.host == "localhost", (src.port ?? 80) == AppConfig.port else {
+                DaemonManager.shared.note("open link: ignored a message from \(src?.absoluteString ?? "?")")
+                return
+            }
+            DeepLink.open(deep, web: web)
         }
     }
 }
