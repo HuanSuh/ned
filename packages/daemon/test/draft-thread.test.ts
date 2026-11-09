@@ -99,6 +99,10 @@ describe("reconcileAsks / renderAsks", () => {
     expect(r[0].answered_in).toBe("1700000005.0");
     expect(reconcileAsks([ask("A", ["1"])], { my_last_ts: "" })[0].status).toBe("open");
   });
+  it("partial answer: a sibling ask from the same message judged answered → the open one stays open", () => {
+    const r = reconcileAsks([ask("Q1", ["1700000001.0"], "answered"), ask("Q2", ["1700000001.0"]), ask("Q3", ["1700000002.0"])], { my_last_ts: "1700000005.0" });
+    expect(r.map((a) => a.status)).toEqual(["answered", "open", "answered"]);
+  });
   it("renderAsks numbers open ones and lists answered as don't-repeat", () => {
     const out = renderAsks([ask("A", [], "answered"), ask("B", []), { ...ask("C", []), due: "금요일" }]);
     expect(out).toContain("1. kim — B");

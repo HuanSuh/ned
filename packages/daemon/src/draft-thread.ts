@@ -199,14 +199,18 @@ export function normalizeAsks(raw: unknown): DraftAsk[] {
 /**
  * Daemon correction of Pass 1 asks (→ asks_final): an `open` ask that was only asked in messages at/before my last
  * reply is demoted to `answered` (my reply came after it); one asked (again) after my last reply — a 재확인 request —
- * stays open. Asks without `asked_in` keep the model's status. Questions the model missed are not invented.
+ * stays open. Partial answers stay open too: when another ask from the same message was judged `answered`, the model
+ * weighed my reply item by item, so its `open` for the rest is trusted (원글 질문 3개 중 2개만 답함 → 나머지 1개 open).
+ * Asks without `asked_in` keep the model's status. Questions the model missed are not invented.
  */
 export function reconcileAsks(asks: DraftAsk[], s: Pick<Segments, "my_last_ts">): DraftAsk[] {
   const cut = tsSec(s.my_last_ts);
+  const judged = new Set(asks.filter((a) => a.status === "answered").flatMap((a) => a.asked_in));
   return asks.map((a) => {
     if (a.status !== "open" || !Number.isFinite(cut)) return a;
     const when = a.asked_in.map(tsSec).filter(Number.isFinite);
     if (!when.length || when.some((t) => t > cut)) return a;
+    if (a.asked_in.some((t) => judged.has(t))) return a;
     return { ...a, status: "answered", answered_in: a.answered_in || s.my_last_ts };
   });
 }

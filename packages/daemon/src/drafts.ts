@@ -5,7 +5,24 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseOrigin, type ActionOrigin } from "./origin.js";
 import { readAgenda, type Agenda, type MailContext, type SlackContext } from "./agenda.js";
-import { extractJson, llmDisabled, runClaude } from "./claude.js";
+import { extractJson, llmDisabled, runClaude, type ClaudeRunResult } from "./claude.js";
+import {
+  filterMentions,
+  mergeParticipants,
+  normalizeCovers,
+  normalizeExtract,
+  normalizeTranscript,
+  openAsks,
+  reconcileAsks,
+  renderAsks,
+  renderSegments,
+  segment,
+  type AskStatus,
+  type DraftAsk,
+  type Participant,
+  type Segments,
+  type TranscriptMsg,
+} from "./draft-thread.js";
 import { normalizeReplyTone, type NedConfig, type ReplyToneSource } from "./config.js";
 import { readRecentEvents, type NedEvent } from "./events.js";
 import { NED_HOME, log, readJson, writeJsonAtomic } from "./paths.js";
@@ -70,10 +87,25 @@ export interface DraftMeta {
   /** github */
   repo?: string;
   number?: string;
+  /** How the drafts were made: `2pass` (extract asks → answer them, Slack / 메일 / Jira) or `legacy` (one prompt, prompts/draft.md). Absent in older cache files. */
+  mode?: DraftPipeline;
 }
 
 /** `fast` = no-tool run on context Ned already has (agenda excerpt / local transcript); `full` = claude reads the thread with tools. */
 export type DraftMode = "fast" | "full";
+/** `2pass` = Pass 1 extract (prompts/draft-extract.md) + Pass 2 write (prompts/draft-write.md); `legacy` = prompts/draft.md alone. */
+export type DraftPipeline = "2pass" | "legacy";
+/** Sources drafted with the 2-pass pipeline; session / github stay single-pass. */
+export const TWO_PASS_SOURCES: ReadonlySet<DraftSource> = new Set<DraftSource>(["slack", "email", "jira"]);
+
+/** One question / request to answer, as the modal lists it ("답할 것"). Open ones are numbered in order (Pass 2's `covers`). */
+export interface DraftAskView {
+  who: string;
+  what: string;
+  due: string;
+  status: AskStatus;
+  answered_in: string;
+}
 
 export interface DraftResult {
   id: string;
@@ -82,7 +114,12 @@ export interface DraftResult {
   /** Age of the agenda-collected context the fast path used (0 for sessions: read live); null on the full path. */
   context_age_minutes: number | null;
   context: { summary: string; excerpt: string };
-  drafts: { id: string; label: DraftLabel; text: string }[];
+  /** `covers` (2-pass): the open-ask numbers (1-based) this draft answers. */
+  drafts: { id: string; label: DraftLabel; text: string; covers?: number[] }[];
+  /** 2-pass: asks after the daemon's correction (asks_final); [] for legacy and older cache files. */
+  asks: DraftAskView[];
+  /** 2-pass Slack: suggested `<@U…>` mentions (≥2 participants, a specific `who`); the modal's toggle prepends them. */
+  mentions: string[];
   cost_usd: number;
   cached: boolean;
   created_at: number;
@@ -251,7 +288,8 @@ export function readDraft(idOrDraftId: string): DraftResult | null {
 export function draftTools(source: DraftSource): string[] {
   if (source === "slack") return ["ToolSearch", "mcp__claude_ai_Slack__slack_read_thread", "mcp__claude_ai_Slack__slack_read_channel"];
   if (source === "email") return ["ToolSearch", "mcp__claude_ai_Gmail__get_thread", "mcp__claude_ai_Gmail__search_threads"];
-  if (source === "jira") return ["ToolSearch", "mcp__claude_ai_Atlassian__getJiraIssue"];
+  // atlassianUserInfo: who "I" am, so Pass 1 can mark my comments (read-only).
+  if (source === "jira") return ["ToolSearch", "mcp__claude_ai_Atlassian__getJiraIssue", "mcp__claude_ai_Atlassian__atlassianUserInfo"];
   return []; // session / github: context is inlined (transcript tail / gh read-only output)
 }
 
@@ -485,15 +523,176 @@ interface LlmDraft {
   drafts?: { label?: string; text?: string }[];
 }
 
-function normalizeDrafts(id: string, raw: LlmDraft["drafts"]): DraftResult["drafts"] {
+/** The model's drafts → the 3 labelled drafts; `asks` = open-ask count (2-pass: keep each draft's `covers`). */
+function normalizeDrafts(id: string, raw: LlmDraft["drafts"], asks?: number): DraftResult["drafts"] {
   const list = Array.isArray(raw) ? raw : [];
   const out: DraftResult["drafts"] = [];
   DRAFT_LABELS.forEach((label, i) => {
     const d = list.find((x) => x?.label === label) ?? list[i];
     const text = typeof d?.text === "string" ? d.text.trim() : "";
-    if (text) out.push({ id: `${id}-${i}`, label, text });
+    if (text) out.push(asks === undefined ? { id: `${id}-${i}`, label, text } : { id: `${id}-${i}`, label, text, covers: normalizeCovers((d as { covers?: unknown }).covers, asks) });
   });
   return out;
+}
+
+// ---------- 2-pass: Pass 1 extract (transcript + asks) → daemon segment / correction → Pass 2 write ----------
+
+/** The conversation Ned already has for a fast-path ref (agenda excerpt), and my last reply ts when the thread read knew it. */
+export function fastTranscript(fast: AgendaCtx): { transcript: TranscriptMsg[]; myLastTs?: string } {
+  if (fast.kind === "slack") {
+    const transcript = normalizeTranscript(fast.ctx.messages.map((m) => ({ ts: m.ts, from: m.from, mine: m.from === "나", text: m.text })));
+    return fast.ctx.my_last_ts ? { transcript, myLastTs: fast.ctx.my_last_ts } : { transcript };
+  }
+  return { transcript: normalizeTranscript([{ ts: "", from: fast.ctx.from || "?", mine: false, text: fast.ctx.body_excerpt }]) };
+}
+
+/**
+ * Pass 1 tools = the draft read tools (Jira includes atlassianUserInfo). Slack's "who am I" comes from loading the
+ * search tool's schema through ToolSearch (its description names my user_id) — that tool is not allowed, so it never runs.
+ */
+export function extractTools(source: DraftSource): string[] {
+  return draftTools(source);
+}
+
+const EXTRACT_FULL_TRANSCRIPT = "읽은 대화의 메시지를 **오래된 순으로 모두**(최대 40개, 넘으면 최근 40개) 옮긴다. `text` 는 원문 그대로 최대 500자(요약·번역 금지), 내 메시지는 `from` `나` + `mine: true`.";
+
+/** Pass 1 source guide (what to read, who "I" am, how to fill transcript) for the 2-pass sources. */
+function extractGuide(req: DraftRequest, fast: AgendaCtx | null): { guide: string; ref: string; context: string; me: string; transcript: string; extra: string; meta: DraftMeta } {
+  const base = sourceGuide(req, fast);
+  const { ref } = req;
+  const preview = [ref.title && `제목: ${ref.title}`, ref.text && `미리보기: ${ref.text}`].filter(Boolean).join("\n");
+  if (fast) {
+    const { transcript, myLastTs } = fastTranscript(fast);
+    const lines = fast.kind === "slack"
+      ? [
+          `참여자: ${fast.ctx.participants.join(", ") || "(모름)"}`,
+          myLastTs ? `내 마지막 메시지 ts: ${myLastTs} (아래 발췌보다 앞일 수 있다 — 그 이전 질문은 이미 답한 것으로 본다)` : "",
+          "대화 (오래된 순, `ts | 보낸 사람 | 원문`):",
+          ...transcript.map((m) => `- ${m.ts || "?"} | ${m.from} | ${m.text}`),
+        ]
+      : [`보낸 사람: ${fast.ctx.from}`, `제목: ${fast.ctx.subject}`, "본문 (스레드의 마지막 다른 사람 메시지, 인용 제거, ts 모름 → asked_in 은 []):", fast.ctx.body_excerpt];
+    return {
+      guide: `${fast.kind === "slack" ? "Slack 대화" : "Gmail 메일"} — 도구는 없다. 아래 수집된 대화만 보고 정리한다.`,
+      ref: base.ref,
+      context: `${lines.filter(Boolean).join("\n")}${preview ? `\n\n(목록 미리보기)\n${preview}` : ""}`,
+      me: fast.kind === "slack" ? "아래 대화에서 `나` 로 표시된 메시지가 내 것이다." : "아래 메일은 다른 사람이 보낸 것이다.",
+      transcript: "`[]` 로 둔다 (Ned 가 위 발췌를 이미 갖고 있다). `asked_in` 에는 위 대화의 ts 를 **그대로** 쓴다.",
+      extra: "",
+      meta: base.meta,
+    };
+  }
+  if (req.source === "slack") {
+    const t = slackTarget(ref);
+    const dm = !!t.channel_id?.startsWith("D") && !t.thread_ts;
+    const parent = dm ? undefined : t.thread_ts ?? t.ts;
+    const read = parent && t.channel_id
+      ? `\`mcp__claude_ai_Slack__slack_read_thread\` 로 channel_id=\`${t.channel_id}\`, message_ts=\`${parent}\`, limit=${THREAD_READ_LIMIT} (스레드 전체, response_format: concise)`
+      : t.channel_id
+        ? `\`mcp__claude_ai_Slack__slack_read_channel\` 로 channel_id=\`${t.channel_id}\`, limit=${dm ? THREAD_READ_LIMIT : 20}${dm ? " (DM 대화)" : ""}`
+        : "";
+    return {
+      guide: ["Slack 대화.", read ? `- ${read} 를 **한 번** 읽는다. 미리보기만 보고 정리하지 않는다.` : "- 채널 정보가 없다. 도구를 쓰지 말고 미리보기만으로 정리한다."].join("\n"),
+      ref: base.ref,
+      context: preview || "(없음)",
+      me: "내 Slack user_id 는 `ToolSearch` 로 `select:mcp__claude_ai_Slack__slack_search_public_and_private` 를 불러오면 그 도구 설명의 `Current logged in user's user_id is U…` 에 있다 (그 도구는 **호출하지 않는다** — 설명만 본다). 그 user_id 가 쓴 메시지가 내 것이다.",
+      transcript: `${EXTRACT_FULL_TRANSCRIPT} \`ts\` 는 Slack 원본 ts 문자열(예 \`"1730860000.123456"\`), \`user_id\` 는 보낸 사람 \`U…\`.`,
+      extra: "",
+      meta: base.meta,
+    };
+  }
+  if (req.source === "email") {
+    return {
+      guide: [
+        "Gmail 메일 스레드.",
+        ref.thread_id
+          ? `- \`mcp__claude_ai_Gmail__get_thread\` 로 threadId=\`${ref.thread_id}\` 를 messageFormat=PLAIN_TEXT 로 읽는다.`
+          : "- thread id 가 없다. 제목·미리보기로 `mcp__claude_ai_Gmail__search_threads` 를 1회만 써서 스레드를 찾고, 찾으면 `get_thread`(PLAIN_TEXT)로 읽는다.",
+        "- `reply_meta`: `message_id` = 스레드의 마지막 **다른 사람이 보낸** 메시지 id, `reply_to` = 그 발신자 주소, `subject` = `Re: <원제목>`.",
+      ].join("\n"),
+      ref: base.ref,
+      context: preview || "(없음)",
+      me: "내 메시지 = `SENT` 라벨이 붙었거나 발신자가 이 계정 주소인 메시지.",
+      transcript: `${EXTRACT_FULL_TRANSCRIPT} \`ts\` 는 메시지 날짜(ISO-8601), \`text\` 는 인용(> …, "On … wrote:") 을 뺀 본문.`,
+      extra: ',"reply_meta":{"message_id":"","reply_to":"","subject":""}',
+      meta: base.meta,
+    };
+  }
+  // jira
+  const t = jiraTarget(ref);
+  return {
+    guide: [
+      "Jira 이슈의 코멘트 대화.",
+      "- `mcp__claude_ai_Atlassian__atlassianUserInfo` 로 현재 사용자(나)를 확인한다.",
+      `- \`mcp__claude_ai_Atlassian__getJiraIssue\` 로 cloudId=\`${t.cloud_id ?? "(URL 없음)"}\`, issueIdOrKey=\`${t.key}\`, fields=["summary","description","status","assignee","reporter","comment"], responseContentFormat="markdown" 로 1회 읽는다.`,
+      "- 질문·요청이 없으면 `asks` 는 `[]` (다음 단계가 진행 상황 공유를 쓴다).",
+    ].join("\n"),
+    ref: base.ref,
+    context: preview || "(없음)",
+    me: "현재 사용자(atlassianUserInfo 의 accountId)가 쓴 코멘트·설명이 내 것이다.",
+    transcript: `이슈 설명을 첫 메시지(보낸 사람 = reporter, ts = 생성 시각)로, 이어서 코멘트를 오래된 순으로. ${EXTRACT_FULL_TRANSCRIPT} \`ts\` 는 코멘트 작성 시각(ISO-8601).`,
+    extra: "",
+    meta: base.meta,
+  };
+}
+
+/** Pass 1 prompt (prompts/draft-extract.md). */
+export function buildExtractPrompt(req: DraftRequest, fast: AgendaCtx | null = null): { prompt: string; meta: DraftMeta } {
+  const template = fs.readFileSync(path.join(PROMPTS_DIR, "draft-extract.md"), "utf8");
+  const g = extractGuide(req, fast);
+  const prompt = template
+    .replace("{{NOW}}", () => new Date().toLocaleString("ko-KR"))
+    .replace("{{TOOL_RULES}}", () => (fast ? "- 도구는 없다. 아래 대화만으로 **한 번에** JSON 을 출력한다." : TOOL_RULES))
+    .replace("{{ME_RULE}}", () => g.me)
+    .replace("{{TRANSCRIPT_RULE}}", () => g.transcript)
+    .replace("{{SOURCE_GUIDE}}", () => g.guide)
+    .replace("{{REF}}", () => g.ref)
+    .replace("{{CONTEXT}}", () => g.context)
+    .replace("{{SCHEMA_EXTRA}}", () => g.extra);
+  return { prompt, meta: g.meta };
+}
+
+const WRITE_SOURCE_RULES: Partial<Record<DraftSource, string>> = {
+  slack: "- Slack: 초안 본문에 멘션을 넣지 않는다 (Ned 가 토글로 붙인다). `mentions` 에는 참여자(나 제외)가 2명 이상이고 특정 항목의 `who` 에게 답해야 할 때만, 위 참여자 목록에 있는 `<@U…>` 를 넣는다. 아니면 `[]`.",
+  email: "- 메일: 인사(\"안녕하세요, ○○님.\")로 시작해도 되지만 서명은 넣지 않는다. `mentions` 는 `[]`.",
+  jira: "- Jira 코멘트: 평문. 다른 사람 언급은 이름만(멘션 문법 금지). 답할 것이 없으면 진행 상황 공유(무엇을 했고 다음에 무엇을 할지)를 짧게. `mentions` 는 `[]`.",
+};
+
+/** Pass 2 prompt (prompts/draft-write.md): segments + numbered open asks, no tools. */
+export function buildWritePrompt(req: DraftRequest, cfg: NedConfig, seg: Segments, participants: Participant[], asks: DraftAsk[]): string {
+  const template = fs.readFileSync(path.join(PROMPTS_DIR, "draft-write.md"), "utf8");
+  const n = openAsks(asks).length;
+  const openRule = n
+    ? `답할 것이 ${n}개다 — 각 초안은 1번부터 ${n}번까지 **모두** 답한다 (covers = [${Array.from({ length: n }, (_, i) => i + 1).join(",")}]).`
+    : `답할 질문·요청이 없다 — 짧은 리액션/확인형으로만 쓴다(예: "확인했어요, 감사합니다"). 세 초안 모두 1~2문장, covers 는 [].`;
+  return template
+    .replace("{{NOW}}", () => new Date().toLocaleString("ko-KR"))
+    .replace("{{OPEN_RULE}}", () => openRule)
+    .replace("{{TONE}}", () => draftTone(req, cfg))
+    .replace("{{HINT}}", () => req.hint ?? "(없음)")
+    .replace("{{SOURCE_RULES}}", () => WRITE_SOURCE_RULES[req.source] ?? "")
+    .replace("{{SEGMENTS}}", () => renderSegments(seg, participants))
+    .replace("{{ASKS}}", () => renderAsks(asks));
+}
+
+interface LlmWrite {
+  summary?: string;
+  excerpt?: string;
+  mentions?: unknown;
+  drafts?: { label?: string; text?: string; covers?: unknown }[];
+}
+
+/** The latest message to answer: last non-reaction message in [답할 대상] (else the last one at all). */
+function targetExcerpt(seg: Segments): string {
+  const t = seg.target.filter((m) => !m.mine);
+  return ((([...t].reverse().find((m) => !m.reaction) ?? t[t.length - 1])?.text) ?? "").slice(0, 300);
+}
+
+const askView = (a: DraftAsk): DraftAskView => ({ who: a.who, what: a.what, due: a.due, status: a.status, answered_in: a.answered_in });
+
+/** NED_NO_LLM: asks guessed from [답할 대상] (a `?` or a request ending), so the modal's list is exercised without claude. */
+const STUB_ASK_RE = /[?？]|부탁|요청|주세요|줘요|해줘|될까|할까|인가요|나요|까요/;
+function stubAsks(seg: Segments): DraftAsk[] {
+  return seg.target.filter((m) => !m.mine && !m.reaction && STUB_ASK_RE.test(m.text)).map((m) => ({ who: m.from, what: m.text.slice(0, 80), due: "", status: "open", answered_in: "", asked_in: m.ts ? [m.ts] : [] }));
 }
 
 const inflight = new Map<string, Promise<DraftResult>>();
@@ -522,7 +721,8 @@ function validate(req: DraftRequest): DraftError | null {
 function cachedDraft(req: DraftRequest, cfg: NedConfig): DraftResult | null {
   const c = readJson<DraftResult | null>(draftFile(draftIdOf(refKey(req.source, req.ref))), null);
   const tone = draftTone(req, cfg);
-  if (c && Date.now() - c.created_at < CACHE_MS && c.hint === (req.hint ?? "") && c.tone === tone && c.drafts.length) return { ...c, mode: c.mode ?? "full", context_age_minutes: c.context_age_minutes ?? null, cached: true }; // pre-fast-path cache files lack mode
+  // pre-fast-path cache files lack mode; pre-2-pass ones lack asks / mentions (meta.mode absent → the modal shows no list)
+  if (c && Date.now() - c.created_at < CACHE_MS && c.hint === (req.hint ?? "") && c.tone === tone && c.drafts.length) return { ...c, mode: c.mode ?? "full", context_age_minutes: c.context_age_minutes ?? null, asks: c.asks ?? [], mentions: c.mentions ?? [], cached: true };
   return null;
 }
 
@@ -553,7 +753,106 @@ export function generateDraft(req: DraftRequest, cfg: NedConfig, opts: { fastOnl
   return p;
 }
 
-async function runDraft(req: DraftRequest, cfg: NedConfig, id: string, tone: string, hint: string, fast: AgendaCtx | null, fallback = true): Promise<DraftResult> {
+function runDraft(req: DraftRequest, cfg: NedConfig, id: string, tone: string, hint: string, fast: AgendaCtx | null, fallback = true): Promise<DraftResult> {
+  return TWO_PASS_SOURCES.has(req.source) ? runTwoPass(req, cfg, id, tone, hint, fast, fallback) : runLegacy(req, cfg, id, tone, hint, fast, fallback);
+}
+
+const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+
+/**
+ * 2-pass draft (Slack / 메일 / Jira). Pass 1 extracts transcript + asks (fast: no tools on the agenda excerpt, fast model,
+ * 1 turn; full: the read tools, maxTurns 8); the daemon re-segments at my last message and corrects the asks; Pass 2
+ * (no tools, fast model, 1 turn) answers the open asks 1:1. Pass 1 unparseable → one legacy single-pass run (meta.mode
+ * "legacy"). Pass 2 failure: fast → the full 2-pass path once (like legacy), else DraftError 502.
+ */
+async function runTwoPass(req: DraftRequest, cfg: NedConfig, id: string, tone: string, hint: string, fast: AgendaCtx | null, fallback: boolean): Promise<DraftResult> {
+  const mode: DraftMode = fast ? "fast" : "full";
+  const context_age_minutes = fast ? fast.age : null;
+  const p1 = buildExtractPrompt(req, fast);
+  const fastOpts = { allowedTools: [], tools: [], maxTurns: 1, isolated: true, effort: "low" as const, model: cfg.draft_fast_model ?? cfg.claude_model, timeoutMs: 90_000, job: "draft" as const };
+  const started = Date.now();
+  let r1: ClaudeRunResult;
+  let extracted;
+  if (llmDisabled()) {
+    log(`draft: NED_NO_LLM=1 — 2pass stub for ${req.source} ${id} (${mode})`);
+    r1 = { ok: true, text: "", cost_usd: 0, num_turns: 0, duration_ms: 0 };
+    extracted = { transcript: [] as TranscriptMsg[], asks: [] as DraftAsk[], participants: [] as Participant[], reply_meta: {} };
+  } else {
+    log(`draft: pass 1 extract (${req.source} ${id}, ${mode}${fast ? `, context ${fast.age}m old` : `, tools=${extractTools(req.source).join(",")}`}${req.origin ? `, from ${req.origin}` : ""})`);
+    r1 = fast
+      ? await runClaude(p1.prompt, fastOpts)
+      : await runClaude(p1.prompt, { allowedTools: extractTools(req.source), tools: ["ToolSearch"], maxTurns: 8, model: cfg.claude_model, timeoutMs: 4 * 60_000, job: "draft" });
+    extracted = r1.ok ? normalizeExtract(extractJson(r1.text)) : null;
+    if (!extracted) {
+      log(`draft: pass 1 failed ${req.source} ${id} (${mode}, $${r1.cost_usd.toFixed(3)}, ${secs(Date.now() - started)}) — ${(r1.error ?? r1.text).slice(0, 300)} → legacy single pass`);
+      const r = await runLegacy(req, cfg, id, tone, hint, fast, fallback);
+      return { ...r, cost_usd: r.cost_usd + r1.cost_usd };
+    }
+  }
+  const t1 = Date.now() - started;
+  // Transcript: fast = the excerpt Ned has (+ the thread's my_last_reply_ts); full = what Pass 1 read; nothing → the list preview.
+  const own = fast ? fastTranscript(fast) : { transcript: extracted.transcript };
+  let transcript = own.transcript;
+  if (!transcript.length && (req.ref.text || req.ref.title)) transcript = normalizeTranscript([{ ts: req.ref.ts ?? "", from: "?", mine: false, text: req.ref.text ?? req.ref.title }]);
+  const seg = segment(transcript, { myLastTs: "myLastTs" in own ? own.myLastTs : undefined });
+  const participants = mergeParticipants(transcript, extracted.participants);
+  const asks = reconcileAsks(llmDisabled() ? stubAsks(seg) : extracted.asks, seg);
+  const open = openAsks(asks).length;
+  const prompt2 = buildWritePrompt(req, cfg, seg, participants, asks);
+
+  let r2: ClaudeRunResult;
+  let parsed: LlmWrite | null;
+  if (llmDisabled()) {
+    r2 = { ok: true, text: "", cost_usd: 0, num_turns: 0, duration_ms: 0 };
+    const covers = Array.from({ length: open }, (_, i) => i + 1);
+    parsed = { summary: "(NED_NO_LLM stub)", excerpt: "", mentions: [], drafts: DRAFT_LABELS.map((label) => ({ label, text: `[stub ${label}] ${hint || (open ? "확인했습니다. 곧 회신드리겠습니다." : "확인했어요, 감사합니다.")}`, covers })) };
+  } else {
+    log(`draft: pass 2 write (${req.source} ${id}, ${open} open / ${asks.length} asks, context ${seg.context.length}+${seg.omitted} / target ${seg.target.length})`);
+    r2 = await runClaude(prompt2, fastOpts);
+    parsed = r2.ok ? extractJson<LlmWrite>(r2.text) : null;
+  }
+  const drafts = parsed ? normalizeDrafts(id, parsed.drafts, open) : [];
+  if (!drafts.length) {
+    log(`draft: pass 2 failed ${req.source} ${id} (${mode}) — ${(r2.error ?? r2.text).slice(0, 300)}`);
+    if (fast && fallback) {
+      log(`draft: ${req.source} ${id} — fast path failed, falling back to full`);
+      const r = await runTwoPass(req, cfg, id, tone, hint, null, false);
+      return { ...r, cost_usd: r.cost_usd + r1.cost_usd + r2.cost_usd };
+    }
+    throw new DraftError(`draft failed: ${(r2.error ?? "unparseable model output").slice(0, 300)}`, 502);
+  }
+  const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+  const rm = extracted.reply_meta;
+  const meta: DraftMeta = req.source === "email"
+    ? { ...p1.meta, message_id: p1.meta.message_id ?? s(rm.message_id), reply_to: p1.meta.reply_to ?? s(rm.reply_to), subject: p1.meta.subject ?? s(rm.subject), mode: "2pass" }
+    : { ...p1.meta, mode: "2pass" };
+  const cost = r1.cost_usd + r2.cost_usd;
+  const result: DraftResult = {
+    id,
+    source: req.source,
+    mode,
+    context_age_minutes,
+    context: { summary: String(parsed?.summary ?? "").slice(0, 200), excerpt: String(parsed?.excerpt || targetExcerpt(seg) || (fast ? contextExcerpt(fast) : req.ref.text ?? "")).slice(0, 600) },
+    drafts,
+    asks: asks.map(askView),
+    mentions: filterMentions(parsed?.mentions, participants, req.source),
+    cost_usd: cost,
+    cached: false,
+    created_at: Date.now(),
+    hint,
+    tone,
+    meta,
+  };
+  if (!llmDisabled()) {
+    fs.mkdirSync(DRAFTS_DIR, { recursive: true });
+    writeJsonAtomic(draftFile(id), result);
+  }
+  const total = Date.now() - started;
+  log(`draft: ${req.source} ${id} (${mode}, 2pass) — ${drafts.length} drafts, ${open} open asks; pass 1 $${r1.cost_usd.toFixed(3)} ${secs(t1)} · pass 2 $${r2.cost_usd.toFixed(3)} ${secs(total - t1)} · total $${cost.toFixed(3)} ${secs(total)}`);
+  return result;
+}
+
+async function runLegacy(req: DraftRequest, cfg: NedConfig, id: string, tone: string, hint: string, fast: AgendaCtx | null, fallback = true): Promise<DraftResult> {
   const noTools = !!fast || req.source === "session" || req.source === "github";
   const mode: DraftMode = noTools ? "fast" : "full";
   const context_age_minutes = fast ? fast.age : req.source === "session" || req.source === "github" ? 0 : null;
@@ -571,12 +870,14 @@ async function runDraft(req: DraftRequest, cfg: NedConfig, id: string, tone: str
       context_age_minutes,
       context: { summary: "(NED_NO_LLM stub)", excerpt },
       drafts: DRAFT_LABELS.map((label, i) => ({ id: `${id}-${i}`, label, text: `[stub ${label}] ${hint || "확인했습니다. 곧 회신드리겠습니다."}` })),
+      asks: [],
+      mentions: [],
       cost_usd: 0,
       cached: false,
       created_at: Date.now(),
       hint,
       tone,
-      meta,
+      meta: { ...meta, mode: "legacy" },
     };
   }
   const started = Date.now();
@@ -597,7 +898,8 @@ async function runDraft(req: DraftRequest, cfg: NedConfig, id: string, tone: str
     log(`draft: failed ${req.source} ${id} (${mode}) — ${(res.error ?? res.text).slice(0, 300)}`);
     if (fast && fallback) {
       log(`draft: ${req.source} ${id} — fast path failed, falling back to full`);
-      return runDraft(req, cfg, id, tone, hint, null, false);
+      const r = await runLegacy(req, cfg, id, tone, hint, null, false);
+      return { ...r, cost_usd: r.cost_usd + res.cost_usd };
     }
     throw new DraftError(`draft failed: ${(res.error ?? "unparseable model output").slice(0, 300)}`, 502);
   }
@@ -610,12 +912,14 @@ async function runDraft(req: DraftRequest, cfg: NedConfig, id: string, tone: str
     context_age_minutes,
     context: { summary: String(parsed?.summary ?? "").slice(0, 200), excerpt: String(parsed?.excerpt || (fast ? contextExcerpt(fast) : "")).slice(0, 600) },
     drafts,
+    asks: [],
+    mentions: [],
     cost_usd: res.cost_usd,
     cached: false,
     created_at: Date.now(),
     hint,
     tone,
-    meta: req.source === "email" ? { ...meta, message_id: meta.message_id ?? s(rawMeta.message_id), reply_to: meta.reply_to ?? s(rawMeta.reply_to), subject: meta.subject ?? s(rawMeta.subject) } : meta,
+    meta: req.source === "email" ? { ...meta, message_id: meta.message_id ?? s(rawMeta.message_id), reply_to: meta.reply_to ?? s(rawMeta.reply_to), subject: meta.subject ?? s(rawMeta.subject), mode: "legacy" } : { ...meta, mode: "legacy" },
   };
   fs.mkdirSync(DRAFTS_DIR, { recursive: true });
   writeJsonAtomic(draftFile(id), result);
