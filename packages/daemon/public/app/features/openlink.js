@@ -2,9 +2,9 @@
  * toDeepLink (links.js, settings from S.config.dashboard) → an app deep link, or null.
  *  - deep + Ned.app (WKWebView, window.webkit.messageHandlers.openLink) → postMessage({ deep, web }); the app checks the
  *    deep link's app is installed / opened, else opens the web URL (DashboardWindow.swift OpenLinkHandler).
- *  - deep in a plain browser → location.href = deep, then after FALLBACK_MS, if the page never went hidden (no app took
- *    over), window.open(web) — tryDeepThenWeb, environment injected so tests drive it without a browser.
- *  - no deep → window.open(web, "_blank", "noopener") (= what target=_blank did before).
+ *  - anything else (no deep link, or a plain browser — no handler) → window.open(web, "_blank", "noopener") (= what
+ *    target=_blank did before). A browser never tries the deep link: Chrome's "open Slack.app?" prompt gives no signal to
+ *    time a fallback against (both would open) and Safari blocks a delayed window.open (nothing would open).
  * Anchors keep href = the web URL + target=_blank (hover, copy, right-click unchanged); one delegated click handler on
  * document (init) turns a plain left click on an external http(s) anchor into openLink. ⌘/Ctrl/⇧/⌥ clicks, other
  * buttons, already-handled clicks and the dashboard's own links (127.0.0.1 / localhost / same host / "#") pass through.
@@ -12,57 +12,22 @@
 import { S } from "../state.js";
 import { linkCtxOf, toDeepLink } from "./links.js";
 
-/** Plain browser: how long the page may stay visible after location.href = deep before the web URL opens. */
-export const FALLBACK_MS = 1500;
-
 /**
- * Plain-browser attempt. env: go(deep) navigates, openWeb(web) opens the fallback, isHidden() reads visibility,
- * onHidden(fn) → unsubscribe, setTimer(fn, ms). Falls back once, only when the page was never hidden.
- */
-export function tryDeepThenWeb(deep, web, env) {
-  let left = false;
-  const off = env.onHidden(() => { left = true; });
-  env.go(deep);
-  env.setTimer(() => {
-    if (typeof off === "function") off();
-    if (!left && !env.isHidden()) env.openWeb(web);
-  }, env.waitMs ?? FALLBACK_MS);
-}
-
-/** The real browser environment for tryDeepThenWeb. */
-export function browserEnv(win = window) {
-  const doc = win.document;
-  return {
-    go: (deep) => { win.location.href = deep; },
-    openWeb: (web) => { win.open(web, "_blank", "noopener"); },
-    isHidden: () => doc.visibilityState === "hidden",
-    // hidden = the tab went away; blur = another app (the one that took the deep link) got focus while the browser
-    // window stays partly visible — either means "the app opened", so no web fallback.
-    onHidden: (fn) => {
-      const vis = () => { if (doc.visibilityState === "hidden") fn(); };
-      doc.addEventListener("visibilitychange", vis);
-      win.addEventListener("blur", fn);
-      return () => { doc.removeEventListener("visibilitychange", vis); win.removeEventListener("blur", fn); };
-    },
-    setTimer: (fn, ms) => win.setTimeout(fn, ms),
-  };
-}
-
-/**
- * Open a web URL, in its app when settings allow and a deep link exists. Returns "app" (handed to Ned.app),
- * "try" (browser deep-link attempt with fallback) or "web". opts: { win, cfg (= config.dashboard), env }.
+ * Open a web URL — in its app only inside Ned.app (message handler present) when settings allow and a deep link exists.
+ * Returns "app" (handed to Ned.app) or "web". opts: { win, cfg (= config.dashboard) }.
  */
 export function openLink(webUrl, opts = {}) {
   const win = opts.win || window;
   const web = String(webUrl ?? "");
   if (!web) return "web";
-  const cfg = opts.cfg !== undefined ? opts.cfg : S.config?.dashboard;
-  const deep = toDeepLink(web, cfg, linkCtxOf(cfg));
-  if (!deep) { win.open(web, "_blank", "noopener"); return "web"; }
   const handler = win.webkit?.messageHandlers?.openLink;
-  if (handler) { handler.postMessage({ deep, web }); return "app"; }
-  tryDeepThenWeb(deep, web, opts.env || browserEnv(win));
-  return "try";
+  if (handler) {
+    const cfg = opts.cfg !== undefined ? opts.cfg : S.config?.dashboard;
+    const deep = toDeepLink(web, cfg, linkCtxOf(cfg));
+    if (deep) { handler.postMessage({ deep, web }); return "app"; }
+  }
+  win.open(web, "_blank", "noopener");
+  return "web";
 }
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
