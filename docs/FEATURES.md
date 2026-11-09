@@ -12,13 +12,14 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - **순찰/브리핑**: "지금 점검"(r) = 소스를 새로 가져와 판단 → 알림·attention. 자동 순찰 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑 `briefing_time`(실패 시 10분 뒤 3회 재시도).
 - **야간·유휴 감속**: 조용한 시간·유휴(`idle_schedule`)엔 자동 실행을 늦추거나 멈춤(`quiet_schedule.mode` normal/slow/pause), 수동은 즉시.
 - **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기 확인 카드, `actions.chat_session_create` 면 새 세션; 회의·문서·메일 정리는 노트로), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글.
-- **답장 초안 ✎**: 초안 3개 → 복사/열기/보내기. 카드·이력·팔로업 카드(모든 행·요약 줄)에 있음(팔로업은 스레드 답글). Slack·메일·Jira 는 2단계: 미답 질문을 "답할 것"(답한 건 ✓, 내 답글 전 질문은 "이전")으로 뽑아 번호대로 1:1 답, 멘션 제안 토글. 발췌가 없거나 6시간 넘으면 스레드부터 읽음. 실제 쓰기는 설정 → 쓰기 액션에서 켠 것만: `actions.slack_send`·`gmail_draft`(기본 켬)·`gmail_send`·`session_send`(기본 켬)·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯. 오늘 한 액션에 출처 칩.
-- **확인 완료 ✓**: 항목을 처리됨으로 접음(✓ 시각 뒤 변경이 오면 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`, 앞 `ack_check_max`개만 검색)면 자동 해제.
+- **답장 초안 ✎**: 초안 3개 → 복사/열기/보내기. 카드·이력·팔로업 카드(모든 행·요약 줄)에 있음(팔로업은 스레드 답글). Slack·메일·Jira 는 2단계: 미답 질문을 "답할 것"(답한 건 ✓, 내 답글 전 질문은 "이전")으로 뽑아 번호대로 1:1 답, 멘션 제안 토글. 오래된 발췌면 스레드부터 읽음. 실제 쓰기는 설정 → 쓰기 액션에서 켠 것만(gmail_draft·session_send 기본 켬): `actions.slack_send`·`gmail_draft`·`gmail_send`·`session_send`·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯. 오늘 한 액션에 출처 칩.
+- **확인 완료 ✓**: 항목을 처리됨으로 접음(✓ 시각 뒤 변경이 오면 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`)면 자동 해제.
 - **Gmail 읽음 표시**(`actions.gmail_mark_read`, 끔): 메일 ✓ 면 Gmail 도 읽음.
 - **검색 ⌘K**: 통합 검색(초성·수집 이력).
-- **아카이브(Obsidian)**: 볼트 `archive.vault` + `archive.enabled` → 매일 `<archive.folder>/Daily/YYYY-MM/날짜.md` 에 하루 기록(마커 밖 메모 보존). `archive.daily_embed` = 데일리 노트에 embed.
-- **수집 이력**: 가져온 항목을 소스별로 보관(`history.keep_days.*`). 수집은 새 것만(증분, Slack 전체 재검색 창 `history.collect.slack_hours`), 카드·순찰·초안은 이력의 표시 구간(`history.display.*`) — Slack 미답 요청은 기간 무관 유지.
-- **설정**(하단 "저장"): 외형(테마 `dashboard.theme` 시스템/라이트/다크, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(`heartbeat_minutes`, `signal_check_minutes`, `briefing_time`, `agenda_refresh_minutes`, `agenda_source_minutes.*`, `quiet_schedule.*`, `idle_schedule.*`) · 쓰기 액션(`actions.*`, 말투 `reply_tone`·`reply_tone_by_source.*`, 오늘 한 액션) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(`claude_model`, `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd` $15 — 닿으면 자동 실행·대화 멈춤). 저장마다 백업 10개.
+- **아카이브(Obsidian)**: 볼트 `archive.vault` + `archive.enabled` → 매일 `<archive.folder>/Daily/…/날짜.md`(마커 밖 메모 보존), `archive.daily_embed`.
+- **수집 이력**: 소스별 보관(`history.keep_days.*`), 증분 수집(Slack 전체 재검색 창 `history.collect.slack_hours`), 카드·순찰·초안은 표시 구간(`history.display.*`) — Slack 미답 요청은 기간 무관.
+- **링크 열기**: Slack·Figma·Notion 링크는 앱으로(`dashboard.open_links_in_app`), 앱 없으면 웹. Slack 은 팀 ID `dashboard.slack_team_id` 필요.
+- **설정**(하단 "저장"): 외형(테마 `dashboard.theme`, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`, 링크 열기) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(위 순찰·감속 키, `signal_check_minutes`, `agenda_refresh_minutes`, `agenda_source_minutes.*`) · 쓰기 액션(`actions.*`, 말투 `reply_tone`·`reply_tone_by_source.*`, 오늘 한 액션) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(`claude_model`, `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd` $15 — 닿으면 자동 실행·대화 멈춤). 저장마다 백업 10개.
 
 ## 상세
 
@@ -72,6 +73,20 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 데이터: config.yaml `dashboard.theme`(기본 system). 고르면 바로 미리보기, "저장" 해야 유지.
 - 언제: 대시보드만 OS 와 다른 밝기로 쓰고 싶을 때.
 - 설정: 설정 → 외형 → 테마 → `dashboard.theme`(system|light|dark).
+
+### 링크 열기 — 앱 딥링크
+- 보여 주는 것: 대시보드의 Slack·Figma·Notion 링크(카드·이력 행·인박스·통신기 답·확인 카드 "열기"·초안 "열기"·검색 ⏎·인박스 ⏎·통신기 메시지)를 누르면 브라우저 대신 설치된 앱에서 바로 열림 — 크롬에 "앱에서 열기" 중간 탭이 남지 않음. 그 밖의 링크는 지금처럼 기본 브라우저.
+- 변환 규칙(`src/links.ts` 원본 = `public/app/features/links.js` 복제, 새 서비스는 규칙 하나 추가):
+
+  | 서비스 | 웹 URL | 앱 링크 |
+  |---|---|---|
+  | Slack | `https://<ws>.slack.com/archives/<C·D·G…>/p<ts>[?thread_ts=…]` | `slack://channel?team=<팀 ID>&id=<채널>&message=<ts>[&thread_ts=…]` (스레드 답글은 스레드로) — 팀 ID 없으면 웹 그대로 |
+  | Figma | `https://(www.)figma.com/(design·file·board·proto)/<key>…[?node-id=…]` | `figma://` + 같은 경로·쿼리 (그 밖의 figma.com 경로는 웹) |
+  | Notion | `https://(www.)notion.so/<…페이지 id…>[?…][#블록]` (id = 32자리 또는 8-4-4-4-12, `notion.com` 도) | `notion://www.notion.so/<같은 경로·쿼리·#블록>` — `*.notion.site`(공개 사이트)는 내 워크스페이스 페이지가 아닐 수 있어 웹 그대로 |
+
+- 여는 방식: 링크(앵커)는 그대로 웹 URL·새 탭이라 마우스를 올리면 주소가 보이고 복사·우클릭도 같음. 일반 왼쪽 클릭만 가로챔 — ⌘/Ctrl/⇧/⌥-클릭·가운데 클릭·검색 ⌘⏎ 는 늘 웹. Ned.app 창이면 앱으로 넘기고, 그 서비스 앱이 설치돼 있지 않거나 열기에 실패하면 웹 URL 을 기본 브라우저로(앱 로그에 `open link: …` 한 줄). 앱 딥링크는 Ned.app 창에서만 — 브라우저로 연 대시보드(`http://127.0.0.1:7777`)는 늘 웹 URL 을 새 탭으로.
+- 설정: 설정 → 외형 → "링크를 앱으로 열기" `dashboard.open_links_in_app`(기본 켬) · 서비스별 `dashboard.open_links_in_app_by_service.slack`·`dashboard.open_links_in_app_by_service.figma`·`dashboard.open_links_in_app_by_service.notion`(기본 모두 켬, 끄면 그 서비스는 웹) · "Slack 팀 ID" `dashboard.slack_team_id`(`T…` 대문자·숫자 7자 이상만, 기본 "" — 비우면 Slack 링크는 웹, 잘못된 값은 저장 안 됨) · "Slack 워크스페이스 주소" `dashboard.slack_team_domain`(`<이름>.slack.com` 의 `<이름>`, 영문 소문자·숫자·-, 기본 "" — 넣으면 `<이름>.slack.com`·`<이름>.enterprise.slack.com` 링크만 앱으로, 다른 워크스페이스 링크는 웹(내 팀 ID 로 열면 "채널 없음"이 되므로). 비우면 모든 `*.slack.com` 을 변환 — 워크스페이스 하나만 쓰면 비워 둬도 됨. `acme.slack.com`·`https://…` 로 넣어도 `acme` 로 저장).
+- Slack 팀 ID 찾기: Slack 앱 → 왼쪽 위 워크스페이스 이름 → 워크스페이스 설정(브라우저에 열리는 주소의 `T…`) 또는 about 화면의 `T…`. Ned 는 Slack 토큰이 없고 수집 데이터에도 팀 ID 가 없어 자동으로 알아내지 못함 — 직접 입력.
 
 ### 인박스
 - 보여 주는 것: "우선"(확인 필요 attention) · "기타"(브리핑의 업데이트/참고) · "기록"(브리핑 목록, 연속 NED_OK 는 "이상 무" 로 묶음). 상세: 행동 필요/업데이트/참고/세션/메타.
@@ -198,7 +213,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 
 ### 설정 탭
 상단 바로가기: 외형 · 소스 · 알림 · 순찰 주기 · 수집·보관 · 쓰기 액션 · 아카이브 · Claude. "다시 불러오기", 하단 "● 저장 안 된 변경" + "저장".
-- **외형**: 테마 🖥️시스템/☀️라이트/🌙다크 `dashboard.theme`(바로 미리보기, 저장해야 유지) · 홈 카드 배치 ↑/↓·1열/2열 `dashboard.card_order`/`dashboard.card_span` · "홈 배치 잠금" `dashboard.locked` · "팔로업 채널을 별도 카드로" `dashboard.watch_cards` · "배치 초기화".
+- **외형**: 테마 🖥️시스템/☀️라이트/🌙다크 `dashboard.theme`(바로 미리보기, 저장해야 유지) · 홈 카드 배치 ↑/↓·1열/2열 `dashboard.card_order`/`dashboard.card_span` · "홈 배치 잠금" `dashboard.locked` · "팔로업 채널을 별도 카드로" `dashboard.watch_cards` · "배치 초기화" · 링크 열기 "링크를 앱으로 열기" `dashboard.open_links_in_app` + Slack/Figma/Notion 체크(`dashboard.open_links_in_app_by_service.*`, 끄면 흐려짐) · "Slack 팀 ID" `dashboard.slack_team_id` · "Slack 워크스페이스 주소" `dashboard.slack_team_domain`(위 "링크 열기 — 앱 딥링크").
 - **소스**: Gmail/Slack/Jira/GitHub/Sentry/캘린더 `sources.*`(끄면 조회·보고 안 함). Slack: 팔로업 채널 `filters.slack.watch_channels` · 트래킹 제외 채널 `filters.slack.exclude_channels`(팔로업보다 우선) · 답 필요 해제 이모지 `filters.slack.ack_reactions` · 한 번에 확인할 이모지 `filters.slack.ack_check_max`(3) · 그룹 멘션 `filters.slack.group_mentions`(유저그룹 ID·핸들). Jira: 제외 프로젝트 `filters.jira.exclude_projects`. 칩 입력: ⏎/쉼표 추가, 빈 입력 Backspace 삭제.
 - **알림**: 알림 켜기 `notifications.enabled` · 소스별 `notifications.kinds.*` · 아침 브리핑 알림 `notifications.briefing` · 소리 `notifications.sound` · 묶음 기준 `notifications.summary_threshold`(기본 3) · 조용한 시간 `quiet_hours`(기본 23:00~08:00) · 그 시간엔 보내지 않음/소리 없이 `notifications.quiet_delivery`.
 - **순찰 주기**: heartbeat 간격 `heartbeat_minutes`(10) · 신호 조회 최소 간격 `signal_check_minutes`(60) · "바뀐 게 없으면 순찰 건너뛰기" `heartbeat_skip_unchanged`(켬) · 아침 브리핑 시각 `briefing_time`(09:00) · 홈 자동 갱신 기본 주기 `agenda_refresh_minutes`(60) · 소스별 주기 Slack/메일/캘린더/Jira/GitHub `agenda_source_minutes.*`(비우면 기본) · 조용한 시간 동작 `quiet_schedule.*` · 유휴 시 동작 `idle_schedule.*`(위 "야간 모드 · 유휴 모드").
@@ -238,6 +253,9 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `actions.slack_send` · `actions.gmail_draft` · `actions.gmail_send` · `actions.gmail_mark_read` · `actions.session_send` · `actions.jira_comment` · `actions.jira_transition` · `actions.github_review` · `actions.calendar_rsvp` · `actions.calendar_create` · `actions.chat_write` · `actions.chat_session_create` | gmail_draft·session_send 만 true | 쓰기 액션 → 허용할 동작 |
 | `reply_tone` · `reply_tone_by_source.slack` · `reply_tone_by_source.email` · `reply_tone_by_source.session` | "간결하고 정중한 존댓말, 핵심 먼저" · null | 쓰기 액션 → 기본 말투 / 답장 말투 |
 | `dashboard.theme` · `dashboard.card_order` · `dashboard.card_span` · `dashboard.locked` · `dashboard.watch_cards` · `dashboard.layout` | system · slack,mail,jira,github · — · false · true · null | 외형 (layout 은 홈 드래그 배치) |
+| `dashboard.open_links_in_app` · `dashboard.open_links_in_app_by_service.slack` · `dashboard.open_links_in_app_by_service.figma` · `dashboard.open_links_in_app_by_service.notion` | true · true · true · true | 외형 → 링크를 앱으로 열기 |
+| `dashboard.slack_team_id` | "" (`T…` 만) | 외형 → Slack 팀 ID |
+| `dashboard.slack_team_domain` | "" (= 모든 `*.slack.com`) | 외형 → Slack 워크스페이스 주소 |
 | `claude_model` · `claude_max_turns` · `agenda_daily_budget_usd` | null · 25 · 15 | Claude |
 | `archive.enabled` · `archive.vault` · `archive.folder` · `archive.daily_embed` | false · "" · Ned · false | 아카이브 |
 | `archive.include.briefings` · `archive.include.updates` · `archive.include.actions` · `archive.include.outputs` · `archive.include.sessions` · `archive.include.history` | true · true · true · true · false · true | 아카이브 → 담을 것 |
@@ -259,6 +277,10 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 |---|---|---|
 | `c-theme` | 외형 → 테마 | `dashboard.theme` |
 | `c-cards` | 외형 → 홈 카드 배치 | `dashboard.card_order` / `dashboard.card_span` |
+| `c-openapp` | 외형 → 링크를 앱으로 열기 | `dashboard.open_links_in_app` |
+| `c-openapp-svc` | 외형 → 링크 열기 Slack/Figma/Notion (`data-olsvc`) | `dashboard.open_links_in_app_by_service.*` |
+| `c-slack-team` | 외형 → Slack 팀 ID | `dashboard.slack_team_id` |
+| `c-slack-domain` | 외형 → Slack 워크스페이스 주소 | `dashboard.slack_team_domain` |
 | `c-sources` | 소스 토글 | `sources.*` |
 | `x-watch-in` | 소스 → Slack → 팔로업 채널 | `filters.slack.watch_channels` |
 | `x-slack-in` | 소스 → Slack → 트래킹 제외 채널 | `filters.slack.exclude_channels` |

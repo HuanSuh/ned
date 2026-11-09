@@ -21,6 +21,8 @@ import {
   normalizePersona,
   normalizeTheme,
   saveConfig,
+  slackTeamDomainError,
+  slackTeamIdError,
   watchChannels,
   type NedConfig,
 } from "../src/config.js";
@@ -185,6 +187,66 @@ describe("normalizers", () => {
     expect(normalizeDashboard({ locked: true }, dark).theme).toBe("dark"); // home lock / layout saves don't reset it
     expect(normalizeDashboard({ theme: "system" }, dark).theme).toBe("system");
     expect(normalizeDashboard({ theme: null }, dark).theme).toBe("system");
+  });
+  it("normalizeDashboard.slack_team_id: T… upper-cased, \"\"/null clears, junk keeps base's, absent keeps base's", () => {
+    expect(DEFAULT_DASHBOARD.slack_team_id).toBe("");
+    expect(normalizeDashboard({}).slack_team_id).toBe("");
+    expect(normalizeDashboard({ slack_team_id: " t0abc1234 " }).slack_team_id).toBe("T0ABC1234");
+    const set = normalizeDashboard({ slack_team_id: "T0ABC1234" });
+    expect(normalizeDashboard({ locked: true }, set).slack_team_id).toBe("T0ABC1234"); // partial PUTs keep it
+    expect(normalizeDashboard({ slack_team_id: "C0123ABCD" }, set).slack_team_id).toBe("T0ABC1234"); // not a team id → kept
+    expect(normalizeDashboard({ slack_team_id: "T12" }, set).slack_team_id).toBe("T0ABC1234");
+    expect(normalizeDashboard({ slack_team_id: 42 }, set).slack_team_id).toBe("T0ABC1234");
+    expect(normalizeDashboard({ slack_team_id: "" }, set).slack_team_id).toBe("");
+    expect(normalizeDashboard({ slack_team_id: null }, set).slack_team_id).toBe("");
+    expect(slackTeamIdError({ slack_team_id: "T0ABC1234" })).toBeNull();
+    expect(slackTeamIdError({ slack_team_id: "t0abc1234" })).toBeNull();
+    expect(slackTeamIdError({ slack_team_id: "" })).toBeNull();
+    expect(slackTeamIdError({ theme: "dark" })).toBeNull();
+    expect(slackTeamIdError(undefined)).toBeNull();
+    expect(slackTeamIdError({ slack_team_id: "acme" })).toMatch(/T 로 시작/);
+    expect(slackTeamIdError({ slack_team_id: 5 })).toMatch(/T 로 시작/);
+  });
+  it("normalizeDashboard.open_links_in_app(+_by_service): default on, booleans only, absent keeps base's", () => {
+    expect(DEFAULT_DASHBOARD.open_links_in_app).toBe(true);
+    expect(DEFAULT_DASHBOARD.open_links_in_app_by_service).toEqual({ slack: true, figma: true, notion: true });
+    const d = normalizeDashboard({});
+    expect(d.open_links_in_app).toBe(true);
+    expect(d.open_links_in_app_by_service).toEqual({ slack: true, figma: true, notion: true });
+    const off = normalizeDashboard({ open_links_in_app: false, open_links_in_app_by_service: { figma: false, jira: false } });
+    expect(off.open_links_in_app).toBe(false);
+    expect(off.open_links_in_app_by_service).toEqual({ slack: true, figma: false, notion: true }); // unknown service dropped
+    const kept = normalizeDashboard({ locked: true, open_links_in_app_by_service: { notion: false } }, off);
+    expect(kept.open_links_in_app).toBe(false);
+    expect(kept.open_links_in_app_by_service).toEqual({ slack: true, figma: false, notion: false });
+    const junk = normalizeDashboard({ open_links_in_app: "yes", open_links_in_app_by_service: ["slack"] }, off);
+    expect(junk.open_links_in_app).toBe(false);
+    expect(junk.open_links_in_app_by_service).toEqual(off.open_links_in_app_by_service);
+    // an old saved dashboard without the keys (base from config.yaml) → on
+    expect(normalizeDashboard({}, { ...DEFAULT_DASHBOARD, open_links_in_app: undefined, open_links_in_app_by_service: undefined } as never).open_links_in_app_by_service).toEqual({ slack: true, figma: true, notion: true });
+  });
+  it("normalizeDashboard.slack_team_domain: lower-cased subdomain, .slack.com stripped, \"\"/null clears, junk keeps base's", () => {
+    expect(DEFAULT_DASHBOARD.slack_team_domain).toBe("");
+    expect(normalizeDashboard({ slack_team_domain: " Acme " }).slack_team_domain).toBe("acme");
+    const set = normalizeDashboard({ slack_team_domain: "https://acme-corp.slack.com" });
+    expect(set.slack_team_domain).toBe("acme-corp");
+    expect(normalizeDashboard({ locked: true }, set).slack_team_domain).toBe("acme-corp");
+    expect(normalizeDashboard({ slack_team_domain: "acme corp" }, set).slack_team_domain).toBe("acme-corp");
+    expect(normalizeDashboard({ slack_team_domain: "" }, set).slack_team_domain).toBe("");
+    expect(slackTeamDomainError({ slack_team_domain: "acme" })).toBeNull();
+    expect(slackTeamDomainError({ slack_team_domain: "acme.slack.com" })).toBeNull();
+    expect(slackTeamDomainError({ slack_team_domain: "" })).toBeNull();
+    expect(slackTeamDomainError({ theme: "dark" })).toBeNull();
+    expect(slackTeamDomainError({ slack_team_domain: "acme corp" })).toMatch(/slack\.com/);
+    expect(slackTeamDomainError({ slack_team_domain: 3 })).toMatch(/slack\.com/);
+  });
+  it("loadConfig: dashboard.slack_team_id from config.yaml, junk → \"\"", () => {
+    write({ dashboard: { slack_team_id: "T0ABC1234" } });
+    expect(loadConfig().dashboard.slack_team_id).toBe("T0ABC1234");
+    write({ dashboard: { slack_team_id: "nope" } });
+    expect(loadConfig().dashboard.slack_team_id).toBe("");
+    write({ dashboard: { locked: true } });
+    expect(loadConfig().dashboard.slack_team_id).toBe("");
   });
   it("loadConfig: dashboard.theme from config.yaml, junk → system, missing → system", () => {
     write({ dashboard: { theme: "light" } });

@@ -408,7 +408,7 @@
     if (e.isComposing || e.keyCode === 229) return; // Korean IME composing: let it finish
     if (st.detail) {
       if (e.key === "Escape" || e.key === "ArrowLeft" || (e.key === "Backspace" && !input.value)) { e.preventDefault(); st.detail = null; render(); return; }
-      if (e.key === "Enter" && st.detail.url) { e.preventDefault(); window.open(st.detail.url, "_blank", "noopener"); return; }
+      if (e.key === "Enter" && st.detail.url) { e.preventDefault(); openUrl(st.detail.url); return; }
       return;
     }
     if (e.key === "Escape") { e.preventDefault(); if (input.value) { input.value = ""; st.q = ""; refresh(); } else close(); return; }
@@ -443,8 +443,12 @@
       if (r.url) { window.open(r.url, "_blank", "noopener"); return; } // palette stays open: open several in a row
       how = "nav";
     }
-    if (how === "enter" && r.url) { window.open(r.url, "_blank", "noopener"); close(); return; }
+    if (how === "enter" && r.url) { openUrl(r.url); close(); return; }
     navigate(r);
+  }
+  /** ⏎ opens like a link click (app deep link when settings allow — app/features/openlink.js); ⌘⏎ stays the web page. */
+  function openUrl(url) {
+    if (window.NED?.openLink) window.NED.openLink(url); else window.open(url, "_blank", "noopener");
   }
 
   const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));

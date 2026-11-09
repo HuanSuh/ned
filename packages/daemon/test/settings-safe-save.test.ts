@@ -132,6 +132,56 @@ describe("settings save", () => {
   });
 });
 
+describe("외형 → 링크 열기 (dashboard.open_links_in_app · _by_service · slack_team_id)", () => {
+  it("renders defaults (older config without the keys → on, empty team id); master off dims the services", () => {
+    expect($("c-openapp").checked).toBe(true);
+    expect([...document.querySelectorAll<HTMLInputElement>("[data-olsvc]")].map((c) => [c.dataset.olsvc, c.checked])).toEqual([["slack", true], ["figma", true], ["notion", true]]);
+    expect($("c-slack-team").value).toBe("");
+    $("c-openapp").click();
+    expect(settings.isDirty()).toBe(true);
+    expect((document.querySelector('[data-olsvc="figma"]') as HTMLInputElement).disabled).toBe(true);
+    $("c-openapp").click();
+    expect((document.querySelector('[data-olsvc="figma"]') as HTMLInputElement).disabled).toBe(false);
+    expect(settings.isDirty()).toBe(false);
+  });
+
+  it("a bad team id is not sent (inline message); a good one + a service toggle go out as one dashboard sub-patch", async () => {
+    const n = puts.length;
+    typeInto("c-slack-team", "acme");
+    expect($("c-slack-team-msg").textContent).toContain("T 로 시작");
+    expect(settings.isDirty()).toBe(true);
+    submit(); await settled();
+    expect(puts).toHaveLength(n);
+    expect($("c-msg").textContent).toContain("저장 안 함");
+    typeInto("c-slack-team", " t0abc1234 ");
+    expect($("c-slack-team-msg").textContent).toBe("");
+    (document.querySelector('[data-olsvc="notion"]') as HTMLInputElement).click();
+    const token = S.config!.updated_at;
+    submit();
+    await vi.waitFor(() => expect(settings.isDirty()).toBe(false));
+    expect(puts.at(-1)).toEqual({ dashboard: { open_links_in_app_by_service: { notion: false }, slack_team_id: "T0ABC1234" }, if_updated_at: token });
+    expect($("c-slack-team").value).toBe("T0ABC1234");
+    expect((document.querySelector('[data-olsvc="notion"]') as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("workspace address: junk blocks the save inline; 'Acme.slack.com' is saved as 'acme'", async () => {
+    const n = puts.length;
+    typeInto("c-slack-domain", "acme corp");
+    expect($("c-slack-domain-msg").textContent).toContain("slack.com");
+    submit(); await settled();
+    expect(puts).toHaveLength(n);
+    expect($("c-msg").textContent).toContain("저장 안 함");
+    typeInto("c-slack-domain", "Acme.slack.com");
+    expect($("c-slack-domain-msg").textContent).toBe("");
+    expect(settings.isDirty()).toBe(true);
+    const token = S.config!.updated_at;
+    submit();
+    await vi.waitFor(() => expect(settings.isDirty()).toBe(false));
+    expect(puts.at(-1)).toEqual({ dashboard: { slack_team_domain: "acme" }, if_updated_at: token });
+    expect($("c-slack-domain").value).toBe("acme");
+  });
+});
+
 describe("이전 설정으로 되돌리기", () => {
   it("lists backups, asks to confirm, restores and re-renders", async () => {
     const box = document.getElementById("c-restore") as HTMLDetailsElement;

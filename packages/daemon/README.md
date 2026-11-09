@@ -111,6 +111,18 @@ osascript 폴백도 같은 규칙: 꺼져 있으면 안 보냄, 켜진 kind 의 
 Slack(2) → 메일(1)·Jira(1) → GitHub(2). 읽을 때·`PUT /api/config`(보낸 경우만) 모두 `normalizeDashboard` — 모르는 id·중복은 버리고 빠진 카드는
 뒤에 붙이고, 폭이 1|2 가 아니면 이전 값. 대시보드 화면만 쓴다(`public/README.md` "카드 높이").
 
+**링크를 앱으로 열기** (`config.dashboard.open_links_in_app` 기본 true · `open_links_in_app_by_service.{slack,figma,notion}` 기본 true ·
+`slack_team_id` 기본 ""): 규칙 테이블은 `src/links.ts`(순수, import 없음 — `public/app/features/links.js` 가 복제, `test/links-shared.test.ts`
+가 같은 픽스처로 둘 다 돌림). Slack permalink `…slack.com/archives/<C|D|G…>/p<ts>[?thread_ts=]` → `slack://channel?team=<T>&id=<C>&message=<ts>[&thread_ts=]`
+(팀 ID 없으면 변환 안 함; `slack_team_domain` 이 있으면 `<domain>.slack.com`·`<domain>.enterprise.slack.com` 만 — 다른 워크스페이스는 웹,
+비면 모든 `*.slack.com`; `^[a-z0-9-]+$`, 소문자화·`.slack.com` 떼고 저장, 아니면 400 `{ field: "dashboard.slack_team_domain" }`), Figma `(design|file|board|proto)/<key>…` → `figma://` + 같은 경로·쿼리, Notion `notion.(so|com)/<…32-hex 또는 8-4-4-4-12 id…>[#블록]` →
+`notion://www.notion.so/…`(`*.notion.site` 는 변환 안 함). `slack_team_id` 는 `^T[A-Z0-9]{6,}$` 만(대문자화) — 다른 값은 `PUT /api/config` 가
+400 `{ field: "dashboard.slack_team_id" }`, 손으로 고친 config.yaml 이면 읽을 때 무시. 팀 ID 자동 감지는 없음(Slack 토큰 없음, 수집 데이터에
+team 필드 없음). 열기는 대시보드(`features/openlink.js`) → Ned.app `openLink` 메시지 핸들러(`apps/menubar/…/DashboardWindow.swift`
+`DeepLink.open`: 앱 미설치·열기 실패면 웹 URL, `open link: …` 로그 한 줄). 앱 딥링크는 Ned.app 창에서만 — 브라우저로 연 대시보드는
+메시지 핸들러가 없어 늘 웹 URL 을 바로 연다(딥링크 시도·폴백 타이머 없음). WKWebView 탐색(`decidePolicyFor`·`createWebViewWith`)으로
+직접 들어온 `slack://`·`figma://`·`notion://` 는 웹 URL 이 없어 앱이 없으면 아무것도 안 열림(로그 한 줄) — 대시보드는 이 경로를 쓰지 않는다.
+
 **트래킹 제외** (`config.filters`): `slack.exclude_channels`(채널명, `#` 없이) · `jira.exclude_projects`(프로젝트 키, 대문자 영숫자만 —
 JQL 에 그대로 들어가므로 그 밖의 값은 버린다). heartbeat.md · briefing.md · agenda-lists.md 의 `{{FILTERS}}` 가
 `제외 채널: #a, #b / 제외 Jira 프로젝트: KEY1, KEY2 — 이들에 속한 항목은 조회·보고하지 말 것` + Jira JQL 에 넣을

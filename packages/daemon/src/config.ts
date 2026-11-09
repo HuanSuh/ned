@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import YAML from "yaml";
+import { LINK_SERVICES, SLACK_TEAM_ID_RE, normalizeSlackTeamDomain, normalizeSlackTeamId, type LinkService } from "./links.js";
 import type { NotifyMode } from "./notify.js";
 import { CONFIG_PATH } from "./paths.js";
 
@@ -199,13 +200,22 @@ export interface NedDashboard {
   watch_cards: boolean;
   /** Dashboard colour theme → <html data-theme>: "system" follows the OS (prefers-color-scheme), light / dark force it. */
   theme: DashboardTheme;
+  /** 링크를 앱으로 열기 (src/links.ts, public/app/features/openlink.js): Slack · Figma · Notion web links open in their app. */
+  open_links_in_app: boolean;
+  /** Per service, only while open_links_in_app is on. */
+  open_links_in_app_by_service: Record<LinkService, boolean>;
+  /** Slack workspace id ("T…", SLACK_TEAM_ID_RE) for slack:// deep links (src/links.ts). "" = Slack links stay on the web. */
+  slack_team_id: string;
+  /** "<name>" of <name>.slack.com (SLACK_TEAM_DOMAIN_RE, lower-case). Set → only that workspace's links open in the app; "" = every *.slack.com. */
+  slack_team_domain: string;
 }
+export const DEFAULT_OPEN_LINKS_BY_SERVICE: Record<LinkService, boolean> = { slack: true, figma: true, notion: true };
 export const DASHBOARD_THEMES = ["system", "light", "dark"] as const;
 export type DashboardTheme = (typeof DASHBOARD_THEMES)[number];
 /** "system" | "light" | "dark"; anything else → "system". */
 export const normalizeTheme = (v: unknown): DashboardTheme => (DASHBOARD_THEMES.includes(v as DashboardTheme) ? (v as DashboardTheme) : "system");
 /** Slack first (most real-time), mail + Jira side by side, then GitHub. */
-export const DEFAULT_DASHBOARD: NedDashboard = { card_order: ["slack", "mail", "jira", "github"], card_span: { slack: 2, mail: 1, jira: 1, github: 2 }, layout: null, locked: false, watch_cards: true, theme: "system" };
+export const DEFAULT_DASHBOARD: NedDashboard = { card_order: ["slack", "mail", "jira", "github"], card_span: { slack: 2, mail: 1, jira: 1, github: 2 }, layout: null, locked: false, watch_cards: true, theme: "system", open_links_in_app: true, open_links_in_app_by_service: DEFAULT_OPEN_LINKS_BY_SERVICE, slack_team_id: "", slack_team_domain: "" };
 export const watchCardId = (channel: string): WatchCardId => `${WATCH_PREFIX}${channel}`;
 /** What DEFAULT_DASHBOARD's order/span become on the free grid: 일정 3 | cards 6 | 할 일 3, 12 rows tall. */
 export const DEFAULT_LAYOUT: Record<DashboardPanel, PanelRect> = {
@@ -254,9 +264,13 @@ export function normalizeLayout(raw: unknown, watch: readonly string[] = []): Ne
  * (also from `base`, so removing a channel in settings removes its card). Spans are 1 | 2, else `base`'s (watch cards: 1).
  * layout: absent keeps `base`'s, null / junk clears it (→ re-derived by the dashboard); locked / watch_cards: boolean, else `base`'s.
  * theme: absent keeps `base`'s (partial PUTs such as the home lock don't reset it); any other value → "system".
+ * open_links_in_app / open_links_in_app_by_service.<svc>: booleans, else `base`'s (default on).
+ * slack_team_id: absent keeps `base`'s; "" / null clears; "t0abc123" → "T0ABC123"; anything else not a team id keeps `base`'s
+ * (PUT /api/config rejects it first with a 400 — slackTeamIdError).
+ * slack_team_domain: same rules (normalizeSlackTeamDomain: lower-cased, scheme / .slack.com stripped; 400 — slackTeamDomainError).
  */
 export function normalizeDashboard(raw: unknown, base: NedDashboard = DEFAULT_DASHBOARD, watch: readonly string[] = []): NedDashboard {
-  const r = (raw && typeof raw === "object" ? raw : {}) as { card_order?: unknown; card_span?: unknown; layout?: unknown; locked?: unknown; watch_cards?: unknown; theme?: unknown };
+  const r = (raw && typeof raw === "object" ? raw : {}) as { card_order?: unknown; card_span?: unknown; layout?: unknown; locked?: unknown; watch_cards?: unknown; theme?: unknown; open_links_in_app?: unknown; open_links_in_app_by_service?: unknown; slack_team_id?: unknown; slack_team_domain?: unknown };
   const isCard = (v: unknown): v is DashboardCard => DASHBOARD_CARDS.includes(v as DashboardCard);
   const cardId = (v: unknown): DashboardCardId | null => (isCard(v) ? v : watchIdIn(v, watch));
   const ids = (xs: readonly unknown[]) => [...new Set(xs.map(cardId).filter((x): x is DashboardCardId => x !== null))];
@@ -276,7 +290,28 @@ export function normalizeDashboard(raw: unknown, base: NedDashboard = DEFAULT_DA
   const locked = typeof r.locked === "boolean" ? r.locked : base.locked === true;
   const watch_cards = typeof r.watch_cards === "boolean" ? r.watch_cards : base.watch_cards !== false;
   const theme = normalizeTheme(r.theme === undefined ? base.theme : r.theme);
-  return { card_order: order, card_span, layout, locked, watch_cards, theme };
+  const baseTeam = normalizeSlackTeamId(base.slack_team_id);
+  const slack_team_id = r.slack_team_id === undefined ? baseTeam : normalizeSlackTeamId(r.slack_team_id, baseTeam);
+  const open_links_in_app = typeof r.open_links_in_app === "boolean" ? r.open_links_in_app : base.open_links_in_app !== false;
+  const svcRaw = (r.open_links_in_app_by_service && typeof r.open_links_in_app_by_service === "object" && !Array.isArray(r.open_links_in_app_by_service) ? r.open_links_in_app_by_service : {}) as Record<string, unknown>;
+  const open_links_in_app_by_service = Object.fromEntries(LINK_SERVICES.map((s) => [s, typeof svcRaw[s] === "boolean" ? svcRaw[s] : base.open_links_in_app_by_service?.[s] !== false])) as Record<LinkService, boolean>;
+  const baseDomain = normalizeSlackTeamDomain(base.slack_team_domain);
+  const slack_team_domain = r.slack_team_domain === undefined ? baseDomain : normalizeSlackTeamDomain(r.slack_team_domain, baseDomain);
+  return { card_order: order, card_span, layout, locked, watch_cards, theme, open_links_in_app, open_links_in_app_by_service, slack_team_id, slack_team_domain };
+}
+
+/** PUT /api/config: a non-empty dashboard.slack_team_domain that isn't a workspace subdomain → the error to show, else null. */
+export function slackTeamDomainError(dashboard: unknown): string | null {
+  const v = dashboard && typeof dashboard === "object" ? (dashboard as { slack_team_domain?: unknown }).slack_team_domain : undefined;
+  if (v === undefined || v === null || (typeof v === "string" && !v.trim())) return null;
+  return typeof v === "string" && normalizeSlackTeamDomain(v, "\0") !== "\0" ? null : "Slack 워크스페이스 주소는 <이름>.slack.com 의 <이름>(영문 소문자·숫자·-)만 돼 — 예: acme";
+}
+
+/** PUT /api/config: a non-empty dashboard.slack_team_id that isn't a team id → the error to show, else null. */
+export function slackTeamIdError(dashboard: unknown): string | null {
+  const v = dashboard && typeof dashboard === "object" ? (dashboard as { slack_team_id?: unknown }).slack_team_id : undefined;
+  if (v === undefined || v === null || (typeof v === "string" && !v.trim())) return null;
+  return typeof v === "string" && SLACK_TEAM_ID_RE.test(v.trim().toUpperCase()) ? null : "Slack 팀 ID 는 T 로 시작하는 영문 대문자·숫자(7자 이상)야 — 예: T0ABC1234";
 }
 
 export interface NedActions {

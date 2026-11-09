@@ -8,6 +8,7 @@ import { init as initLayout } from "./features/layout.js";
 import { init as initCards } from "./features/cards.js";
 import { init as initHistView } from "./features/histview.js";
 import { init as initComms } from "./features/comms.js";
+import { init as initOpenLink, openLink } from "./features/openlink.js";
 import { init as initDrafts } from "./features/drafts.js";
 import { init as initReviewed } from "./features/reviewed.js";
 import { init as initSlackThread } from "./features/slackthread.js";
@@ -174,11 +175,12 @@ export let resizeT = 0;
 /** For search.js and future modules: the store, the API wrappers and navigation. (No `data` key on purpose —
  *  search.js keeps fetching with its own 30 s cache, exactly as before the split.) */
 export const nav = { go: (view) => { location.hash = `#${view}`; }, tab: setTab, view: () => ui.view };
-window.NED = { store, api: { api, postJson }, nav };
+window.NED = { store, api: { api, postJson }, nav, openLink };
 
 // Every module's listeners + one-time setup, in the order the single file ran them — listener order on document
 // matters (e.g. the error popover's Esc stopImmediatePropagation runs before the page keys in boot()).
-for (const init of [initChips, initPopover, initSettings, initCardLayout, initLayout, initReviewed, initDrafts, initCalendar, initCards, initHistView, initSlackThread, initAgStatus, initHome, initTodoSplit, initComms, initActivityPing]) init();
+// initOpenLink first: its document capture click listener must run before reviewed.js's (which stops inbox-row icon clicks).
+for (const init of [initOpenLink, initChips, initPopover, initSettings, initCardLayout, initLayout, initReviewed, initDrafts, initCalendar, initCards, initHistView, initSlackThread, initAgStatus, initHome, initTodoSplit, initComms, initActivityPing]) init();
 boot();
 
 function boot() {
@@ -209,7 +211,7 @@ function boot() {
     else if (ev.key === "Enter") {
       if (t && t.tagName === "BUTTON" || t && t.tagName === "A") return;
       const it = list[ui.sel];
-      if (it?.url) window.open(it.url, "_blank", "noopener"); else if (it) openDetail();
+      if (it?.url) openLink(it.url); else if (it) openDetail();
     }
     else if (ev.key === "1") setTab("priority");
     else if (ev.key === "2") setTab("other");

@@ -84,6 +84,31 @@ describe("partial PUT /api/config", () => {
     expect(a.actions).toMatchObject({ slack_send: true, gmail_draft: true });
   });
 
+  it("dashboard.slack_team_id: a valid id saves (upper-cased) without touching the layout keys; junk → 400, nothing written", async () => {
+    const ok = await put({ dashboard: { slack_team_id: "t0abc1234" } });
+    expect(ok.status).toBe(200);
+    const a = await ok.json();
+    expect(a.dashboard.slack_team_id).toBe("T0ABC1234");
+    expect(a.dashboard.theme).toBe("system");
+    const before = fs.readFileSync(CONFIG_PATH, "utf8");
+    const bad = await put({ dashboard: { slack_team_id: "acme-workspace" } });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ field: "dashboard.slack_team_id" });
+    expect(fs.readFileSync(CONFIG_PATH, "utf8")).toBe(before);
+    const cleared = await (await put({ dashboard: { slack_team_id: "" } })).json();
+    expect(cleared.dashboard.slack_team_id).toBe("");
+  });
+
+  it("dashboard.slack_team_domain: saves lower-cased; junk → 400 with its field, nothing written", async () => {
+    const ok = await (await put({ dashboard: { slack_team_domain: "Acme.slack.com" } })).json();
+    expect(ok.dashboard.slack_team_domain).toBe("acme");
+    const before = fs.readFileSync(CONFIG_PATH, "utf8");
+    const bad = await put({ dashboard: { slack_team_domain: "acme corp" } });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ field: "dashboard.slack_team_domain" });
+    expect(fs.readFileSync(CONFIG_PATH, "utf8")).toBe(before);
+  });
+
   it("GET/PUT carry updated_at (config.yaml mtime) and build_id; every save moves updated_at", async () => {
     const g = await getCfg();
     expect(g.updated_at).toBe(configUpdatedAt());

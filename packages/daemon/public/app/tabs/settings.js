@@ -9,6 +9,7 @@ import { originChip } from "../features/draftref.js";
 import { readToneBySource, syncWriteActionGroups, writeActionsHtml } from "./settings-actions.js";
 import { initArchive, readArchive, renderArchive } from "./settings-archive.js";
 import { initHistorySettings, readHistorySettings, renderHistorySettings } from "./settings-history.js";
+import { initLinkPrefs, linkPrefsError, readLinkPrefs, renderLinkPrefs } from "./settings-links.js";
 import { persona } from "../features/personas.js";
 import { applyTheme, normTheme, syncTheme, themeHtml } from "../features/theme.js";
 import { loadAgenda } from "../main.js";
@@ -191,6 +192,7 @@ export function renderConfig(c = S.config, { preview = false } = {}) {
   if (preview) applyTheme(normTheme(c.dashboard?.theme)); else syncTheme(c.dashboard); // server value wins over the <head> cache (and drops an unsaved preview)
   $("c-theme").innerHTML = themeHtml(c.dashboard?.theme);
   renderCardLayout(c.dashboard ?? null);
+  renderLinkPrefs(c.dashboard); // 링크 열기 (앱 딥링크) · Slack 팀 ID
   excl.slack = [...(c.filters?.slack?.exclude_channels || [])];
   excl.jira = [...(c.filters?.jira?.exclude_projects || [])];
   excl.watch = [...(c.filters?.slack?.watch_channels || [])];
@@ -256,7 +258,7 @@ export function readBody() {
     quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
     sources,
     filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack], ack_check_max: $("c-ackmax").value === "" ? null : Number($("c-ackmax").value), group_mentions: [...excl.group] }, jira: { exclude_projects: [...excl.jira] } },
-    dashboard: { ...readCardLayout(), theme: readTheme() },
+    dashboard: { ...readCardLayout(), theme: readTheme(), ...readLinkPrefs() },
     notifications: readNotifications(),
     actions: Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])),
     reply_tone: $("c-tone").value.trim(),
@@ -272,10 +274,13 @@ export function readBody() {
 // ---------- 저장 안 된 변경: body as rendered vs. now ----------
 // dashboard is left out of the snapshot: lock / 팔로업 카드 save on their own, and order/width edits show up as
 // readCardLayout().layout (cardlayout.js re-derives the grid only when they were touched here).
-// theme is part of dashboard but only saves with the form, so it stays in the snapshot.
+// theme and the 링크 열기 keys are part of dashboard but only save with the form, so they stay in the snapshot.
 let saved = "";
 let savedBody = null; // readBody() right after the last render: the PUT sends only diffConfig(savedBody, readBody())
-const snap = () => { const { dashboard, ...rest } = readBody(); return JSON.stringify({ ...rest, theme: dashboard.theme }); };
+const snap = () => {
+  const { dashboard: d, ...rest } = readBody();
+  return JSON.stringify({ ...rest, theme: d.theme, open_links_in_app: d.open_links_in_app, open_links_in_app_by_service: d.open_links_in_app_by_service, slack_team_id: d.slack_team_id, slack_team_domain: d.slack_team_domain });
+};
 export const isDirty = () => !!S.config && (snap() !== saved || !!readCardLayout().layout);
 export function syncDirty() {
   const d = isDirty();
@@ -351,6 +356,8 @@ export function init() {
     if (BUILD.stale) { syncSaveLock(); return; }
     const patch = diffConfig(savedBody, readBody());
     if (isEmptyPatch(patch)) { msg.className = "msg"; msg.textContent = "바뀐 항목이 없어."; return; }
+    const linkErr = linkPrefsError(patch.dashboard);
+    if (linkErr) { msg.className = "msg err"; msg.textContent = `저장 안 함: ${linkErr.msg}`; $(linkErr.id).focus(); return; }
     btn.disabled = true; msg.className = "msg"; msg.textContent = "저장 중…";
     try {
       // Only the changed keys (sub-key level), plus the version this form was rendered from: a save made elsewhere since → 409.
@@ -365,7 +372,7 @@ export function init() {
         msg.className = "msg err"; msg.textContent = "다른 곳에서 설정이 바뀌어 최신 값을 불러왔어 — 수정한 항목은 유지됨, 다시 저장해 줘.";
         toast("다른 곳에서 설정이 바뀌어 최신 값을 불러왔어 — 수정한 항목은 유지됨, 다시 저장", 6000);
       } else {
-        console.warn(err); msg.className = "msg err"; msg.textContent = `저장 실패: ${err.message}`;
+        console.warn(err); msg.className = "msg err"; msg.textContent = `저장 실패: ${err.data?.error || err.message}`;
       }
     } finally { btn.disabled = false; syncSaveLock(); }
   });
@@ -373,6 +380,7 @@ export function init() {
   initRestore();
   initArchive();
   initHistorySettings();
+  initLinkPrefs();
 }
 
 // ---------- 새 버전 감지: daemon build changed since page load → 저장 잠금 (build.js shows the reload banner) ----------
