@@ -15,7 +15,7 @@ import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runCh
 import { validateChatAction } from "./chat-actions.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, restoreConfigBackup, saveConfig, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type PersonaId } from "./config.js";
+import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, restoreConfigBackup, saveConfig, slackTeamIdError, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { historyStatus, queryHistory } from "./history.js";
@@ -170,6 +170,8 @@ export function startServer(getConfig: () => NedConfig): void {
     if (if_updated_at != null && Number(if_updated_at) !== configUpdatedAt()) return c.json({ error: "conflict", current: configView(loadConfig()) }, 409);
     const cur = loadConfig(); // may create config.yaml — so read the token after it
     const seen = configUpdatedAt();
+    const teamErr = slackTeamIdError(body.dashboard);
+    if (teamErr) return c.json({ error: teamErr, field: "dashboard.slack_team_id" }, 400);
     const merged = mergeConfigPatch(cur, body);
     const archErr = archivePatchError(cur, merged);
     if (archErr) return c.json({ error: archErr, field: "archive.vault" }, 400);

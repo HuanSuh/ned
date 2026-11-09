@@ -21,6 +21,7 @@ import {
   normalizePersona,
   normalizeTheme,
   saveConfig,
+  slackTeamIdError,
   watchChannels,
   type NedConfig,
 } from "../src/config.js";
@@ -185,6 +186,33 @@ describe("normalizers", () => {
     expect(normalizeDashboard({ locked: true }, dark).theme).toBe("dark"); // home lock / layout saves don't reset it
     expect(normalizeDashboard({ theme: "system" }, dark).theme).toBe("system");
     expect(normalizeDashboard({ theme: null }, dark).theme).toBe("system");
+  });
+  it("normalizeDashboard.slack_team_id: T… upper-cased, \"\"/null clears, junk keeps base's, absent keeps base's", () => {
+    expect(DEFAULT_DASHBOARD.slack_team_id).toBe("");
+    expect(normalizeDashboard({}).slack_team_id).toBe("");
+    expect(normalizeDashboard({ slack_team_id: " t0abc1234 " }).slack_team_id).toBe("T0ABC1234");
+    const set = normalizeDashboard({ slack_team_id: "T0ABC1234" });
+    expect(normalizeDashboard({ locked: true }, set).slack_team_id).toBe("T0ABC1234"); // partial PUTs keep it
+    expect(normalizeDashboard({ slack_team_id: "C0123ABCD" }, set).slack_team_id).toBe("T0ABC1234"); // not a team id → kept
+    expect(normalizeDashboard({ slack_team_id: "T12" }, set).slack_team_id).toBe("T0ABC1234");
+    expect(normalizeDashboard({ slack_team_id: 42 }, set).slack_team_id).toBe("T0ABC1234");
+    expect(normalizeDashboard({ slack_team_id: "" }, set).slack_team_id).toBe("");
+    expect(normalizeDashboard({ slack_team_id: null }, set).slack_team_id).toBe("");
+    expect(slackTeamIdError({ slack_team_id: "T0ABC1234" })).toBeNull();
+    expect(slackTeamIdError({ slack_team_id: "t0abc1234" })).toBeNull();
+    expect(slackTeamIdError({ slack_team_id: "" })).toBeNull();
+    expect(slackTeamIdError({ theme: "dark" })).toBeNull();
+    expect(slackTeamIdError(undefined)).toBeNull();
+    expect(slackTeamIdError({ slack_team_id: "acme" })).toMatch(/T 로 시작/);
+    expect(slackTeamIdError({ slack_team_id: 5 })).toMatch(/T 로 시작/);
+  });
+  it("loadConfig: dashboard.slack_team_id from config.yaml, junk → \"\"", () => {
+    write({ dashboard: { slack_team_id: "T0ABC1234" } });
+    expect(loadConfig().dashboard.slack_team_id).toBe("T0ABC1234");
+    write({ dashboard: { slack_team_id: "nope" } });
+    expect(loadConfig().dashboard.slack_team_id).toBe("");
+    write({ dashboard: { locked: true } });
+    expect(loadConfig().dashboard.slack_team_id).toBe("");
   });
   it("loadConfig: dashboard.theme from config.yaml, junk → system, missing → system", () => {
     write({ dashboard: { theme: "light" } });
