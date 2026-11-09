@@ -68,11 +68,12 @@ export const srcRevAt = (key, x, kind = "") => reviewedAt(marksNow(), key, kind 
 export const revAt = (kind, x) => srcRevAt(srcKey(kind, x), x, kind);
 export const isOpenSrc = (kind) => (x) => !revAt(kind, x);
 export const revCls = (kind, x) => (revAt(kind, x) ? " reviewed" : "");
-/** ✓ for a row; a row with no key (unparsable link) gets a disabled ✓ instead of none, so the gap is visible. */
+/** ✓ for a row; a row with no key (unparsable link) gets an inert ✓ instead of none, so the gap is visible. It is
+ *  aria-disabled (not `disabled` — a disabled button gets no click, and the click explains itself with a toast). */
 export const NO_KEY_TITLE = "확인 키 없음";
 export const srcCheck = (kind, x) => {
   const k = srcKey(kind, x);
-  return k ? reviewIcon({ id: k, reviewed_at: srcRevAt(k, x, kind) }) : iconBtn("check", NO_KEY_TITLE, { attrs: `disabled aria-disabled="true" data-review-nokey="1"`, cls: "nokey" });
+  return k ? reviewIcon({ id: k, reviewed_at: srcRevAt(k, x, kind) }) : iconBtn("check", NO_KEY_TITLE, { attrs: `aria-disabled="true" data-review-nokey="1"`, cls: "nokey" });
 };
 /** A card list: open items, then a folded "확인 완료 N" with the reviewed ones (click the check again to bring one back). */
 export function withFold(cardId, kind, list, rowFn) {
