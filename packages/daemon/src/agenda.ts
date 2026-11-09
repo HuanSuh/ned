@@ -8,7 +8,7 @@ import { extractJson, llmDisabled, runClaude } from "./claude.js";
 import { ACK_CHECK_MAX_DEFAULT, filtersPrompt, isGroupId, jqlExclude, watchChannels, type NedConfig } from "./config.js";
 import { personaPrompt } from "./persona.js";
 import { AGENDA_PATH, AGENDA_RAW_PATH, log, readJson, writeJsonAtomic } from "./paths.js";
-import { ACK_LOOKBACK_HOURS, collectWindow, finalizeSlackView, gmailAfter, historyDisplay, historyUpsert, mailView, noteCollected, openSlack, recording, slackView, type CollectWindow, type UpsertCtx } from "./history.js";
+import { collectWindow, finalizeSlackView, gmailAfter, historyDisplay, historyUpsert, mailView, noteCollected, openSlack, recording, slackView, type CollectWindow, type UpsertCtx } from "./history.js";
 import { readReviewed } from "./state.js";
 import { applyThreadState, syncDmsFromList, syncThreadsFromList, type SlackThread, type ThreadRowFields } from "./slack-threads.js";
 
@@ -642,9 +642,9 @@ export function groupMentionsPrompt(groups: string[], since: string): string {
 export interface ListWindows {
   slack?: CollectWindow;
   mail?: CollectWindow;
-  /** ms: the ack-emoji search's `after` — reaches back to the oldest open ask Ned remembers (incremental runs). */
+  /** ms: the ack-emoji search's `after` — reaches back to the oldest open ask Ned remembers (any age, full runs too). */
   ackSince?: number;
-  /** Open Slack asks in the history: the ack search runs even when this run's results have no candidate. */
+  /** Open Slack asks in the history (any age): the ack search runs even when this run's results have no candidate. */
   openAsks?: number;
   /** Incremental runs: each 팔로업 channel's current summary ("#ch" → text), so the model updates instead of restarting. */
   watchPrev?: Record<string, string>;
@@ -655,12 +655,13 @@ export function listWindows(cfg: NedConfig, keys: readonly AgendaSourceKey[], no
   const w: ListWindows = {};
   if (keys.includes("slack")) {
     w.slack = collectWindow("slack", cfg, now);
-    if (!w.slack.full) {
-      const o = openSlack(cfg, now, Math.min(cfg.history.display.slack_hours, ACK_LOOKBACK_HOURS));
+    // The card keeps open asks of any age (slackView): the ack search reaches back to the oldest one, full runs too.
+    const o = openSlack(cfg, now);
+    if (o.n) {
       w.openAsks = o.n;
       w.ackSince = Math.min(w.slack.since, o.oldest);
-      w.watchPrev = Object.fromEntries((prevSlack?.watch ?? []).filter((x) => x.summary).map((x) => [x.channel, x.summary]));
     }
+    if (!w.slack.full) w.watchPrev = Object.fromEntries((prevSlack?.watch ?? []).filter((x) => x.summary).map((x) => [x.channel, x.summary]));
   }
   if (keys.includes("mail")) w.mail = collectWindow("mail", cfg, now);
   return w;
@@ -689,7 +690,7 @@ export function buildListsPrompt(cfg: NedConfig, keys: AgendaSourceKey[], now = 
   const watchPrev = sInc && watch.length
     ? `- **증분**: 채널마다 \`after\` 뒤 새 메시지만 본다. 새 메시지가 없으면 그 채널은 \`summary: ""\`, \`highlights: []\`, \`recent: []\` (Ned 가 이전 것을 유지한다). 있으면 아래 이전 요약에 새 내용을 반영해 \`summary\` 를 다시 쓴다.\n${prev.map(([c, t]) => `  - ${c} 이전 요약: ${JSON.stringify(t.slice(0, 400))}\n`).join("")}`
     : "";
-  const ackOpen = sInc && (win.openAsks ?? 0) > 0 ? ` — 단, 지금은 Ned 가 기억하는 열린 항목이 ${win.openAsks}건 있으니 후보가 없어도 한다` : "";
+  const ackOpen = (win.openAsks ?? 0) > 0 ? ` — 단, 지금은 Ned 가 기억하는 열린 항목이 ${win.openAsks}건 있으니 후보가 없어도 한다` : "";
   const mailIncr = mInc ? "- **증분 수집**: 두 번째 검색은 지난 수집 이후(`after:` 날짜)만 본다 — 이전 항목은 Ned 가 기억한다. 새 것이 없으면 `items: []`.\n" : "";
   return pickSections(tpl, keep)
     .replaceAll("{{NOW}}", isoLocal(now))

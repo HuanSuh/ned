@@ -36,8 +36,6 @@ export const SLACK_FULL_HOURS = 24;
 export const MAIL_FULL_DAYS = 3;
 /** Mail unread count / `all` search window (always searched whole — it is the unread count). */
 export const MAIL_UNREAD_DAYS = 2;
-/** Slack ack-emoji search reaches back at most this far for open items (hasmy:: filters by message date). */
-export const ACK_LOOKBACK_HOURS = 7 * 24;
 
 const H = 3600_000, D = 24 * H;
 
@@ -578,23 +576,27 @@ export interface ViewCtx {
   full: boolean;
 }
 
+/** An open Slack ask: picked into items[] by a list, not answered (my reply / `mine`) and not acked. */
+export const openAsk = (r: SlackRec): boolean => !!r.state.reason && r.state.need && !r.state.answered && !r.state.acked;
+
 /**
- * The Slack block for agenda.json from the history: rows within history.display.slack_hours. items = picked, not
- * answered / acked (reviewed is dropped later, once thread state is known — finalizeSlackView); all = every mention /
- * DM / thread / group row; watch = 팔로업 channel highlights + newest messages. DM collapse / dedupe / excluded channels
- * as in normalize(). `fresh` = this run's normalized list (summary, watch summaries), `prev` = agenda.json's block.
+ * The Slack block for agenda.json from the history. items = open asks (openAsk) of **any age** — an unanswered ask
+ * stays until it is answered / acked / 확인 완료 or pruned (keep_days.slack); reviewed is dropped later, once thread
+ * state is known (finalizeSlackView). all = every mention / DM / thread / group row within history.display.slack_hours;
+ * watch = 팔로업 channel highlights + newest messages (display window). DM collapse / dedupe / excluded channels as in
+ * normalize(). `fresh` = this run's normalized list (summary, watch summaries), `prev` = agenda.json's block.
  */
 export function slackView(cfg: NedConfig, fresh: SlackBlock, prev: SlackBlock | null, ctx: ViewCtx, recs: SlackRec[] = readHistory<SlackRec>("slack")): SlackBlock {
   const lo = ctx.now - cfg.history.display.slack_hours * H;
   const ex = new Set(cfg.filters.slack.exclude_channels.map((c) => c.toLowerCase()));
-  const keep = (r: SlackRec) => ms(r.ts) >= lo && !ex.has(r.item.channel.replace(/^#/, "").toLowerCase());
-  const inWin = recs.filter(keep);
+  const shown = recs.filter((r) => !ex.has(r.item.channel.replace(/^#/, "").toLowerCase()));
+  const inWin = shown.filter((r) => ms(r.ts) >= lo);
   const rows = inWin.filter((r) => r.state.reason);
   const all: SlackAllItem[] = [...rows]
     .sort((a, b) => ms(b.ts) - ms(a.ts))
     .map((r) => ({ channel: r.item.channel, from: r.item.from, text: r.item.text || r.item.ask || "", url: r.item.url, ts: r.item.ts || r.ts, reason: r.state.reason!, answered: r.state.answered || r.state.acked }));
-  const items: SlackItem[] = rows
-    .filter((r) => r.state.need && !r.state.answered && !r.state.acked)
+  const items: SlackItem[] = shown
+    .filter(openAsk)
     .sort(byRank)
     .map((r) => ({ channel: r.item.channel, from: r.item.from, text: r.item.ask || r.item.text, url: r.item.url, ts: r.item.ts || r.ts, reason: r.state.reason!, ...(r.state.count > 1 ? { count: Math.min(99, r.state.count) } : {}) }));
   const viewItems = collapseDMs(dedupeSlack(items));
@@ -621,7 +623,8 @@ export function slackView(cfg: NedConfig, fresh: SlackBlock, prev: SlackBlock | 
   const freshEmpty = !fresh.items.length && !fresh.all.length;
   const keepPrev = viewItems.length && !ctx.full ? prev?.summary ?? "" : "";
   const summary = !ctx.full && freshEmpty ? keepPrev : fresh.summary || keepPrev;
-  return { summary, items: viewItems, all: supersetSlack(viewItems, viewAll), watch };
+  // all stays the display window: only in-window asks are added to it (the dashboard's 전체 = all ∪ items anyway).
+  return { summary, items: viewItems, all: supersetSlack(viewItems.filter((x) => ms(x.ts) >= lo), viewAll), watch };
 }
 
 /** After thread state (applyThreadState): drop 확인 완료 rows from items (thread-aware key), cap at 10. */
@@ -651,12 +654,14 @@ export function mailView(cfg: NedConfig, fresh: MailBlock, prev: MailBlock | nul
   return { summary, unread: fresh.unread, unread_capped: fresh.unread_capped, items, all: supersetMail(items, all) };
 }
 
-/** Oldest open Slack ask in the history within `hours` (ms), and how many — the ack-emoji search must reach them. */
-export function openSlack(cfg: NedConfig, now: number, hours: number): { n: number; oldest: number } {
+/**
+ * Open Slack asks in the history (any age — the card keeps them, see slackView), excluded channels left out: how many,
+ * and the oldest one's time (ms). The ack-emoji search reaches back to it so an old ask can still be released.
+ */
+export function openSlack(cfg: NedConfig, now: number, recs: SlackRec[] = readHistory<SlackRec>("slack")): { n: number; oldest: number } {
   if (!recording(cfg, "slack")) return { n: 0, oldest: now };
-  const lo = now - hours * H;
-  const open = readHistory<SlackRec>("slack").filter((r) => r.state.reason && r.state.need && !r.state.answered && !r.state.acked && ms(r.ts) >= lo);
-  return { n: open.length, oldest: open.reduce((m, r) => Math.min(m, ms(r.ts)), now) };
+  const open = recs.filter((r) => openAsk(r) && !excludedSlack(cfg, r));
+  return { n: open.length, oldest: open.reduce((m, r) => Math.min(m, ms(r.ts) || now), now) };
 }
 
 // ---------- reading: /api/history, status, search, archive ----------
@@ -713,7 +718,7 @@ export function currentKeys(a: Agenda): Record<HistorySource, Set<string>> {
 
 /** Is the record part of what the card shows now (HistoryRow.current)? */
 function isCurrent(r: HistRecord, cfg: NedConfig, now: number, cur: Record<HistorySource, Set<string>>): boolean {
-  if (r.source === "slack") return historyDisplay(cfg, "slack") ? ms(r.ts) >= now - cfg.history.display.slack_hours * H : cur.slack.has(r.key);
+  if (r.source === "slack") return historyDisplay(cfg, "slack") ? ms(r.ts) >= now - cfg.history.display.slack_hours * H || openAsk(r as SlackRec) : cur.slack.has(r.key);
   if (r.source === "mail") return historyDisplay(cfg, "mail") ? ms(r.ts) >= now - cfg.history.display.mail_days * D : cur.mail.has(r.key);
   if (r.source === "jira" || r.source === "github") return r.state.open === true && cur[r.source].has(r.key);
   return cur.calendar.has(r.key);
