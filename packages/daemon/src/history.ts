@@ -630,8 +630,11 @@ export function pruneHistory(cfg: NedConfig, now = Date.now(), force = false): P
 
 // ---------- views (agenda.json's slack / mail blocks) ----------
 
-/** A mark counts when it is at or after the item's last change (review-keys.ts, same as the dashboard's revkeys.js). */
-const revAt = (marks: Reviewed, key: string, actMs: number): boolean => !!reviewedAt(foldReviewMarks(marks), key, actMs);
+/**
+ * A mark counts when it is at or after the item's last change (review-keys.ts, same as the dashboard's revkeys.js).
+ * `marks` is already folded (readReviewed folds old `@…` keys once per read) — no per-call fold here.
+ */
+const revAt = (marks: Reviewed, key: string, actMs: number): boolean => !!reviewedAt(marks, key, actMs);
 export { slackReviewKey };
 
 /** The followed thread a Slack permalink belongs to (agenda slack.threads), if any. */
@@ -649,8 +652,8 @@ export function slackRecReviewed(marks: Reviewed, r: Pick<SlackRec, "item" | "ts
   const key = slackReviewKey({ url: r.item.url });
   if (!key) return false;
   const t = threadOfUrl(threads, r.item.url);
-  const act = Math.max(ms(r.ts), activityMs("slack", { ts: r.item.ts, thread: t }));
-  return revAt(marks, key, act);
+  // Row ts as the dashboard's 이력 row has it (histrows.js histTarget: item.ts, else the record's ts).
+  return revAt(marks, key, activityMs("slack", { ts: r.item.ts || r.ts, thread: t }));
 }
 
 const byRank = (a: HistRecord<{ rank?: number; rank_at?: number }>, b: HistRecord<{ rank?: number; rank_at?: number }>) =>
@@ -752,7 +755,8 @@ export function mailView(cfg: NedConfig, fresh: MailBlock, prev: MailBlock | nul
  */
 export function openSlack(cfg: NedConfig, now: number, opts: { hours?: number; recs?: SlackRec[]; marks?: Reviewed; threads?: SlackThread[] } = {}): { n: number; oldest: number } {
   if (!recording(cfg, "slack")) return { n: 0, oldest: now };
-  const recs = opts.recs ?? readHistory<SlackRec>("slack"), marks = opts.marks ?? readReviewed();
+  // Folded once per call (readReviewed already folds; caller-given marks may still carry old `@…` keys).
+  const recs = opts.recs ?? readHistory<SlackRec>("slack"), marks = opts.marks ? foldReviewMarks(opts.marks) : readReviewed();
   const lo = opts.hours ? now - opts.hours * H : -Infinity;
   const open = recs.filter((r) => openAsk(r) && ms(r.ts) >= lo && !excludedSlack(cfg, r) && !slackRecReviewed(marks, r, opts.threads));
   return { n: open.length, oldest: open.reduce((m, r) => Math.min(m, ms(r.ts) || now), now) };
