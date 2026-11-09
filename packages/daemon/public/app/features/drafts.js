@@ -1,7 +1,7 @@
 /* Reply-draft modal: POST /api/draft → 3 drafts, edit, regenerate → POST /api/send. */
 import { postJson } from "../api.js";
 import { init as initActions } from "./actions.js";
-import { applyMentions, asksHtml, missingMentions } from "./draftasks.js";
+import { asksHtml, editMentions, mentionIds, shownText, toggleMentions } from "./draftasks.js";
 import { clean, parseDraftAttr } from "./draftref.js";
 import { SRC_KEY_RE, reviewAttention, reviewSource } from "./reviewed.js";
 import { resumePending, sendAndWait } from "./sendjob.js";
@@ -94,19 +94,15 @@ export function draftActions() {
   return list;
 }
 export const curDraft = () => DR.resp?.drafts?.find((d) => d.id === DR.tab) || null;
-export const curText = () => (DR.tab in DR.edits ? DR.edits[DR.tab] : applyMentions(curDraft()?.text || "", DR.resp?.mentions, !!DR.mention));
+export const curText = () => (DR.tab in DR.edits ? DR.edits[DR.tab] : shownText(curDraft()?.text || "", mentionIds(DR.resp), !!DR.mention));
 /**
- * 멘션 제안 toggle: flips DR.mention. Edited texts get the missing mentions added (never twice); turning it off strips
- * only what the toggle added (DR.mentionAdded per tab) — a mention the user typed stays.
+ * 멘션 제안 toggle (state transitions: features/draftasks.js toggleMentions / editMentions). Edited texts get the
+ * missing mentions (never twice); turning it off strips only what the toggle added — a mention the user typed stays.
  */
 export function toggleMention() {
-  const ms = DR.resp?.mentions; if (!ms?.length) return;
-  DR.mention = !DR.mention;
-  DR.mentionAdded ||= {};
-  for (const k of Object.keys(DR.edits)) {
-    if (DR.mention) { DR.mentionAdded[k] = missingMentions(DR.edits[k], ms); DR.edits[k] = applyMentions(DR.edits[k], ms, true); }
-    else { DR.edits[k] = applyMentions(DR.edits[k], DR.mentionAdded[k] || [], false); delete DR.mentionAdded[k]; }
-  }
+  const ids = mentionIds(DR.resp); if (!ids.length) return;
+  const st = toggleMentions({ on: !!DR.mention, edits: DR.edits, added: DR.mentionAdded || {} }, ids);
+  DR.mention = st.on; DR.edits = st.edits; DR.mentionAdded = st.added;
   $("dm-text").dataset.tab = ""; // repaint the textarea with the new text
   DR.confirm = null; renderDraft();
 }
@@ -201,9 +197,12 @@ export function init() {
     if (e.target.closest("[data-dcancel]")) { DR.confirm = null; renderDraft(); }
   });
   $("dm-text").addEventListener("input", (e) => {
-    // first edit of a tab while the toggle is on: the mentions it shows were added by the toggle (strip them on off)
-    if (DR.tab != null && DR.mention && !(DR.tab in DR.edits)) (DR.mentionAdded ||= {})[DR.tab] = missingMentions(curDraft()?.text || "", DR.resp?.mentions);
-    if (DR.tab != null) DR.edits[DR.tab] = e.target.value; if (DR.confirm) { DR.confirm = null; renderDraft(); } });
+    // first edit of a tab while the toggle is on records the mentions it shows as the toggle's (stripped on off)
+    if (DR.tab != null) {
+      const st = editMentions({ on: !!DR.mention, edits: DR.edits, added: DR.mentionAdded || {} }, DR.tab, e.target.value, curDraft()?.text || "", mentionIds(DR.resp));
+      DR.edits = st.edits; DR.mentionAdded = st.added;
+    }
+    if (DR.confirm) { DR.confirm = null; renderDraft(); } });
   $("dm-regen").addEventListener("click", () => requestDraft($("dm-hint").value.trim()));
   $("dm-hint").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing && !(e.metaKey || e.ctrlKey)) { e.preventDefault(); requestDraft(e.target.value.trim()); } });
   // Modal keys win over page shortcuts: Esc closes (or backs out of the confirm step), ⌘⏎ / Ctrl⏎ runs the primary action.

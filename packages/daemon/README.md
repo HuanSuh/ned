@@ -266,8 +266,8 @@ Agenda 응답 형태:
 { "id": "16hex", "source": "slack",
   "context": { "summary": "답할 대상 한 줄", "excerpt": "[답할 대상] 원문 발췌" },
   "drafts": [ { "id": "<id>-0", "label": "짧게", "text": "", "covers?": [1, 2] }, { "id": "<id>-1", "label": "보통", "text": "" }, { "id": "<id>-2", "label": "정중하게", "text": "" } ],
-  "asks": [ { "who": "kim", "what": "리뷰 완료 시점", "due": "", "status": "open" | "answered", "answered_in": "ts|''" } ],
-  "mentions": [ "<@U…>" ],
+  "asks": [ { "who": "kim", "what": "리뷰 완료 시점", "due": "", "status": "open" | "answered", "answered_in": "ts|''", "before_reply?": true } ],
+  "mentions": [ { "id": "<@U…>", "name": "kim" } ],   // 옛 캐시는 "<@U…>" 문자열일 수 있음
   "cost_usd": 0.12, "cached": false,
   "meta": { "channel_id?": "", "thread_ts?": "", "thread_id?": "", "message_id?": "", "reply_to?": "", "subject?": "", "session_id?": "", "mode?": "2pass" | "legacy" } }
 // 400 {error} (source/ref 부족) · 502 {error} (claude 실패·출력 깨짐)
@@ -277,17 +277,26 @@ Agenda 응답 형태:
   1. **Pass 1 추출** (`prompts/draft-extract.md`): 출력 `{transcript:[{ts,from,mine,text,user_id?}], asks:[{who,what,due,status,answered_in,asked_in[]}], participants:[{name,user_id?}], reply_meta?}`.
      fast 경로는 agenda 발췌만 보고 도구 없이(`draft_fast_model`, 1턴, isolated — `transcript` 는 `[]`, Ned 가 발췌를 그대로 씀), full 경로는
      지금 도구 세트(slack read_thread/read_channel, Gmail get_thread/search_threads, Jira getJiraIssue + `atlassianUserInfo`)로 읽고 `--max-turns 8`.
+     full 의 transcript 는 `EXTRACT_MAX_MSGS`=25개 × `EXTRACT_MAX_CHARS`=250자(내 마지막 메시지와 그 뒤는 모두, 앞은 최근 것 위주) — 출력 토큰·타임아웃 때문.
      mine: Slack = 내 user_id(ToolSearch 로 불러온 `slack_search_public_and_private` 설명에서, 그 도구는 실행 불가), 메일 = SENT/내 주소, Jira = currentUser.
-  2. **데몬 구획·보정** (`src/draft-thread.ts`, 순수): `segment(transcript, {myLastTs})` — 마지막 `mine` 메시지(또는 팔로업 스레드의
-     `my_last_reply_ts` → `SlackContext.my_last_ts`, 더 최신이면)까지 `context`, 이후 `target`; mine 이 없으면 전부 target. 빈 글·이모지·`+1`·`ㅇㅇ`·`ㅋㅋ` 류는
-     `(짧은 반응)`. context 는 `DRAFT_CTX_MAX_MSGS`=20 · `DRAFT_CTX_MAX_CHARS`=4000(오래된 것부터 잘라 "…앞 N개 생략"). `reconcileAsks` — open 인데
-     `asked_in` 이 전부 내 마지막 답글 이전이면 answered 로 내림. 예외: 이후에 다시 언급(재확인)됐거나, 같은 메시지의 다른 ask 를 모델이 answered 로
-     판정했으면(부분 답변) open 유지. 모델이 놓친 질문을 새로 만들지는 않음.
+     "확인해 볼게요" 류 대기성 답글은 answered 가 아니라고 프롬프트에 명시.
+  2. **데몬 구획·표시** (`src/draft-thread.ts`, 순수): `segment(transcript, {myLastTs})` — 마지막 `mine` 메시지(또는 팔로업 스레드의
+     `my_last_reply_ts` → `SlackContext.my_last_ts`, 더 최신이면 — fast 는 발췌, full 은 `agendaContext(req)` 에서; ts 없는 mine 은 그 앞의 가장 늦은 ts 로
+     본다)까지 `context`, 이후 `target`; mine 이 없으면 전부 target. 빈 글·이모지·`+1`·`ㅇㅇ`·`ㅋㅋ` 류는
+     `(짧은 반응)`. context 는 `DRAFT_CTX_MAX_MSGS`=20 · `DRAFT_CTX_MAX_CHARS`=4000(오래된 것부터 잘라 "…앞 N개 생략"). `reconcileAsks` — **status 는
+     Pass 1 그대로**(데몬이 answered 로 내리지 않음: 대기성 답글 뒤의 질문이 '이미 답함'이 되는 걸 막음). open 인데 `asked_in` 이 전부 내 마지막 답글
+     이전(ts 는 `tsSec` 숫자로 비교)이면 `before_reply: true` — Pass 2 엔 `[내 마지막 답글 이전 질문 — 아직 답 안 됨]` 으로, 모달엔 "이전" 칩. 놓친 질문은 만들지 않음.
+     from·who·due·what 은 공백 한 칸으로 정규화.
   3. **Pass 2 작성** (`prompts/draft-write.md`, 도구 없음, `draft_fast_model`, 1턴, isolated): `renderSegments`(참여자 `이름(<@U…>)`,
      `### [맥락] — 참고만, 요약하지 않는다`, `### [답할 대상] — 내 마지막 답글(MM/DD HH:mm) 이후`, 줄 `[MM/DD HH:mm] 나|이름: 내용`) + open asks 번호 목록 +
-     이미 답한 것(반복 금지) + 말투·힌트. open 을 번호 순서로 1:1(초안마다 `covers`), open 0 이면 짧은 확인형. `mentions` 는 Slack·참여자 2명 이상·
-     알려진 `<@U…>` 만 남김. `excerpt` 를 비우면 Ned 가 [답할 대상] 의 마지막 실질 메시지로 채움.
-  - Pass 1 JSON 이 깨지면 legacy 1회(`meta.mode: "legacy"`, 비용 합산). Pass 2 실패는 fast 면 full 2-pass 로 한 번, 아니면 502.
+     이미 답한 것(반복 금지) + 말투·힌트. `{{OPEN_RULE}}`(`writeOpenRule`): open 있으면 번호 순서로 1:1(초안마다 `covers`); open 0 이고
+     [답할 대상]에 다른 사람 메시지가 없으면(내가 마지막) 후속 확인(독촉)·추가 공유; Jira 면 진행 상황 공유; 그 밖엔 짧은 확인형. 힌트가 있으면 "힌트를
+     우선한다" 를 덧붙임. `mentions` 는 Slack·참여자 2명 이상·알려진 `<@U…>` 만 `{id, name}` 으로 남김 — fast 경로는 발췌에 user_id 가 없어 Pass 1 의
+     participants.user_id 를 버림(= 멘션 제안 없음). `excerpt` 를 비우면 Ned 가 [답할 대상] 의 마지막 실질 메시지로 채움.
+  - 템플릿은 `fillTemplate` 한 번 치환(`/\{\{(\w+)\}\}/g`) — 메시지 본문에 `{{ASKS}}` 등이 있어도 다른 섹션으로 바뀌지 않음(extract·write·legacy 공통).
+  - 실패: Pass 1 이 돌았는데 JSON 이 깨지면 legacy 1회(`meta.mode: "legacy"`). Pass 1 실행 자체 실패(`ok:false` — 타임아웃·커넥터 없음·spawn 오류)면
+    fast 는 full 2-pass 로 1회, full 은 바로 502(같은 오류 메시지 — 4분 대기를 두 번 하지 않음). Pass 2 실패는 fast 면 full 2-pass 로 1회, full 이면
+    Pass 2 만 1회 더(읽기는 다시 안 함) 후 502. 폴백 결과의 `cost_usd` 는 앞선 호출 합산이고 캐시 파일에도 그 값으로 저장(`withCost`).
   - 로그: `draft: … (fast, 2pass) — N drafts, K open asks; pass 1 $… s · pass 2 $… s · total $… s`. 두 호출 모두 `costs.json` job `draft`.
   - `NED_NO_LLM=1`: 2-pass 스텁 — [답할 대상] 에서 `?`·요청 어미가 있는 메시지를 open ask 로, 초안 `[stub …]`.
 
@@ -312,6 +321,7 @@ Agenda 응답 형태:
     email `get_thread`/`search_threads`. `--max-turns 8`. `context_age_minutes: null`.
 - 미리 생성(선택): `config.drafts_pregenerate: true`(기본 false)면 agenda 실행 뒤 백그라운드에서 답장이 필요한 항목(slack `items` +
   mail `items` 중 reason `reply|approval|request`, 맥락이 신선한 것)을 순서대로 최대 6개 fast 경로로 생성해 캐시한다(모달이 바로 열림).
+  2-pass 라 항목당 claude 호출 2번(둘 다 도구 없는 fast 1턴).
   `GET /api/draft/status` → `{ pregenerated, skipped_cached, failed, cost_usd, last_run_ts, running }` (마지막 실행 기준, 로그에 총 비용).
 - 초안은 **사용자 본인 목소리**: `{{PERSONA}}` 를 쓰지 않고 요청 `tone` → `config.reply_tone_by_source[source]`(slack/email/session, null 이면 건너뜀) → `config.reply_tone`(기본 말투, 기본 `간결하고 정중한 존댓말, 핵심 먼저`) 순으로 고른다 (`draftTone`). 대시보드는 `tone` 을 보내지 않고 서버가 정한다.
 - 캐시: `~/.ned/drafts/<id>.json`, id = sha1(source + ref 키) 앞 16자 (Slack ref 키의 thread_ts 는 없으면 DM 이 아닌 한 ts —

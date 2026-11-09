@@ -57,6 +57,7 @@ body.modal-open { overflow: hidden; }
 .mctx .dask .n { flex: none; font: 10.5px var(--mono); color: var(--dim); }
 .mctx .dask .who { font-weight: 600; }
 .mctx .dask .due { color: var(--warn, var(--dim)); }
+.mctx .dask .prev { flex: none; font-size: 10.5px; padding: 0 5px; border-radius: 999px; background: var(--hover); color: var(--dim); }
 .mctx .dask.done { color: var(--faint); }
 .mctx .dask.done .who { font-weight: 400; }
 .mctx .dask-none { color: var(--dim); }
