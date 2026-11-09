@@ -6,17 +6,17 @@
 ## 요약
 
 Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub·Sentry)를 모아 보여 주는 로컬 대시보드(탭: 홈·인박스·타임라인·설정). 전역 키: h 홈, i 인박스, r 지금 점검, ⌘K·/ 검색, ⌘J 통신기.
-- **홈**: 일정(일/주, ＋·드래그로 일정 만들기, ⋯ 수락/미정/거절), 할 일(NED 액션 아이템 / 개인 할 일 — 구분선·접기, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, 이력 7/30일, ↻ 소스별 갱신), 팔로업 채널 카드(멘션 없이 따라가는 Slack 채널 요약, "나한테" 강조).
+- **홈**: 일정(일/주, ＋·드래그로 일정 만들기, ⋯ 수락/미정/거절), 할 일(NED 액션 아이템 / 개인 할 일, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, 이력 7/30일, ↻ 소스별 갱신), 팔로업 채널 카드(멘션 없이 따라가는 채널 요약, "나한테" 강조).
 - **인박스**: 우선·기타·기록(브리핑) 3탭 + "장비실"(세션 상태, 대화창 배지). 키 j/k·e·⏎·1/2/3.
 - **타임라인**: 세션 이벤트·브리핑 시간순(필터)
-- **순찰/브리핑**: "지금 점검"(r) = 소스를 새로 가져와 판단 → 알림·attention. 자동 순찰 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑 `briefing_time` — 실패 시 10분 뒤 재시도(3회).
+- **순찰/브리핑**: "지금 점검"(r) = 소스를 새로 가져와 판단 → 알림·attention. 자동 순찰 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑 `briefing_time`(실패 시 10분 뒤 3회 재시도).
 - **야간·유휴 감속**: 조용한 시간·유휴(`idle_schedule`)엔 자동 순찰·홈 갱신을 늦추거나 멈춤(`quiet_schedule.mode` normal/slow/pause). 수동 실행은 즉시.
-- **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기를 확인 카드로 제안; `actions.chat_session_create` 면 새 세션도; 회의·문서·메일 정리는 노트로 저장), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글.
-- **답장 초안 ✎**: 연필 → 초안 3개 → 복사/열기/보내기. 카드 행·이력 "지난 N일" 행·팔로업 카드(모든 행·최근 대화·요약 줄)에 있음; 팔로업은 늘 스레드 답글. 발췌가 없거나 6시간 넘으면 스레드부터 읽음. 실제 쓰기는 설정 → 쓰기 액션에서 켠 것만: `actions.slack_send`·`gmail_draft`(기본 켬)·`gmail_send`·`session_send`(기본 켬)·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯. 오늘 한 액션에 출처 칩.
+- **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기 확인 카드, `actions.chat_session_create` 면 새 세션; 회의·문서·메일 정리는 노트로), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글.
+- **답장 초안 ✎**: 초안 3개 → 복사/열기/보내기. 카드·이력·팔로업 카드(모든 행·요약 줄)에 있음(팔로업은 스레드 답글). Slack·메일·Jira 는 2단계: 내 마지막 답글 이후 미답 질문을 "답할 것"(답한 건 ✓)으로 뽑아 번호대로 1:1 답, 멘션 제안 토글. 발췌가 없거나 6시간 넘으면 스레드부터 읽음. 실제 쓰기는 설정 → 쓰기 액션에서 켠 것만: `actions.slack_send`·`gmail_draft`(기본 켬)·`gmail_send`·`session_send`(기본 켬)·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯. 오늘 한 액션에 출처 칩.
 - **확인 완료 ✓**: 항목을 처리됨으로 접음(바뀌면 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`, 앞 `ack_check_max`개만 검색)면 자동 해제.
 - **Gmail 읽음 표시**(`actions.gmail_mark_read`, 끔): 메일 ✓ 면 Gmail 도 읽음.
 - **검색 ⌘K**: 통합 검색(초성·수집 이력).
-- **아카이브(Obsidian)**: 설정 → 아카이브에 볼트 `archive.vault` + 켜기 `archive.enabled` → 매일 `<archive.folder>/Daily/YYYY-MM/날짜.md` 에 브리핑·순찰·보낸 것·결과물·들어온 것·통계 자동 기록(마커 밖 메모 보존). `archive.daily_embed` = 데일리 노트에 embed.
+- **아카이브(Obsidian)**: 볼트 `archive.vault` + `archive.enabled` → 매일 `<archive.folder>/Daily/YYYY-MM/날짜.md` 에 하루 기록(마커 밖 메모 보존). `archive.daily_embed` = 데일리 노트에 embed.
 - **수집 이력**: 가져온 항목을 소스별로 보관(`history.keep_days.*`). 수집은 새 것만(증분, Slack 전체 재검색 창 `history.collect.slack_hours`), 카드·순찰·초안은 이력의 표시 구간(`history.display.*`) — Slack 미답 요청은 기간 무관 유지.
 - **설정**(하단 "저장"): 외형(테마 `dashboard.theme` 시스템/라이트/다크, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(`heartbeat_minutes`, `signal_check_minutes`, `briefing_time`, `agenda_refresh_minutes`, `agenda_source_minutes.*`, `quiet_schedule.*`, `idle_schedule.*`) · 쓰기 액션(`actions.*`, 말투 `reply_tone`·`reply_tone_by_source.*`, 오늘 한 액션) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(`claude_model`, `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd` $15 — 닿으면 자동 실행·대화 멈춤). 저장마다 백업 10개.
 
@@ -141,9 +141,10 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 언제: 회의록·긴 문서·메일 더미를 대화로 정리하고 기록으로 남기고 싶을 때.
 
 ### 답장 초안 ✎
-- 보여 주는 것: 맥락 요약·발췌 + 초안 3개(짧게/보통/정중하게), 편집 가능, "다시 생성"(힌트).
+- 보여 주는 것: 답할 대상 한 줄·발췌 + **"답할 것" 목록**(Slack·메일·Jira: 미답 질문·요청 `☐ 번호 누가 · 무엇 · (마감)`, 이미 답한 건 흐리게 `✓ 이미 답함`, 하나도 없으면 "답할 질문 없음 — 가벼운 확인 답") + 초안 3개(짧게/보통/정중하게), 편집 가능, "다시 생성"(힌트). Slack 에서 상대가 2명 이상이고 누구에게 답할지 특정되면 "멘션 제안: @…" 칩 + 토글(기본 꺼짐, 켜면 초안 첫머리에 `<@U…>` — 편집한 글에도 이미 있으면 다시 넣지 않음, 끄면 뺌).
+- 어떻게 쓰나(2단계, Slack 스레드·채널 메시지·DM / Gmail 스레드 / Jira 코멘트): ① 추출 — 대화를 메시지 목록으로 옮기고 나에게 온 질문·요청과 이미 답했는지를 뽑음(빠른 경로는 모은 발췌로 도구 없이, 전체 경로는 커넥터로 직접 읽음; Slack 은 내 user_id, 메일은 보낸편지(SENT), Jira 는 현재 사용자 코멘트로 내 메시지 구분). ② Ned 가 **내 마지막 답글**을 기준으로 앞은 [맥락](참고만, 최근 20개·4,000자), 뒤는 [답할 대상]으로 나누고 이모지·`+1`·`ㅋㅋ` 류는 `(짧은 반응)` 으로 줄임. 내 답글보다 앞에서만 나온 질문은 답한 것으로 내림(같은 메시지의 다른 질문만 답했으면 = 부분 답이면 그대로 미답, 내 답 뒤에 다시 묻거나 재확인하면 미답). ③ 작성 — 미답 질문에 번호 순서대로 1:1 로 답하고 맥락은 재요약하지 않음, 미답이 없으면 짧은 확인형. 추출 결과를 못 읽으면 예전 한 번짜리 초안으로 1회 대신 만듦. 세션·GitHub 리뷰는 예전 방식 그대로.
 - 어디서: 홈 소스 카드 행, 카드의 이력 "지난 7일/30일" 행(Slack·메일; Jira·GitHub·캘린더는 ⋯), 팔로업 채널 카드의 모든 행·최근 대화·요약 줄(위 "팔로업 채널 카드"), 인박스·장비실. 팔로업에서 연 초안은 원글 ts 를 thread_ts 로 써서 스레드 답글.
-- 데이터: 백그라운드로 모은 답장 맥락(신선하면 — `draft_context_max_age_minutes` 180분 — 빠른 경로) 또는 커넥터로 스레드를 읽어 생성. **Slack 은 모은 발췌가 없거나 6시간보다 오래됐으면** 프롬프트가 먼저 `slack_read_thread`(limit 50, 스레드 없는 DM 은 `slack_read_channel`)로 대화 전체를 읽고 그 맥락으로 쓰게 함 — 오래된 스레드도 지난 결론을 놓치지 않게(6시간 이내 발췌면 지금처럼 바로). 캐시 `~/.ned/drafts/`(1시간). 초안을 열면 항목은 확인 완료.
+- 데이터: 백그라운드로 모은 답장 맥락(신선하면 — `draft_context_max_age_minutes` 180분 — 빠른 경로) 또는 커넥터로 스레드를 읽어 생성. **Slack 은 모은 발췌가 없거나 6시간보다 오래됐으면** 프롬프트가 먼저 `slack_read_thread`(limit 50, 스레드 없는 DM 은 `slack_read_channel`)로 대화 전체를 읽고 그 맥락으로 쓰게 함 — 오래된 스레드도 지난 결론을 놓치지 않게(6시간 이내 발췌면 지금처럼 바로). 캐시 `~/.ned/drafts/`(1시간, 2단계 이전에 만든 캐시는 "답할 것" 없이 그대로 보임). 비용: 2단계는 claude 호출이 2번(빠른 경로는 둘 다 도구 없는 `draft_fast_model` 1턴, 전체 경로는 읽기 1번 + 빠른 작성 1번) — 비용 집계엔 둘 다 "draft". 초안을 열면 항목은 확인 완료.
 - 출처: 초안·보내기 요청에 어디서 열었는지(`origin` card / history / watch, 대화창은 chat)가 실려 `~/.ned/sent-actions.log` 와 설정 → 오늘 한 액션의 출처 칩(카드 / 지난 N일 / 팔로업 / 대화창)에 남음. 예전 기록(출처 없음)은 칩 없이 그대로. 인박스·장비실(세션) ✎ 는 일부러 출처 없음(칩 없음). `actions.chat_write` 는 대화창 출처에만 걸림.
 - 언제: Slack·메일 답장, 세션에 지시, Jira 코멘트, PR 리뷰 문구를 빨리 쓰고 싶을 때.
 - 키·설정: ⌘⏎ 주 액션, Esc 닫기. 말투 = `reply_tone`(기본 "간결하고 정중한 존댓말, 핵심 먼저") / 소스별 `reply_tone_by_source.slack|email|session`. 미리 생성 `drafts_pregenerate`(config.yaml 만).
