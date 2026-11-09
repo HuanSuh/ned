@@ -1,6 +1,7 @@
 /* Reply-draft modal: POST /api/draft → 3 drafts, edit, regenerate → POST /api/send. */
 import { postJson } from "../api.js";
 import { init as initActions } from "./actions.js";
+import { applyMentions, asksHtml } from "./draftasks.js";
 import { clean, parseDraftAttr } from "./draftref.js";
 import { SRC_KEY_RE, reviewAttention, reviewSource } from "./reviewed.js";
 import { resumePending, sendAndWait } from "./sendjob.js";
@@ -52,7 +53,7 @@ export async function requestDraft(hint) {
   const r = await postJson("/api/draft", clean({ source: DR.source, ref: DR.ref, hint: hint || undefined, origin: DR.origin || undefined })).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
   if (!DR.open) { S.drafting = false; renderHeader(); return; }
   if (r.ok && r.data) {
-    DR.resp = r.data; DR.tab = (r.data.drafts?.[1] || r.data.drafts?.[0])?.id ?? null; DR.edits = {};
+    DR.resp = r.data; DR.tab = (r.data.drafts?.[1] || r.data.drafts?.[0])?.id ?? null; DR.edits = {}; DR.mention = false; // 멘션 제안 toggle: off by default
     // drafting a reply counts as having looked at it
     if (DR.att && SRC_KEY_RE.test(DR.att)) { if (!(S.agenda?.reviewed || {})[DR.att]) reviewSource(DR.att, true); }
     else { const a = DR.att && S.state?.attention.find((x) => x.id === DR.att); if (a && !a.reviewed_at) reviewAttention(DR.att, true); }
@@ -93,7 +94,15 @@ export function draftActions() {
   return list;
 }
 export const curDraft = () => DR.resp?.drafts?.find((d) => d.id === DR.tab) || null;
-export const curText = () => (DR.tab in DR.edits ? DR.edits[DR.tab] : curDraft()?.text || "");
+export const curText = () => (DR.tab in DR.edits ? DR.edits[DR.tab] : applyMentions(curDraft()?.text || "", DR.resp?.mentions, !!DR.mention));
+/** 멘션 제안 toggle: flips DR.mention; edited texts get the mentions added (never twice) or stripped from the front. */
+export function toggleMention() {
+  const ms = DR.resp?.mentions; if (!ms?.length) return;
+  DR.mention = !DR.mention;
+  for (const k of Object.keys(DR.edits)) DR.edits[k] = applyMentions(DR.edits[k], ms, DR.mention);
+  $("dm-text").dataset.tab = ""; // repaint the textarea with the new text
+  DR.confirm = null; renderDraft();
+}
 export function confirmTarget(a) {
   const t = DR.ref.title || "";
   if (DR.source === "jira") return `Jira ${DR.ref.key || t} 에 이 코멘트를 남김`;
@@ -108,7 +117,7 @@ export function renderDraft() {
   const note = DR.note ? `<div class="dnote" role="note">ⓘ ${esc(DR.note)}</div>` : "";
   $("dm-ctx").innerHTML = DR.pick ? `<div class="dpick" role="group" aria-label="답할 메시지 후보">${DR.pick.map((c, i) => `<button type="button" class="dpk" data-dpick="${i}"><span class="from">${esc(c.from || "")}</span><span class="tx">${esc(c.label || c.ref?.text || "")}</span></button>`).join("")}</div>`
     : note + (DR.loading ? `<div class="calload"><span class="spin"></span>맥락 읽고 초안 쓰는 중… <span class="hint">보통 10~30초</span></div>`
-    : r ? `${ctx.summary ? `<div class="sum">${esc(ctx.summary)}</div>` : ""}${ctx.excerpt ? `<blockquote>${esc(ctx.excerpt)}</blockquote>` : ""}<div class="mmeta">${r.cached ? "캐시 · " : ""}$${Number(r.cost_usd || 0).toFixed(3)}</div>` : "");
+    : r ? `${ctx.summary ? `<div class="sum">${esc(ctx.summary)}</div>` : ""}${ctx.excerpt ? `<blockquote>${esc(ctx.excerpt)}</blockquote>` : ""}${asksHtml(r, { mentionOn: !!DR.mention })}<div class="mmeta">${r.cached ? "캐시 · " : ""}$${Number(r.cost_usd || 0).toFixed(3)}</div>` : "");
   $("dm-tabs").innerHTML = (r?.drafts || []).map((d) => `<button type="button" class="tab ${d.id === DR.tab ? "on" : ""}" role="tab" aria-selected="${d.id === DR.tab}" data-dtab="${esc(d.id)}">${esc(d.label)}</button>`).join("");
   const ta = $("dm-text");
   if (document.activeElement !== ta || ta.dataset.tab !== String(DR.tab)) { ta.value = curText(); ta.dataset.tab = String(DR.tab); }
@@ -178,6 +187,7 @@ export function init() {
   $("draft-modal").addEventListener("click", (e) => {
     if (e.target === $("draft-modal") || e.target.closest("[data-mclose]")) return closeDraft();
     const pk = e.target.closest("[data-dpick]"); if (pk) return pickDraft(Number(pk.dataset.dpick));
+    if (e.target.closest("[data-dmention]")) return toggleMention();
     const t = e.target.closest("[data-dtab]"); if (t) { DR.tab = t.dataset.dtab; DR.confirm = null; renderDraft(); return; }
     const a = e.target.closest("[data-dact]"); if (a) return runAction(a.dataset.dact);
     if (e.target.closest("[data-dconfirm]")) return runAction(DR.confirm);
