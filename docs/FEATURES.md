@@ -85,7 +85,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
   | Notion | `https://(www.)notion.so/<…32자리 페이지 id…>[?…]` | `notion://www.notion.so/<같은 경로·쿼리>` — `*.notion.site`(공개 사이트)는 내 워크스페이스 페이지가 아닐 수 있어 웹 그대로 |
 
 - 여는 방식: 링크(앵커)는 그대로 웹 URL·새 탭이라 마우스를 올리면 주소가 보이고 복사·우클릭도 같음. 일반 왼쪽 클릭만 가로챔 — ⌘/Ctrl/⇧/⌥-클릭·가운데 클릭·검색 ⌘⏎ 는 늘 웹. Ned.app 창이면 앱으로 넘기고, 그 서비스 앱이 설치돼 있지 않거나 열기에 실패하면 웹 URL 을 기본 브라우저로(앱 로그에 `open link: …` 한 줄). 앱 딥링크는 Ned.app 창에서만 — 브라우저로 연 대시보드(`http://127.0.0.1:7777`)는 늘 웹 URL 을 새 탭으로.
-- 설정: 설정 → 외형 → "링크를 앱으로 열기" `dashboard.open_links_in_app`(기본 켬) · 서비스별 `dashboard.open_links_in_app_by_service.slack`·`dashboard.open_links_in_app_by_service.figma`·`dashboard.open_links_in_app_by_service.notion`(기본 모두 켬, 끄면 그 서비스는 웹) · "Slack 팀 ID" `dashboard.slack_team_id`(`T…` 대문자·숫자 7자 이상만, 기본 "" — 비우면 Slack 링크는 웹, 잘못된 값은 저장 안 됨).
+- 설정: 설정 → 외형 → "링크를 앱으로 열기" `dashboard.open_links_in_app`(기본 켬) · 서비스별 `dashboard.open_links_in_app_by_service.slack`·`dashboard.open_links_in_app_by_service.figma`·`dashboard.open_links_in_app_by_service.notion`(기본 모두 켬, 끄면 그 서비스는 웹) · "Slack 팀 ID" `dashboard.slack_team_id`(`T…` 대문자·숫자 7자 이상만, 기본 "" — 비우면 Slack 링크는 웹, 잘못된 값은 저장 안 됨) · "Slack 워크스페이스 주소" `dashboard.slack_team_domain`(`<이름>.slack.com` 의 `<이름>`, 영문 소문자·숫자·-, 기본 "" — 넣으면 `<이름>.slack.com`·`<이름>.enterprise.slack.com` 링크만 앱으로, 다른 워크스페이스 링크는 웹(내 팀 ID 로 열면 "채널 없음"이 되므로). 비우면 모든 `*.slack.com` 을 변환 — 워크스페이스 하나만 쓰면 비워 둬도 됨. `acme.slack.com`·`https://…` 로 넣어도 `acme` 로 저장).
 - Slack 팀 ID 찾기: Slack 앱 → 왼쪽 위 워크스페이스 이름 → 워크스페이스 설정(브라우저에 열리는 주소의 `T…`) 또는 about 화면의 `T…`. Ned 는 Slack 토큰이 없고 수집 데이터에도 팀 ID 가 없어 자동으로 알아내지 못함 — 직접 입력.
 
 ### 인박스
@@ -213,7 +213,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 
 ### 설정 탭
 상단 바로가기: 외형 · 소스 · 알림 · 순찰 주기 · 수집·보관 · 쓰기 액션 · 아카이브 · Claude. "다시 불러오기", 하단 "● 저장 안 된 변경" + "저장".
-- **외형**: 테마 🖥️시스템/☀️라이트/🌙다크 `dashboard.theme`(바로 미리보기, 저장해야 유지) · 홈 카드 배치 ↑/↓·1열/2열 `dashboard.card_order`/`dashboard.card_span` · "홈 배치 잠금" `dashboard.locked` · "팔로업 채널을 별도 카드로" `dashboard.watch_cards` · "배치 초기화" · 링크 열기 "링크를 앱으로 열기" `dashboard.open_links_in_app` + Slack/Figma/Notion 체크(`dashboard.open_links_in_app_by_service.*`, 끄면 흐려짐) · "Slack 팀 ID" `dashboard.slack_team_id`(위 "링크 열기 — 앱 딥링크").
+- **외형**: 테마 🖥️시스템/☀️라이트/🌙다크 `dashboard.theme`(바로 미리보기, 저장해야 유지) · 홈 카드 배치 ↑/↓·1열/2열 `dashboard.card_order`/`dashboard.card_span` · "홈 배치 잠금" `dashboard.locked` · "팔로업 채널을 별도 카드로" `dashboard.watch_cards` · "배치 초기화" · 링크 열기 "링크를 앱으로 열기" `dashboard.open_links_in_app` + Slack/Figma/Notion 체크(`dashboard.open_links_in_app_by_service.*`, 끄면 흐려짐) · "Slack 팀 ID" `dashboard.slack_team_id` · "Slack 워크스페이스 주소" `dashboard.slack_team_domain`(위 "링크 열기 — 앱 딥링크").
 - **소스**: Gmail/Slack/Jira/GitHub/Sentry/캘린더 `sources.*`(끄면 조회·보고 안 함). Slack: 팔로업 채널 `filters.slack.watch_channels` · 트래킹 제외 채널 `filters.slack.exclude_channels`(팔로업보다 우선) · 답 필요 해제 이모지 `filters.slack.ack_reactions` · 한 번에 확인할 이모지 `filters.slack.ack_check_max`(3) · 그룹 멘션 `filters.slack.group_mentions`(유저그룹 ID·핸들). Jira: 제외 프로젝트 `filters.jira.exclude_projects`. 칩 입력: ⏎/쉼표 추가, 빈 입력 Backspace 삭제.
 - **알림**: 알림 켜기 `notifications.enabled` · 소스별 `notifications.kinds.*` · 아침 브리핑 알림 `notifications.briefing` · 소리 `notifications.sound` · 묶음 기준 `notifications.summary_threshold`(기본 3) · 조용한 시간 `quiet_hours`(기본 23:00~08:00) · 그 시간엔 보내지 않음/소리 없이 `notifications.quiet_delivery`.
 - **순찰 주기**: heartbeat 간격 `heartbeat_minutes`(10) · 신호 조회 최소 간격 `signal_check_minutes`(60) · "바뀐 게 없으면 순찰 건너뛰기" `heartbeat_skip_unchanged`(켬) · 아침 브리핑 시각 `briefing_time`(09:00) · 홈 자동 갱신 기본 주기 `agenda_refresh_minutes`(60) · 소스별 주기 Slack/메일/캘린더/Jira/GitHub `agenda_source_minutes.*`(비우면 기본) · 조용한 시간 동작 `quiet_schedule.*` · 유휴 시 동작 `idle_schedule.*`(위 "야간 모드 · 유휴 모드").
@@ -255,6 +255,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `dashboard.theme` · `dashboard.card_order` · `dashboard.card_span` · `dashboard.locked` · `dashboard.watch_cards` · `dashboard.layout` | system · slack,mail,jira,github · — · false · true · null | 외형 (layout 은 홈 드래그 배치) |
 | `dashboard.open_links_in_app` · `dashboard.open_links_in_app_by_service.slack` · `dashboard.open_links_in_app_by_service.figma` · `dashboard.open_links_in_app_by_service.notion` | true · true · true · true | 외형 → 링크를 앱으로 열기 |
 | `dashboard.slack_team_id` | "" (`T…` 만) | 외형 → Slack 팀 ID |
+| `dashboard.slack_team_domain` | "" (= 모든 `*.slack.com`) | 외형 → Slack 워크스페이스 주소 |
 | `claude_model` · `claude_max_turns` · `agenda_daily_budget_usd` | null · 25 · 15 | Claude |
 | `archive.enabled` · `archive.vault` · `archive.folder` · `archive.daily_embed` | false · "" · Ned · false | 아카이브 |
 | `archive.include.briefings` · `archive.include.updates` · `archive.include.actions` · `archive.include.outputs` · `archive.include.sessions` · `archive.include.history` | true · true · true · true · false · true | 아카이브 → 담을 것 |
@@ -279,6 +280,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `c-openapp` | 외형 → 링크를 앱으로 열기 | `dashboard.open_links_in_app` |
 | `c-openapp-svc` | 외형 → 링크 열기 Slack/Figma/Notion (`data-olsvc`) | `dashboard.open_links_in_app_by_service.*` |
 | `c-slack-team` | 외형 → Slack 팀 ID | `dashboard.slack_team_id` |
+| `c-slack-domain` | 외형 → Slack 워크스페이스 주소 | `dashboard.slack_team_domain` |
 | `c-sources` | 소스 토글 | `sources.*` |
 | `x-watch-in` | 소스 → Slack → 팔로업 채널 | `filters.slack.watch_channels` |
 | `x-slack-in` | 소스 → Slack → 트래킹 제외 채널 | `filters.slack.exclude_channels` |

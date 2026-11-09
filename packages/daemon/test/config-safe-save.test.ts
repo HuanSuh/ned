@@ -99,6 +99,16 @@ describe("partial PUT /api/config", () => {
     expect(cleared.dashboard.slack_team_id).toBe("");
   });
 
+  it("dashboard.slack_team_domain: saves lower-cased; junk → 400 with its field, nothing written", async () => {
+    const ok = await (await put({ dashboard: { slack_team_domain: "Acme.slack.com" } })).json();
+    expect(ok.dashboard.slack_team_domain).toBe("acme");
+    const before = fs.readFileSync(CONFIG_PATH, "utf8");
+    const bad = await put({ dashboard: { slack_team_domain: "acme corp" } });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ field: "dashboard.slack_team_domain" });
+    expect(fs.readFileSync(CONFIG_PATH, "utf8")).toBe(before);
+  });
+
   it("GET/PUT carry updated_at (config.yaml mtime) and build_id; every save moves updated_at", async () => {
     const g = await getCfg();
     expect(g.updated_at).toBe(configUpdatedAt());

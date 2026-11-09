@@ -21,6 +21,7 @@ import {
   normalizePersona,
   normalizeTheme,
   saveConfig,
+  slackTeamDomainError,
   slackTeamIdError,
   watchChannels,
   type NedConfig,
@@ -223,6 +224,21 @@ describe("normalizers", () => {
     expect(junk.open_links_in_app_by_service).toEqual(off.open_links_in_app_by_service);
     // an old saved dashboard without the keys (base from config.yaml) → on
     expect(normalizeDashboard({}, { ...DEFAULT_DASHBOARD, open_links_in_app: undefined, open_links_in_app_by_service: undefined } as never).open_links_in_app_by_service).toEqual({ slack: true, figma: true, notion: true });
+  });
+  it("normalizeDashboard.slack_team_domain: lower-cased subdomain, .slack.com stripped, \"\"/null clears, junk keeps base's", () => {
+    expect(DEFAULT_DASHBOARD.slack_team_domain).toBe("");
+    expect(normalizeDashboard({ slack_team_domain: " Acme " }).slack_team_domain).toBe("acme");
+    const set = normalizeDashboard({ slack_team_domain: "https://acme-corp.slack.com" });
+    expect(set.slack_team_domain).toBe("acme-corp");
+    expect(normalizeDashboard({ locked: true }, set).slack_team_domain).toBe("acme-corp");
+    expect(normalizeDashboard({ slack_team_domain: "acme corp" }, set).slack_team_domain).toBe("acme-corp");
+    expect(normalizeDashboard({ slack_team_domain: "" }, set).slack_team_domain).toBe("");
+    expect(slackTeamDomainError({ slack_team_domain: "acme" })).toBeNull();
+    expect(slackTeamDomainError({ slack_team_domain: "acme.slack.com" })).toBeNull();
+    expect(slackTeamDomainError({ slack_team_domain: "" })).toBeNull();
+    expect(slackTeamDomainError({ theme: "dark" })).toBeNull();
+    expect(slackTeamDomainError({ slack_team_domain: "acme corp" })).toMatch(/slack\.com/);
+    expect(slackTeamDomainError({ slack_team_domain: 3 })).toMatch(/slack\.com/);
   });
   it("loadConfig: dashboard.slack_team_id from config.yaml, junk → \"\"", () => {
     write({ dashboard: { slack_team_id: "T0ABC1234" } });

@@ -83,6 +83,38 @@ describe.each(SIDES)("%s: toDeepLink", (_name, m) => {
     expect(m.linkService(42)).toBeNull();
   });
 
+  it("slackTeamDomain: set → only <domain>(.enterprise).slack.com converts, other workspaces stay on the web; empty → all", () => {
+    const mine = "https://acme.slack.com/archives/C0123ABCD/p1794193614524359";
+    const ent = "https://ACME.enterprise.slack.com/archives/C0123ABCD/p1794193614524359";
+    const other = "https://other-co.slack.com/archives/C0123ABCD/p1794193614524359";
+    const want = `slack://channel?team=${T}&id=C0123ABCD&message=1794193614.524359`;
+    const withDomain = { slackTeamId: T, slackTeamDomain: "acme" };
+    expect(m.toDeepLink(mine, ON, withDomain)).toBe(want);
+    expect(m.toDeepLink(ent, ON, withDomain)).toBe(want);
+    expect(m.toDeepLink(other, ON, withDomain)).toBeNull();
+    expect(m.toDeepLink("https://acme-other.slack.com/archives/C0123ABCD", ON, withDomain)).toBeNull();
+    for (const d of ["", null, undefined]) {
+      expect(m.toDeepLink(other, ON, { slackTeamId: T, slackTeamDomain: d })).toBe(want);
+      expect(m.toDeepLink(mine, ON, { slackTeamId: T, slackTeamDomain: d })).toBe(want);
+    }
+    // domain alone (no team id) still can't build a slack:// link
+    expect(m.toDeepLink(mine, ON, { slackTeamDomain: "acme" })).toBeNull();
+    // Figma / Notion ignore it
+    expect(m.toDeepLink("https://www.figma.com/design/AbC/x", ON, withDomain)).toBe("figma://design/AbC/x");
+  });
+
+  it("normalizeSlackTeamDomain", () => {
+    expect(m.normalizeSlackTeamDomain(" ACME ")).toBe("acme");
+    expect(m.normalizeSlackTeamDomain("acme-corp.slack.com")).toBe("acme-corp");
+    expect(m.normalizeSlackTeamDomain("https://acme.enterprise.slack.com/")).toBe("acme");
+    expect(m.normalizeSlackTeamDomain("")).toBe("");
+    expect(m.normalizeSlackTeamDomain(null)).toBe("");
+    expect(m.normalizeSlackTeamDomain("acme corp", "keep")).toBe("keep");
+    expect(m.normalizeSlackTeamDomain("acme.example.com", "keep")).toBe("keep");
+    expect(m.normalizeSlackTeamDomain(7, "keep")).toBe("keep");
+    expect(m.linkCtxOf({ slack_team_id: T, slack_team_domain: "acme" })).toEqual({ slackTeamId: T, slackTeamDomain: "acme" });
+  });
+
   it("normalizeSlackTeamId / linkCtxOf", () => {
     expect(m.normalizeSlackTeamId(" t0abc1234 ")).toBe("T0ABC1234");
     expect(m.normalizeSlackTeamId("")).toBe("");
@@ -92,8 +124,8 @@ describe.each(SIDES)("%s: toDeepLink", (_name, m) => {
     expect(m.normalizeSlackTeamId("C0123ABCD", "")).toBe("");
     expect(m.normalizeSlackTeamId("T0AB-123", "TOLD0000")).toBe("TOLD0000");
     expect(m.normalizeSlackTeamId(42, "TOLD0000")).toBe("TOLD0000");
-    expect(m.linkCtxOf({ slack_team_id: T })).toEqual({ slackTeamId: T });
-    expect(m.linkCtxOf(undefined)).toEqual({ slackTeamId: "" });
+    expect(m.linkCtxOf({ slack_team_id: T })).toEqual({ slackTeamId: T, slackTeamDomain: "" });
+    expect(m.linkCtxOf(undefined)).toEqual({ slackTeamId: "", slackTeamDomain: "" });
   });
 });
 
@@ -101,4 +133,5 @@ it("client copy has the same services and team-id rule", () => {
   expect(client.LINK_SERVICES).toEqual([...server.LINK_SERVICES]);
   expect(client.LINK_RULES.map((r: { service: string }) => r.service)).toEqual(server.LINK_RULES.map((r) => r.service));
   expect(String(client.SLACK_TEAM_ID_RE)).toBe(String(server.SLACK_TEAM_ID_RE));
+  expect(String(client.SLACK_TEAM_DOMAIN_RE)).toBe(String(server.SLACK_TEAM_DOMAIN_RE));
 });

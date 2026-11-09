@@ -9,7 +9,7 @@ import { originChip } from "../features/draftref.js";
 import { readToneBySource, syncWriteActionGroups, writeActionsHtml } from "./settings-actions.js";
 import { initArchive, readArchive, renderArchive } from "./settings-archive.js";
 import { initHistorySettings, readHistorySettings, renderHistorySettings } from "./settings-history.js";
-import { initLinkPrefs, readLinkPrefs, renderLinkPrefs, teamIdError } from "./settings-links.js";
+import { initLinkPrefs, linkPrefsError, readLinkPrefs, renderLinkPrefs } from "./settings-links.js";
 import { persona } from "../features/personas.js";
 import { applyTheme, normTheme, syncTheme, themeHtml } from "../features/theme.js";
 import { loadAgenda } from "../main.js";
@@ -279,7 +279,7 @@ let saved = "";
 let savedBody = null; // readBody() right after the last render: the PUT sends only diffConfig(savedBody, readBody())
 const snap = () => {
   const { dashboard: d, ...rest } = readBody();
-  return JSON.stringify({ ...rest, theme: d.theme, open_links_in_app: d.open_links_in_app, open_links_in_app_by_service: d.open_links_in_app_by_service, slack_team_id: d.slack_team_id });
+  return JSON.stringify({ ...rest, theme: d.theme, open_links_in_app: d.open_links_in_app, open_links_in_app_by_service: d.open_links_in_app_by_service, slack_team_id: d.slack_team_id, slack_team_domain: d.slack_team_domain });
 };
 export const isDirty = () => !!S.config && (snap() !== saved || !!readCardLayout().layout);
 export function syncDirty() {
@@ -356,8 +356,8 @@ export function init() {
     if (BUILD.stale) { syncSaveLock(); return; }
     const patch = diffConfig(savedBody, readBody());
     if (isEmptyPatch(patch)) { msg.className = "msg"; msg.textContent = "바뀐 항목이 없어."; return; }
-    const teamErr = teamIdError(patch.dashboard?.slack_team_id);
-    if (teamErr) { msg.className = "msg err"; msg.textContent = `저장 안 함: ${teamErr}`; $("c-slack-team").focus(); return; }
+    const linkErr = linkPrefsError(patch.dashboard);
+    if (linkErr) { msg.className = "msg err"; msg.textContent = `저장 안 함: ${linkErr.msg}`; $(linkErr.id).focus(); return; }
     btn.disabled = true; msg.className = "msg"; msg.textContent = "저장 중…";
     try {
       // Only the changed keys (sub-key level), plus the version this form was rendered from: a save made elsewhere since → 409.

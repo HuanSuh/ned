@@ -15,7 +15,7 @@ import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runCh
 import { validateChatAction } from "./chat-actions.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, restoreConfigBackup, saveConfig, slackTeamIdError, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type PersonaId } from "./config.js";
+import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, restoreConfigBackup, saveConfig, slackTeamDomainError, slackTeamIdError, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { historyStatus, queryHistory } from "./history.js";
@@ -172,6 +172,8 @@ export function startServer(getConfig: () => NedConfig): void {
     const seen = configUpdatedAt();
     const teamErr = slackTeamIdError(body.dashboard);
     if (teamErr) return c.json({ error: teamErr, field: "dashboard.slack_team_id" }, 400);
+    const domainErr = slackTeamDomainError(body.dashboard);
+    if (domainErr) return c.json({ error: domainErr, field: "dashboard.slack_team_domain" }, 400);
     const merged = mergeConfigPatch(cur, body);
     const archErr = archivePatchError(cur, merged);
     if (archErr) return c.json({ error: archErr, field: "archive.vault" }, 400);

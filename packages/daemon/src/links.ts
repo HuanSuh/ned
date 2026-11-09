@@ -6,6 +6,7 @@
  * - Slack  https://<ws>.slack.com/archives/<C|D|G…>/p<ts10><ts6>[?thread_ts=<x>&cid=<C>]
  *          → slack://channel?team=<T>&id=<C>&message=<ts10>.<ts6>[&thread_ts=<x>]   (no team id → null = stay on the web)
  *          A channel link without a message (…/archives/<C>) → slack://channel?team=<T>&id=<C>.
+ *          ctx.slackTeamDomain set → only <domain>(.enterprise).slack.com converts; empty → every *.slack.com.
  * - Figma  https://(www.)figma.com/(design|file|board|proto)/<key>[/<name>][?node-id=…] → figma://<same path>[?<same query>]
  * - Notion https://(www.)notion.so/<path with a 32-hex page id>[?…] → notion://www.notion.so/<path>[?…]
  *          <ws>.notion.site (public sites) is NOT converted: the page may not be in the user's workspace, the web view works.
@@ -24,6 +25,8 @@ export interface LinkPrefs {
 }
 export interface LinkCtx {
   slackTeamId?: string | null;
+  /** "<name>" of <name>.slack.com: when set, only that workspace's links convert (others stay on the web). */
+  slackTeamDomain?: string | null;
 }
 export interface LinkRule {
   service: LinkService;
@@ -34,6 +37,12 @@ export interface LinkRule {
 const SLACK_HOST_RE = /^[a-z0-9-]+(\.enterprise)?\.slack\.com$/i;
 const SLACK_PATH_RE = /^\/archives\/([CDG][A-Z0-9]+)(?:\/p(\d{10})(\d{6}))?\/?$/;
 const SLACK_TS_RE = /^\d{10}\.\d{6}$/;
+/** Slack workspace subdomain ("acme" of acme.slack.com). */
+export const SLACK_TEAM_DOMAIN_RE = /^[a-z0-9-]+$/;
+const slackHostIs = (host: string, domain: string) => {
+  const h = host.toLowerCase(), d = domain.toLowerCase();
+  return h === `${d}.slack.com` || h === `${d}.enterprise.slack.com`;
+};
 const FIGMA_HOST_RE = /^(www\.)?figma\.com$/i;
 const FIGMA_PATH_RE = /^\/(design|file|board|proto)\/[A-Za-z0-9]+(\/|$)/;
 const NOTION_HOST_RE = /^(www\.)?notion\.so$/i;
@@ -46,6 +55,9 @@ export const LINK_RULES: readonly LinkRule[] = [
     toDeep: (u, ctx) => {
       const team = ctx?.slackTeamId;
       if (typeof team !== "string" || !SLACK_TEAM_ID_RE.test(team)) return null;
+      // Another workspace's link with my team id would open "channel not found" in the app — keep it on the web.
+      const domain = ctx?.slackTeamDomain;
+      if (domain && !slackHostIs(u.hostname, domain)) return null;
       const m = SLACK_PATH_RE.exec(u.pathname);
       if (!m) return null;
       let out = `slack://channel?team=${team}&id=${m[1]}`;
@@ -93,10 +105,23 @@ export function toDeepLink(url: unknown, cfg: LinkPrefs | null | undefined, ctx:
   return rule.toDeep(u, ctx ?? {});
 }
 
-/** ctx from config.dashboard (slack_team_id). */
-export const linkCtxOf = (dashboard: { slack_team_id?: unknown } | null | undefined): LinkCtx => ({
+/** ctx from config.dashboard (slack_team_id, slack_team_domain). */
+export const linkCtxOf = (dashboard: { slack_team_id?: unknown; slack_team_domain?: unknown } | null | undefined): LinkCtx => ({
   slackTeamId: typeof dashboard?.slack_team_id === "string" ? dashboard.slack_team_id : "",
+  slackTeamDomain: typeof dashboard?.slack_team_domain === "string" ? dashboard.slack_team_domain : "",
 });
+
+/**
+ * " ACME " / "acme.slack.com" / "https://acme.enterprise.slack.com/" → "acme"; "" / null → ""; anything else that isn't
+ * a subdomain (SLACK_TEAM_DOMAIN_RE after lower-casing and stripping scheme / .slack.com) → `fallback`.
+ */
+export function normalizeSlackTeamDomain(v: unknown, fallback = ""): string {
+  if (v == null) return "";
+  if (typeof v !== "string") return fallback;
+  const d = v.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "").replace(/(\.enterprise)?\.slack\.com$/, "");
+  if (!d) return "";
+  return SLACK_TEAM_DOMAIN_RE.test(d) ? d : fallback;
+}
 
 /** " t0abc123 " → "T0ABC123"; "" / null → ""; anything that isn't a team id → `fallback`. */
 export function normalizeSlackTeamId(v: unknown, fallback = ""): string {

@@ -114,7 +114,8 @@ Slack(2) → 메일(1)·Jira(1) → GitHub(2). 읽을 때·`PUT /api/config`(보
 **링크를 앱으로 열기** (`config.dashboard.open_links_in_app` 기본 true · `open_links_in_app_by_service.{slack,figma,notion}` 기본 true ·
 `slack_team_id` 기본 ""): 규칙 테이블은 `src/links.ts`(순수, import 없음 — `public/app/features/links.js` 가 복제, `test/links-shared.test.ts`
 가 같은 픽스처로 둘 다 돌림). Slack permalink `…slack.com/archives/<C|D|G…>/p<ts>[?thread_ts=]` → `slack://channel?team=<T>&id=<C>&message=<ts>[&thread_ts=]`
-(팀 ID 없으면 변환 안 함), Figma `(design|file|board|proto)/<key>…` → `figma://` + 같은 경로·쿼리, Notion `notion.so/<…32-hex id…>` →
+(팀 ID 없으면 변환 안 함; `slack_team_domain` 이 있으면 `<domain>.slack.com`·`<domain>.enterprise.slack.com` 만 — 다른 워크스페이스는 웹,
+비면 모든 `*.slack.com`; `^[a-z0-9-]+$`, 소문자화·`.slack.com` 떼고 저장, 아니면 400 `{ field: "dashboard.slack_team_domain" }`), Figma `(design|file|board|proto)/<key>…` → `figma://` + 같은 경로·쿼리, Notion `notion.so/<…32-hex id…>` →
 `notion://www.notion.so/…`(`*.notion.site` 는 변환 안 함). `slack_team_id` 는 `^T[A-Z0-9]{6,}$` 만(대문자화) — 다른 값은 `PUT /api/config` 가
 400 `{ field: "dashboard.slack_team_id" }`, 손으로 고친 config.yaml 이면 읽을 때 무시. 팀 ID 자동 감지는 없음(Slack 토큰 없음, 수집 데이터에
 team 필드 없음). 열기는 대시보드(`features/openlink.js`) → Ned.app `openLink` 메시지 핸들러(`apps/menubar/…/DashboardWindow.swift`

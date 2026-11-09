@@ -1,7 +1,8 @@
 /* 링크를 앱으로 열기 — copy of src/links.ts (the single definition); test/links-shared.test.ts runs both on the same
  * fixtures. Pure (no DOM, no imports). openlink.js does the opening; this only maps a web URL to an app deep link.
  * - Slack  https://<ws>.slack.com/archives/<C|D|G…>/p<ts10><ts6>[?thread_ts=<x>] → slack://channel?team=<T>&id=<C>&message=<ts>[&thread_ts=<x>]
- *          (no team id → null = stay on the web; …/archives/<C> → slack://channel?team=<T>&id=<C>)
+ *          (no team id → null = stay on the web; …/archives/<C> → slack://channel?team=<T>&id=<C>;
+ *          ctx.slackTeamDomain set → only <domain>(.enterprise).slack.com converts)
  * - Figma  https://(www.)figma.com/(design|file|board|proto)/<key>… → figma://<same path>[?<same query>]
  * - Notion https://(www.)notion.so/<path with a 32-hex id>[?…] → notion://www.notion.so/<path>[?…] (notion.site: not converted) */
 
@@ -11,6 +12,11 @@ export const SLACK_TEAM_ID_RE = /^T[A-Z0-9]{6,}$/;
 const SLACK_HOST_RE = /^[a-z0-9-]+(\.enterprise)?\.slack\.com$/i;
 const SLACK_PATH_RE = /^\/archives\/([CDG][A-Z0-9]+)(?:\/p(\d{10})(\d{6}))?\/?$/;
 const SLACK_TS_RE = /^\d{10}\.\d{6}$/;
+export const SLACK_TEAM_DOMAIN_RE = /^[a-z0-9-]+$/;
+const slackHostIs = (host, domain) => {
+  const h = host.toLowerCase(), d = domain.toLowerCase();
+  return h === `${d}.slack.com` || h === `${d}.enterprise.slack.com`;
+};
 const FIGMA_HOST_RE = /^(www\.)?figma\.com$/i;
 const FIGMA_PATH_RE = /^\/(design|file|board|proto)\/[A-Za-z0-9]+(\/|$)/;
 const NOTION_HOST_RE = /^(www\.)?notion\.so$/i;
@@ -23,6 +29,8 @@ export const LINK_RULES = [
     toDeep: (u, ctx) => {
       const team = ctx?.slackTeamId;
       if (typeof team !== "string" || !SLACK_TEAM_ID_RE.test(team)) return null;
+      const domain = ctx?.slackTeamDomain;
+      if (domain && !slackHostIs(u.hostname, domain)) return null;
       const m = SLACK_PATH_RE.exec(u.pathname);
       if (!m) return null;
       let out = `slack://channel?team=${team}&id=${m[1]}`;
@@ -63,7 +71,18 @@ export function toDeepLink(url, cfg, ctx = {}) {
   return rule.toDeep(u, ctx ?? {});
 }
 
-export const linkCtxOf = (dashboard) => ({ slackTeamId: typeof dashboard?.slack_team_id === "string" ? dashboard.slack_team_id : "" });
+export const linkCtxOf = (dashboard) => ({
+  slackTeamId: typeof dashboard?.slack_team_id === "string" ? dashboard.slack_team_id : "",
+  slackTeamDomain: typeof dashboard?.slack_team_domain === "string" ? dashboard.slack_team_domain : "",
+});
+
+export function normalizeSlackTeamDomain(v, fallback = "") {
+  if (v == null) return "";
+  if (typeof v !== "string") return fallback;
+  const d = v.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "").replace(/(\.enterprise)?\.slack\.com$/, "");
+  if (!d) return "";
+  return SLACK_TEAM_DOMAIN_RE.test(d) ? d : fallback;
+}
 
 export function normalizeSlackTeamId(v, fallback = "") {
   if (v == null) return "";

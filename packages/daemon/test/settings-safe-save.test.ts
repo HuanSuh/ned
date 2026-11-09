@@ -163,6 +163,23 @@ describe("외형 → 링크 열기 (dashboard.open_links_in_app · _by_service �
     expect($("c-slack-team").value).toBe("T0ABC1234");
     expect((document.querySelector('[data-olsvc="notion"]') as HTMLInputElement).checked).toBe(false);
   });
+
+  it("workspace address: junk blocks the save inline; 'Acme.slack.com' is saved as 'acme'", async () => {
+    const n = puts.length;
+    typeInto("c-slack-domain", "acme corp");
+    expect($("c-slack-domain-msg").textContent).toContain("slack.com");
+    submit(); await settled();
+    expect(puts).toHaveLength(n);
+    expect($("c-msg").textContent).toContain("저장 안 함");
+    typeInto("c-slack-domain", "Acme.slack.com");
+    expect($("c-slack-domain-msg").textContent).toBe("");
+    expect(settings.isDirty()).toBe(true);
+    const token = S.config!.updated_at;
+    submit();
+    await vi.waitFor(() => expect(settings.isDirty()).toBe(false));
+    expect(puts.at(-1)).toEqual({ dashboard: { slack_team_domain: "acme" }, if_updated_at: token });
+    expect($("c-slack-domain").value).toBe("acme");
+  });
 });
 
 describe("이전 설정으로 되돌리기", () => {
