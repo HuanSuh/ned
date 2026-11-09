@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseOrigin, type ActionOrigin } from "./origin.js";
 import { readAgenda, type Agenda, type MailContext, type SlackContext } from "./agenda.js";
 import { extractJson, llmDisabled, runClaude } from "./claude.js";
 import { normalizeReplyTone, type NedConfig, type ReplyToneSource } from "./config.js";
@@ -47,6 +48,8 @@ export interface DraftRequest {
   tone?: string;
   /** Skip the 1h cache. */
   force?: boolean;
+  /** Which dashboard list asked (card / history / watch, chat) — logged only; the send carries it into the action log. */
+  origin?: ActionOrigin;
 }
 
 /** What a later POST /api/send needs to address the reply without re-reading anything. */
@@ -109,7 +112,8 @@ export function parseDraftRequest(body: Record<string, unknown>): DraftRequest {
     const v = str(typeof r[k] === "number" ? String(r[k]) : r[k], k === "text" ? 2000 : 500);
     if (v) ref[k] = v;
   }
-  return { source, ref, hint: str(body.hint, 500), tone: str(body.tone, 200), force: body.force === true };
+  const origin = parseOrigin(body.origin);
+  return { source, ref, hint: str(body.hint, 500), tone: str(body.tone, 200), force: body.force === true, ...(origin ? { origin } : {}) };
 }
 
 /** Slack permalink → channel / ts / thread_ts. `p1700000000123456` → `1700000000.123456`. */
@@ -278,6 +282,32 @@ export function fastContext(req: Pick<DraftRequest, "source" | "ref">, cfg: NedC
   return c && c.age <= cfg.draft_context_max_age_minutes ? c : null;
 }
 
+/**
+ * Slack full path: a collected excerpt older than this (or none at all) can't be trusted for an old / long thread,
+ * so the prompt makes the model read the whole thread first (CONTEXT_RULE). Younger excerpts keep today's prompt.
+ */
+export const DRAFT_CTX_FRESH_HOURS = 6;
+const THREAD_READ_LIMIT = 50;
+
+/**
+ * The forced "read the thread first" rule for a Slack full-path draft, or "" (fast path, other sources, fresh excerpt).
+ * `ctx` = the agenda excerpt for the ref (agendaContext), null when there is none.
+ */
+export function contextRule(req: Pick<DraftRequest, "source" | "ref">, fast: AgendaCtx | null, ctx: AgendaCtx | null): string {
+  if (fast || req.source !== "slack") return "";
+  if (ctx && ctx.age <= DRAFT_CTX_FRESH_HOURS * 60) return "";
+  const t = slackTarget(req.ref);
+  if (!t.channel_id) return "";
+  const why = ctx ? `수집된 발췌가 ${Math.floor(ctx.age / 60)}시간 전 것이라 낡았다` : "수집된 발췌가 없다";
+  const parent = t.thread_ts ?? t.ts;
+  const read = t.channel_id.startsWith("D") && !t.thread_ts
+    ? `\`mcp__claude_ai_Slack__slack_read_channel\` 로 channel_id=\`${t.channel_id}\`, limit=${THREAD_READ_LIMIT} (DM 대화)`
+    : parent
+      ? `\`mcp__claude_ai_Slack__slack_read_thread\` 로 channel_id=\`${t.channel_id}\`, message_ts=\`${parent}\`, limit=${THREAD_READ_LIMIT} (스레드 전체)`
+      : `\`mcp__claude_ai_Slack__slack_read_channel\` 로 channel_id=\`${t.channel_id}\`, limit=${THREAD_READ_LIMIT}`;
+  return `\n- **먼저 맥락을 읽는다** (${why}): 초안을 쓰기 전에 ${read} 를 읽고, 그 맥락으로 쓴다. 미리보기만 보고 쓰지 않는다. 오래된 대화면 그 뒤에 결론이 났는지도 확인한다.`;
+}
+
 function formatContext(c: AgendaCtx): string {
   if (c.kind === "slack") {
     return [
@@ -419,14 +449,19 @@ export function draftTone(req: Pick<DraftRequest, "source" | "tone">, cfg: Pick<
   return normalizeReplyTone(req.tone, normalizeReplyTone(per, normalizeReplyTone(cfg.reply_tone)));
 }
 
-/** `fast` (or a session) → no-tool prompt built from context Ned already has. */
-export function buildDraftPrompt(req: DraftRequest, cfg: NedConfig, fast: AgendaCtx | null = null, prefetched?: string): { prompt: string; meta: DraftMeta } {
+/**
+ * `fast` (or a session) → no-tool prompt built from context Ned already has. `ctx` = the agenda excerpt for the ref
+ * (default: looked up; only Slack full-path drafts use it — no / stale excerpt → CONTEXT_RULE makes the model read the thread).
+ */
+export function buildDraftPrompt(req: DraftRequest, cfg: NedConfig, fast: AgendaCtx | null = null, prefetched?: string, ctx?: AgendaCtx | null): { prompt: string; meta: DraftMeta } {
   const template = fs.readFileSync(path.join(PROMPTS_DIR, "draft.md"), "utf8");
   const s = sourceGuide(req, fast, prefetched);
+  const rule = !fast && req.source === "slack" ? contextRule(req, fast, ctx === undefined ? agendaContext(req) : ctx) : "";
   const tone = draftTone(req, cfg);
   const prompt = template
     .replace("{{NOW}}", () => new Date().toLocaleString("ko-KR"))
     .replace("{{TOOL_RULES}}", () => (fast ? `${NO_TOOL_RULES}\n${FAST_OUTPUT_RULE}` : req.source === "session" || req.source === "github" ? NO_TOOL_RULES : TOOL_RULES))
+    .replace("{{CONTEXT_RULE}}", () => rule)
     .replace("{{TONE}}", () => tone)
     .replace("{{HINT}}", () => req.hint ?? "(없음)")
     .replace("{{SOURCE_GUIDE}}", () => s.guide)
@@ -540,11 +575,11 @@ async function runDraft(req: DraftRequest, cfg: NedConfig, id: string, tone: str
   let res;
   if (noTools) {
     // Everything is in the prompt: no tools, one turn, and none of the user's hooks / plugins / MCP servers (start-up ~4s instead of ~40s).
-    log(`draft: asking claude (${req.source} ${id}, fast${fast ? `, context ${fast.age}m old` : ""})`);
+    log(`draft: asking claude (${req.source} ${id}, fast${fast ? `, context ${fast.age}m old` : ""}${req.origin ? `, from ${req.origin}` : ""})`);
     res = await runClaude(prompt, { allowedTools: [], tools: [], maxTurns: 1, isolated: true, effort: "low", model: cfg.draft_fast_model ?? cfg.claude_model, timeoutMs: 90_000, job: "draft" });
   } else {
     const tools = draftTools(req.source);
-    log(`draft: asking claude (${req.source} ${id}, full, tools=${tools.join(",")})`);
+    log(`draft: asking claude (${req.source} ${id}, full, tools=${tools.join(",")}${req.origin ? `, from ${req.origin}` : ""})`);
     // Read-only: plan mode + read tools only; built-ins narrowed to ToolSearch.
     res = await runClaude(prompt, { allowedTools: tools, tools: ["ToolSearch"], maxTurns: 8, model: cfg.claude_model, timeoutMs: 4 * 60_000, job: "draft" });
   }
