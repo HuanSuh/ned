@@ -87,7 +87,12 @@ export function onLinkClick(e, open = openLink) {
   return true;
 }
 
-/** main.js: one listener on document (bubble — row handlers run first and may cancel). */
+/**
+ * main.js: one CAPTURE listener on document, registered before every other module's. Capture because reviewed.js stops
+ * propagation of clicks on inbox-row icons (`#items .row .ib`, incl. the ↗ open anchor) in the capture phase — a bubble
+ * listener never saw them. stopPropagation can't stop another listener on the same node, and registering first means
+ * no earlier handler can have cancelled the click either. No module cancels clicks on external anchors on purpose.
+ */
 export function init(doc = document) {
-  doc.addEventListener("click", (e) => { onLinkClick(e); });
+  doc.addEventListener("click", (e) => { onLinkClick(e); }, true);
 }

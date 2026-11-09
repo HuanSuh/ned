@@ -179,7 +179,8 @@ window.NED = { store, api: { api, postJson }, nav, openLink };
 
 // Every module's listeners + one-time setup, in the order the single file ran them — listener order on document
 // matters (e.g. the error popover's Esc stopImmediatePropagation runs before the page keys in boot()).
-for (const init of [initChips, initPopover, initSettings, initCardLayout, initLayout, initReviewed, initDrafts, initCalendar, initCards, initHistView, initSlackThread, initAgStatus, initHome, initTodoSplit, initComms, initActivityPing, initOpenLink]) init();
+// initOpenLink first: its document capture click listener must run before reviewed.js's (which stops inbox-row icon clicks).
+for (const init of [initOpenLink, initChips, initPopover, initSettings, initCardLayout, initLayout, initReviewed, initDrafts, initCalendar, initCards, initHistView, initSlackThread, initAgStatus, initHome, initTodoSplit, initComms, initActivityPing]) init();
 boot();
 
 function boot() {
