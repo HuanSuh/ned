@@ -12,6 +12,7 @@ import { toast } from "../ui/toast.js";
 import { sendAndWait } from "./sendjob.js";
 import { buildFeed, clampSize, commsVoice, createSseParser, feedHtml, helloLine, messagesHtml, readSize, shellHtml, tickerOf, usd } from "./chat-core.js";
 import { bindCodeCopy } from "./code-copy.js";
+import { openLink } from "./openlink.js";
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const MOD = MAC ? "⌘" : "Ctrl+";
@@ -305,7 +306,7 @@ function onFeedClick(e) {
   const x = st.feed[+b.dataset.fi]; if (!x) return;
   st.seen.add(x.key); saveSeen();
   if (x.go === "chat") { setTab("chat"); return; }
-  if (x.url) window.open(x.url, "_blank", "noopener");
+  if (x.url) openLink(x.url);
   else { location.hash = `#${x.go}`; close(); }
   render();
 }
