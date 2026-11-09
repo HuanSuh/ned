@@ -6,6 +6,8 @@ import { buildClaudeArgs, extractJson, llmDisabled, runClaude, type ClaudeRunOpt
 import type { NedConfig } from "./config.js";
 import { invalidateCalendarRanges } from "./calendar.js";
 import { buildCalendarCreate, eventKey, type CalendarEventInput, type CreatedEvent } from "./calendar-create.js";
+import type { ActionOrigin } from "./origin.js";
+import { parseOrigin } from "./origin.js";
 import { REF_FIELDS, githubTarget, jiraTarget, readDraft, sessionEvents, slackTarget, type DraftMeta, type DraftRef, type DraftSource } from "./drafts.js";
 import { NED_HOME, log } from "./paths.js";
 
@@ -64,13 +66,11 @@ export interface SendRequest {
   mode: SendMode;
   /** calendar `create` only (POST /api/calendar/events builds it — see calendar-create.ts). */
   event?: CalendarEventInput;
-  /** "chat" = run from a Ned Net 확인 카드 (needs config.actions.chat_write too); absent = dashboard buttons. */
+  /** "chat" = run from a Ned Net 확인 카드 (needs config.actions.chat_write too); card / history / watch = which dashboard list; absent = older clients. */
   origin?: ActionOrigin;
 }
 
-export type ActionOrigin = "chat";
-/** `body.origin` → "chat" or undefined (anything else is ignored). */
-export const parseOrigin = (v: unknown): ActionOrigin | undefined => (v === "chat" ? "chat" : undefined);
+export { ACTION_ORIGINS, parseOrigin, type ActionOrigin } from "./origin.js";
 
 export interface SendResult {
   ok: boolean;
@@ -109,7 +109,7 @@ export interface ActionLogEntry {
   event_key?: string;
   /** calendar `create` ok: the new event. */
   event?: CreatedEvent;
-  /** "chat" when the Ned Net 확인 카드 ran it (설정 → 오늘 한 액션 shows a 대화창 badge). */
+  /** Where it was started (설정 → 오늘 한 액션 shows a 출처 chip: 대화창 / 카드 / 지난 N일 / 팔로업). */
   origin?: ActionOrigin;
   /** session `create` (대화창에서 세션 만들기): what was started — see session-create.ts. */
   session_create?: { repo: string; worktree_mode: string; worktree_name: string; model: string; worktree_path?: string; handle?: string; stage?: string };

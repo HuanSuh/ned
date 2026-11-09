@@ -3,37 +3,15 @@
  * more in the menu before sending. Rows rendered by other modules get the ⋯ button injected (see `inject`), so home.js /
  * calendar.js don't need to know about it; they can call `axBtn(kind, item)` directly instead. */
 import { sendAndWait } from "./sendjob.js";
-import { ACTION_KO, actionsOn, clean, openDraft } from "./drafts.js";
+import { ACTION_KO, actionsOn, openDraft } from "./drafts.js";
+import { axBtn } from "./draftref.js";
 import { S } from "../state.js";
 import { errSummary } from "../ui/popover.js";
 import { toast } from "../ui/toast.js";
 import { esc } from "../util.js";
 
-// ---------- refs ----------
-export const jiraRef = (x) => clean({ url: x.url, key: x.key || /\/browse\/([A-Z][A-Z0-9_]*-\d+)/i.exec(x.url || "")?.[1], title: [x.key, x.title].filter(Boolean).join(" ") || x.title, text: x.status ? `상태: ${x.status}` : x.detail });
-export function githubRef(x) {
-  const m = /github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/.exec(x.url || "");
-  return clean({ url: x.url, repo: x.repo || m?.[1], number: x.number != null ? String(x.number) : m?.[2], title: x.title, text: x.detail });
-}
-/** Google Calendar `eid` = base64("<eventId> <calendarId>") → both ids. */
-export function decodeEid(url) {
-  const eid = /[?&]eid=([^&#]+)/.exec(url || "")?.[1];
-  if (!eid) return {};
-  try {
-    const b64 = decodeURIComponent(eid).replace(/-/g, "+").replace(/_/g, "/");
-    const [event_id, calendar_id] = atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4)).split(" ");
-    return { event_id, calendar_id: calendar_id && calendar_id !== "primary" ? calendar_id.replace(/@m$/, "") : undefined };
-  } catch { return {}; }
-}
-export const calRef = (e) => { const d = decodeEid(e.url); return clean({ url: e.url, event_id: e.id || d.event_id, calendar_id: d.calendar_id, title: e.title, rsvp: e.rsvp }); };
-export const REF_OF = { jira: jiraRef, github: githubRef, calendar: calRef };
-
-/** The ⋯ button for one item. `kind` = jira | github | calendar. */
-export function axBtn(kind, item) {
-  const ref = REF_OF[kind]?.(item);
-  if (!ref || (kind === "calendar" && (!ref.event_id || item.rsvp === "organizer"))) return "";
-  return `<button type="button" class="ib axb" data-axm="${esc(JSON.stringify({ kind, ref }))}" title="액션 — ${kind === "jira" ? "코멘트·상태 변경" : kind === "github" ? "리뷰·승인" : "참석 응답"}" aria-label="액션 메뉴" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h.01M12 12h.01M18 12h.01" stroke-width="3"/></svg></button>`;
-}
+// ---------- refs + the ⋯ button: features/draftref.js (pure, node-testable) ----------
+export { axBtn, calRef, decodeEid, githubRef, jiraRef, REF_OF } from "./draftref.js";
 
 // ---------- menu model ----------
 const RSVP_KO = { accepted: "수락", tentative: "미정", declined: "거절" };
@@ -68,9 +46,9 @@ function popEl() {
   document.body.appendChild(pop);
   return pop;
 }
-export function openMenu(btn, kind, ref) {
+export function openMenu(btn, kind, ref, origin = "") {
   closeMenu(false);
-  AX = { open: true, btn, kind, ref, items: menuItems(kind, ref), confirm: null, busy: null, error: "", transitions: null, loadingSub: false };
+  AX = { open: true, btn, kind, ref, origin, items: menuItems(kind, ref), confirm: null, busy: null, error: "", transitions: null, loadingSub: false };
   btn.setAttribute("aria-expanded", "true");
   renderMenu(); place();
   pop.querySelector("button:not([disabled])")?.focus();
@@ -111,7 +89,7 @@ export function renderMenu() {
 async function send(it) {
   const { kind, ref } = AX;
   AX.busy = it.id; AX.confirm = null; AX.error = ""; renderMenu();
-  const body = { source: kind, mode: it.send.mode, ref: { ...ref, ...(it.send.ref || {}) }, text: it.send.text || "" };
+  const body = { source: kind, mode: it.send.mode, ref: { ...ref, ...(it.send.ref || {}) }, text: it.send.text || "", ...(AX.origin ? { origin: AX.origin } : {}) };
   const r = await sendAndWait(body, { label: it.label }); // a daemon job: 202 → poll (features/sendjob.js)
   if (!AX.open) return r;
   AX.busy = null;
@@ -119,7 +97,7 @@ async function send(it) {
 }
 async function loadTransitions() {
   AX.loadingSub = true; AX.error = ""; renderMenu(); place();
-  const r = await sendAndWait({ source: "jira", mode: "transitions", ref: AX.ref }, { label: "Jira 전환 목록" });
+  const r = await sendAndWait({ source: "jira", mode: "transitions", ref: AX.ref, ...(AX.origin ? { origin: AX.origin } : {}) }, { label: "Jira 전환 목록" });
   if (!AX.open) return;
   AX.loadingSub = false;
   const list = r.data?.transitions;
@@ -130,7 +108,7 @@ async function loadTransitions() {
 export async function pick(id) {
   const it = [...AX.items, ...(AX.transitions || [])].find((x) => x.id === id); if (!it) return;
   if (!actionsOn()[it.gate]) { toast(`설정 → 쓰기 액션에서 '${ACTION_KO[it.gate]}' 을 켜야 해.`); return; }
-  if (it.draft) { const { ref } = AX; closeMenu(false); openDraft(it.draft, ref); return; }
+  if (it.draft) { const { ref, origin } = AX; closeMenu(false); openDraft(it.draft, ref, "", { origin }); return; }
   if (it.sub === "transitions") { if (!AX.transitions) loadTransitions(); return; }
   if (it.confirm && AX.confirm !== it.id) { AX.confirm = it.id; renderMenu(); place(); pop.querySelector("[data-axgo]")?.focus(); return; }
   const r = await send(it);
@@ -168,7 +146,7 @@ export function inject(root = document) {
     const item = kind === "jira" ? (S.agenda?.jira || []).find((j) => j.url === href) || { url: href, key: /^[A-Z]/.test(key) ? key : undefined, title: ti.querySelector(".tt")?.textContent }
       : kind === "github" ? (S.agenda?.github || []).find((g) => g.url === href) || { url: href, title: ti.querySelector(".tt")?.textContent }
       : (cal ||= calByUrl()).get(href) || { url: href, title: ti.querySelector(".tt")?.textContent };
-    const b = axBtn(kind, item); if (b) ra.insertAdjacentHTML("afterbegin", b);
+    const b = axBtn(kind, item, "card"); if (b) ra.insertAdjacentHTML("afterbegin", b);
   }
   // Calendar day view: all-day rows and timed blocks' first line.
   for (const row of root.querySelectorAll(".allday .ad, .cev .t1")) {
@@ -176,7 +154,7 @@ export function inject(root = document) {
     const href = row.querySelector(".tt a[href]")?.getAttribute("href") || "";
     if (!CAL_RE.test(href)) continue;
     const e = (cal ||= calByUrl()).get(href) || { url: href, title: row.querySelector(".tt")?.textContent };
-    const b = axBtn("calendar", e); if (b) row.insertAdjacentHTML("beforeend", b);
+    const b = axBtn("calendar", e, "card"); if (b) row.insertAdjacentHTML("beforeend", b);
   }
 }
 
@@ -212,7 +190,7 @@ export function init() {
     if (b) {
       e.preventDefault(); e.stopPropagation();
       if (AX.open && AX.btn === b) return closeMenu();
-      try { const { kind, ref } = JSON.parse(b.dataset.axm); openMenu(b, kind, ref); } catch (err) { console.warn("ax ref", err); }
+      try { const { kind, ref, origin } = JSON.parse(b.dataset.axm); openMenu(b, kind, ref, origin || ""); } catch (err) { console.warn("ax ref", err); }
       return;
     }
     if (!AX.open) return;

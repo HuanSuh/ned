@@ -41,7 +41,7 @@ export function renderTodoGroups() {
   const nedRow = (a) => {
     const u = safeUrl(a.url);
     return `<div class="ti${a.reviewed_at ? " reviewed" : ""}"><span class="ic">${KIND_ICON[a.kind] || "🔔"}</span><div class="mn"><span class="tt">${u ? ext(u, esc(a.title)) : esc(a.title)}</span>${a.detail ? `<div class="sb"><span class="d">${esc(a.detail)}</span></div>` : ""}</div>
-        <div class="ra">${draftFor(a.kind, a, a.id)}${openIcon(u)}${reviewIcon(a)}${closeIcon(a)}</div></div>`;
+        <div class="ra">${draftFor(a.kind, a, a.id, "card")}${openIcon(u)}${reviewIcon(a)}${closeIcon(a)}</div></div>`;
   };
   const nedRows = ned.map(nedRow).join("") + (nedRev.length
     ? `${ned.length ? "" : `<div class="gnone">열린 액션 아이템 없음.</div>`}<details class="rvfold" data-rv="home" ${ui.revOpenHome ? "open" : ""}><summary>확인 완료 ${nedRev.length}</summary>${nedRev.map(nedRow).join("")}</details>` : "");
@@ -64,7 +64,7 @@ export function renderTodoGroups() {
     const ic = "unread" in x ? `<span class="ic" title="${x.unread ? "안 읽음" : "읽음"}">${x.unread ? "●" : "○"}</span>` : `<span class="ic">${mailRow(x)[2]}</span>`;
     return `<div class="ti${need ? " need" : ""}${revCls("email", x)}">${ic}<div class="mn"><span class="tt">${u ? ext(u, esc(x.subject || "(제목 없음)")) : esc(x.subject || "(제목 없음)")}</span>
         <div class="sb"><span class="from">${esc(x.from)}</span>${need ? `<span class="chipx today">확인 필요</span>` : ""}${ts ? `<span>${rel(toMs(ts))}</span>` : ""}</div></div>
-        <div class="ra">${draftFor("email", x, srcKey("email", x))}${openIcon(u)}${srcCheck("email", x)}</div></div>`;
+        <div class="ra">${draftFor("email", x, srcKey("email", x), "card")}${openIcon(u)}${srcCheck("email", x)}</div></div>`;
   });
   card("mail", {
     hidden: !mailOn, loading: loadingSrc("mail", ag?.mail), n: mi.length, hot: mi.some((x) => x.reason === "deadline" || x.reason === "approval"),
@@ -73,7 +73,7 @@ export function renderTodoGroups() {
       const u = safeUrl(x.url), r = mailRow(x);
       return `<div class="ti${revCls("email", x)}"><span class="ic">${r[2]}</span><div class="mn"><span class="tt">${u ? ext(u, esc(x.subject || "(제목 없음)")) : esc(x.subject || "(제목 없음)")}</span>
           <div class="sb"><span class="from">${esc(x.from)}</span><span class="chipx ${r[0]}">${r[1]}</span>${x.why ? `<span class="d">${esc(x.why)}</span>` : ""}${x.received ? `<span>${rel(toMs(x.received))}</span>` : ""}</div></div>
-          <div class="ra">${draftFor("email", x, srcKey("email", x))}${openIcon(u)}${srcCheck("email", x)}</div></div>`;
+          <div class="ra">${draftFor("email", x, srcKey("email", x), "card")}${openIcon(u)}${srcCheck("email", x)}</div></div>`;
     }),
     empty: unavailable || (mail ? "확인할 메일 없음." : "다음 새로고침 때 메일도 가져올게."),
     sum: mail ? esc([counts([["결재", mr("approval")], ["마감", mr("deadline")], ["답장", mr("reply")], ["확인", mr("request")]], " · "), `안 읽은 ${unreadN}`].filter(Boolean).join(" · ")) : "",
@@ -110,7 +110,7 @@ export function renderTodoGroups() {
     const chip = need ? `<span class="chipx today">답 필요</span>` : x.answered ? `<span class="chipx ok">답함</span>` : `<span class="chipx ${r[0]}">${r[1]}</span>`;
     return `<div class="ti${need ? " need" : ""}${x.answered && !need ? " answered" : ""}${revCls("slack", x)}"><span class="ic">${r[2]}</span><div class="mn">${threadMain(x, u, chip + moreBadge(x) + histToggle(x)) ||`<span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
         <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span>${chip}${moreBadge(x)}${histToggle(x)}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div>`}${histPanel(x)}</div>
-        <div class="ra">${draftFor("slack", x, srcKey("slack", x))}${openIcon(u)}${srcCheck("slack", x)}</div></div>`;
+        <div class="ra">${draftFor("slack", x, srcKey("slack", x), "card")}${openIcon(u)}${srcCheck("slack", x)}</div></div>`;
   });
   card("slack", {
     hidden: !slackOn, loading: loadingSrc("slack", ag?.slack), n: si.length + wNeed.length, hot: si.some((x) => x.reason === "dm" || x.reason === "mention") || wNeed.length > 0,
@@ -119,7 +119,7 @@ export function renderTodoGroups() {
       const u = safeUrl(x.url), r = slRow(x);
       return `<div class="ti${revCls("slack", x)}"><span class="ic">${r[2]}</span><div class="mn">${threadMain(x, u, `<span class="chipx ${r[0]}">${x.reopened ? "새 답글" : r[1]}</span>${moreBadge(x)}${histToggle(x)}`) ||`<span class="tt">${u ? ext(u, esc(x.text || "(내용 없음)")) : esc(x.text || "(내용 없음)")}</span>
           <div class="sb"><span class="key" style="color:var(--dim)">${esc(x.channel)}</span><span class="from">${esc(x.from)}</span><span class="chipx ${r[0]}">${r[1]}</span>${moreBadge(x)}${histToggle(x)}${x.ts ? `<span>${rel(toMs(x.ts))}</span>` : ""}</div>`}${histPanel(x)}</div>
-          <div class="ra">${draftFor("slack", x, srcKey("slack", x))}${openIcon(u)}${srcCheck("slack", x)}</div></div>`;
+          <div class="ra">${draftFor("slack", x, srcKey("slack", x), "card")}${openIcon(u)}${srcCheck("slack", x)}</div></div>`;
     }),
     empty: unavailable || (slack ? "답할 Slack 없음." : "다음 새로고침 때 Slack 도 가져올게."),
     sum: si.length || wNeed.length ? esc([si.length ? `${counts([["멘션", si.filter((x) => x.reason === "mention").length], ["DM", si.filter((x) => x.reason === "dm").length], ["스레드", si.filter((x) => x.reason === "thread").length], ["그룹", si.filter((x) => x.reason === "group").length]])} 답 필요` : "", wNeed.length ? `팔로업 채널 ${wNeed.length}건 확인` : ""].filter(Boolean).join(" · ")) : "",
