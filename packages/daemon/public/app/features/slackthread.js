@@ -11,7 +11,8 @@ export const readThread = (x) => (x?.thread?.last_reply_ts ? x.thread : null);
 export function newReplies(x) {
   const t = x?.thread;
   if (!t || !(t.new_since_me > 0)) return 0;
-  return t.seen_reply_ts && tsMs(t.seen_reply_ts) >= tsMs(t.last_reply_ts) ? 0 : t.new_since_me;
+  // Same as slack-threads.ts hasNewSinceMe: seen covers the newest known ts (last reply or phase 1's newest hit).
+  return t.seen_reply_ts && tsMs(t.seen_reply_ts) >= Math.max(tsMs(t.last_reply_ts), tsMs(t.search_latest_ts)) ? 0 : t.new_since_me;
 }
 export const newChip = (x) => { const n = newReplies(x); return n ? `<span class="chipx today" title="내 마지막 답 이후 다른 사람이 쓴 답글">+${n} 새 답글</span>` : ""; };
 const clip = (s, n) => { const t = String(s || "").replace(/\s+/g, " ").trim(); return t.length > n ? t.slice(0, n - 1) + "…" : t; };

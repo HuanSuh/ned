@@ -71,6 +71,7 @@ body.modal-open { overflow: hidden; }
 .ib:focus-visible { outline: 2px solid var(--info); outline-offset: 1px; }
 .ib.on { color: var(--hero-text, var(--hero)); }
 .ib-check.on svg { stroke-width: 2.8; }
+.ib-check.nokey { opacity: .3; cursor: not-allowed; } /* row without a ✓ key (revkeys.js srcCheck) */
 .ti .ra { gap: 2px; }
 .ti.reviewed { opacity: .55; } .ti.reviewed:hover, .ti.reviewed:focus-within { opacity: .9; }
 details.rvfold { margin-top: 2px; }
