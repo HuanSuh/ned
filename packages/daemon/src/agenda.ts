@@ -63,6 +63,8 @@ export interface SlackContext {
   messages: { from: string; ts: string; text: string }[];
   /** ISO time the agenda run collected it. */
   collected_at: string;
+  /** My last message in the thread (Slack ts, from the followed-thread read), when known — the draft's [맥락]/[답할 대상] cut. */
+  my_last_ts?: string;
 }
 
 export interface MailContext {

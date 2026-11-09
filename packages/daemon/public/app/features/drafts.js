@@ -1,6 +1,7 @@
 /* Reply-draft modal: POST /api/draft → 3 drafts, edit, regenerate → POST /api/send. */
 import { postJson } from "../api.js";
 import { init as initActions } from "./actions.js";
+import { asksHtml, editMentions, mentionIds, shownText, toggleMentions } from "./draftasks.js";
 import { clean, parseDraftAttr } from "./draftref.js";
 import { SRC_KEY_RE, reviewAttention, reviewSource } from "./reviewed.js";
 import { resumePending, sendAndWait } from "./sendjob.js";
@@ -52,7 +53,7 @@ export async function requestDraft(hint) {
   const r = await postJson("/api/draft", clean({ source: DR.source, ref: DR.ref, hint: hint || undefined, origin: DR.origin || undefined })).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
   if (!DR.open) { S.drafting = false; renderHeader(); return; }
   if (r.ok && r.data) {
-    DR.resp = r.data; DR.tab = (r.data.drafts?.[1] || r.data.drafts?.[0])?.id ?? null; DR.edits = {};
+    DR.resp = r.data; DR.tab = (r.data.drafts?.[1] || r.data.drafts?.[0])?.id ?? null; DR.edits = {}; DR.mention = false; DR.mentionAdded = {}; // 멘션 제안 toggle: off by default
     // drafting a reply counts as having looked at it
     if (DR.att && SRC_KEY_RE.test(DR.att)) { if (!(S.agenda?.reviewed || {})[DR.att]) reviewSource(DR.att, true); }
     else { const a = DR.att && S.state?.attention.find((x) => x.id === DR.att); if (a && !a.reviewed_at) reviewAttention(DR.att, true); }
@@ -93,7 +94,18 @@ export function draftActions() {
   return list;
 }
 export const curDraft = () => DR.resp?.drafts?.find((d) => d.id === DR.tab) || null;
-export const curText = () => (DR.tab in DR.edits ? DR.edits[DR.tab] : curDraft()?.text || "");
+export const curText = () => (DR.tab in DR.edits ? DR.edits[DR.tab] : shownText(curDraft()?.text || "", mentionIds(DR.resp), !!DR.mention));
+/**
+ * 멘션 제안 toggle (state transitions: features/draftasks.js toggleMentions / editMentions). Edited texts get the
+ * missing mentions (never twice); turning it off strips only what the toggle added — a mention the user typed stays.
+ */
+export function toggleMention() {
+  const ids = mentionIds(DR.resp); if (!ids.length) return;
+  const st = toggleMentions({ on: !!DR.mention, edits: DR.edits, added: DR.mentionAdded || {} }, ids);
+  DR.mention = st.on; DR.edits = st.edits; DR.mentionAdded = st.added;
+  $("dm-text").dataset.tab = ""; // repaint the textarea with the new text
+  DR.confirm = null; renderDraft();
+}
 export function confirmTarget(a) {
   const t = DR.ref.title || "";
   if (DR.source === "jira") return `Jira ${DR.ref.key || t} 에 이 코멘트를 남김`;
@@ -108,7 +120,7 @@ export function renderDraft() {
   const note = DR.note ? `<div class="dnote" role="note">ⓘ ${esc(DR.note)}</div>` : "";
   $("dm-ctx").innerHTML = DR.pick ? `<div class="dpick" role="group" aria-label="답할 메시지 후보">${DR.pick.map((c, i) => `<button type="button" class="dpk" data-dpick="${i}"><span class="from">${esc(c.from || "")}</span><span class="tx">${esc(c.label || c.ref?.text || "")}</span></button>`).join("")}</div>`
     : note + (DR.loading ? `<div class="calload"><span class="spin"></span>맥락 읽고 초안 쓰는 중… <span class="hint">보통 10~30초</span></div>`
-    : r ? `${ctx.summary ? `<div class="sum">${esc(ctx.summary)}</div>` : ""}${ctx.excerpt ? `<blockquote>${esc(ctx.excerpt)}</blockquote>` : ""}<div class="mmeta">${r.cached ? "캐시 · " : ""}$${Number(r.cost_usd || 0).toFixed(3)}</div>` : "");
+    : r ? `${ctx.summary ? `<div class="sum">${esc(ctx.summary)}</div>` : ""}${ctx.excerpt ? `<blockquote>${esc(ctx.excerpt)}</blockquote>` : ""}${asksHtml(r, { mentionOn: !!DR.mention })}<div class="mmeta">${r.cached ? "캐시 · " : ""}$${Number(r.cost_usd || 0).toFixed(3)}</div>` : "");
   $("dm-tabs").innerHTML = (r?.drafts || []).map((d) => `<button type="button" class="tab ${d.id === DR.tab ? "on" : ""}" role="tab" aria-selected="${d.id === DR.tab}" data-dtab="${esc(d.id)}">${esc(d.label)}</button>`).join("");
   const ta = $("dm-text");
   if (document.activeElement !== ta || ta.dataset.tab !== String(DR.tab)) { ta.value = curText(); ta.dataset.tab = String(DR.tab); }
@@ -178,12 +190,19 @@ export function init() {
   $("draft-modal").addEventListener("click", (e) => {
     if (e.target === $("draft-modal") || e.target.closest("[data-mclose]")) return closeDraft();
     const pk = e.target.closest("[data-dpick]"); if (pk) return pickDraft(Number(pk.dataset.dpick));
+    if (e.target.closest("[data-dmention]")) return toggleMention();
     const t = e.target.closest("[data-dtab]"); if (t) { DR.tab = t.dataset.dtab; DR.confirm = null; renderDraft(); return; }
     const a = e.target.closest("[data-dact]"); if (a) return runAction(a.dataset.dact);
     if (e.target.closest("[data-dconfirm]")) return runAction(DR.confirm);
     if (e.target.closest("[data-dcancel]")) { DR.confirm = null; renderDraft(); }
   });
-  $("dm-text").addEventListener("input", (e) => { if (DR.tab != null) DR.edits[DR.tab] = e.target.value; if (DR.confirm) { DR.confirm = null; renderDraft(); } });
+  $("dm-text").addEventListener("input", (e) => {
+    // first edit of a tab while the toggle is on records the mentions it shows as the toggle's (stripped on off)
+    if (DR.tab != null) {
+      const st = editMentions({ on: !!DR.mention, edits: DR.edits, added: DR.mentionAdded || {} }, DR.tab, e.target.value, curDraft()?.text || "", mentionIds(DR.resp));
+      DR.edits = st.edits; DR.mentionAdded = st.added;
+    }
+    if (DR.confirm) { DR.confirm = null; renderDraft(); } });
   $("dm-regen").addEventListener("click", () => requestDraft($("dm-hint").value.trim()));
   $("dm-hint").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing && !(e.metaKey || e.ctrlKey)) { e.preventDefault(); requestDraft(e.target.value.trim()); } });
   // Modal keys win over page shortcuts: Esc closes (or backs out of the confirm step), ⌘⏎ / Ctrl⏎ runs the primary action.

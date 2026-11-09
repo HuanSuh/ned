@@ -379,7 +379,9 @@ export function mergeThreadReads(threads: SlackThread[], raw: unknown[], now = D
 /** The thread excerpt as a draft context (drafts.ts fast path), or undefined when never read. */
 export function threadContext(t: SlackThread): SlackContext | undefined {
   if (!t.recent.length || !t.checked_at) return undefined;
-  return { participants: t.participants, messages: t.recent.map((m) => ({ from: m.from, ts: m.at, text: m.text })), collected_at: t.checked_at };
+  const ctx: SlackContext = { participants: t.participants, messages: t.recent.map((m) => ({ from: m.from, ts: m.at, text: m.text })), collected_at: t.checked_at };
+  if (t.my_last_reply_ts) ctx.my_last_ts = t.my_last_reply_ts;
+  return ctx;
 }
 
 export function threadView(t: SlackThread): SlackThreadView {
