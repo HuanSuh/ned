@@ -6,19 +6,19 @@
 ## 요약
 
 Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub·Sentry)를 모아 보여 주는 로컬 대시보드(탭: 홈·인박스·타임라인·설정). 전역 키: h 홈, i 인박스, r 지금 점검, ⌘K·/ 검색, ⌘J 통신기.
-- **홈**: 일정(일/주, ＋·드래그로 일정 만들기, ⋯ 수락/미정/거절), 할 일(NED 액션 아이템 / 개인 할 일 — 구분선·접기, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, 이력 7/30일, ↻ 소스별 갱신), 팔로업 채널 카드(멘션 없어도 따라가는 Slack 채널 요약, "나한테" 강조).
-- **인박스**: 우선·기타·기록(브리핑) 3탭 + "장비실"(세션 상태, 대화창 출처 배지). 키 j/k·e·⏎·1/2/3.
-- **타임라인**: 세션 이벤트·브리핑 시간순(유형·워크트리 필터)
-- **순찰/브리핑**: "지금 점검"(r) = 소스를 새로 가져와 판단 → 알림·attention. 자동 순찰은 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑은 `briefing_time` — 실패하면 10분 뒤 재시도(최대 3회).
-- **야간·유휴 감속**: 조용한 시간·유휴(`idle_schedule`)엔 자동 순찰·홈 갱신을 늦추거나 멈춤(`quiet_schedule.mode` normal/slow/pause). 홈 상단 칩. 수동 실행은 늘 즉시.
-- **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기를 확인 카드로 제안, 텍스트만 고쳐 실행; `actions.chat_session_create` 면 새 세션도; 회의·문서·메일 정리는 노트로 저장), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글 피드.
-- **답장 초안 ✎**: 연필 → 초안 3개 → 복사/열기/보내기. 실제 쓰기는 설정 → 쓰기 액션에서 켠 것만: `actions.slack_send`·`gmail_draft`(기본 켬)·`gmail_send`·`session_send`(기본 켬)·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯ 메뉴.
+- **홈**: 일정(일/주, ＋·드래그로 일정 만들기, ⋯ 수락/미정/거절), 할 일(NED 액션 아이템 / 개인 할 일 — 구분선·접기, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, 이력 7/30일, ↻ 소스별 갱신), 팔로업 채널 카드(멘션 없이 따라가는 Slack 채널 요약, "나한테" 강조).
+- **인박스**: 우선·기타·기록(브리핑) 3탭 + "장비실"(세션 상태, 대화창 배지). 키 j/k·e·⏎·1/2/3.
+- **타임라인**: 세션 이벤트·브리핑 시간순(필터)
+- **순찰/브리핑**: "지금 점검"(r) = 소스를 새로 가져와 판단 → 알림·attention. 자동 순찰 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑 `briefing_time` — 실패 시 10분 뒤 재시도(3회).
+- **야간·유휴 감속**: 조용한 시간·유휴(`idle_schedule`)엔 자동 순찰·홈 갱신을 늦추거나 멈춤(`quiet_schedule.mode` normal/slow/pause). 수동 실행은 즉시.
+- **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기를 확인 카드로 제안; `actions.chat_session_create` 면 새 세션도; 회의·문서·메일 정리는 노트로 저장), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글.
+- **답장 초안 ✎**: 연필 → 초안 3개 → 복사/열기/보내기. 카드 행·이력 "지난 N일" 행·팔로업 카드(모든 행·최근 대화·요약 줄)에 있음; 팔로업은 늘 스레드 답글. 발췌가 없거나 6시간 넘으면 스레드부터 읽음. 실제 쓰기는 설정 → 쓰기 액션에서 켠 것만: `actions.slack_send`·`gmail_draft`(기본 켬)·`gmail_send`·`session_send`(기본 켬)·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯. 오늘 한 액션에 출처 칩.
 - **확인 완료 ✓**: 항목을 처리됨으로 접음(바뀌면 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`, 앞 `ack_check_max`개만 검색)면 자동 해제.
-- **Gmail 읽음 표시**(`actions.gmail_mark_read`, 기본 끔): 메일 ✓ 면 Gmail 도 읽음.
-- **검색 ⌘K**: 통합 검색(초성, 수집 이력 포함).
-- **아카이브(Obsidian)**: 설정 → 아카이브에 볼트 `archive.vault` + 켜기 `archive.enabled` → 매일 `<archive.folder>/Daily/YYYY-MM/날짜.md` 에 브리핑·순찰·보낸 것·결과물·들어온 것·통계 자동 기록(Claude 호출 없음, 마커 밖 메모 보존). `archive.daily_embed` = 내 데일리 노트에 embed 한 줄.
+- **Gmail 읽음 표시**(`actions.gmail_mark_read`, 끔): 메일 ✓ 면 Gmail 도 읽음.
+- **검색 ⌘K**: 통합 검색(초성·수집 이력).
+- **아카이브(Obsidian)**: 설정 → 아카이브에 볼트 `archive.vault` + 켜기 `archive.enabled` → 매일 `<archive.folder>/Daily/YYYY-MM/날짜.md` 에 브리핑·순찰·보낸 것·결과물·들어온 것·통계 자동 기록(마커 밖 메모 보존). `archive.daily_embed` = 데일리 노트에 embed.
 - **수집 이력**: 가져온 항목을 소스별로 보관(`history.keep_days.*`). 수집은 새 것만(증분, Slack 전체 재검색 창 `history.collect.slack_hours`), 카드·순찰·초안은 이력의 표시 구간(`history.display.*`) — Slack 미답 요청은 기간 무관 유지.
-- **설정**(하단 "저장"): 외형(테마 `dashboard.theme` 시스템/라이트/다크, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(`heartbeat_minutes`, `signal_check_minutes`, `briefing_time`, `agenda_refresh_minutes`, `agenda_source_minutes.*`, `quiet_schedule.*`, `idle_schedule.*`) · 쓰기 액션(`actions.*`, 기본 말투 `reply_tone`, 소스별 답장 말투 `reply_tone_by_source.*`, 오늘 한 액션 로그) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(모델 `claude_model`, 최대 턴 `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd` $15 — 닿으면 자동 실행·대화 멈춤). 저장마다 백업 10개(되돌리기).
+- **설정**(하단 "저장"): 외형(테마 `dashboard.theme` 시스템/라이트/다크, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(`heartbeat_minutes`, `signal_check_minutes`, `briefing_time`, `agenda_refresh_minutes`, `agenda_source_minutes.*`, `quiet_schedule.*`, `idle_schedule.*`) · 쓰기 액션(`actions.*`, 말투 `reply_tone`·`reply_tone_by_source.*`, 오늘 한 액션) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(`claude_model`, `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd` $15 — 닿으면 자동 실행·대화 멈춤). 저장마다 백업 10개.
 
 ## 상세
 
@@ -53,12 +53,13 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 보여 주는 것: 📬 메일 확인 필요(결재/마감/답장/확인, 안 읽은 N) · 📋 Jira 내 이슈(마감 지난/오늘/진행 중) · 💬 Slack 답할 것(DM/멘션/스레드/그룹, 답 필요/답함/새 답글) · 🐙 GitHub 리뷰 요청(리뷰 요청/변경 요청/승인됨). 접힘/펼침, 메일·Slack 은 `확인 필요 | 전체`(전체 = 표시 구간 — 메일 `history.display.mail_days`·Slack `history.display.slack_hours` — 의 스레드·멘션·DM; Slack 확인 필요는 기간 무관 — 답 안 한 요청은 답·해제 이모지·✓ 까지 남음).
 - 데이터: agenda.json — 소스별 `claude -p`(커넥터 읽기) 또는 GitHub 는 `gh search prs`. 소스별 주기마다 자동, 답장 맥락은 백그라운드 수집("맥락 수집 N/M"). Slack 스레드·DM 의 최근 대화는 갱신마다 다시 읽되, 마지막으로 읽은 뒤 새 메시지가 안 보이면 건너뜀(6시간마다 한 번은 재확인).
 - 언제: 답할 메시지·리뷰·마감 이슈를 소스별로 훑을 때.
-- 버튼·설정: 카드 ↻(그 소스만 지금 갱신), ⚠ 오류 배지, 항목 ✎ 초안·열기·✓ 확인. **이력 `표시 구간 | 지난 7일 | 30일`**(메일·Slack 은 전체 보기 위, Jira·GitHub 은 목록 아래): 표시 구간 밖까지 Ned 가 모은 항목을 날짜 구분선과 함께 최신순(최대 200, 지금 카드에 있는 건 "지금", 상태 칩 답함/답 필요/안 읽음/목록에서 빠짐), 카드별 기억(`ned.cardhist.<카드>`). `sources.*`, `agenda_source_minutes.*`, `dashboard.card_order`/`card_span`, `agenda_all_limit`.
+- 버튼·설정: 카드 ↻(그 소스만 지금 갱신), ⚠ 오류 배지, 항목 ✎ 초안·열기·✓ 확인. **이력 `표시 구간 | 지난 7일 | 30일`**(메일·Slack 은 전체 보기 위, Jira·GitHub 은 목록 아래): 표시 구간 밖까지 Ned 가 모은 항목을 날짜 구분선과 함께 최신순(최대 200, 지금 카드에 있는 건 "지금", 상태 칩 답함/답 필요/안 읽음/목록에서 빠짐), 카드별 기억(`ned.cardhist.<카드>`). 이력 행에도 Slack·메일은 ✎ 초안 + ✓ 확인(카드와 같은 확인 키라 어느 쪽에서 눌러도 같이 바뀜; 아직 답이 필요한 행은 진하게, 나머지 ✎ 는 흐리게·마우스를 올리면 보임), Jira·GitHub·캘린더는 ⋯ 메뉴. `sources.*`, `agenda_source_minutes.*`, `dashboard.card_order`/`card_span`, `agenda_all_limit`.
 
 ### 홈 — 팔로업 채널 카드
 - 보여 주는 것: 멘션이 없어도 따라가는 Slack 채널마다 24시간 요약 + 하이라이트. 나를 향한 것은 "나한테" 칩으로 앞에, 할 일 카드 개수에도 포함. 없으면 "지난 24시간 눈에 띄는 대화 없음."
 - 데이터: agenda.json `slack.watch`(수집 이력에서 표시 구간만큼 — 하이라이트·최근 메시지, 새 메시지가 없으면 이전 요약 유지). 펼친 카드 아래 이력 `지난 7일 | 30일` = 그 채널에서 모은 메시지(`/api/history?channel=`).
 - 언제: 내가 태그되진 않지만 결정·공지를 놓치면 안 되는 채널.
+- 버튼: 모든 하이라이트·"최근 대화" 행에 ✎ 초안("나한테" 행은 진하게, 나머지는 흐리게·마우스를 올리면 보임), 요약 줄 끝에도 ✎ — 그 줄이 가리키는 메시지가 하나면 그 메시지로, 여럿이면 초안 팝업이 먼저 후보(보낸 사람·내용)를 보여 주고 고른 것으로, 없으면 그 채널의 가장 최근 메시지로("가장 최근 메시지 기준" 안내). 팔로업에서 만든 초안은 늘 그 메시지의 스레드 답글로 보냄. 별도 카드든 Slack 카드 안 접힘이든 같은 행·버튼.
 - 설정: 설정 → 소스 → Slack → "팔로업 채널"(`filters.slack.watch_channels`, 최대 20). 별도 카드 대신 Slack 카드 안 "채널 팔로업 N" 으로 접으려면 설정 → 외형 → "팔로업 채널을 별도 카드로" 끄기(`dashboard.watch_cards`).
 
 ### 홈 — 배치
@@ -141,7 +142,9 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 
 ### 답장 초안 ✎
 - 보여 주는 것: 맥락 요약·발췌 + 초안 3개(짧게/보통/정중하게), 편집 가능, "다시 생성"(힌트).
-- 데이터: 백그라운드로 모은 답장 맥락(신선하면 빠른 경로) 또는 커넥터로 스레드를 읽어 생성. 캐시 `~/.ned/drafts/`(1시간). 초안을 열면 항목은 확인 완료.
+- 어디서: 홈 소스 카드 행, 카드의 이력 "지난 7일/30일" 행(Slack·메일; Jira·GitHub·캘린더는 ⋯), 팔로업 채널 카드의 모든 행·최근 대화·요약 줄(위 "팔로업 채널 카드"), 인박스·장비실. 팔로업에서 연 초안은 원글 ts 를 thread_ts 로 써서 스레드 답글.
+- 데이터: 백그라운드로 모은 답장 맥락(신선하면 — `draft_context_max_age_minutes` 180분 — 빠른 경로) 또는 커넥터로 스레드를 읽어 생성. **Slack 은 모은 발췌가 없거나 6시간보다 오래됐으면** 프롬프트가 먼저 `slack_read_thread`(limit 50, 스레드 없는 DM 은 `slack_read_channel`)로 대화 전체를 읽고 그 맥락으로 쓰게 함 — 오래된 스레드도 지난 결론을 놓치지 않게(6시간 이내 발췌면 지금처럼 바로). 캐시 `~/.ned/drafts/`(1시간). 초안을 열면 항목은 확인 완료.
+- 출처: 초안·보내기 요청에 어디서 열었는지(`origin` card / history / watch, 대화창은 chat)가 실려 `~/.ned/sent-actions.log` 와 설정 → 오늘 한 액션의 출처 칩(카드 / 지난 N일 / 팔로업 / 대화창)에 남음. 예전 기록(출처 없음)은 칩 없이 그대로. `actions.chat_write` 는 대화창 출처에만 걸림.
 - 언제: Slack·메일 답장, 세션에 지시, Jira 코멘트, PR 리뷰 문구를 빨리 쓰고 싶을 때.
 - 키·설정: ⌘⏎ 주 액션, Esc 닫기. 말투 = `reply_tone`(기본 "간결하고 정중한 존댓말, 핵심 먼저") / 소스별 `reply_tone_by_source.slack|email|session`. 미리 생성 `drafts_pregenerate`(config.yaml 만).
 
@@ -157,7 +160,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
   - GitHub: "GitHub 리뷰·코멘트" `actions.github_review`(⋯ → 리뷰 초안 쓰기…/바로 승인; 리뷰 코멘트·변경 요청·승인+코멘트·PR 코멘트)
   - 캘린더: "캘린더 참석 응답" `actions.calendar_rsvp` · "캘린더 일정 생성" `actions.calendar_create`
   - 대화창: "대화창에서 쓰기 허용" `actions.chat_write`(꺼짐) — 통신기 대화가 확인 카드로 쓰기를 제안(위 "대화창에서 쓰기")
-  - 아래 "오늘 한 액션" 표(소스·결과 필터, "읽기 포함", 새로고침).
+  - 아래 "오늘 한 액션" 표(소스·결과 필터, "읽기 포함", 새로고침). 소스 옆 출처 칩 = 어디서 실행했는지(카드 / 지난 N일 / 팔로업 / 대화창).
 - Slack 이모지 리액션 보내기는 없음(커넥터에 도구 없음).
 
 ### Gmail 읽음 표시

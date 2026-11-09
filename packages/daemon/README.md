@@ -299,8 +299,14 @@ Agenda 응답 형태:
 - `meta` 는 보내기에 쓸 주소: slack 은 channel_id/thread_ts, email 은 모델이 스레드에서 찾은 `message_id`(답장할 마지막 메시지)·
   `reply_to`·`subject`. `POST /api/send` 에 `draft_id` 를 넘기면 이 meta 를 캐시에서 읽어 쓴다.
 - `NED_NO_LLM=1` 이면 `[stub 짧게] …` 스텁 3개(비용 0, 캐시 안 함).
+- **오래된 스레드 맥락** (Slack full 경로만): ref 의 agenda 발췌(`agendaContext`)가 없거나 `collected_at` 이 `DRAFT_CTX_FRESH_HOURS`(6시간)보다
+  오래됐으면 `prompts/draft.md` 의 `{{CONTEXT_RULE}}` 에 "먼저 `slack_read_thread`(channel_id, message_ts=thread_ts ?? ts, limit 50)로 스레드 전체를
+  읽고 그 맥락으로 쓴다" 를 넣는다 (스레드 없는 DM `D…` 은 `slack_read_channel` limit 50). 6시간 이내 발췌면 빈 문자열 — fast 경로(180분 이내)와
+  그 사이(180분~6시간, full 경로의 기존 읽기 지시)는 그대로 (`contextRule`, `buildDraftPrompt(…, ctx?)`).
+- **origin** (선택): `card` | `history` | `watch` | `chat` (`src/origin.ts` `parseOrigin`, 그 밖의 값은 무시). 초안 로그 줄에만 쓰이고,
+  대시보드는 같은 값을 `POST /api/send` 에도 실어 액션 로그에 남긴다.
 
-**보내기** `POST /api/send` `{ draft_id?, source, ref, text, mode }` → `200 { ok, action, detail, logged_at }`,
+**보내기** `POST /api/send` `{ draft_id?, source, ref, text, mode, origin? }` → `200 { ok, action, detail, logged_at }`,
 그 외 `{ ok:false, action, detail, logged_at, error }` + 400(잘못된 요청·주소 없음) / 403(꺼짐) / 409(세션 터미널 없음) / 502(실패·검증 안 됨).
 
 | source | mode | 스위치 (`config.actions`, 기본) | 동작 |
@@ -323,6 +329,9 @@ Agenda 응답 형태:
 - 텍스트는 JSON 문자열로 프롬프트에 넣고 "글자 하나 바꾸지 말고 그대로, 도구 한 번만" 지시. 최대 4000자.
 - 모든 시도(거절·실패·dry-run 포함)는 `~/.ned/sent-actions.log` 에 JSONL 한 줄:
   `{ts, source, mode, action, ref, draft_id, text(앞 120자), ok, result, claude_args?, origin?}` — `claude_args` 는 실제 spawn 한 argv.
+  `origin` = 어디서 실행했는지: `card`(홈 카드 행 ✎·⋯) · `history`(카드의 "지난 N일" 이력 행) · `watch`(팔로업 카드 행·최근 대화·요약 줄) ·
+  `chat`(Ned Net 확인 카드). 없으면(예전 줄·다른 클라이언트) 그대로 둔다. 게이트는 `chat` 에만 추가(`actions.chat_write`) — `/api/todos` 도
+  `origin: "chat"` 일 때만 대화창 경로(그 밖의 origin 은 일반 추가). `GET /api/actions` 는 줄을 그대로 돌려주고 설정 → 오늘 한 액션이 출처 칩으로 보여 준다.
 - `NED_NO_LLM=1` 또는 `NED_SEND_DRY_RUN=1` 이면 커넥터·gh 액션(Slack/Gmail/Jira/GitHub/Calendar)은 argv 와 프롬프트를 로그에 남기고 실행하지 않는다
   (`ok:false`, `action: "dry_run:…"`, gh 본문 파일도 만들지 않음). 세션 보내기는 로컬이라 그대로 실행한다. `NED_NO_LLM=1` 의 jira `transitions` 는
   화면 테스트용 `(stub)` 전환 2개를 돌려준다.
