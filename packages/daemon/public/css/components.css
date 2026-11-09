@@ -37,6 +37,17 @@
 .mft .btn.dis { opacity: .45; cursor: not-allowed; }
 body.modal-open { overflow: hidden; }
 .drb { white-space: nowrap; }
+/* ✎ on rows that don't need me (팔로업 일반 하이라이트 · 최근 대화 · 이력): dimmed until the row is hovered / focused */
+.drb.soft { opacity: .35; }
+.ti:hover .drb.soft, .trep:hover .drb.soft, .wsum li:hover .drb.soft, .drb.soft:focus-visible { opacity: 1; }
+.trep .drb, .wsum .drb { width: 20px; height: 18px; vertical-align: middle; margin-left: 2px; }
+/* draft modal: note line ("가장 최근 메시지 기준") + pick step (요약 줄 → 여러 후보) */
+.mctx .dnote { font-size: 12px; color: var(--dim); background: var(--bubble); border-radius: 6px; padding: 4px 8px; margin-bottom: 6px; }
+.mctx .dpick { display: flex; flex-direction: column; gap: 4px; }
+.mctx .dpk { appearance: none; display: flex; gap: 8px; align-items: baseline; text-align: left; width: 100%; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; font-size: 13px; cursor: pointer; }
+.mctx .dpk:hover, .mctx .dpk:focus-visible { background: var(--hover); border-color: var(--info); outline: none; }
+.mctx .dpk .from { flex: none; color: var(--dim); font-weight: 600; }
+.mctx .dpk .tx { overflow-wrap: anywhere; }
 /* item action icons */
 .ib { appearance: none; display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; flex: none; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--dim); cursor: pointer; text-decoration: none; }
 .ib svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }

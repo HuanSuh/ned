@@ -53,11 +53,51 @@ export function matchHighlight(line, hls) {
   return best.h;
 }
 
-/** `<li>` per summary line, a ↗ permalink on lines that clearly match a highlight. "" when there's no summary. */
-export function summaryHtml(summary, hls) {
+/**
+ * Highlights a summary line could be about when matchHighlight can't pick one: several share its issue key, or several
+ * pass the word test (≥2 shared words, ≥30% of the line) — best first, max 5. [] when nothing comes close.
+ */
+export function matchCandidates(line, hls) {
+  const cands = (hls || []).filter((h) => safeUrl(h.url));
+  const uniq = (list) => { const seen = new Set(); return list.filter((h) => !seen.has(h.url) && seen.add(h.url)); };
+  const lk = keysOf(line);
+  if (lk.size) {
+    const hit = uniq(cands.filter((h) => [...keysOf(`${h.text} ${h.reason || ""}`)].some((k) => lk.has(k))));
+    if (hit.length) return hit.slice(0, 5);
+  }
+  const lt = tokensOf(line);
+  if (lt.size < 2) return [];
+  return uniq(cands.map((h) => { const ht = tokensOf(h.text); let n = 0; for (const w of lt) if (ht.has(w)) n++; return { h, n }; })
+    .filter((x) => x.n >= 2 && x.n / lt.size >= 0.3).sort((a, b) => b.n - a.n).map((x) => x.h)).slice(0, 5);
+}
+
+/**
+ * Which message a summary line's ✎ drafts a reply to:
+ * - {kind: "one", h}     — matchHighlight is sure (the same message the ↗ opens);
+ * - {kind: "many", list} — several highlights fit → the draft modal asks which one first;
+ * - {kind: "recent", h}  — nothing fits → the channel's newest message (recent[0], else the newest highlight), with a
+ *   "가장 최근 메시지 기준" note in the modal;
+ * - null                 — the channel has no message with a permalink at all.
+ */
+export function summaryTarget(line, hls, recent) {
+  const h = matchHighlight(line, hls);
+  if (h) return { kind: "one", h };
+  const list = matchCandidates(line, hls);
+  if (list.length > 1) return { kind: "many", list };
+  if (list.length === 1) return { kind: "one", h: list[0] };
+  const newest = (recent || []).find((m) => m && safeUrl(m.url)) || [...(hls || [])].filter((x) => safeUrl(x.url)).sort((a, b) => String(b.ts || "").localeCompare(String(a.ts || "")))[0];
+  return newest ? { kind: "recent", h: newest } : null;
+}
+
+/**
+ * `<li>` per summary line, a ↗ permalink on lines that clearly match a highlight. "" when there's no summary.
+ * `opts.act(target, line)` (watchrow.js): extra html at the end of the line — the ✎ for summaryTarget(line, hls, opts.recent).
+ */
+export function summaryHtml(summary, hls, opts = {}) {
   return summaryLines(summary).map((l) => {
     const h = matchHighlight(l, hls), u = h && safeUrl(h.url);
     const link = u ? " " + ext(u, "↗", "wlk").replace("<a ", `<a title="${esc(`메시지 열기 — ${h.from || ""}: ${String(h.text || "").slice(0, 60)}`)}" aria-label="관련 메시지 열기" `) : "";
-    return `<li>${esc(l)}${link}</li>`;
+    const t = opts.act ? summaryTarget(l, hls, opts.recent) : null;
+    return `<li>${esc(l)}${link}${t ? opts.act(t, l) : ""}</li>`;
   }).join("");
 }
