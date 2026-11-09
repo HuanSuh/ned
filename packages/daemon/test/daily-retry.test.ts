@@ -152,6 +152,8 @@ describe("restart: only a successful daily counts", () => {
 
 describe("heartbeat(): success flag + daily_failed_at", () => {
   it("unparsable daily → ok:false, kept as raw, not counted; a good daily clears daily_failed_at", async () => {
+    // The "restart" fixtures above are dated 2026-11-09 — on that day they would count as today's good daily.
+    if (fs.existsSync(BRIEFINGS_DIR)) for (const f of fs.readdirSync(BRIEFINGS_DIR)) if (f.endsWith(".json")) fs.unlinkSync(path.join(BRIEFINGS_DIR, f));
     const cfg = { ...loadConfig(), sources: { ...DEFAULT_CONFIG.sources, slack: false, gmail: false, jira: false, github: false, calendar: false, sentry: false } };
     process.env.NED_NO_LLM_RESULT = "sorry, I couldn't reach the API";
     const bad = (await heartbeat(cfg, { force: true, daily: true }))!;
