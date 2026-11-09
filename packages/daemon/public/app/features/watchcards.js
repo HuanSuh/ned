@@ -5,25 +5,16 @@
  * clearly talks about — watchsum.js), then highlights, needs_me first (from · time · text · link · check; followed
  * thread → summary + latest reply). Shrunk: summary + open needs_me. Expanded: every highlight, 확인 완료 ones folded.
  * needs_me still counts in the 할 일 card / greeting via cards.js watchNeeds(). */
-import { draftFor } from "./drafts.js";
 import { cardDomId, cardKeyOf, watchCh, watchIds, WATCH_ICON } from "./cardlayout.js";
 import { cardOpen } from "./cards.js";
 import { decoratePanel } from "./layout.js";
-import { isOpenSrc, revCls, srcCheck, srcKey, withFold } from "./reviewed.js";
+import { isOpenSrc, withFold } from "./reviewed.js";
 import { histBar, histList } from "./histview.js";
-import { histPanel, histToggle, newChip, recentHtml, threadTail } from "./slackthread.js";
-import { summaryHtml } from "./watchsum.js";
-import { openIcon } from "../ui/icons.js";
-import { $, esc, ext, rel, safeUrl, toMs } from "../util.js";
+import { watchRecent, watchRow, watchSummary } from "./watchrow.js";
+import { $, esc } from "../util.js";
 
-/** One highlight row (also used by the Slack card's fold). needs_me rows get the accent bar + a draft button;
- *  a followed thread (row.thread, slack-threads.ts) adds "+N 새 답글" and its summary + latest reply under the row. */
-export function watchRow(channel, h) {
-  const u = safeUrl(h.url), rv = revCls("slack", h), text = h.text || "(내용 없음)";
-  return `<div class="ti${h.needs_me && !rv ? " need" : ""}${rv}"><span class="ic">${h.needs_me ? "❗" : "·"}</span><div class="mn"><span class="tt">${u ? ext(u, esc(text)) : esc(text)}</span>
-      <div class="sb"><span class="from">${esc(h.from)}</span>${h.needs_me ? `<span class="chipx today">나한테</span>` : ""}${newChip(h)}${histToggle(h)}${h.reason ? `<span class="d">${esc(h.reason)}</span>` : ""}${h.ts ? `<span>${rel(toMs(h.ts))}</span>` : ""}</div>${threadTail(h)}${histPanel(h)}</div>
-      <div class="ra">${h.needs_me ? draftFor("slack", { ...h, channel }, srcKey("slack", h)) : ""}${openIcon(u)}${srcCheck("slack", h)}</div></div>`;
-}
+// Rows / summary / 최근 대화 (each with a ✎, origin "watch") are shared with the Slack card's fold: features/watchrow.js.
+export { watchRow } from "./watchrow.js";
 
 function cardHtml(id) {
   const k = cardKeyOf(id), ch = watchCh(id), eid = esc(id);
@@ -71,9 +62,9 @@ export function renderWatchCards(slack, on, unavailable) {
     $("n-" + k).classList.toggle("hot", need.length > 0);
     $("wme-" + k).innerHTML = need.length ? `<span class="chipx today">나한테 ${need.length}</span>` : "";
     const fallback = unavailable || (!slack ? "다음 새로고침 때 Slack 도 가져올게." : w ? "표시 구간에 눈에 띄는 대화 없음." : "다음 새로고침 때 이 채널도 볼게.");
-    const sum = summaryHtml(w?.summary, hls);
+    const sum = w ? watchSummary(w) : "";
     // Nothing stood out (no summary, no highlights): the channel's newest messages instead of an empty card.
-    const quiet = !sum && !hls.length ? recentHtml(w?.recent) : "";
+    const quiet = !sum && !hls.length && w ? watchRecent(w) : "";
     $("ss-" + k).className = sum ? "wsum" : "wsum none";
     $("ss-" + k).innerHTML = sum || (quiet ? "" : `<li>${esc(fallback)}</li>`);
     $("ss-" + k).hidden = !sum && !!quiet;
@@ -81,7 +72,7 @@ export function renderWatchCards(slack, on, unavailable) {
     // 수집 이력 (features/histview.js): 지난 7일 / 30일 of this channel instead of the display window's highlights.
     const hist = histList(id, { source: "slack", channel: ch });
     $("g-" + k).innerHTML = hist !== null ? histBar(id) + hist : (hls.length
-      ? withFold(id, "slack", needFirst(hls), (h) => watchRow(w.channel, h)) + recentHtml(w?.recent, new Set(hls.map((h) => h.url).filter(Boolean))) // expanded only (.wall): newest messages not already listed
+      ? withFold(id, "slack", needFirst(hls), (h) => watchRow(w.channel, h)) + watchRecent(w, new Set(hls.map((h) => h.url).filter(Boolean))) // expanded only (.wall): newest messages not already listed
       : quiet) + (slack ? histBar(id) : ""); // nothing to list: the summary area already says so
     const isOpen = cardOpen(id, 0); // shrunk by default: the summary + needs_me already show
     el.classList.toggle("open", isOpen);

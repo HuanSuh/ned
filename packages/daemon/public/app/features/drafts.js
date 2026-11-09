@@ -1,12 +1,12 @@
 /* Reply-draft modal: POST /api/draft → 3 drafts, edit, regenerate → POST /api/send. */
 import { postJson } from "../api.js";
-import { axBtn, init as initActions } from "./actions.js";
+import { init as initActions } from "./actions.js";
+import { clean, parseDraftAttr } from "./draftref.js";
 import { SRC_KEY_RE, reviewAttention, reviewSource } from "./reviewed.js";
 import { resumePending, sendAndWait } from "./sendjob.js";
 import { renderHeader } from "../main.js";
 import { S } from "../state.js";
 import { select } from "../tabs/inbox.js";
-import { iconBtn } from "../ui/icons.js";
 import { hideModal, showModal, trapTab } from "../ui/modal.js";
 import { errBadge, errSummary } from "../ui/popover.js";
 import { toast } from "../ui/toast.js";
@@ -18,27 +18,27 @@ export const ACTION_DEFAULTS = { slack_send: false, gmail_draft: true, gmail_sen
 export const ACTION_KO = { slack_send: "Slack 전송", gmail_draft: "Gmail 초안 저장", gmail_send: "메일 보내기", gmail_mark_read: "Gmail 읽음 표시", session_send: "세션에 보내기", jira_comment: "Jira 코멘트", jira_transition: "Jira 상태 변경", github_review: "GitHub 리뷰·코멘트", calendar_rsvp: "캘린더 참석 응답", calendar_create: "캘린더 일정 생성", chat_write: "대화창에서 쓰기 허용", chat_session_create: "대화창에서 세션 만들기" };
 export const actionsOn = () => ({ ...ACTION_DEFAULTS, ...(S.config?.actions || {}) });
 export const DRAFT_SRC_KO = { slack: "Slack", email: "메일", session: "세션", jira: "Jira 코멘트", github: "PR 리뷰" };
-export const clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== ""));
-/** ref for a Slack message: channel id + ts (+ thread_ts) from its permalink. */
-export function slackRef(x) {
-  const m = /\/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})/.exec(x.url || ""), tt = /[?&]thread_ts=([\d.]+)/.exec(x.url || "");
-  // Followed thread (agenda slack.threads): reply into it, and let /api/draft use its latest excerpt.
-  const key = m ? `${m[1]}:${tt?.[1] || `${m[2]}.${m[3]}`}` : "";
-  const th = x.thread || (key && (S.agenda?.slack?.threads || []).find((t) => t.key === key));
-  const thread_ts = tt?.[1] || (th && th.reply_count > 0 ? th.thread_ts : undefined);
-  return clean({ url: x.url, channel: m?.[1] || x.channel, ts: m ? `${m[2]}.${m[3]}` : undefined, thread_ts, title: [x.channel, x.from].filter(Boolean).join(" · ") || x.title, text: x.text || x.detail });
-}
-export const mailRef = (x) => clean({ url: x.url, thread_id: x.id || /#[\w-]+\/([^|?&#\s]+)/.exec(x.url || "")?.[1], title: [x.subject || x.title, x.from].filter(Boolean).join(" — "), text: x.why || x.snippet || x.detail });
-export const sessionRef = (x) => clean({ session_id: x.id, title: x.worktree, text: x.last_summary || (x.last_prompt ? "» " + x.last_prompt : "") });
-/** Button that opens the draft modal; `small` for list rows. */
-export const draftBtn = (source, ref, att = "") => iconBtn("draft", "답장 초안 — Ned 가 3가지 말투로 써 줘", { cls: "drb", attrs: `data-draft="${esc(JSON.stringify({ source, ref }))}"${att ? ` data-att="${esc(att)}"` : ""}` });
-export const draftFor = (kind, item, att = "") => (kind === "slack" ? draftBtn("slack", slackRef(item), att) : kind === "email" ? draftBtn("email", mailRef(item), att) : kind === "jira" || kind === "github" || kind === "calendar" ? axBtn(kind, item) : "");
+// refs + ✎ button html: features/draftref.js (pure, node-testable) — re-exported for the old import sites.
+export { clean, draftBtn, draftFor, mailRef, ORIGIN_KO, sessionRef, slackRef } from "./draftref.js";
 
 export let DR = { open: false };
-export function openDraft(source, ref, att = "") {
-  DR = { open: true, source, ref, att, loading: false, resp: null, tab: null, edits: {}, error: "", confirm: null, sending: null, back: document.activeElement };
+/**
+ * Open the modal for (source, ref). `opts`: origin (card | history | watch — rides to /api/draft and /api/send for the
+ * action log), note (a line above the context, e.g. "가장 최근 메시지 기준"), pick ([{source, ref, from, label, att}] — a
+ * 팔로업 요약 줄 matching several messages: the modal first lists them, the chosen one gets drafted).
+ */
+export function openDraft(source, ref, att = "", opts = {}) {
+  const pick = Array.isArray(opts.pick) && opts.pick.length ? opts.pick : null;
+  DR = { open: true, source, ref: ref || {}, att, origin: opts.origin || "", note: opts.note || "", pick, loading: false, resp: null, tab: null, edits: {}, error: "", confirm: null, sending: null, back: document.activeElement };
   $("dm-hint").value = ""; $("dm-text").value = ""; $("dm-text").dataset.tab = ""; // nothing carries over from the last popup
   showModal($("draft-modal"));
+  if (pick) { renderDraft(); $("dm-ctx").querySelector("[data-dpick]")?.focus(); return; }
+  requestDraft();
+}
+/** Pick step → draft the chosen candidate in the same popup. */
+export function pickDraft(i) {
+  const c = DR.pick?.[i]; if (!c) return;
+  DR.source = c.source || DR.source; DR.ref = c.ref || {}; DR.att = c.att || ""; DR.note = c.note || ""; DR.pick = null;
   requestDraft();
 }
 export function closeDraft() {
@@ -49,7 +49,7 @@ export function closeDraft() {
 }
 export async function requestDraft(hint) {
   DR.loading = true; DR.error = ""; DR.confirm = null; S.drafting = true; renderHeader(); renderDraft();
-  const r = await postJson("/api/draft", clean({ source: DR.source, ref: DR.ref, hint: hint || undefined })).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
+  const r = await postJson("/api/draft", clean({ source: DR.source, ref: DR.ref, hint: hint || undefined, origin: DR.origin || undefined })).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
   if (!DR.open) { S.drafting = false; renderHeader(); return; }
   if (r.ok && r.data) {
     DR.resp = r.data; DR.tab = (r.data.drafts?.[1] || r.data.drafts?.[0])?.id ?? null; DR.edits = {};
@@ -104,14 +104,16 @@ export function renderDraft() {
   if (!DR.open) return;
   const r = DR.resp, ctx = r?.context || {};
   $("dm-title").textContent = `${DR.source === "jira" || DR.source === "github" ? "코멘트 초안" : "답장 초안"} · ${DRAFT_SRC_KO[DR.source] || DR.source}`;
-  $("dm-sub").textContent = DR.ref.title || "";
-  $("dm-ctx").innerHTML = DR.loading ? `<div class="calload"><span class="spin"></span>맥락 읽고 초안 쓰는 중… <span class="hint">보통 10~30초</span></div>`
-    : r ? `${ctx.summary ? `<div class="sum">${esc(ctx.summary)}</div>` : ""}${ctx.excerpt ? `<blockquote>${esc(ctx.excerpt)}</blockquote>` : ""}<div class="mmeta">${r.cached ? "캐시 · " : ""}$${Number(r.cost_usd || 0).toFixed(3)}</div>` : "";
+  $("dm-sub").textContent = DR.pick ? "어느 메시지에 답할지 골라 줘" : DR.ref.title || "";
+  const note = DR.note ? `<div class="dnote" role="note">ⓘ ${esc(DR.note)}</div>` : "";
+  $("dm-ctx").innerHTML = DR.pick ? `<div class="dpick" role="group" aria-label="답할 메시지 후보">${DR.pick.map((c, i) => `<button type="button" class="dpk" data-dpick="${i}"><span class="from">${esc(c.from || "")}</span><span class="tx">${esc(c.label || c.ref?.text || "")}</span></button>`).join("")}</div>`
+    : note + (DR.loading ? `<div class="calload"><span class="spin"></span>맥락 읽고 초안 쓰는 중… <span class="hint">보통 10~30초</span></div>`
+    : r ? `${ctx.summary ? `<div class="sum">${esc(ctx.summary)}</div>` : ""}${ctx.excerpt ? `<blockquote>${esc(ctx.excerpt)}</blockquote>` : ""}<div class="mmeta">${r.cached ? "캐시 · " : ""}$${Number(r.cost_usd || 0).toFixed(3)}</div>` : "");
   $("dm-tabs").innerHTML = (r?.drafts || []).map((d) => `<button type="button" class="tab ${d.id === DR.tab ? "on" : ""}" role="tab" aria-selected="${d.id === DR.tab}" data-dtab="${esc(d.id)}">${esc(d.label)}</button>`).join("");
   const ta = $("dm-text");
   if (document.activeElement !== ta || ta.dataset.tab !== String(DR.tab)) { ta.value = curText(); ta.dataset.tab = String(DR.tab); }
   ta.disabled = DR.loading || !r;
-  $("dm-regen").disabled = $("dm-hint").disabled = DR.loading;
+  $("dm-regen").disabled = $("dm-hint").disabled = DR.loading || !!DR.pick;
   $("dm-err").innerHTML = DR.error ? errBadge("draft", { where: DR.errWhere || "답장 초안", message: DR.error, at: DR.errAt || Date.now(), retry: DR.errRetry || null, label: DR.errLabel || "실패" }) : "";
   const acts = draftActions();
   $("dm-actions").innerHTML = acts.map((a) => {
@@ -154,7 +156,7 @@ export async function runAction(key) {
   if (a.confirm && DR.confirm !== a.key) { DR.confirm = a.key; renderDraft(); $("dm-confirm").querySelector("[data-dconfirm]")?.focus(); return; }
   const d = DR; // this popup; a later openDraft() replaces DR
   d.confirm = null; d.sending = a.key; d.sendElapsed = 0; d.error = ""; renderDraft();
-  const r = await sendAndWait({ draft_id: curDraft()?.id, source: d.source, ref: d.ref, text: $("dm-text").value, mode: a.mode }, {
+  const r = await sendAndWait(clean({ draft_id: curDraft()?.id, source: d.source, ref: d.ref, text: $("dm-text").value, mode: a.mode, origin: d.origin || undefined }), {
     label: a.label,
     onTick: (ms) => { d.sendElapsed = ms; if (DR === d && d.open) { const el = $("dm-actions").querySelector("[data-dsend-el]"); if (el) el.textContent = sendingText(); } },
   });
@@ -175,6 +177,7 @@ export function init() {
   initActions(); // ⋯ item actions (features/actions.js) — main.js's init list belongs to another module
   $("draft-modal").addEventListener("click", (e) => {
     if (e.target === $("draft-modal") || e.target.closest("[data-mclose]")) return closeDraft();
+    const pk = e.target.closest("[data-dpick]"); if (pk) return pickDraft(Number(pk.dataset.dpick));
     const t = e.target.closest("[data-dtab]"); if (t) { DR.tab = t.dataset.dtab; DR.confirm = null; renderDraft(); return; }
     const a = e.target.closest("[data-dact]"); if (a) return runAction(a.dataset.dact);
     if (e.target.closest("[data-dconfirm]")) return runAction(DR.confirm);
@@ -198,6 +201,8 @@ export function init() {
   document.addEventListener("click", (e) => {
     const b = e.target.closest(".drb[data-draft]"); if (!b) return;
     e.preventDefault(); e.stopPropagation();
-    try { const { source, ref } = JSON.parse(b.dataset.draft); openDraft(source, ref, b.dataset.att || ""); } catch (err) { console.warn("draft ref", err); }
+    const d = parseDraftAttr(b.dataset.draft);
+    if (!d) { console.warn("draft ref", b.dataset.draft); return; }
+    openDraft(d.source, d.ref, b.dataset.att || "", { origin: d.origin, note: d.note, pick: d.pick });
   }, true);
 }

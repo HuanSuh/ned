@@ -81,13 +81,14 @@ function toggleHist(key) {
   for (const b of document.querySelectorAll(`[data-hist="${CSS.escape(key)}"]`)) { b.setAttribute("aria-expanded", String(on)); b.textContent = b.textContent.replace(/^[▸▾]/, on ? "▾" : "▸"); }
 }
 
-/** 팔로업 card "최근 대화": the channel's newest messages (from · time · text · ↗), skipping urls already shown. */
-export function recentHtml(recent, skipUrls = new Set()) {
+/** 팔로업 card "최근 대화": the channel's newest messages (from · time · text · ↗), skipping urls already shown.
+ *  `act(m)`: extra html after the ↗ (watchrow.js: the ✎). */
+export function recentHtml(recent, skipUrls = new Set(), act = null) {
   const rows = (recent || []).filter((m) => m && (m.text || m.url) && !(m.url && skipUrls.has(m.url)));
   if (!rows.length) return "";
   return `<div class="wrec"><div class="wrech">최근 대화</div>` + rows.map((m) => {
     const u = safeUrl(m.url);
-    return `<div class="trep"><span class="from">${esc(m.from || "?")}</span><span class="tw">${m.ts ? rel(tsMs(m.ts)) : ""}</span><span class="tx">${esc(m.text || "")}</span>${u ? ext(u, "↗", "wlk") : ""}</div>`;
+    return `<div class="trep"><span class="from">${esc(m.from || "?")}</span><span class="tw">${m.ts ? rel(tsMs(m.ts)) : ""}</span><span class="tx">${esc(m.text || "")}</span>${u ? ext(u, "↗", "wlk") : ""}${act ? act(m) : ""}</div>`;
   }).join("") + `</div>`;
 }
 

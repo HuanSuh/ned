@@ -2,8 +2,7 @@
 import { cardDomId, cardIds, dashLayout } from "./cardlayout.js";
 import { applyLayout, cardOrder } from "./layout.js";
 import { isOpenSrc, srcKey } from "./reviewed.js";
-import { recentHtml } from "./slackthread.js";
-import { watchRow } from "./watchcards.js";
+import { watchFoldHtml } from "./watchrow.js";
 import { ui } from "../state.js";
 import { renderTodoGroups } from "../tabs/home.js";
 import { CARD_KIND, srcOn } from "../ui/chips.js";
@@ -83,16 +82,8 @@ export function watchNeeds(slack) {
 /** Slack card's 채널 팔로업 fold (config.dashboard.watch_cards = false; else each channel has its own card — watchcards.js):
  *  collapsed by default, per-channel summary + highlights; needs_me rows get the accent bar. */
 export function renderSlackWatch(watch, needN) {
-  const el = $("slack-watch");
-  if (!watch.length) { el.innerHTML = ""; return; }
-  const hl = (w, h) => watchRow(w.channel, h);
-  el.innerHTML = `<details class="swatch" ${ui.watchOpen ? "open" : ""}><summary>채널 팔로업 ${watch.length}${needN ? `<span class="chipx today">나한테 ${needN}</span>` : ""}</summary>` +
-    watch.map((w) => {
-      const n = (w.highlights || []).filter((h) => h.needs_me && isOpenSrc("slack")(h)).length;
-      return `<div class="swch"><div class="swh">${esc(w.channel)}${n ? `<span class="chipx today">${n}</span>` : ""}</div>` +
-        (w.summary ? `<div class="sws">${esc(w.summary)}</div>` : (!(w.highlights || []).length && recentHtml(w.recent)) || `<div class="gnone">표시 구간에 눈에 띄는 대화 없음.</div>`) +
-        (w.highlights || []).map((h) => hl(w, h)).join("") + `</div>`;
-    }).join("") + `</details>`;
+  // Same rows / summary (↗ + ✎) / 최근 대화 as the separate cards — features/watchrow.js.
+  $("slack-watch").innerHTML = watchFoldHtml(watch, needN, !!ui.watchOpen);
 }
 
 /** Lay the source cards out in rows: config.dashboard order, each card 1 or 2 of the grid's --cols (≤ 2) columns —

@@ -313,7 +313,7 @@ export function startServer(getConfig: () => NedConfig): void {
   app.post("/api/todos", async (c) => {
     const body = await readBody(c);
     const origin = parseOrigin(body.origin);
-    if (!origin) {
+    if (origin !== "chat") {
       const t = addTodo(body);
       return t ? c.json(t, 201) : c.json({ error: "title required" }, 400);
     }

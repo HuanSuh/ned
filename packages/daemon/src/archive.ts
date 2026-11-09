@@ -168,6 +168,8 @@ function patrolBody(d: DayData): string {
   return ["## 🔔 순찰", "", ...(lines.length ? lines : ["_(오늘 새로 알린 것 없음)_"])].join("\n");
 }
 
+/** Action log origin → the short label after a "보낸 것" line (absent = older entries, no label). */
+const ORIGIN_KO: Record<string, string> = { chat: "대화창", card: "카드", history: "지난 N일", watch: "팔로업" };
 function actionTarget(e: ActionLogEntry): string {
   const r = e.ref ?? {};
   return r.title || r.key || (r.repo ? `${r.repo}#${r.number ?? ""}` : "") || r.channel || (r.session_id ? `세션 ${String(r.session_id).slice(0, 8)}` : "") || "";
@@ -177,7 +179,7 @@ function sentBody(d: DayData): string {
     const url = e.event?.html_link || /https:\/\/[^\s"')]+/.exec(e.result ?? "")?.[0] || e.ref?.url;
     const what = `${SRC_KO[e.source] ?? e.source} ${MODE_KO[e.mode] ?? e.mode}`;
     const tgt = one(actionTarget(e), 100);
-    return `- ${hm(Date.parse(e.ts))} ${what}${tgt ? ` · ${link(tgt, url)}` : url ? ` · ${link("링크", url)}` : ""}${e.text ? ` — “${one(e.text, 100)}”` : ""}${e.origin === "chat" ? " (대화창)" : ""}`;
+    return `- ${hm(Date.parse(e.ts))} ${what}${tgt ? ` · ${link(tgt, url)}` : url ? ` · ${link("링크", url)}` : ""}${e.text ? ` — “${one(e.text, 100)}”` : ""}${e.origin && Object.hasOwn(ORIGIN_KO, e.origin) ? ` (${ORIGIN_KO[e.origin]})` : ""}`;
   });
   return ["## ✉️ 보낸 것", "", ...(lines.length ? lines : ["_(오늘 보낸 것 없음)_"])].join("\n");
 }
