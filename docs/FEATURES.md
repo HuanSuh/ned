@@ -82,7 +82,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
   |---|---|---|
   | Slack | `https://<ws>.slack.com/archives/<C·D·G…>/p<ts>[?thread_ts=…]` | `slack://channel?team=<팀 ID>&id=<채널>&message=<ts>[&thread_ts=…]` (스레드 답글은 스레드로) — 팀 ID 없으면 웹 그대로 |
   | Figma | `https://(www.)figma.com/(design·file·board·proto)/<key>…[?node-id=…]` | `figma://` + 같은 경로·쿼리 (그 밖의 figma.com 경로는 웹) |
-  | Notion | `https://(www.)notion.so/<…32자리 페이지 id…>[?…]` | `notion://www.notion.so/<같은 경로·쿼리>` — `*.notion.site`(공개 사이트)는 내 워크스페이스 페이지가 아닐 수 있어 웹 그대로 |
+  | Notion | `https://(www.)notion.so/<…페이지 id…>[?…][#블록]` (id = 32자리 또는 8-4-4-4-12, `notion.com` 도) | `notion://www.notion.so/<같은 경로·쿼리·#블록>` — `*.notion.site`(공개 사이트)는 내 워크스페이스 페이지가 아닐 수 있어 웹 그대로 |
 
 - 여는 방식: 링크(앵커)는 그대로 웹 URL·새 탭이라 마우스를 올리면 주소가 보이고 복사·우클릭도 같음. 일반 왼쪽 클릭만 가로챔 — ⌘/Ctrl/⇧/⌥-클릭·가운데 클릭·검색 ⌘⏎ 는 늘 웹. Ned.app 창이면 앱으로 넘기고, 그 서비스 앱이 설치돼 있지 않거나 열기에 실패하면 웹 URL 을 기본 브라우저로(앱 로그에 `open link: …` 한 줄). 앱 딥링크는 Ned.app 창에서만 — 브라우저로 연 대시보드(`http://127.0.0.1:7777`)는 늘 웹 URL 을 새 탭으로.
 - 설정: 설정 → 외형 → "링크를 앱으로 열기" `dashboard.open_links_in_app`(기본 켬) · 서비스별 `dashboard.open_links_in_app_by_service.slack`·`dashboard.open_links_in_app_by_service.figma`·`dashboard.open_links_in_app_by_service.notion`(기본 모두 켬, 끄면 그 서비스는 웹) · "Slack 팀 ID" `dashboard.slack_team_id`(`T…` 대문자·숫자 7자 이상만, 기본 "" — 비우면 Slack 링크는 웹, 잘못된 값은 저장 안 됨) · "Slack 워크스페이스 주소" `dashboard.slack_team_domain`(`<이름>.slack.com` 의 `<이름>`, 영문 소문자·숫자·-, 기본 "" — 넣으면 `<이름>.slack.com`·`<이름>.enterprise.slack.com` 링크만 앱으로, 다른 워크스페이스 링크는 웹(내 팀 ID 로 열면 "채널 없음"이 되므로). 비우면 모든 `*.slack.com` 을 변환 — 워크스페이스 하나만 쓰면 비워 둬도 됨. `acme.slack.com`·`https://…` 로 넣어도 `acme` 로 저장).

@@ -37,6 +37,14 @@ const CASES: [string, string | null][] = [
   // Notion
   ["https://www.notion.so/acme/Spec-0123456789abcdef0123456789abcdef", "notion://www.notion.so/acme/Spec-0123456789abcdef0123456789abcdef"],
   ["https://notion.so/0123456789abcdef0123456789abcdef?v=fedcba9876543210fedcba9876543210&pvs=4", "notion://www.notion.so/0123456789abcdef0123456789abcdef?v=fedcba9876543210fedcba9876543210&pvs=4"],
+  ["https://www.notion.so/acme/Spec-0123456789abcdef0123456789abcdef#fedcba9876543210fedcba9876543210", "notion://www.notion.so/acme/Spec-0123456789abcdef0123456789abcdef#fedcba9876543210fedcba9876543210"],
+  ["https://www.notion.so/acme/Spec-0123456789abcdef0123456789abcdef?pvs=4#blk", "notion://www.notion.so/acme/Spec-0123456789abcdef0123456789abcdef?pvs=4#blk"],
+  ["https://www.notion.so/01234567-89ab-cdef-0123-456789abcdef", "notion://www.notion.so/01234567-89ab-cdef-0123-456789abcdef"],
+  ["https://www.notion.com/acme/Spec-0123456789abcdef0123456789abcdef", "notion://www.notion.so/acme/Spec-0123456789abcdef0123456789abcdef"],
+  ["https://notion.com/01234567-89ab-cdef-0123-456789abcdef?v=1", "notion://www.notion.so/01234567-89ab-cdef-0123-456789abcdef?v=1"],
+  ["https://www.notion.com/product", null],
+  ["https://www.notion.so/01234567-89ab-cdef-0123", null],
+  ["https://notion.com.evil.io/0123456789abcdef0123456789abcdef", null],
   ["https://acme.notion.site/Public-0123456789abcdef0123456789abcdef", null],
   ["https://www.notion.so/pricing", null],
   // Not ours / not a web URL

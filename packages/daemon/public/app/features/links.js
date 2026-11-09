@@ -4,7 +4,8 @@
  *          (no team id → null = stay on the web; …/archives/<C> → slack://channel?team=<T>&id=<C>;
  *          ctx.slackTeamDomain set → only <domain>(.enterprise).slack.com converts)
  * - Figma  https://(www.)figma.com/(design|file|board|proto)/<key>… → figma://<same path>[?<same query>]
- * - Notion https://(www.)notion.so/<path with a 32-hex id>[?…] → notion://www.notion.so/<path>[?…] (notion.site: not converted) */
+ * - Notion https://(www.)notion.(so|com)/<path with a 32-hex or 8-4-4-4-12 id>[?…][#block] → notion://www.notion.so/<path>[?…][#block]
+ *          (notion.site: not converted) */
 
 export const LINK_SERVICES = ["slack", "figma", "notion"];
 export const SLACK_TEAM_ID_RE = /^T[A-Z0-9]{6,}$/;
@@ -19,8 +20,8 @@ const slackHostIs = (host, domain) => {
 };
 const FIGMA_HOST_RE = /^(www\.)?figma\.com$/i;
 const FIGMA_PATH_RE = /^\/(design|file|board|proto)\/[A-Za-z0-9]+(\/|$)/;
-const NOTION_HOST_RE = /^(www\.)?notion\.so$/i;
-const NOTION_ID_RE = /[0-9a-f]{32}/i;
+const NOTION_HOST_RE = /^(www\.)?notion\.(so|com)$/i;
+const NOTION_ID_RE = /[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 export const LINK_RULES = [
   {
@@ -48,7 +49,7 @@ export const LINK_RULES = [
   {
     service: "notion",
     match: (u) => NOTION_HOST_RE.test(u.hostname) && NOTION_ID_RE.test(u.pathname),
-    toDeep: (u) => `notion://www.notion.so${u.pathname}${u.search}`,
+    toDeep: (u) => `notion://www.notion.so${u.pathname}${u.search}${u.hash}`,
   },
 ];
 

@@ -8,7 +8,7 @@
  *          A channel link without a message (…/archives/<C>) → slack://channel?team=<T>&id=<C>.
  *          ctx.slackTeamDomain set → only <domain>(.enterprise).slack.com converts; empty → every *.slack.com.
  * - Figma  https://(www.)figma.com/(design|file|board|proto)/<key>[/<name>][?node-id=…] → figma://<same path>[?<same query>]
- * - Notion https://(www.)notion.so/<path with a 32-hex page id>[?…] → notion://www.notion.so/<path>[?…]
+ * - Notion https://(www.)notion.(so|com)/<path with a page id — 32 hex or 8-4-4-4-12>[?…][#block] → notion://www.notion.so/<path>[?…][#block]
  *          <ws>.notion.site (public sites) is NOT converted: the page may not be in the user's workspace, the web view works.
  */
 
@@ -45,8 +45,9 @@ const slackHostIs = (host: string, domain: string) => {
 };
 const FIGMA_HOST_RE = /^(www\.)?figma\.com$/i;
 const FIGMA_PATH_RE = /^\/(design|file|board|proto)\/[A-Za-z0-9]+(\/|$)/;
-const NOTION_HOST_RE = /^(www\.)?notion\.so$/i;
-const NOTION_ID_RE = /[0-9a-f]{32}/i;
+const NOTION_HOST_RE = /^(www\.)?notion\.(so|com)$/i;
+/** A page / database id: 32 hex, or the dashed 8-4-4-4-12 form. */
+const NOTION_ID_RE = /[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 export const LINK_RULES: readonly LinkRule[] = [
   {
@@ -75,7 +76,7 @@ export const LINK_RULES: readonly LinkRule[] = [
   {
     service: "notion",
     match: (u) => NOTION_HOST_RE.test(u.hostname) && NOTION_ID_RE.test(u.pathname),
-    toDeep: (u) => `notion://www.notion.so${u.pathname}${u.search}`,
+    toDeep: (u) => `notion://www.notion.so${u.pathname}${u.search}${u.hash}`, // #<block id> scrolls to the block
   },
 ];
 
