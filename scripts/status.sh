@@ -4,13 +4,15 @@
 #
 # Usage: scripts/status.sh [plugin-root]   (plugin-root = ${CLAUDE_PLUGIN_ROOT}; default: this checkout)
 # Environment: NED_HOME, NED_PORT (7777), NED_DEFAULTS_DOMAIN (com.ned.menubar),
-#              NED_CLAUDE_SETTINGS (~/.claude/settings.json) — tests point these at temp values.
+#              NED_CLAUDE_SETTINGS (~/.claude/settings.json), NED_CLAUDE_PLUGINS_DIR (~/.claude/plugins)
+#              — tests point these at temp values.
 set -uo pipefail
 PLUGIN_ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd -P)}"
 NED_HOME="${NED_HOME:-$HOME/.ned}"
 PORT="${NED_PORT:-7777}"
 DOMAIN="${NED_DEFAULTS_DOMAIN:-com.ned.menubar}"
 SETTINGS="${NED_CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
+PLUGINS_DIR="${NED_CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}"
 version_of() { node -p "require(process.argv[1]).version" "$1/.claude-plugin/plugin.json" 2>/dev/null || echo "?"; }
 
 echo "## daemon (http://127.0.0.1:$PORT)"
@@ -42,6 +44,12 @@ echo "## runtime"
 REPO="$(defaults read "$DOMAIN" nedRepoPath 2>/dev/null || true)"
 PV="$(version_of "$PLUGIN_ROOT")"
 echo "  plugin   : $PV  ($PLUGIN_ROOT)"
+# The session may still be running the version it loaded before `/plugin update` (see scripts/lib/plugin-check.mjs).
+check="$(node "$(dirname "$0")/lib/plugin-check.mjs" "$PLUGINS_DIR" "$PLUGIN_ROOT" 2>&1)"; rc=$?
+case "$rc" in
+  3|4) echo "  ⚠ 로드된 플러그인이 설치본과 다름 — /reload-plugins(또는 새 세션) 후 다시 확인 ($check)" ;;
+  *) echo "  plugin check: $check" ;;
+esac
 if [ -z "$REPO" ]; then
   echo "  nedRepoPath: (unset in $DOMAIN) — /ned:install 을 아직 안 돌림"
 else
