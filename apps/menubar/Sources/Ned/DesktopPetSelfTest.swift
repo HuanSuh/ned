@@ -43,8 +43,12 @@ enum PetSelfTest {
                 check(ok && distinct, "\(id.rawValue) \(dark ? "dark" : "light"): edge per mood, running (mint) ≠ attention (accent)")
             }
         }
-        check(PetColors.glow(.offline) == 0 && PetColors.glow(.idle) == 0 && PetColors.glow(.running) < PetColors.glow(.attention) && PetColors.glow(.attention) < PetColors.glow(.blocked),
-              "glow: none for idle/offline, running faint < attention < error")
+        check(PetColors.glow(.offline) == 0 && PetColors.glow(.idle) > 0 && PetColors.glow(.idle) < PetColors.glow(.running)
+              && PetColors.glow(.running) < PetColors.glow(.needsInput) && PetColors.glow(.needsInput) < PetColors.glow(.attention)
+              && PetColors.glow(.attention) < PetColors.glow(.blocked),
+              "glow: none only offline, idle soft < running < 입력 기다림 < attention < error (every live state breathes)")
+        check(PetColors.glowColor(.idle, ned, dark: true) == PetColors.dim(true) && PetColors.glowColor(.running, ned, dark: true) == PetColors.edge(.running, ned, dark: true),
+              "glow colour: idle = --dim light, others = the edge colour")
         check(PetColors.moodSymbol(.needsInput) == "keyboard" && !PetMood.allCases.contains { PetColors.moodSymbol($0).hasPrefix("hand.") }, "입력 기다림 symbol = keyboard (no hand)")
         check(PetColors.messageEdge(PetSnapshot.slack, ned, dark: true).0 == ned.accent, "message bubble edge = accent")
         check(PetCharacter.breath >= 3 && PetCharacter.idleScale <= 1.02, "motion: glow breath ≥ 3 s, idle scale ≤ 2 % (no bounce / shake)")
