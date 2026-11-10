@@ -176,8 +176,8 @@ enum PetPlacement {
 enum PetLayout {
     static let panel = CGSize(width: 280, height: 300)
     static let character: CGFloat = 76
-    /// Room around the character card for its glow (the breath reaches radius 18).
-    static let inset: CGFloat = 14
+    /// Room around the character card for its glow (the back-light reaches radius 6).
+    static let inset: CGFloat = 10
     /// Character card (rounded, state-coloured edge) and the persona mark inside it.
     static let card: CGFloat = 64
     static let tile: CGFloat = 54
@@ -532,7 +532,7 @@ struct PetBubble: View {
 }
 
 /// The persona mark on a rounded card whose edge + outer glow carry the state colour. Motion: only a slow glow
-/// breath (PetGlow, 3 s ease-in-out — every state but 연결 끊김) and, at rest, a ≤1.5 % scale breath — no bounce, no shake, no emoji. 동작 줄이기 = still.
+/// breath (PetGlow, 1.6 s ease-in-out — every state but 연결 끊김) and, at rest, a ≤1.5 % scale breath — no bounce, no shake, no emoji. 동작 줄이기 = still.
 struct PetCharacter: View {
     let mood: PetMood
     let persona: Persona
@@ -888,11 +888,11 @@ final class DesktopPetController: NSObject {
     }
 }
 
-/// The breathing outer glow of the card and the bubbles: a soft halo that swells and fades (radius 6 ↔ 18, 20 % ↔ 100 %
-/// of `strength`) on a slow ease-in-out cycle, plus a tight inner ring so the edge itself brightens with it.
-/// 동작 줄이기 (or a snapshot) = the halo held at its middle, no motion.
+/// The breathing outer glow of the card and the bubbles: a tight back-light just behind the edge (radius 2 ↔ 6,
+/// 35 % ↔ 100 % of `strength`) pulsing on a quicker ease-in-out cycle, plus a hairline inner ring so the edge itself
+/// brightens with it — kept small on purpose (a wide halo read as too much). 동작 줄이기 (or a snapshot) = held, no motion.
 struct PetGlow: ViewModifier {
-    static let breath: Double = 3.0
+    static let breath: Double = 1.6
     let color: Color
     let strength: Double
     let reduceMotion: Bool
@@ -901,11 +901,11 @@ struct PetGlow: ViewModifier {
         if strength <= 0 {
             content
         } else if reduceMotion {
-            content.shadow(color: color.opacity(strength * 0.4), radius: 3).shadow(color: color.opacity(strength * 0.7), radius: 12)
+            content.shadow(color: color.opacity(strength * 0.5), radius: 1.5).shadow(color: color.opacity(strength * 0.75), radius: 4)
         } else {
             content.phaseAnimator([false, true]) { c, up in
-                c.shadow(color: color.opacity(strength * (up ? 0.55 : 0.15)), radius: up ? 4 : 2)
-                    .shadow(color: color.opacity(strength * (up ? 1 : 0.2)), radius: up ? 18 : 6)
+                c.shadow(color: color.opacity(strength * (up ? 0.7 : 0.3)), radius: up ? 1.5 : 1)
+                    .shadow(color: color.opacity(strength * (up ? 1 : 0.35)), radius: up ? 6 : 2)
             } animation: { _ in .easeInOut(duration: Self.breath) }
         }
     }

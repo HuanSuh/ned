@@ -403,8 +403,8 @@ only the position (`desktopPetOrigin`) and the seen message keys (`desktopPetSee
   Greeting: `Persona.greeting(at:)` once a day, at the first non-quiet look of the day (`greet:YYYY-MM-DD` seen key).
   While the pet is hidden new items only become seen. Status notes: "끝" (needsInput/attention → idle, session kind)
   and "연결 끊김".
-- **Motion**: only the glow's slow breath (`PetGlow`: 3 s ease-in-out `phaseAnimator`, halo radius 6 ↔ 18 at 20 % ↔ 100 % of the
-  state's strength plus a tight inner ring, on the card and the bubbles — every state but offline) and an idle scale ≤ 1.5 %; mood and
+- **Motion**: only the glow's slow breath (`PetGlow`: 1.6 s ease-in-out `phaseAnimator`, a tight back-light radius 2 ↔ 6 at 35 % ↔ 100 % of
+  the state's strength plus a hairline inner ring, on the card and the bubbles — every state but offline) and an idle scale ≤ 1.5 %; mood and
   bubble changes cross-fade in 0.5 s. No bounce / shake / spinning ring. "동작 줄이기" → glow fixed, no breath.
 
 ```sh
