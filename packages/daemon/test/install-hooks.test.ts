@@ -28,6 +28,37 @@ const run = (...args: string[]) => {
 const OLD = { hooks: [{ type: "command", command: '/bin/sh "/Users/x/ned/packages/hook/ned-hook.sh"', timeout: 5 }] };
 const ORCA = { hooks: [{ type: "command", command: "/usr/local/bin/orca-hook" }] };
 
+describe("ned-hook.sh", () => {
+  const HOOK = path.resolve(here, "../../hook/ned-hook.sh");
+  const hook = (xcodeSelectExit: number) => {
+    const d = tmp();
+    fs.mkdirSync(path.join(d, "bin"));
+    fs.writeFileSync(path.join(d, "bin", "xcode-select"), `#!/bin/sh\nexit ${xcodeSelectExit}\n`, { mode: 0o755 });
+    const r = spawnSync("/bin/sh", [HOOK], {
+      encoding: "utf8",
+      input: JSON.stringify({ hook_event_name: "Stop", session_id: "s1", cwd: "/x" }),
+      env: { ...process.env, PATH: `${path.join(d, "bin")}:${process.env.PATH}`, NED_HOME: path.join(d, "ned") },
+    });
+    const ev = path.join(d, "ned", "events");
+    return { out: r.stdout, code: r.status, files: fs.existsSync(ev) ? fs.readdirSync(ev) : [], ev };
+  };
+
+  it("without the Command Line Tools: answers {} and records nothing (never touches the python3 stub)", () => {
+    const r = hook(2);
+    expect(r.code).toBe(0);
+    expect(r.out).toBe("{}\n");
+    expect(r.files).toEqual([]);
+  });
+
+  it("with them: answers {} and appends one JSON line", () => {
+    const r = hook(0);
+    expect(r.out).toBe("{}\n");
+    expect(r.files).toHaveLength(1);
+    const line = JSON.parse(fs.readFileSync(path.join(r.ev, r.files[0]), "utf8").trim());
+    expect(line).toMatchObject({ event: "Stop", session_id: "s1", cwd: "/x" });
+  });
+});
+
 describe("install-hooks.mjs --settings", () => {
   it("--uninstall removes only Ned entries and keeps other hooks and keys", () => {
     const f = path.join(tmp(), "settings.json");
