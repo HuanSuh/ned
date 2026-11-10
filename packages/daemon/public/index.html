@@ -147,7 +147,7 @@
   <main class="view page" id="v-settings" hidden>
     <div class="pwrap">
       <div class="say-slot" id="say-settings"></div>
-      <div class="stop"><b class="stitle" id="s-title">설정</b><span class="count mono" id="cfg-port"></span><span class="sp"></span><button class="btn small" data-refresh="config">다시 불러오기</button></div>
+      <div class="stop"><b class="stitle" id="s-title">설정</b><span class="count mono" id="cfg-port"></span><span class="sp"></span><button class="btn small" type="button" data-onboard="1" title="커넥터 연결·Slack 팀 ID·자동 실행·코드 서명 점검">시작하기</button><button class="btn small" data-refresh="config">다시 불러오기</button></div>
       <div class="slay">
         <nav class="snav" id="s-nav" aria-label="설정 섹션">
           <a href="#settings" data-sjump="s-look">외형</a>
@@ -379,6 +379,14 @@
       <div class="merr" id="dm-err" role="alert"></div>
     </div>
     <div class="mft" id="dm-actions"></div>
+  </div>
+</div>
+
+<div class="modal" id="ob-modal" hidden>
+  <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="ob-title">
+    <div class="mhd"><h3 id="ob-title">시작하기</h3><span class="mt" id="ob-sub"></span><span class="sp"></span><button type="button" class="btn small" data-obclose="1" aria-label="닫기" title="닫기 (Esc)">✕</button></div>
+    <div class="mbd obbd" id="ob-body"></div>
+    <div class="mft"><span class="hint obft">설정 → 시작하기에서 다시 열 수 있어.</span><button type="button" class="btn go" data-obclose="1">닫기</button></div>
   </div>
 </div>
 

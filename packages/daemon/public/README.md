@@ -40,6 +40,7 @@ daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙�
 | `app/features/chat-output.js` | Ned Net 정리 결과물 저장 카드: ```` ```ned-output ```` 파서(`parseOutputBlock` — 펜스 숨김, 스트리밍 중엔 pending), `renderOutputCard({out, err, block}, md)`(순수 HTML — 저장 위치, Obsidian 에서 열기(`obsidian://` 만), Finder 에서 보기, 내용 보기), `wireOutputCards(root, {postJson, toast})`(→ `POST /api/outputs/:id/reveal`) |
 | `app/features/reviewed.js` | 확인 완료(attention·소스 항목) |
 | `app/features/dailyfail.js` | 실패한 브리핑 표시(순수): `bfFailed(b)`(`ok:false` 또는 옛 파일의 `raw`), `bfKind(b)`("아침 실패"), `dailyFailedLine(state)`(오늘 `daily_failed_at` 이면 홈 한 줄) |
+| `app/features/onboarding.js` | 시작하기 모달(`#ob-modal`, `OB`): `GET /api/setup` → 소스 행(상태 칩 `.stk`, "claude.ai 에서 연결" 링크·`gh auth login`, 다시 확인 = `?refresh=1`)·Slack 팀 ID(`#ob-team` → `PUT /api/config { dashboard: { slack_team_id }, if_updated_at }`, 설정 폼이 더티가 아니면 `renderConfig`)·자동 실행(Ned.app 의 `webkit.messageHandlers.loginItem.postMessage({op: get\|set, enabled})` → Promise `{status, enabled, message?}`, 브라우저면 메뉴 안내)·코드 서명 명령. `init()` 이 첫 로드에 `onboarding.dismissed_at` 없고 `complete` 아니면 연다. 닫기(✕·닫기·Esc·바깥) = `POST /api/setup/dismiss`. 설정 상단 `[data-onboard]` 로 다시 열기. `onboardingHtml(OB, {inApp})` 순수 |
 | `app/features/personas.js` | `VOICE`, 마크, `applyPersona`, 말풍선 `say`, mood·opener |
 | `css/tokens.css` → `base` → `inbox` → `timeline` → `settings` → `home` → `components` → `responsive` | 토큰·페르소나 / 셸·카드·칩 / 탭별 / 오류 배지·모달·아이콘 / 모든 미디어쿼리(마지막이어야 함) |
 
@@ -64,6 +65,7 @@ daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙�
 | 브리핑 히스토리 | `GET /api/briefings?limit=30` | 최신순, 펼치면 headline/action_items/updates/fyi/sessions/cost/raw. `NED_OK` 는 접힘·흐리게 |
 | 타임라인 | `GET /api/events?days=2` + 브리핑 | ts 로 병합, 이벤트 유형·워크트리 칩 필터 |
 | 설정 | `GET/PUT /api/config` | 페르소나 선택 UI 는 없음(현재 UI 미제공, config.persona 로만 — 테마는 `state.persona` 를 따름). heartbeat/신호 간격, 브리핑 시각, 조용한 시간, 소스 토글(`config.sources` 키에서 자동 생성), **트래킹 제외**(Slack 채널 / Jira 프로젝트 칩 입력: 엔터·쉼표로 추가, ✕·빈 입력에서 Backspace 로 빼기, `MNT-123` 은 `MNT` 로, 잘못된 키는 안내만. 자동완성 후보는 `/api/agenda` 의 slack 채널·jira 키 접두어와 `/api/briefings` 의 slack·jira 항목에서 클라이언트가 모은 datalist. 저장 = `PUT /api/config` 의 `filters`), claude_model, claude_max_turns |
+| 시작하기 (모달) | `GET /api/setup` · `POST /api/setup/dismiss` · `PUT /api/config { dashboard }` | 처음 열 때 준비 안 된 항목이 있고 닫은 적 없으면 저절로, 설정 상단 "시작하기" 로 다시. 모달이 열려 있으면 페이지 키(r/h/i…)는 안 먹음 |
 | 설정 → 아카이브 | `GET /api/archive/status` · `POST /api/archive/flush` · `PUT /api/config { archive }` | Obsidian 볼트 경로(잘못된 경로·~/.ned·레포 안이면 저장이 400 으로 막히고 "저장 실패: …"), `.obsidian` 있으면 "볼트 확인됨" 칩. 끄면 나머지는 흐려지지만 값은 저장됨 |
 
 ## 갱신 주기

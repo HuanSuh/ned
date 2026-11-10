@@ -11,6 +11,7 @@ import { readUnprocessedEvents } from "./events.js";
 import { EVENTS_DIR, STATE_PATH, ensureDirs, localDay, log } from "./paths.js";
 import { startServer } from "./server.js";
 import { readState, writeState } from "./state.js";
+import { formatSetupCheck, runSetupCheck } from "./setup-check.js";
 
 const [, , cmd = "run", ...rest] = process.argv;
 const flag = (f: string) => rest.includes(f);
@@ -115,8 +116,14 @@ async function main(): Promise<void> {
       console.log(JSON.stringify(readState(), null, 2));
       break;
     }
+    case "setup-check": {
+      // 시작하기 checks (/ned:install runs this after installing): connectors, gh, Slack 팀 ID, code signing.
+      const r = await runSetupCheck(loadConfig());
+      console.log(flag("--json") ? JSON.stringify(r, null, 2) : formatSetupCheck(r));
+      break;
+    }
     default:
-      console.log(`usage: ned <run|heartbeat [--daily]|state|agenda|prompt <heartbeat|briefing|agenda>>`);
+      console.log(`usage: ned <run|heartbeat [--daily]|state|agenda|prompt <heartbeat|briefing|agenda>|setup-check [--json]>`);
       process.exit(1);
   }
 }

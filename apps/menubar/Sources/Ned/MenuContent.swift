@@ -315,4 +315,24 @@ struct LoginItem {
         refresh()
         if SMAppService.mainApp.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
     }
+
+    /// `--login-item-register` / `--login-item-unregister`: the same SMAppService call, no UI / daemon / log file —
+    /// one status line on stdout (+ the approval pane when macOS wants the user's OK). 0 = ok, 1 = the call failed.
+    nonisolated static func headless(register on: Bool) -> Int32 {
+        var code: Int32 = 0
+        do {
+            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+        } catch {
+            print("login-item-\(on ? "register" : "unregister"): failed — \(error.localizedDescription)")
+            code = 1
+        }
+        let s = SMAppService.mainApp.status
+        print("login-item-status: \(describe(s)) (rawValue \(s.rawValue)) — 자동 시작: \(s == .enabled ? "켜짐" : s == .requiresApproval ? "꺼짐 (승인 필요)" : "꺼짐")")
+        if s == .requiresApproval {
+            print("approve: System Settings > General > Login Items & Extensions → Ned")
+            SMAppService.openSystemSettingsLoginItems()
+        }
+        fflush(stdout)
+        return code
+    }
 }

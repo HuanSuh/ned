@@ -59,6 +59,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         cfg.websiteDataStore = .default()
         cfg.userContentController.add(BootMessageHandler(), name: "ned")
         cfg.userContentController.add(OpenLinkHandler(), name: "openLink")
+        cfg.userContentController.addScriptMessageHandler(LoginItemHandler(), contentWorld: .page, name: "loginItem")
         webView = WKWebView(frame: frame, configuration: cfg)
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -320,6 +321,39 @@ private final class OpenLinkHandler: NSObject, WKScriptMessageHandler {
                 return
             }
             DeepLink.open(deep, web: web)
+        }
+    }
+}
+
+/// 시작하기 → 자동 실행 (public/app/features/onboarding.js): `webkit.messageHandlers.loginItem.postMessage({op: "get"})`
+/// or `{op: "set", enabled}` → Promise of `{status, enabled, message?}` (status = LoginItem.describe). Same LoginItem path
+/// as the menu toggle. Only the dashboard page (http://127.0.0.1:<port>) may call it.
+private final class LoginItemHandler: NSObject, WKScriptMessageHandlerWithReply {
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage,
+                               replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
+        let body = message.body as? [String: Any]
+        let op = body?["op"] as? String
+        let enabled = body?["enabled"] as? Bool
+        let src = message.frameInfo.request.url
+        MainActor.assumeIsolated {
+            guard let src, src.scheme == "http", src.host == "127.0.0.1" || src.host == "localhost", (src.port ?? 80) == AppConfig.port else {
+                DaemonManager.shared.note("login item: ignored a message from \(src?.absoluteString ?? "?")")
+                replyHandler(nil, "not allowed")
+                return
+            }
+            var li = LoginItem()
+            if op == "set", let enabled {
+                DaemonManager.shared.note("login item: dashboard 시작하기 → \(enabled ? "register" : "unregister")")
+                li.set(enabled)
+            } else if op == "get" {
+                li.refresh()
+            } else {
+                replyHandler(nil, "unknown op")
+                return
+            }
+            var reply: [String: Any] = ["status": LoginItem.describe(li.status), "enabled": li.enabled]
+            if let m = li.message { reply["message"] = m }
+            replyHandler(reply, nil)
         }
     }
 }

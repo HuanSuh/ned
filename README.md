@@ -26,6 +26,9 @@ Claude Code 에서:
 `/Applications/Ned.app` 에 설치해 실행한다. 몇 분 걸린다. 새 빌드가 다 끝난 뒤에만 기존 설치를 바꾸므로, 중간에 실패해도 쓰던 Ned 는 그대로다
 (로그 `~/.ned/logs/install.log`). 세션 훅은 새 Claude Code 세션부터 기록된다.
 
+`/ned:install` 은 빌드 전에 코드 서명 인증서가 없으면 만들지 묻고, 설치 뒤 소스별 연결 상태(`ned setup-check`)를 보여 주고, 처음이면 자동 실행을 묻는다.
+대시보드도 처음 열 때 **시작하기** 창(설정 → 시작하기)으로 같은 점검을 보여 준다.
+
 처음 한 번:
 - claude.ai → 설정 → 커넥터에서 Slack·Gmail·Google Calendar·Atlassian(Jira)·GitHub 를 **본인 계정으로** 연결.
 - 대시보드 설정 → 외형 → 링크 열기에서 Slack 팀 ID 입력(Slack 링크를 앱으로 열 때).

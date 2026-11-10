@@ -10,6 +10,7 @@ import { init as initHistView } from "./features/histview.js";
 import { init as initComms } from "./features/comms.js";
 import { init as initOpenLink, openLink } from "./features/openlink.js";
 import { init as initDrafts } from "./features/drafts.js";
+import { OB, init as initOnboarding } from "./features/onboarding.js";
 import { init as initReviewed } from "./features/reviewed.js";
 import { init as initSlackThread } from "./features/slackthread.js";
 import { init as initTodoSplit, setMeFold, isMeFolded } from "./features/todosplit.js";
@@ -180,13 +181,13 @@ window.NED = { store, api: { api, postJson }, nav, openLink };
 // Every module's listeners + one-time setup, in the order the single file ran them — listener order on document
 // matters (e.g. the error popover's Esc stopImmediatePropagation runs before the page keys in boot()).
 // initOpenLink first: its document capture click listener must run before reviewed.js's (which stops inbox-row icon clicks).
-for (const init of [initOpenLink, initChips, initPopover, initSettings, initCardLayout, initLayout, initReviewed, initDrafts, initCalendar, initCards, initHistView, initSlackThread, initAgStatus, initHome, initTodoSplit, initComms, initActivityPing]) init();
+for (const init of [initOpenLink, initChips, initPopover, initSettings, initCardLayout, initLayout, initReviewed, initDrafts, initCalendar, initCards, initHistView, initSlackThread, initAgStatus, initHome, initTodoSplit, initComms, initActivityPing, initOnboarding]) init();
 boot();
 
 function boot() {
   window.addEventListener("hashchange", setView);
   document.addEventListener("keydown", (ev) => {
-    if (DR.open) return; // the draft modal owns the keyboard
+    if (DR.open || OB.open) return; // the draft / 시작하기 modal owns the keyboard
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
     const t = ev.target;
     if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
