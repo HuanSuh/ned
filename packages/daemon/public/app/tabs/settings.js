@@ -7,6 +7,7 @@ import { readCardLayout, renderCardLayout } from "../features/cardlayout.js";
 import { ACTION_DEFAULTS, ACTION_KO } from "../features/drafts.js";
 import { originChip } from "../features/draftref.js";
 import { readToneBySource, syncWriteActionGroups, writeActionsHtml } from "./settings-actions.js";
+import { initAppSettings } from "./settings-app.js";
 import { initArchive, readArchive, renderArchive } from "./settings-archive.js";
 import { initHistorySettings, readHistorySettings, renderHistorySettings } from "./settings-history.js";
 import { initLinkPrefs, linkPrefsError, readLinkPrefs, renderLinkPrefs } from "./settings-links.js";
@@ -382,6 +383,7 @@ export function init() {
   onBuildStale(syncSaveLock);
   initRestore();
   initArchive();
+  initAppSettings(); // 앱 (Ned.app): its own section + nav link, applied at once through the app bridge (not the form)
   initHistorySettings();
   initLinkPrefs();
   initPet();

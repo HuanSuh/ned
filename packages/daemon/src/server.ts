@@ -25,6 +25,7 @@ import { log } from "./paths.js";
 import { listOutputs, outputFile, readOutput } from "./outputs.js";
 import { checkVault } from "./vault.js";
 import { readOnboarding, setOnboardingDismissed, setupCheck } from "./setup-check.js";
+import { updateCheck } from "./update-check.js";
 import { onMailReviewed, type MarkReadOutcome } from "./mail-read.js";
 import { SOURCE_KEY, readSourceReviewed, readState, setReviewed, writeState } from "./state.js";
 import { noteActivity, schedulerStatus } from "./scheduler.js";
@@ -517,6 +518,9 @@ export function startServer(getConfig: () => NedConfig): void {
     const { dismissed } = (await readBody(c)) as { dismissed?: unknown };
     return c.json({ onboarding: setOnboardingDismissed(dismissed !== false) });
   });
+
+  // 업데이트 확인 (src/update-check.ts): installed runtime version vs GitHub main (gh) / the marketplace clone — cached 10 min, ?refresh=1 forces.
+  app.get("/api/update-check", async (c) => c.json(await updateCheck({ refresh: c.req.query("refresh") === "1" })));
 
   registerSearch(app); // GET /api/search (src/search.ts) — before the static catch-all
   // Static files under public/ (proposals, svg mark, ...). Registered last so /api/* wins.

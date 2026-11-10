@@ -40,6 +40,14 @@ node dist/cli.js setup-check [--json] # 시작하기 점검 1회(아래 "시작�
 - 코드 서명: `security find-identity -v -p codesigning` 에 "Ned Local Signing" → ok, `-v` 없이만 보이면 `untrusted`, 없으면 `missing`. `command` = `bash <레포>/scripts/make-signing-cert.sh`(다음 설치부터 적용 — package.sh 가 빌드 때 고름).
 - Login Item 은 여기 없다 — `SMAppService` 는 Ned.app 만 읽고 바꾼다(대시보드 → `webkit.messageHandlers.loginItem`, apps/menubar README).
 
+### 업데이트 확인 (`src/update-check.ts`)
+
+Ned.app 메뉴 "업데이트 확인"과 설정 → 앱의 같은 버튼이 `GET /api/update-check` 를 부른다. 설치하지는 않는다(설치는 Claude Code 흐름).
+- 현재 버전: `$NED_RUNTIME_DIR`(없으면 `$NED_HOME/runtime`)`/.claude-plugin/plugin.json` — `/ned:install` 이 빌드하는 곳. 런타임이 없는 개발 체크아웃이면 데몬이 도는 체크아웃(`REPO_ROOT`)의 것.
+- 최신 버전: (a) `gh api -H "Accept: application/vnd.github.raw+json" repos/<owner>/<repo>/contents/.claude-plugin/plugin.json?ref=main`(비공개 레포 → `gh auth login` 필요; 슬러그는 plugin.json `repository`/`homepage` 에서) →
+  실패하면 (b) `$CLAUDE_CONFIG_DIR`(없으면 `~/.claude`)`/plugins/marketplaces/<marketplace.json name>/.claude-plugin/plugin.json`. 둘 다 안 되면 `error` 에 둘의 사유.
+- 비교는 semver(프리릴리스 < 정식). 결과 10분 캐시(동시 요청은 한 번만), `?refresh=1` 은 새로. 테스트는 `setUpdateDeps({readFile, gh})` 로 파일·gh 를 바꾼다.
+
 `run` 은 시작 직후 heartbeat 를 한 번 돌린다. 이후 `heartbeat_minutes` 마다 tick 하며,
 새 세션 이벤트도 없고 `signal_check_minutes` 가 지나지 않았으면 LLM 을 부르지 않고 침묵한다.
 `briefing_time` 이 지난 첫 tick 은 `prompts/briefing.md` 로 아침 브리핑을 만든다 (하루 1회).
@@ -272,6 +280,7 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 | GET | `/api/archive/status` | Obsidian 아카이브 상태 `{ enabled, vault, folder, check: {ok, obsidian, path, error?} \| null, today_rel, today_url (obsidian://, 파일 있을 때), last_write_at, last_write_path, last_error, last_error_at, last_embed: {day, result}, pending_days }` — 아래 "Obsidian 아카이브" |
 | GET | `/api/setup?refresh=1` | 시작하기 점검(위 "시작하기") `{checked_at, sources: [{key, label, via: connector\|mcp\|gh, status: connected\|needs-auth\|not-connected\|pending\|error, detail?, fix?: {text, url?, command?}}], slack_team_id: {status: ok\|missing\|n/a, value}, signing: {status: ok\|untrusted\|missing\|error, identity, command, detail?}, complete, onboarding: {dismissed_at}}` — 켠 소스만. (sources, 팀 ID) 가 같으면 1분 캐시(동시 요청은 한 번만 띄움), `refresh=1` 은 새로 |
 | POST | `/api/setup/dismiss` | `{dismissed?: boolean}`(기본 true) → `{onboarding: {dismissed_at}}` — 시작하기 창이 저절로 뜨지 않게. `~/.ned/onboarding.json`(config.yaml 아님), false 면 지움 |
+| GET | `/api/update-check?refresh=1` | 업데이트 확인(위 "업데이트 확인") `{current, latest, source: github\|marketplace\|null, update_available, checked_at, repo, steps: ["/plugin update ned", "/reload-plugins", "/ned:install"], error?, note?}` — `note` = 마켓플레이스로 폴백했을 때 gh 가 안 된 이유. 10분 캐시, `refresh=1` 은 새로 |
 | POST | `/api/archive/flush` | 오늘(+대기 중인 날) 리포트를 지금 씀 → `{ ok, written: [day], error?, status }` · 409 아카이브 꺼짐 · 500 쓰기 실패(`status.last_error`) |
 | GET | `/api/outputs?limit=50` | 정리 결과물 목록(최신순, `markdown` 뺌) `[{ id, ts, kind, title, sources, chat_id?, message_ts?, vault_rel?, vault_path?, obsidian_url?, vault_error? }]` |
 | GET | `/api/outputs/:id` | 결과물 하나(`markdown` 포함). 404 |
