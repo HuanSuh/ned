@@ -1,7 +1,7 @@
 {
   "name": "ned",
   "displayName": "Ned",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Ned — 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub)를 모아 브리핑하는 로컬 대시보드 + 메뉴 막대 앱. /ned:install 로 이 Mac 에 빌드·설치.",
   "author": {
     "name": "HuanSuh",

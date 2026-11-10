@@ -2,6 +2,14 @@
 
 Ned 플러그인(`ned@ned`) 버전 기록. 버전은 `.claude-plugin/plugin.json` 의 `version` — 올리는 규칙은 `docs/RELEASE.md`.
 
+## 0.2.0 — 2026-11-11
+
+- **시작하기(첫 실행 점검)**: `/ned:install` 이 빌드 전에 코드 서명 인증서("Ned Local Signing")를 만들지 묻고, 설치 뒤 소스별 연결 상태
+  (claude.ai 커넥터·`gh`·Sentry)·Slack 팀 ID·서명을 표로 보여 주고, 처음 설치면 자동 실행(Login Item) 등록을 묻는다.
+- 대시보드 **시작하기** 창: 준비 안 된 항목이 있으면 처음 열 때 자동으로 뜸(설정 → 시작하기로 다시 열기). 소스별 상태·"다시 확인"·
+  Slack 팀 ID 입력·자동 실행 토글(Ned.app 창)·서명 상태. `GET /api/setup`, `POST /api/setup/dismiss`, CLI `setup-check [--json]`.
+- Ned.app: `--login-item-register` / `--login-item-unregister`(헤드리스), 대시보드용 `loginItem` 브리지.
+
 ## 0.1.0 — 2026-11-11
 
 첫 Claude Code 플러그인 배포.
