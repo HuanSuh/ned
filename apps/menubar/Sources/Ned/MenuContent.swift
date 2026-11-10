@@ -2,123 +2,169 @@ import SwiftUI
 import AppKit
 import ServiceManagement
 
+/// The dropdown: one status line + 대시보드 열기 · 설정… · 업데이트 확인 · 종료. Everything else lives in the dashboard
+/// (설정 → 앱 for the app's own settings, via AppSettingsHandler in DashboardWindow.swift).
 struct MenuContent: View {
     @ObservedObject var store: StateStore
     @ObservedObject var daemon: DaemonManager
-    @State private var loginItem = LoginItem()
-    @AppStorage(LaunchBehavior.openAtLaunchKey) private var openAtLaunch = true
-    @AppStorage(LaunchBehavior.openAtLoginLaunchKey) private var openAtLoginLaunch = false
+    @ObservedObject private var updates = UpdateChecker.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            header
-            if daemon.isBooting {
-                bootLine
-            } else {
-                daemonLine
-            }
-            if !store.state.daemonAlive && !daemon.isHealthy && !daemon.isBooting {
-                Label("\(store.persona.displayName) 데몬이 꺼져 있어요 — 로그를 확인하세요", systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange)
-            }
-            if let e = store.lastError {
-                Label("state.json 읽기 실패 (이전 상태 표시 중)", systemImage: "doc.badge.ellipsis")
-                    .font(.caption2).foregroundStyle(.secondary).help(e)
-            }
-            // Open items only: 확인 완료 (reviewed_at) ones are hidden here and not in the badge.
-            if !store.state.openAttention.isEmpty {
-                section("지금 봐야 할 것") {
-                    ForEach(store.state.openAttention.prefix(5)) { item in
-                        AttentionRow(item: item) { store.dismiss(item.id) }
-                    }
-                }
-            } else {
-                // Empty attention: the persona's greeting for this time of day.
-                Label(store.persona.greeting(), systemImage: store.persona.symbol(.idle))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            section("에이전트 세션 (\(store.state.sessions.count))") {
-                if store.state.sessions.isEmpty {
-                    Text("활성 세션 없음").font(.caption).foregroundStyle(.secondary)
-                }
-                // The user's own sessions first, then (dimmed) Orca workers; recency order within each.
-                ForEach((store.state.sessions.filter { !$0.is_worker } + store.state.sessions.filter(\.is_worker)).prefix(8)) { s in SessionRow(session: s, live: store.persona.led) }
-            }
-            Divider()
-            settings
-            footer
+        TimelineView(.periodic(from: .now, by: 30)) { ctx in
+            MenuView(status: MenuStatus.make(daemon: daemon.status, bootStage: daemon.bootStage, statusLine: daemon.statusLine,
+                                              repoPath: daemon.repoPath, lastHeartbeatAt: store.state.last_heartbeat_at,
+                                              attention: store.attentionCount, readError: store.lastError, now: ctx.date),
+                     persona: store.persona, checkingUpdate: updates.checking,
+                     actions: MenuActions(
+                        restart: { daemon.restart() },
+                        openDashboard: { StatusItemController.shared?.closePopover(); DashboardWindowController.shared.show() },
+                        openSettings: { StatusItemController.shared?.closePopover(); DashboardWindowController.shared.show(section: "s-app") },
+                        checkUpdate: { UpdateChecker.shared.check() },
+                        quit: { NSApp.terminate(nil) }))
         }
-        .padding(12)
-        .frame(width: 360)
-        .tint(store.persona.accent)
-        .onAppear { loginItem.refresh() }
+    }
+}
+
+/// What the status line shows — pure (MenuStatus.make), so `--menu-snapshot` can render every state without a daemon.
+struct MenuStatus: Equatable {
+    enum Kind: String { case ok, booting, off }
+    var kind: Kind
+    var message: String
+    /// Tooltip: the supervisor line (pid / failure), repo, state.json read error.
+    var detail: String
+    var attention: Int
+
+    /// Dot colours are the old daemon line's: running/external = persona LED, checking/starting = yellow, failed = red.
+    static func make(daemon: DaemonManager.Status, bootStage: DaemonManager.BootStage, statusLine: String, repoPath: String?,
+                     lastHeartbeatAt: Double?, attention: Int, readError: String?, now: Date = Date()) -> MenuStatus {
+        var tip = [statusLine, repoPath.map { "저장소: \($0)" } ?? "저장소 미지정"]
+        if let e = readError { tip.append("state.json 읽기 실패 (이전 상태 표시 중): \(e)") }
+        let kind: Kind, msg: String
+        switch daemon {
+        case .checking, .starting:
+            kind = .booting
+            msg = "시작 중 \(bootStage.rawValue + 1)/\(DaemonManager.BootStage.allCases.count) · \(bootStage.label)"
+        case .failed:
+            kind = .off
+            msg = "꺼져 있음"
+        case .running, .external:
+            kind = .ok
+            msg = lastHeartbeatAt.map { "마지막 점검 \(ago($0, now: now))" } ?? "아직 점검 전"
+        }
+        return MenuStatus(kind: kind, message: msg, detail: tip.joined(separator: "\n"), attention: max(0, attention))
     }
 
-    private var daemonLine: some View {
-        HStack(spacing: 6) {
-            Circle().fill(daemonColor).frame(width: 7, height: 7)
-                .shadow(color: daemon.isHealthy ? store.persona.led.opacity(0.7) : .clear, radius: 2)
-            Text(daemon.statusLine).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                .help(daemon.repoPath.map { "저장소: \($0)" } ?? "저장소 미지정")
+    /// "방금" · "N분 전" · "N시간 전" · "N일 전" (ms since 1970). A future time (clock skew) reads as 방금.
+    static func ago(_ ms: Double, now: Date) -> String {
+        let s = now.timeIntervalSince1970 - ms / 1000
+        if s < 60 { return "방금" }
+        if s < 3600 { return "\(Int(s / 60))분 전" }
+        if s < 86_400 { return "\(Int(s / 3600))시간 전" }
+        return "\(Int(s / 86_400))일 전"
+    }
+}
+
+struct MenuActions {
+    var restart: () -> Void = {}
+    var openDashboard: () -> Void = {}
+    var openSettings: () -> Void = {}
+    var checkUpdate: () -> Void = {}
+    var quit: () -> Void = {}
+}
+
+/// The dropdown's layout, from plain values (MenuContent feeds it live; MenuSnapshot feeds fixed states).
+struct MenuView: View {
+    static var width: CGFloat { 248 }
+    let status: MenuStatus
+    let persona: Persona
+    var checkingUpdate = false
+    var actions = MenuActions()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            statusLine.padding(.horizontal, 10).padding(.top, 9).padding(.bottom, 8)
+            Divider().padding(.horizontal, 6)
+            VStack(spacing: 0) {
+                MenuRow(title: "대시보드 열기", symbol: "macwindow", action: actions.openDashboard)
+                MenuRow(title: "설정…", symbol: "gearshape", action: actions.openSettings)
+                MenuRow(title: checkingUpdate ? "업데이트 확인 중…" : "업데이트 확인", symbol: "arrow.down.circle",
+                        busy: checkingUpdate, action: actions.checkUpdate)
+                Divider().padding(.horizontal, 6).padding(.vertical, 3)
+                MenuRow(title: "종료", symbol: "power", action: actions.quit)
+            }
+            .padding(5)
+        }
+        .frame(width: Self.width)
+        .tint(persona.accent)
+    }
+
+    private var dotColor: Color {
+        switch status.kind {
+        case .ok: return persona.led
+        case .booting: return .yellow
+        case .off: return .red
+        }
+    }
+
+    private var statusLine: some View {
+        HStack(spacing: 7) {
+            Circle().fill(dotColor).frame(width: 8, height: 8)
+                .shadow(color: status.kind == .ok ? persona.led.opacity(0.7) : .clear, radius: 2)
+            Text(status.message).font(.callout).foregroundStyle(status.kind == .off ? .primary : .secondary).lineLimit(1)
             Spacer(minLength: 4)
-            if case .failed = daemon.status {
-                Button { daemon.restart() } label: { Label("다시 시작", systemImage: "arrow.clockwise") }
+            if status.kind == .off {
+                Button(action: actions.restart) { Label("다시 시작", systemImage: "arrow.clockwise") }
                     .buttonStyle(.borderedProminent).tint(.red).controlSize(.small).font(.caption.weight(.semibold))
             }
-            Button("로그 열기") { daemon.revealLog() }.buttonStyle(.link).font(.caption)
-        }
-    }
-
-    /// While the daemon is .checking / .starting: the boot screen's step (n/4 + label) with a small spinner.
-    private var bootLine: some View {
-        HStack(alignment: .center, spacing: 8) {
-            ProgressView().controlSize(.small)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("시작 중 \(daemon.bootStage.rawValue + 1)/\(DaemonManager.BootStage.allCases.count) · \(daemon.bootStage.label)")
-                    .font(.caption.weight(.medium))
-                Text(daemon.statusLine).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            if status.attention > 0 {
+                Text(status.attention > 99 ? "99+" : "\(status.attention)")
+                    .font(.caption2.monospacedDigit().weight(.bold))
+                    .foregroundStyle(persona.accentIsLight ? Color.black : Color.white)
+                    .padding(.horizontal, 5).frame(minWidth: 16, minHeight: 15)
+                    .background(Capsule().fill(persona.accent))
+                    .help("확인할 것 \(status.attention)건 — 대시보드에서 보기")
+                    .accessibilityLabel("확인할 것 \(status.attention)건")
             }
-            Spacer(minLength: 4)
-            Button("로그 열기") { daemon.revealLog() }.buttonStyle(.link).font(.caption)
         }
-        .help(daemon.repoPath.map { "저장소: \($0)" } ?? "저장소 미지정")
+        .help(status.detail)
+        .accessibilityElement(children: .combine)
     }
+}
 
-    private var daemonColor: Color {
-        switch daemon.status {
-        case .running, .external: return store.persona.led
-        case .starting, .checking: return .yellow
-        case .failed: return .red
-        }
-    }
+/// One menu-like row: icon + title, full width, hover highlight.
+struct MenuRow: View {
+    let title: String
+    let symbol: String
+    var busy = false
+    let action: () -> Void
+    @State private var hover = false
 
-    private var settings: some View {
-        VStack(alignment: .leading, spacing: 4) {
+    var body: some View {
+        Button(action: action) {
             HStack(spacing: 8) {
-                Toggle("Login Items 에 등록", isOn: Binding(
-                    get: { loginItem.enabled },
-                    set: { loginItem.set($0) }))
-                    .toggleStyle(.checkbox).font(.caption)
-                Text("자동 시작: \(loginItem.statusLabel)")
-                    .font(.caption2).foregroundStyle(loginItem.status == .enabled ? .primary : .secondary)
-                    .help("SMAppService.mainApp.status = \(LoginItem.describe(loginItem.status))")
+                Group {
+                    if busy { ProgressView().controlSize(.mini) } else { Image(systemName: symbol) }
+                }
+                .frame(width: 16).foregroundStyle(.secondary)
+                Text(title)
+                Spacer()
             }
-            if let m = loginItem.message {
-                Text(m).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            HStack(spacing: 12) {
-                Toggle("실행 시 대시보드 열기", isOn: $openAtLaunch).toggleStyle(.checkbox).font(.caption)
-                    .help("Ned 를 실행하면 대시보드 창을 엽니다 (NED_OPEN_DASHBOARD=0 이면 항상 꺼짐)")
-                Toggle("자동 시작 시에도 열기", isOn: $openAtLoginLaunch).toggleStyle(.checkbox).font(.caption)
-                    .disabled(!openAtLaunch)
-                    .help("로그인 직후 자동 시작됐을 때도 대시보드를 엽니다 (기본: 메뉴 막대만)")
-            }
-            Button("저장소 위치…") { chooseRepo() }.buttonStyle(.link).font(.caption)
-                .help(daemon.repoPath ?? "")
+            .padding(.horizontal, 6).padding(.vertical, 4)
+            .contentShape(Rectangle())
+            .background(RoundedRectangle(cornerRadius: 5).fill(hover ? Color.primary.opacity(0.09) : .clear))
         }
+        .buttonStyle(.plain)
+        .disabled(busy)
+        .onHover { hover = $0 }
     }
+}
 
-    private func chooseRepo() {
+/// 설정 → 앱 "저장소 위치 → 변경…": pick the Ned repo folder (must contain packages/daemon) → DaemonManager.setRepoPath.
+/// Returns false when cancelled or the folder is not a Ned repo (an alert says so).
+@MainActor
+enum RepoPicker {
+    static func choose() -> Bool {
+        let daemon = DaemonManager.shared
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -126,147 +172,17 @@ struct MenuContent: View {
         panel.message = "Ned 저장소 (packages/daemon 이 있는 폴더) 를 선택하세요"
         if let r = daemon.repoPath { panel.directoryURL = URL(fileURLWithPath: r) }
         NSApp.activate(ignoringOtherApps: true)
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
         guard FileManager.default.fileExists(atPath: url.path + "/packages/daemon/package.json") else {
             let a = NSAlert()
             a.messageText = "Ned 저장소가 아니에요"
             a.informativeText = "\(url.path) 에 packages/daemon 이 없습니다."
             a.runModal()
-            return
+            return false
         }
         daemon.setRepoPath(url.path)
+        return true
     }
-
-    private var header: some View {
-        HStack {
-            Text(store.persona.headerTitle).font(.headline).foregroundStyle(store.persona.accent)
-            if let b = store.state.last_briefing, b.status != "NED_OK" {
-                Text(b.headline ?? "업데이트")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            } else {
-                Text(store.persona.nothingNew)
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer()
-            if store.state.quiet { Image(systemName: "moon.zzz").foregroundStyle(.secondary).help("Quiet hours") }
-        }
-    }
-
-    private var footer: some View {
-        HStack {
-            Button("지금 점검") { store.triggerHeartbeat() }
-            Button("대시보드") { DashboardWindowController.shared.show() }
-            Spacer()
-            if let t = store.state.last_heartbeat_at {
-                Text("마지막 \(relative(t))").font(.caption2).foregroundStyle(.secondary)
-            }
-            Button("종료") { NSApp.terminate(nil) }.buttonStyle(.plain).foregroundStyle(.secondary).font(.caption)
-        }
-        .controlSize(.small)
-    }
-
-    @ViewBuilder
-    private func section<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption).foregroundStyle(.secondary).textCase(.uppercase)
-            content()
-        }
-    }
-}
-
-struct AttentionRow: View {
-    let item: AttentionItem
-    let dismiss: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: icon).frame(width: 14).foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.title).font(.callout).lineLimit(2)
-                if let d = item.detail, !d.isEmpty {
-                    Text(d).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                }
-            }
-            Spacer(minLength: 4)
-            if let u = item.url, let url = URL(string: u) {
-                Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "arrow.up.right.square") }.buttonStyle(.plain)
-            }
-            Button(action: dismiss) { Image(systemName: "xmark") }.buttonStyle(.plain).foregroundStyle(.secondary)
-        }
-        .padding(6)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
-    }
-
-    private var icon: String {
-        switch item.kind {
-        case "session": return "terminal"
-        case "email": return "envelope"
-        case "slack": return "number"
-        case "jira": return "checklist"
-        case "github": return "arrow.triangle.pull"
-        case "sentry": return "exclamationmark.octagon"
-        case "calendar": return "calendar"
-        default: return "bell"
-        }
-    }
-}
-
-struct SessionRow: View {
-    let session: SessionView
-    var live: Color = .green
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Circle().fill(color).frame(width: 8, height: 8)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
-                    Text(session.worktree).font(.callout).fontWeight(.medium)
-                    Text(label).font(.caption2).foregroundStyle(.secondary)
-                    if session.is_worker {
-                        Text("워커").font(.caption2).foregroundStyle(.secondary)
-                            .padding(.horizontal, 4)
-                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.secondary.opacity(0.5), lineWidth: 0.5))
-                            .help("Orca 하위 워크트리 — 알림·확인할 것에서 제외")
-                    }
-                    if session.subagents_active > 0 {
-                        Text("+\(session.subagents_active)").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-                if let s = session.last_summary ?? session.last_prompt, !s.isEmpty {
-                    Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-            Spacer()
-            Text(relative(session.last_event_ts)).font(.caption2).foregroundStyle(.tertiary)
-        }
-        .opacity(session.is_worker ? 0.55 : 1)
-    }
-
-    private var color: Color {
-        switch session.status {
-        case "running": return live
-        case "waiting": return .orange
-        case "error": return .red
-        case "done": return .blue
-        default: return .gray
-        }
-    }
-
-    private var label: String {
-        switch session.status {
-        case "running": return "작업 중"
-        case "waiting": return "입력 대기"
-        case "error": return "오류"
-        case "done": return "완료"
-        default: return session.status
-        }
-    }
-}
-
-func relative(_ ms: Double) -> String {
-    let f = RelativeDateTimeFormatter()
-    f.unitsStyle = .short
-    return f.localizedString(for: Date(timeIntervalSince1970: ms / 1000), relativeTo: Date())
 }
 
 /// `SMAppService.mainApp` wrapper. Registration of an unsigned/dev bundle may need the user's
@@ -334,5 +250,75 @@ struct LoginItem {
         }
         fflush(stdout)
         return code
+    }
+}
+
+extension Persona {
+    /// Black text reads better on this accent (same threshold as the status item's badge).
+    var accentIsLight: Bool {
+        let c = accentNS.usingColorSpace(.sRGB) ?? accentNS
+        return 0.2126 * c.redComponent + 0.7152 * c.greenComponent + 0.0722 * c.blueComponent > 0.55
+    }
+}
+
+/// `--menu-snapshot <dir>` (headless): MenuView for fixed states → PNG through NSHostingView in an off-screen window
+/// (real AppKit controls, unlike ImageRenderer), light and dark. Also checks MenuStatus.make for each state.
+@MainActor
+enum MenuSnapshot {
+    static func run(dir: String) -> Int32 {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.prohibited)
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        var written = 0, failed = 0
+        let now = Date()
+        let ms = { (secondsAgo: Double) in (now.timeIntervalSince1970 - secondsAgo) * 1000 }
+        typealias S = MenuStatus
+        let cases: [(name: String, status: S, expect: (S.Kind, String))] = [
+            ("ok", S.make(daemon: .running(pid: 4242), bootStage: .dashboard, statusLine: "데몬 실행 중 (pid 4242)", repoPath: "/Users/me/.ned/runtime",
+                          lastHeartbeatAt: ms(180), attention: 0, readError: nil, now: now), (.ok, "마지막 점검 3분 전")),
+            ("not-yet", S.make(daemon: .external(pid: nil), bootStage: .dashboard, statusLine: "외부 데몬 사용 중 — external", repoPath: nil,
+                               lastHeartbeatAt: nil, attention: 0, readError: nil, now: now), (.ok, "아직 점검 전")),
+            ("booting", S.make(daemon: .starting(pid: 4242), bootStage: .connect, statusLine: "데몬 시작 중… (pid 4242)", repoPath: "/r",
+                               lastHeartbeatAt: ms(600), attention: 0, readError: nil, now: now), (.booting, "시작 중 3/4 · 연결 확인")),
+            ("off", S.make(daemon: .failed("node 를 찾지 못함"), bootStage: .tools, statusLine: "데몬 실패: node 를 찾지 못함", repoPath: "/r",
+                           lastHeartbeatAt: ms(7200), attention: 0, readError: "dataCorrupted", now: now), (.off, "꺼져 있음")),
+            ("attention", S.make(daemon: .running(pid: 4242), bootStage: .dashboard, statusLine: "데몬 실행 중 (pid 4242)", repoPath: "/r",
+                                 lastHeartbeatAt: ms(30), attention: 3, readError: nil, now: now), (.ok, "마지막 점검 방금")),
+        ]
+        for c in cases where (c.status.kind, c.status.message) != c.expect {
+            print("menu-snapshot: FAIL — \(c.name) → \(c.status.kind.rawValue) \"\(c.status.message)\", want \(c.expect.0.rawValue) \"\(c.expect.1)\""); failed += 1
+        }
+        if !cases[3].status.detail.contains("state.json 읽기 실패") { print("menu-snapshot: FAIL — read error not in the tooltip"); failed += 1 }
+        if MenuStatus.ago(ms(2 * 86_400 + 5), now: now) != "2일 전" || MenuStatus.ago(ms(-30), now: now) != "방금" {
+            print("menu-snapshot: FAIL — ago()"); failed += 1
+        }
+        for dark in [false, true] {
+            for c in cases {
+                let view = MenuView(status: c.status, persona: PersonaID.ned.persona, checkingUpdate: false)
+                let host = NSHostingView(rootView: view.background(Color(nsColor: .windowBackgroundColor)))
+                let size = host.fittingSize
+                host.frame = NSRect(origin: .zero, size: size)
+                let w = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+                w.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                w.contentView = host
+                host.layoutSubtreeIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+                let path = "\(dir)/menu-\(c.name)-\(dark ? "dark" : "light").png"
+                // 2× pixels (an off-screen window reports 1× backing).
+                guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * 2), pixelsHigh: Int(size.height * 2),
+                                                 bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                                 colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { print("menu-snapshot: FAIL — \(path)"); failed += 1; continue }
+                rep.size = size
+                host.cacheDisplay(in: host.bounds, to: rep)
+                guard let png = rep.representation(using: .png, properties: [:]), FileManager.default.createFile(atPath: path, contents: png) else {
+                    print("menu-snapshot: FAIL — \(path)"); failed += 1; continue
+                }
+                print("menu-snapshot: \(path) (\(rep.pixelsWide)×\(rep.pixelsHigh))")
+                written += 1
+            }
+        }
+        print("menu-snapshot: \(written) written, \(failed) failed → \(dir)")
+        fflush(stdout)
+        return failed == 0 ? 0 : 1
     }
 }

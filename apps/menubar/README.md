@@ -7,8 +7,8 @@ Ned.app is the one thing you run. It:
   when it exits (more than 5 exits in 10 min → failed state), and stops it on quit (SIGTERM, 3 s, SIGKILL).
   If a daemon is already healthy on the port (e.g. a leftover LaunchAgent), it **adopts** it and spawns nothing.
 - **hosts the dashboard** in a native window (`WKWebView` at `http://127.0.0.1:<port>/`),
-- shows attention items and agent sessions in a menu bar item (AppKit `NSStatusItem` + popover), read from `state.json`,
-- can register itself as a Login Item (`SMAppService.mainApp`),
+- shows a short menu bar menu (AppKit `NSStatusItem` + popover): one status line + 대시보드 열기 · 설정… · 업데이트 확인 · 종료 (see Menu below),
+- can register itself as a Login Item (`SMAppService.mainApp`) — from the dashboard's 설정 → 앱,
 - posts native notifications (`UNUserNotificationCenter`) from `state.json` changes — see below.
 
 The daemon and the dashboard HTML are unchanged; the app only wraps them.
@@ -16,11 +16,11 @@ The daemon and the dashboard HTML are unchanged; the app only wraps them.
 | File | Role |
 | --- | --- |
 | `Sources/Ned/NedApp.swift` | `@main` app (empty Settings scene), app delegate (store, status item, starts/stops the daemon, SIGTERM → quit) |
-| `Sources/Ned/StatusItemController.swift` | `NSStatusItem` (unique autosave name, icon/badge/count), MenuContent popover, StatusItemGuard |
-| `Sources/Ned/MenuContent.swift` | Dropdown: daemon status, attention, sessions, Login Item toggle, repo picker, footer |
+| `Sources/Ned/StatusItemController.swift` | `NSStatusItem` (unique autosave name, icon/badge/count), MenuContent popover, StatusItemGuard, `UpdateChecker` (업데이트 확인 alert) |
+| `Sources/Ned/MenuContent.swift` | Dropdown: status line (`MenuStatus`, pure) + 4 items (`MenuView`), repo picker, `LoginItem`, `--menu-snapshot` |
 | `Sources/Ned/StateStore.swift` | `state.json` model, directory watcher, daemon HTTP calls |
 | `Sources/Ned/DaemonManager.swift` | Daemon supervisor + `node`/`claude` resolution |
-| `Sources/Ned/DashboardWindow.swift` | Single dashboard window (`WKWebView`), placeholder, external links |
+| `Sources/Ned/DashboardWindow.swift` | Single dashboard window (`WKWebView`), boot screen, external links, bridges (`loginItem`, `appSettings` + `--appsettings-selftest`) |
 | `Sources/Ned/Notifier.swift` | Native notifications: diffs `state.json`, seen-id store, actions |
 | `Sources/Ned/AppConfig.swift` | `NED_HOME` / `NED_PORT` / user defaults |
 | `Sources/Ned/DesktopPet.swift` | Desktop pet: floating `NSPanel`, state → look mapping, message inbox / queue, bubble, hit views |
@@ -81,18 +81,18 @@ scripts/install.sh                       # 이제 "Ned Local Signing" 으로 서
 
 ## Daemon supervision
 
-| Menu line | Meaning |
+| Supervisor state (status line tooltip) | Meaning |
 | --- | --- |
 | 데몬 실행 중 (pid N) | The app spawned the daemon and it answers `/api/state` |
 | 데몬 시작 중… | Spawned, not answering yet |
 | 외부 데몬 사용 중 — external | Something else already serves the port; the app adopted it. If it stops answering for ~15 s the app takes over |
-| 데몬 실패: … | No repo, no `dist/cli.js`, no `node`, or too many exits. **다시 시작** retries |
+| 데몬 실패: … | No repo, no `dist/cli.js`, no `node`, or too many exits. The menu says **꺼져 있음** + **다시 시작** (retries) |
 
-**로그 열기** opens `$NED_HOME/logs/app-daemon.log`: supervisor lines prefixed `[ned.app …]` plus the
+설정 → 앱 → 로그 **Finder 에서 보기** reveals `$NED_HOME/logs/app-daemon.log`: supervisor lines prefixed `[ned.app …]` plus the
 child's stdout/stderr.
 
 - **Repo**: the nearest ancestor of the app bundle containing `packages/daemon` (dev builds live in
-  `apps/menubar/.build`), else the `nedRepoPath` user default. Set it from **저장소 위치…**
+  `apps/menubar/.build`), else the `nedRepoPath` user default. Set it from the dashboard's 설정 → 앱 → 저장소 위치 **변경…**
   (`install.sh` writes it for `/Applications/Ned.app` — `~/.ned/runtime` for a plugin install, the checkout otherwise).
 - **`node` / `claude`**: taken from `zsh -lic`, then `zsh -lc`, then `/opt/homebrew/bin`, `/usr/local/bin`,
   `~/.nvm/versions/node/*/bin`, `~/.local/bin`, `~/.claude/local`. The first `node` with major ≥ 18 wins.
@@ -103,7 +103,7 @@ child's stdout/stderr.
 
 ## Dashboard window
 
-**대시보드** opens one window and reuses it after that. Its size and position are remembered.
+**대시보드 열기** opens one window and reuses it after that (**설정…** opens it on 설정 → 앱). Its size and position are remembered.
 Until `/api/state` answers it shows a "daemon starting…" placeholder.
 Links with `target=_blank`, `window.open`, or any host other than the dashboard open in the default browser.
 Keys: ⌘W close, ⌘R reload, ⌘C/⌘V/⌘X/⌘A/⌘Z edit. The app shows a Dock icon while the window is open.
@@ -120,7 +120,7 @@ kill <pid>                                            # quits cleanly (stops the
 ```
 
 Launch: a normal launch opens the dashboard window (boot screen → dashboard), so starting Ned always shows
-something (LSUIElement: no Dock icon otherwise). Turn it off in the dropdown (실행 시 대시보드 열기, defaults
+something (LSUIElement: no Dock icon otherwise). Turn it off in the dashboard's 설정 → 앱 (실행 시 대시보드 열기, defaults
 `openDashboardAtLaunch`, default true) or with `NED_OPEN_DASHBOARD=0`; `--dashboard` / `NED_OPEN_DASHBOARD=1` always
 open it; `--*-selftest` runs never do. A launch at login (the launch Apple event's `keyAELaunchedAsLogInItem`; only
 when no launch event was received, < 60 s after the Dock process started — an event without the marker is a direct
@@ -133,10 +133,10 @@ when the frame is missing / zero-sized or the window is occluded (icon not on sc
 Menu Bar or behind the notch). Use it instead of looking at the menu bar.
 `--login-item-selftest` registers then unregisters the Login Item and logs both results.
 `--login-item-status` prints `SMAppService.mainApp.status` to stdout and exits (read-only, no UI; see Login Item below).
-`--login-item-register` / `--login-item-unregister` do the same register / unregister call as the menu toggle, print the
+`--login-item-register` / `--login-item-unregister` do the same register / unregister call as 설정 → 앱, print the
 same status line and exit (0, or 1 when the call failed; `requiresApproval` also opens the Login Items pane). No UI, no daemon —
 `/ned:install` runs `/Applications/Ned.app/Contents/MacOS/Ned --login-item-register` whether or not Ned is already running
-(registration is per bundle; the running app's menu toggle refreshes when the menu opens).
+(registration is per bundle; 설정 → 앱 reads it again whenever the settings tab is shown).
 `--persona-selftest` logs persona resolution and exercises the persona PUT (see Persona below).
 `--pet-selftest` / `--pet-snapshot <dir>` (headless, stdout) check the desktop pet (see Desktop pet below).
 `--wake-selftest` fakes a wedged-after-sleep daemon (SIGSTOP on the child) and runs the wake check (see Sleep / wake below).
@@ -172,22 +172,61 @@ in a window-less web view and passes if the dashboard load starts ≤ outro + 1 
   dashboard's own `--bg` (persona × light/dark, mirrored from `tokens.css` in `BootScreen.dashboardBackground`).
   The dashboard then paints on that same colour and its top-level blocks fade + lift in (`revealScript`, a one-shot
   document-start user script removed after the load).
-- **Menu**: while `.checking` / `.starting` the daemon line becomes a spinner + `시작 중 n/4 · <step>`; `.failed`
-  shows a prominent 다시 시작. The menu bar label is unchanged (one Image + one Text).
+- **Menu**: while `.checking` / `.starting` the status line reads `시작 중 n/4 · <step>` (yellow dot); `.failed`
+  shows 꺼져 있음 + a prominent 다시 시작. The menu bar label is unchanged (one Image + one Text).
+
+## Menu
+
+Click the menu bar item → a ~248 pt popover (`MenuView`, fed by `MenuContent`):
+
+- **Status line** (`MenuStatus.make`, pure): daemon dot (running/external = persona LED, checking/starting = yellow,
+  failed = red) + one message — `마지막 점검 N분 전` (`state.last_heartbeat_at`; `방금` / `N시간 전` / `N일 전`), `아직 점검 전`,
+  `시작 중 n/4 · <step>`, or `꺼져 있음` + **다시 시작**. Open attention N → a small accent badge at the end. Tooltip: the
+  supervisor line (pid / failure), the repo path, and a `state.json` read error if the last read failed.
+- **대시보드 열기** · **설정…** (dashboard window → settings tab, scrolled to 앱 — `DashboardWindowController.show(section:)`
+  runs the dashboard's `nedOpenSettings('s-app')`, after the load if the boot screen is still up) · **업데이트 확인** · **종료**.
+- **업데이트 확인** (`UpdateChecker`): `GET /api/update-check?refresh=1` (daemon `src/update-check.ts`: installed runtime
+  version vs GitHub main via `gh`, else the local marketplace clone) → an alert: `최신 버전 (X.Y.Z)`, or
+  `X → Y 업데이트 있음` + the Claude Code steps (`/plugin update ned` → `/reload-plugins` → `/ned:install`) and
+  **명령 복사**, or `업데이트 확인 실패` + why. The app never installs anything itself. One `update check: …` log line.
+
+Everything that used to be in the dropdown moved to the dashboard: attention list / sessions → 홈·인박스·장비실;
+Login Items, 실행 시 대시보드 열기, 자동 시작 시에도 열기, 저장소 위치…, 로그 열기 → **설정 → 앱 (Ned.app)**.
+
+### 설정 → 앱 bridge (`appSettings`)
+
+`webkit.messageHandlers.appSettings.postMessage(msg)` (`AppSettingsHandler`, `WKScriptMessageHandlerWithReply`) → Promise of
+`{loginItem: {status, enabled, message?}, openAtLaunch, openAtLoginLaunch, repoPath, logPath, cancelled?}`:
+
+| msg | Does |
+| --- | --- |
+| `{op: "get"}` | current values |
+| `{op: "set", key, value}` | `key` ∈ `loginItem` (SMAppService register/unregister) · `openAtLaunch` · `openAtLoginLaunch` (the LaunchBehavior defaults); `value` must be a JS boolean |
+| `{op: "action", name}` | `chooseRepo` (NSOpenPanel → `setRepoPath`, `cancelled` if not picked) · `revealLog` (Finder) · `restartDaemon` |
+
+Anything else is refused (`unknown op` / `unknown key` / `value must be a boolean` / `unknown action` / `bad message`), and
+only the dashboard page (`http://127.0.0.1|localhost:<port>`) may post (`not allowed`). Changes apply at once (no 저장).
+
+```sh
+.build/debug/Ned --appsettings-selftest          # whitelist / origin / set → snapshot on its own defaults suite; exit 1 on failure
+.build/debug/Ned --menu-snapshot /tmp/menu       # menu-{ok,not-yet,booting,off,attention}-{light,dark}.png (NSHostingView, 2×)
+```
+
+The selftest never registers a Login Item, opens a panel or restarts the daemon (defaults suite
+`com.ned.menubar.appsettings-selftest`, removed afterwards).
 
 ## Menu bar badge and attention
 
 - **Badge** = `state.attention_open_count` (attention not marked 확인 완료). An older daemon without that field:
   the count of `attention` items without `reviewed_at`.
-- **지금 봐야 할 것** lists open items only (max 5). Reviewed items stay in `state.json` but are hidden here.
+- The menu shows only the count (a badge at the end of the status line); the items themselves are in the dashboard.
 - **Worker sessions**: the daemon marks sessions whose cwd (or Orca worktree path) is under `~/orca/workspaces/`
   as `is_worker` (Orca child worktrees = the user's own agent workers). They never become attention items
-  (`입력 대기` / `오류`) and are not counted, but stay in `state.sessions`. The menu lists them after your own
-  sessions, dimmed, with a `워커` tag.
+  (`입력 대기` / `오류`) and are not counted, but stay in `state.sessions` (the dashboard's 장비실 lists them, dimmed).
 
 ## Login Item
 
-The toggle next to **Login Items 에 등록** shows **자동 시작: 켜짐 / 꺼짐**. 켜짐 only when
+설정 → 앱 → 자동 실행 (**로그인할 때 Ned 실행**) shows **자동 시작: 켜짐 / 꺼짐**. 켜짐 only when
 `SMAppService.mainApp.status == .enabled`; `requiresApproval` shows `꺼짐 (승인 필요)`.
 
 ```sh
@@ -200,18 +239,18 @@ The toggle next to **Login Items 에 등록** shows **자동 시작: 켜짐 / �
 | --- | --- |
 | `enabled` | Registered and allowed — Ned opens at login |
 | `requiresApproval` | Registered, but macOS wants the user's OK (common for ad-hoc-signed bundles) |
-| `notRegistered` | Not registered (toggle off) |
+| `notRegistered` | Not registered (off) |
 | `notFound` | macOS has no record for this bundle path — normal for a dev bundle that was never registered |
 
 Dashboard 시작하기 (`public/app/features/onboarding.js`): `webkit.messageHandlers.loginItem` (`LoginItemHandler` in
 `DashboardWindow.swift`, a `WKScriptMessageHandlerWithReply`) — `postMessage({op: "get"})` / `{op: "set", enabled}` →
-Promise `{status, enabled, message?}` (`status` = `LoginItem.describe`). Same `LoginItem` path as the menu toggle; only the
-dashboard page (`http://127.0.0.1:<port>`) may call it. A plain browser has no handler and shows the menu hint instead.
+Promise `{status, enabled, message?}` (`status` = `LoginItem.describe`). Same `LoginItem` path as 설정 → 앱; only the
+dashboard page (`http://127.0.0.1:<port>`) may call it. A plain browser has no handler and shows a hint instead.
 
 Status is per bundle path: check the installed app with `/Applications/Ned.app/Contents/MacOS/Ned --login-item-status`
 (only with a build that has this flag — an older binary ignores it and launches normally).
 
-**Approval** (when status is `requiresApproval`; the toggle also opens this pane):
+**Approval** (when status is `requiresApproval`; turning it on also opens this pane):
 System Settings > General > **Login Items & Extensions** (macOS 14: **Login Items**) → find Ned under
 **Open at Login** (add it with + if missing), and if Ned is listed under **Allow in the Background**, turn it on.
 
@@ -270,8 +309,7 @@ NED_NO_DAEMON=1 NED_HOME=/tmp/ned-mb .build/release/Ned   # NED_NO_DAEMON: don't
 What to expect:
 
 - The status item shows the eyeglasses icon and `2`.
-- The dropdown lists both attention items and both sessions.
-- The header shows the briefing headline.
+- The dropdown's status line ends with a `2` badge (attention items are listed in the dashboard, not the menu).
 
 The daemon treats `state.json` as data it owns and replaces it atomically. To test the
 watcher the same way, write a temp file and rename it over the original:
@@ -290,9 +328,8 @@ How decoding copes with bad input:
 | Wrong type in `last_briefing` or another non-critical field | That field is treated as absent |
 | Invalid JSON, such as a partial write | The previous state stays on screen with a small warning line |
 
-The menu's Dismiss button removes the item at once and sends
-`POST /api/attention/<id>/dismiss`. If the daemon is not running, the request fails, the
-failure is logged, and the next reload of `state.json` restores the item.
+A notification's **닫기** sends `POST /api/attention/<id>/dismiss` (`StateStore.dismiss`). If the daemon is not running,
+the request fails, the failure is logged, and the next reload of `state.json` restores the item.
 
 ## Notifications
 
@@ -391,12 +428,9 @@ All of these symbols exist on macOS 13 or earlier. If a name is ever missing at 
 Ned's eye symbols are used instead. While there is attention, the label shows a single
 non-template image: the symbol plus a count capsule in the accent color.
 
-- **Menu**: the header name and color, the quiet line, a time-of-day greeting when nothing
-  needs attention, the LED and button tint, and a `페르소나: <name>` pop-up next to
-  "저장소 위치…" — **hidden feature**: the pop-up only shows when you open the dropdown with
-  ⌥ (option) held (otherwise edit `persona:` in config.yaml). Picking a persona there switches the UI right away and sends
-  `PUT /api/config {"persona":"<id>"}`. If the PUT fails, the UI goes back to the previous
-  persona.
+- **Menu**: the status dot's LED colour, the badge and button tint. There is no persona picker in the app
+  (edit `persona:` in config.yaml); `StateStore.setPersona` (`PUT /api/config {"persona":"<id>"}`, back to the previous
+  persona if it fails) is only used by `--persona-selftest`.
 - **Notifications**: the briefing title is the persona name, the persona name is the subtitle
   of per-item banners, and the >3 summary uses the persona's own wording.
 - **App icon**: `Resources/marks/<id>.svg` holds plain original geometry (ned.svg is the
