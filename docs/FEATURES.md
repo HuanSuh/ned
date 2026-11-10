@@ -17,7 +17,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - **Gmail 읽음 표시**(`actions.gmail_mark_read`): 메일 ✓ = Gmail 읽음.
 - **검색**: ⌘K 통합 검색
 - **아카이브(Obsidian)**: 볼트 `archive.vault` + `archive.enabled` → 매일 `<archive.folder>/Daily/…/날짜.md`, `archive.daily_embed`.
-- **수집 이력**: 소스별 보관(`history.keep_days.*`), 증분 수집(Slack 전체 재검색 창 `history.collect.slack_hours`), 카드·순찰·초안은 표시 구간(`history.display.*`).
+- **수집 이력**: 소스별 보관(`history.keep_days.*`), 증분 수집(Slack 재검색 창 `history.collect.slack_hours`), 표시 구간(`history.display.*`).
 - **링크 열기**: Slack·Figma·Notion 링크는 앱으로(`dashboard.open_links_in_app`, Slack 은 팀 ID `dashboard.slack_team_id`), 없으면 웹.
 - **설치**: 플러그인 `ned@ned` → `/ned:install`. 업데이트 `/plugin update ned`→`/reload-plugins`→`/ned:install`.
 - **Ned.app 메뉴**: 상태 줄 + 대시보드 열기·설정…·업데이트 확인·종료. 앱 설정·`updates.*` 는 설정 → 앱.

@@ -53,7 +53,7 @@ export function updateHtml(ap) {
 }
 
 /** (pure) The 업데이트 sub-group's fixed part (config.updates inputs — saved with 저장, so never re-rendered by the bridge). */
-export const UPDATES_HTML = `<div class="appupdgrp" id="app-upd" role="group" aria-labelledby="app-upd-h">
+export const UPDATES_HTML = `<div class="ntf appupdgrp" id="app-upd" role="group" aria-labelledby="app-upd-h">
   <h3 id="app-upd-h">업데이트</h3>
   <p class="hint">아래 세 항목은 하단 <b>"저장"</b>으로 저장돼 (config.yaml <code>updates.*</code>) — 위 앱 항목과 달리 즉시 적용 아님.</p>
   <div class="nrow"><span class="lab">자동 확인</span><div class="inl"><label class="ck"><input type="checkbox" id="c-upd-check"> 새 버전 자동 확인</label>
