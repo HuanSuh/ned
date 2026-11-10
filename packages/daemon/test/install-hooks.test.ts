@@ -40,6 +40,15 @@ describe("install-hooks.mjs --settings", () => {
     expect(fs.existsSync(f + ".ned-backup")).toBe(true);
   });
 
+  it("--uninstall keeps another tool's hook that shares a group with Ned's", () => {
+    const f = path.join(tmp(), "settings.json");
+    const mixed = { matcher: "", hooks: [ORCA.hooks[0], OLD.hooks[0]] };
+    fs.writeFileSync(f, JSON.stringify({ hooks: { Notification: [mixed] } }));
+    const r = run("--uninstall", "--settings", f);
+    expect(r.out).toMatch(/Removed 1 Ned hook entry/);
+    expect(JSON.parse(fs.readFileSync(f, "utf8"))).toEqual({ hooks: { Notification: [{ matcher: "", hooks: [ORCA.hooks[0]] }] } });
+  });
+
   it("--uninstall with no Ned entries leaves the file byte-identical and writes no backup", () => {
     const f = path.join(tmp(), "settings.json");
     const body = JSON.stringify({ hooks: { Stop: [ORCA] } });

@@ -42,9 +42,19 @@ const isNed = (h) => typeof h?.command === "string" && h.command.includes("ned-h
 let removed = 0;
 for (const ev of EVENTS) {
   const groups = settings.hooks[ev] ?? [];
-  // Remove previous Ned groups (path may have moved).
-  const kept = groups.filter((g) => !(g.hooks ?? []).some(isNed));
-  removed += groups.length - kept.length;
+  // Remove previous Ned hooks (path may have moved) one by one — another tool's hook that shares the group
+  // stays; a group left empty goes.
+  const kept = [];
+  for (const g of groups) {
+    const hs = Array.isArray(g?.hooks) ? g.hooks : null;
+    const n = hs ? hs.filter(isNed).length : 0;
+    if (!n) {
+      kept.push(g);
+      continue;
+    }
+    removed += n;
+    if (hs.length > n) kept.push({ ...g, hooks: hs.filter((h) => !isNed(h)) });
+  }
   if (!uninstall) kept.push({ hooks: [{ type: "command", command: `/bin/sh "${hookPath}"`, timeout: 5 }] });
   if (kept.length) settings.hooks[ev] = kept;
   else delete settings.hooks[ev];
