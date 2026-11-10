@@ -31,10 +31,22 @@ enum PetSelfTest {
 
         // State colours: 쉼·작업 중 = accent, 입력 기다림 = amber, 오류 = red, 연결 끊김 = grey without glow, 확인할 것 = strongest accent glow.
         let ned = PersonaID.ned.persona
-        check(PetColors.edge(.idle, ned, dark: true) == ned.accent && PetColors.edge(.running, ned, dark: true) == ned.accent
-              && PetColors.edge(.needsInput, ned, dark: true) == PetColors.waiting(true) && PetColors.edge(.blocked, ned, dark: false) == PetColors.error(false)
-              && PetColors.edge(.offline, ned, dark: true) == PetColors.offline, "edge colour per mood")
-        check(PetColors.glow(.offline) == 0 && PetColors.glow(.attention) > PetColors.glow(.running), "glow: none offline, attention stronger than running")
+        // 쉼 neutral, 작업 중 mint, 확인할 것 accent, 입력 기다림 amber, 오류 red, 연결 끊김 grey — distinct for every persona.
+        for id in PersonaID.allCases {
+            let p = id.persona
+            for dark in [true, false] {
+                let t = PetColors.tokens(id, dark: dark)
+                let ok = PetColors.edge(.idle, p, dark: dark) == PetColors.neutral(p, dark) && PetColors.edge(.running, p, dark: dark) == Color(hex: t.mint)
+                    && PetColors.edge(.attention, p, dark: dark) == p.accent && PetColors.edge(.needsInput, p, dark: dark) == Color(hex: t.amber)
+                    && PetColors.edge(.blocked, p, dark: dark) == Color(hex: t.red) && PetColors.edge(.offline, p, dark: dark) == PetColors.offline
+                let distinct = Set([t.edge, t.mint, t.amber, t.red]).count == 4 && NSColor(hex: t.mint).usingColorSpace(.sRGB) != p.accentNS.usingColorSpace(.sRGB)
+                check(ok && distinct, "\(id.rawValue) \(dark ? "dark" : "light"): edge per mood, running (mint) ≠ attention (accent)")
+            }
+        }
+        check(PetColors.glow(.offline) == 0 && PetColors.glow(.idle) == 0 && PetColors.glow(.running) < PetColors.glow(.attention) && PetColors.glow(.attention) < PetColors.glow(.blocked),
+              "glow: none for idle/offline, running faint < attention < error")
+        check(PetColors.moodSymbol(.needsInput) == "keyboard" && !PetMood.allCases.contains { PetColors.moodSymbol($0).hasPrefix("hand.") }, "입력 기다림 symbol = keyboard (no hand)")
+        check(PetColors.messageEdge(PetSnapshot.slack, ned, dark: true).0 == ned.accent, "message bubble edge = accent")
         check(PetCharacter.breath >= 3 && PetCharacter.idleScale <= 1.02, "motion: glow breath ≥ 3 s, idle scale ≤ 2 % (no bounce / shake)")
 
         // Inbox: seed, seen, kind toggles, quiet, bundling, greeting.
@@ -256,6 +268,10 @@ enum PetSnapshot {
             render("pet-msg-summary", running, persona: .ned, message: .summary(recent + [slack, mail]), dark: dark)
             render("pet-hover-ned", PetMapping.expression(cases[2].1), persona: .ned, message: nil, list: true, recent: recent, dark: dark)
             for id in PersonaID.allCases where id != .ned {
+                for i in [0, 1, 3] { // idle, running, attention — must read as three different states
+                    let e = PetMapping.expression(cases[i].1)
+                    render("pet-\(e.mood.rawValue)-\(id.rawValue)", e, persona: id, message: nil, list: true, dark: dark)
+                }
                 render("pet-msg-slack-\(id.rawValue)", running, persona: id, message: slack, dark: dark)
             }
         }

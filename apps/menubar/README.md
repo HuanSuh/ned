@@ -346,10 +346,13 @@ only the position (`desktopPetOrigin`) and the seen message keys (`desktopPetSee
   (status line + newest 3 of switched-on kinds); it stays while the pointer moves onto it.
 - **State → look** (`PetMapping.expression`, pure): offline > blocked (`error`) > needsInput (`waiting`, Orca workers
   excluded) > attention (open count, badge also under higher moods) > running > idle. Shown as the card's edge colour +
-  outer glow, the way 통신기 does it (`comms.css` `--cm-edge` / `--cm-glow`): idle/running = persona accent, needsInput =
-  `--amber`, attention = accent with a stronger glow and thicker edge, blocked = `--red` dashed (tokens.css keeps red
-  outlined so it never reads as Ned's red accent), offline = grey, no glow, mark desaturated. Values are the dashboard
-  tokens (ned persona), commented at `PetColors`. No emoji overlay; the bubble's first line carries an SF Symbol.
+  outer glow, the way 통신기 does it (`comms.css` `--cm-edge` / `--cm-glow`), from the persona's dashboard tokens
+  (`PetColors.tokens`, tokens.css): idle = neutral `--edge`, no glow · running = `--mint` (the 통신기 `--cm-rx` of ned;
+  the other personas' `--cm-rx` is their accent, so the pet uses `--mint` for all to keep 작업 중 ≠ 확인할 것), faint
+  breathing glow · attention = persona accent, thicker edge + glow · needsInput = `--amber` · blocked = `--red` dashed
+  with the strongest glow (tokens.css keeps red outlined so it never reads as Ned's red accent) · offline = grey, no
+  glow, mark desaturated. Message bubbles wear the accent; the hover list wears the mood colour. 입력 기다림's symbol is
+  `keyboard` (no hand / emoji).
 - **Messages** (`PetInbox`, pure): GET /api/feed items (the 통신기 메시지 rules, daemon `src/feed.ts`) whose key was
   never seen pop as chat bubbles (source symbol + title + one detail line) for 5.5 s each, oldest first, at most 3
   waiting; more than 3 at once (or a queue overflow) → one "새 소식 N". First run seeds every current key as seen.

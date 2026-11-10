@@ -299,29 +299,60 @@ final class PetModel: ObservableObject {
 /// Colours are the dashboard's tokens (packages/daemon/public/css/tokens.css, ned persona): --amber, --red, --bubble,
 /// --edge; the edge / glow follow 통신기 comms.css (--cm-edge = accent 70 %, --cm-glow = accent 50 %).
 enum PetColors {
-    static func waiting(_ dark: Bool) -> Color { dark ? Color(hex: 0xF0AD3C) : Color(hex: 0xA96B00) } // --amber
-    static func error(_ dark: Bool) -> Color { dark ? Color(hex: 0xF08C80) : Color(hex: 0x8F1D17) }   // --red
-    static func card(_ dark: Bool) -> Color { dark ? Color(hex: 0x1B2337) : Color(hex: 0xF8F3EA) }    // --bubble
-    static func text(_ dark: Bool) -> Color { dark ? Color(hex: 0xE8EBF3) : Color(hex: 0x1C2133) }    // --fg
-    static func dim(_ dark: Bool) -> Color { dark ? Color(hex: 0x9CA6BD) : Color(hex: 0x5D6376) }     // --dim
-    static let offline = Color(hex: 0x626D88)                                                         // --faint
+    /// Per persona, dark / light — packages/daemon/public/css/tokens.css: --edge, --mint, --amber, --red.
+    struct Tokens { let edge: UInt32; let mint: UInt32; let amber: UInt32; let red: UInt32 }
+    static func tokens(_ id: PersonaID, dark: Bool) -> Tokens {
+        switch (id, dark) {
+        case (.ned, true): return Tokens(edge: 0x3B4867, mint: 0x5CC4A3, amber: 0xF0AD3C, red: 0xF08C80)
+        case (.ned, false): return Tokens(edge: 0x1C2133, mint: 0x2D8A6D, amber: 0xA96B00, red: 0x8F1D17)
+        case (.alfred, true): return Tokens(edge: 0x3B3A35, mint: 0x8FAE99, amber: 0xD9A441, red: 0xF0907F)
+        case (.alfred, false): return Tokens(edge: 0x1B1A17, mint: 0x3F7A55, amber: 0x9A6700, red: 0x8F1D17)
+        case (.oracle, true): return Tokens(edge: 0x2B5B40, mint: 0x3DDC84, amber: 0xF2B33D, red: 0xFF8A7A)
+        case (.oracle, false): return Tokens(edge: 0x0C2016, mint: 0x0D8A4A, amber: 0x946300, red: 0x8F1D17)
+        case (.jarvis, true): return Tokens(edge: 0x2E4C71, mint: 0x5FD4C0, amber: 0xF0B429, red: 0xFF8F86)
+        case (.jarvis, false): return Tokens(edge: 0x0D2236, mint: 0x0F8F7C, amber: 0xF0B429, red: 0x8F1D17)
+        }
+    }
+    static func waiting(_ p: Persona, _ dark: Bool) -> Color { Color(hex: tokens(p.id, dark: dark).amber) }
+    static func error(_ p: Persona, _ dark: Bool) -> Color { Color(hex: tokens(p.id, dark: dark).red) }
+    /// 작업 중 = the persona's secondary colour. 통신기 uses --cm-rx (= --mint for ned, = --hero for the others); the pet
+    /// takes --mint for every persona so 작업 중 never looks like 확인할 것 (accent).
+    static func running(_ p: Persona, _ dark: Bool) -> Color { Color(hex: tokens(p.id, dark: dark).mint) }
+    /// 쉼 = neutral --edge (light themes' --edge is the ink colour → softened).
+    static func neutral(_ p: Persona, _ dark: Bool) -> Color { Color(hex: tokens(p.id, dark: dark).edge).opacity(dark ? 1 : 0.35) }
+    static func card(_ dark: Bool) -> Color { dark ? Color(hex: 0x1B2337) : Color(hex: 0xF8F3EA) }    // ned --bubble
+    static func text(_ dark: Bool) -> Color { dark ? Color(hex: 0xE8EBF3) : Color(hex: 0x1C2133) }    // ned --fg
+    static func dim(_ dark: Bool) -> Color { dark ? Color(hex: 0x9CA6BD) : Color(hex: 0x5D6376) }     // ned --dim
+    static let offline = Color(hex: 0x626D88)                                                         // ned --faint
 
-    /// Edge colour of the card / bubble for a mood.
+    /// Edge colour of the card / hover list for a mood: 쉼 neutral, 작업 중 mint, 확인할 것 accent, 입력 기다림 amber,
+    /// 오류 red (dashed), 연결 끊김 grey.
     static func edge(_ m: PetMood, _ p: Persona, dark: Bool) -> Color {
         switch m {
         case .offline: return offline
-        case .blocked: return error(dark)
-        case .needsInput: return waiting(dark)
-        case .attention, .running, .idle: return p.accent
+        case .blocked: return error(p, dark)
+        case .needsInput: return waiting(p, dark)
+        case .attention: return p.accent
+        case .running: return running(p, dark)
+        case .idle: return neutral(p, dark)
         }
     }
-    /// Outer glow strength (0 = none): 확인할 것 = accent 진하게, offline = none.
+    /// Outer glow strength (0 = none): 오류 strongest, 확인할 것 next, 작업 중 faint, 쉼·연결 끊김 none.
     static func glow(_ m: PetMood) -> Double {
         switch m {
-        case .offline: return 0
-        case .attention, .blocked: return 0.8
-        case .needsInput: return 0.65
-        case .running, .idle: return 0.5
+        case .offline, .idle: return 0
+        case .blocked: return 0.9
+        case .attention: return 0.7
+        case .needsInput: return 0.6
+        case .running: return 0.35
+        }
+    }
+    /// Message bubbles (new items) wear the accent like 확인할 것; status notes keep their own colour.
+    static func messageEdge(_ m: PetMessage, _ p: Persona, dark: Bool) -> (Color, Double) {
+        switch m.kind {
+        case "offline": return (offline, 0)
+        case "done": return (running(p, dark), 0.35)
+        default: return (p.accent, 0.6)
         }
     }
 
@@ -329,7 +360,7 @@ enum PetColors {
         switch m {
         case .offline: return "bolt.horizontal.circle"
         case .blocked: return "exclamationmark.triangle.fill"
-        case .needsInput: return "hand.raised.fill"
+        case .needsInput: return "keyboard"
         case .attention: return "bell.fill"
         case .running: return "gearshape.2.fill"
         case .idle: return "checkmark.circle.fill"
@@ -357,7 +388,8 @@ enum PetColors {
     static func kindTint(_ kind: String, _ p: Persona, dark: Bool) -> Color {
         switch kind {
         case "offline": return offline
-        case "session": return waiting(dark)
+        case "session": return waiting(p, dark)
+        case "done": return running(p, dark)
         default: return p.accent
         }
     }
@@ -437,7 +469,10 @@ struct PetBubble: View {
 
     var body: some View {
         let dark = scheme == .dark
-        let edge = PetColors.edge(mood, persona, dark: dark)
+        let (edge, glow): (Color, Double) = {
+            if case .message(let m) = content { return PetColors.messageEdge(m, persona, dark: dark) }
+            return (PetColors.edge(mood, persona, dark: dark), PetColors.glow(mood))
+        }()
         VStack(alignment: .leading, spacing: 6) {
             switch content {
             case .message(let m):
@@ -452,7 +487,7 @@ struct PetBubble: View {
                         .petFrame(i)
                 }
                 if let e = empty {
-                    row(icon: PetColors.moodSymbol(.idle), tint: persona.accent, title: e, detail: "", lines: 1, dark: dark)
+                    row(icon: PetColors.moodSymbol(.idle), tint: PetColors.dim(dark), title: e, detail: "", lines: 1, dark: dark)
                 }
             }
         }
@@ -462,9 +497,9 @@ struct PetBubble: View {
             RoundedRectangle(cornerRadius: PetLayout.bubbleRadius, style: .continuous)
                 .fill(PetColors.card(dark))
                 .overlay(RoundedRectangle(cornerRadius: PetLayout.bubbleRadius, style: .continuous)
-                    .strokeBorder(edge.opacity(mood == .offline ? 0.6 : 0.7), lineWidth: 1))
+                    .strokeBorder(edge.opacity(0.8), lineWidth: 1))
                 .shadow(color: .black.opacity(dark ? 0.45 : 0.18), radius: 6, y: 2)
-                .shadow(color: edge.opacity(PetColors.glow(mood) * 0.5), radius: 10)
+                .shadow(color: edge.opacity(glow * 0.6), radius: 10)
         )
         .petFrame(-1) // the drawn bubble only — the click / hover area (PetBubbleHitView)
         // Hug the text like a chat bubble, at most the panel's width, right-aligned over the character.
@@ -489,7 +524,7 @@ struct PetBubble: View {
 }
 
 /// The persona mark on a rounded card whose edge + outer glow carry the state colour. Motion: only a slow glow
-/// breath (3.6 s ease-in-out) and, at rest, a ≤1.5 % scale breath — no bounce, no shake, no emoji. 동작 줄이기 = still.
+/// breath (3.6 s ease-in-out; none at rest — 쉼 has no glow) and, at rest, a ≤1.5 % scale breath — no bounce, no shake, no emoji. 동작 줄이기 = still.
 struct PetCharacter: View {
     let mood: PetMood
     let persona: Persona
@@ -520,7 +555,7 @@ struct PetCharacter: View {
         .shadow(color: .black.opacity(dark ? 0.45 : 0.2), radius: 4, y: 1.5)
 
         Group {
-            if reduceMotion || glow == 0 {
+            if reduceMotion || mood == .offline {
                 card.shadow(color: edge.opacity(glow), radius: 10)
             } else {
                 card.phaseAnimator([false, true]) { c, up in
