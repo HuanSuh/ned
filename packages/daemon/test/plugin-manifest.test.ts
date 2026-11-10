@@ -35,6 +35,10 @@ describe("plugin manifests", () => {
     expect(entry.version).toBeUndefined();
   });
 
+  it("the root package.json version matches plugin.json (docs/RELEASE.md bumps both)", () => {
+    expect(readJson("package.json").version).toBe(plugin.version);
+  });
+
   it("CHANGELOG.md has an entry for the current version (docs/RELEASE.md)", () => {
     const log = fs.readFileSync(path.join(ROOT, "CHANGELOG.md"), "utf8");
     expect(log).toMatch(new RegExp(`^## ${plugin.version.replace(/\./g, "\\.")}\\b`, "m"));

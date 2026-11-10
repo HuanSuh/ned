@@ -16,11 +16,15 @@ Claude Code 에서:
 ```
 /plugin marketplace add HuanSuh/ned
 /plugin install ned@ned
+/reload-plugins
 /ned:install
 ```
 
+`/reload-plugins`(또는 새 세션)를 해야 방금 설치한 플러그인의 `/ned:*` 명령과 훅이 이 세션에 로드된다.
+
 `/ned:install` 은 플러그인 소스를 `~/.ned/runtime/` 으로 옮겨 데몬과 Ned.app 을 **이 Mac 에서** 빌드하고(공증 없는 앱을 내려받지 않기 위해),
-`/Applications/Ned.app` 에 설치해 실행한다. 몇 분 걸린다. 세션 훅은 새 Claude Code 세션부터 기록된다.
+`/Applications/Ned.app` 에 설치해 실행한다. 몇 분 걸린다. 새 빌드가 다 끝난 뒤에만 기존 설치를 바꾸므로, 중간에 실패해도 쓰던 Ned 는 그대로다
+(로그 `~/.ned/logs/install.log`). 세션 훅은 새 Claude Code 세션부터 기록된다.
 
 처음 한 번:
 - claude.ai → 설정 → 커넥터에서 Slack·Gmail·Google Calendar·Atlassian(Jira)·GitHub 를 **본인 계정으로** 연결.
@@ -30,7 +34,7 @@ Claude Code 에서:
 
 | 하고 싶은 것 | 명령 |
 | --- | --- |
-| 업데이트 | `/plugin update ned` → `/ned:install` |
+| 업데이트 | `/plugin update ned` → `/reload-plugins`(또는 새 세션) → `/ned:install` — reload 없이는 이 세션이 옛 버전을 쓰고 있어 설치가 멈춘다 |
 | 상태 확인(읽기만) | `/ned:status` — 데몬·앱·런타임 vs 플러그인 버전·최근 로그·옛 훅 잔존 |
 | 제거 | `/ned:uninstall` → `/plugin uninstall ned` (데이터 `~/.ned` 는 남음) |
 

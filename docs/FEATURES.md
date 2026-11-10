@@ -19,7 +19,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - **아카이브(Obsidian)**: 볼트 `archive.vault` + `archive.enabled` → 매일 `<archive.folder>/Daily/…/날짜.md`, `archive.daily_embed`.
 - **수집 이력**: 소스별 보관(`history.keep_days.*`), 증분 수집(Slack 전체 재검색 창 `history.collect.slack_hours`), 카드·순찰·초안은 표시 구간(`history.display.*`).
 - **링크 열기**: Slack·Figma·Notion 링크는 앱으로(`dashboard.open_links_in_app`), 앱 없으면 웹. Slack 은 팀 ID `dashboard.slack_team_id` 필요.
-- **설치·업데이트**: Claude Code 플러그인 — `/plugin marketplace add HuanSuh/ned` → `/plugin install ned@ned` → `/ned:install`(이 Mac 에서 빌드). 업데이트는 `/plugin update ned` 후 다시 `/ned:install`. `/ned:status`·`/ned:uninstall`.
+- **설치**: 플러그인 `ned@ned`(마켓플레이스 `HuanSuh/ned`) → `/ned:install`. 업데이트 `/plugin update ned`→`/reload-plugins`→`/ned:install`.
 - **설정**(하단 "저장"): 외형(테마 `dashboard.theme`, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`, 링크 열기) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(위 순찰·감속 키, `signal_check_minutes`, `agenda_refresh_minutes`, `agenda_source_minutes.*`) · 쓰기 액션(`actions.*`, 말투 `reply_tone`·`reply_tone_by_source.*`, 오늘 한 액션) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(`claude_model`, `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd` $15). 저장마다 백업 10개.
 
 ## 상세
@@ -214,9 +214,9 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 
 ### 설치·업데이트 — Claude Code 플러그인
 - 보여 주는 것: Ned 는 Claude Code 플러그인 `ned@ned`(마켓플레이스 = 이 레포 `HuanSuh/ned`, 기본 브랜치 main 이 설치본). 플러그인이 주는 것: 세션 훅 8개(`hooks/hooks.json` — SessionStart·UserPromptSubmit·Stop·StopFailure·Notification·SubagentStart·SubagentStop·SessionEnd → `$NED_HOME/events/`)와 명령 `/ned:install`·`/ned:status`·`/ned:uninstall`.
-- 설치: `/plugin marketplace add HuanSuh/ned` → `/plugin install ned@ned` → `/ned:install`. 사전 조건 node 22+·pnpm·Xcode 명령줄 도구·claude CLI(없으면 설치 안내 후 멈춤). Ned.app 은 공증이 없어 내려받지 않고 각 Mac 에서 빌드. 세션 훅은 새 세션(또는 `/reload-plugins`)부터 기록.
+- 설치: `/plugin marketplace add HuanSuh/ned` → `/plugin install ned@ned` → `/reload-plugins` → `/ned:install`. 사전 조건 node 22+·pnpm·Xcode 명령줄 도구·claude CLI(없으면 설치 안내 후 멈춤). Ned.app 은 공증이 없어 내려받지 않고 각 Mac 에서 빌드. 세션 훅은 새 세션(또는 `/reload-plugins`)부터 기록.
 - 데이터: 플러그인 캐시(`~/.claude/plugins/cache/ned/ned/<버전>/`)는 업데이트마다 경로가 바뀌므로, `/ned:install` 이 소스를 고정 경로 `~/.ned/runtime/` 로 동기화해 거기서 빌드하고 Ned.app 의 `nedRepoPath` 를 그곳으로 둔다. `~/.claude/settings.json` 에 예전 방식(절대 경로) Ned 훅이 남아 있으면 지운다(이벤트 이중 기록 방지, 백업 `settings.json.ned-backup`).
-- 언제: 업데이트 = `/plugin update ned` → `/ned:install`(같은 명령, 멱등). `/ned:status` 는 읽기만 — 데몬·앱·런타임 vs 플러그인 버전("업데이트 필요")·최근 로그·옛 훅 잔존. `/ned:uninstall` 은 확인 후 앱·런타임 삭제(데이터 `~/.ned` 유지), 이어서 `/plugin uninstall ned`.
+- 언제: 업데이트 = `/plugin update ned` → `/reload-plugins`(또는 새 세션) → `/ned:install`(같은 명령, 멱등). reload 를 빼면 이 세션은 업데이트 전 버전을 쓰고 있어 `/ned:install` 이 "다시 로드 후 실행" 으로 멈춘다(옛 버전 재설치 방지). 새 빌드는 `~/.ned/runtime.next` 에서 끝까지 만든 뒤에만 교체하므로 실패해도 기존 설치가 유지되고, 로그는 `~/.ned/logs/install.log`. `/ned:status` 는 읽기만 — 데몬·앱·런타임 vs 플러그인 버전("업데이트 필요")·최근 로그·옛 훅 잔존. `/ned:uninstall` 은 확인 후 앱·런타임 삭제(데이터 `~/.ned` 유지), 이어서 `/plugin uninstall ned`.
 - 처음 한 번: 설정 → 외형 → 링크 열기에서 Slack 팀 ID 입력, claude.ai 커넥터(Slack·Gmail·Calendar·Jira·GitHub)를 본인 계정으로 연결 — Ned 는 토큰을 갖지 않는다.
 - 레포에서 직접 설치(개발용): `scripts/install.sh` — 체크아웃에서 빌드하고 `settings.json` 에 훅 등록. 플러그인과 같이 쓰지 말 것. 릴리스 절차는 `docs/RELEASE.md`.
 
