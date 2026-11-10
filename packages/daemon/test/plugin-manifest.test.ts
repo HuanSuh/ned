@@ -60,3 +60,30 @@ describe("plugin hooks (hooks/hooks.json)", () => {
     expect(fs.statSync(p).mode & 0o111).not.toBe(0);
   });
 });
+
+describe("plugin commands (/ned:install · /ned:status · /ned:uninstall)", () => {
+  const frontmatter = (md: string) => {
+    const m = /^---\n([\s\S]*?)\n---\n/.exec(md);
+    return m ? Object.fromEntries(m[1].split("\n").map((l) => [l.slice(0, l.indexOf(":")).trim(), l.slice(l.indexOf(":") + 1).trim()])) : null;
+  };
+  const cases: [string, string, boolean][] = [
+    ["install", "scripts/install.sh", true],
+    ["status", "scripts/status.sh", false],
+    ["uninstall", "scripts/uninstall.sh", true],
+  ];
+  for (const [name, script, manualOnly] of cases) {
+    it(`commands/${name}.md has a description and runs ${script} through \${CLAUDE_PLUGIN_ROOT}`, () => {
+      const md = fs.readFileSync(path.join(ROOT, "commands", `${name}.md`), "utf8");
+      const fm = frontmatter(md);
+      expect(fm?.description).toBeTruthy();
+      expect(fm?.["allowed-tools"]).toBeTruthy();
+      // Installing/removing software only when the user types it — Claude must not run these on its own.
+      expect(fm?.["disable-model-invocation"] === "true").toBe(manualOnly);
+      expect(md).toContain(`"\${CLAUDE_PLUGIN_ROOT}/${script}"`);
+      expect(fs.statSync(path.join(ROOT, script)).mode & 0o111).not.toBe(0);
+    });
+  }
+  it("install/uninstall run in plugin mode", () => {
+    for (const n of ["install", "uninstall"]) expect(fs.readFileSync(path.join(ROOT, "commands", `${n}.md`), "utf8")).toContain("NED_PLUGIN_MODE=1 bash");
+  });
+});
