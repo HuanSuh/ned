@@ -25,7 +25,20 @@ node dist/cli.js heartbeat [--daily] # heartbeat 1회 강제 실행 (claude -p �
 node dist/cli.js state               # events → sessions 를 다시 계산해 state.json 을 갱신하고 출력
 node dist/cli.js agenda              # agenda 잡 1회 실행 (calendar/jira/github/gmail/slack → agenda.json, 결과를 stdout 에 출력)
 node dist/cli.js prompt agenda       # dry-run: heartbeat | briefing | agenda 프롬프트를 치환된 그대로 출력 (claude 호출·이벤트 커서 커밋 없음)
+node dist/cli.js setup-check [--json] # 시작하기 점검 1회(아래 "시작하기") — /ned:install 이 설치 뒤 실행. 사람이 읽는 표, --json 은 GET /api/setup 과 같은 모양(onboarding 빼고)
 ```
+
+### 시작하기 (`src/setup-check.ts`)
+
+설정에서 켠 소스(`sources.*`)가 실제로 읽히는지 + Slack 팀 ID + 코드 서명. 대시보드 "시작하기" 창(`GET /api/setup`)과 `ned setup-check` 가 같은 함수.
+- 커넥터: `claude -p --output-format stream-json --verbose --max-turns 1`(argv 는 `buildClaudeArgs` — runClaude 와 같은 바이너리·env, 빠른 시작 설정 포함)을 띄워
+  `system/init` 줄의 `mcp_servers[{name, status}]` 만 읽고 그 자리에서 끈다 — 모델 호출 전이라 비용 0. `claude mcp list` 는 쓰지 않는다(인증이 필요한 Gmail 을
+  "Connected" 로 보여 줬다). 빠른 시작에서 claude.ai 서버가 하나도 없으면 전체 설정으로 한 번 더(runClaude 의 폴백과 같음). `NED_NO_LLM=1` 이면 띄우지 않고 확인 실패.
+- 소스 ↔ 서버 이름 표 `SETUP_SOURCES` 하나(대소문자 무시, 표 이름 + " …" 로 긴 이름도 맞음): slack `claude.ai Slack` · gmail `claude.ai Gmail` · calendar `claude.ai Google Calendar` ·
+  jira `claude.ai Atlassian` · sentry `Sentry`(~/.claude.json MCP 서버, `mcp__Sentry__*`) · github 은 커넥터가 아니라 `gh auth status`(exit 0 = 연결됨, gh 없음 = 연결 안 됨).
+- 상태: `connected` · `needs-auth` · `pending`(아직 붙는 중 — 5초 뒤 한 번 더 보고, 그래도면 pending) · 그 밖의 status(`failed` 등) = `error` · 목록에 없음 = `not-connected`. 띄우기 실패·90초 초과 = 커넥터 전부 `error`(detail 에 이유).
+- 코드 서명: `security find-identity -v -p codesigning` 에 "Ned Local Signing" → ok, `-v` 없이만 보이면 `untrusted`, 없으면 `missing`. `command` = `bash <레포>/scripts/make-signing-cert.sh`(다음 설치부터 적용 — package.sh 가 빌드 때 고름).
+- Login Item 은 여기 없다 — `SMAppService` 는 Ned.app 만 읽고 바꾼다(대시보드 → `webkit.messageHandlers.loginItem`, apps/menubar README).
 
 `run` 은 시작 직후 heartbeat 를 한 번 돌린다. 이후 `heartbeat_minutes` 마다 tick 하며,
 새 세션 이벤트도 없고 `signal_check_minutes` 가 지나지 않았으면 LLM 을 부르지 않고 침묵한다.
@@ -256,6 +269,8 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 | GET | `/api/history?source=&days=7&q=&channel=&limit=200` | 수집 이력 한 소스(`slack\|mail\|jira\|github\|calendar`, 아니면 400): `ts` 가 `days`(1~90) 안인 레코드 최신순 최대 200 → `{source, days, total, items: [{key, source, ts, first_seen, last_seen, current, title, detail, url, channel?, state, item}]}`. `current` = 지금 카드에 있음(Slack: 표시 구간 안 또는 열린 요청, 메일: 표시 구간 안, Jira·GitHub: `open` 이고 agenda 목록에 있음, 캘린더: agenda 목록에 있음). `q` 는 공백으로 나눈 토큰이 제목·상세에 모두 있어야(대소문자 무시), `channel` 은 Slack 채널(팔로업 행 포함) |
 | GET | `/api/history/status` | `{enabled, display, sources: {<src>: {keep_days, recording, count, days, bytes, oldest, newest}}, collect: {slack\|mail: {last_ok_at, last_full_at, full_hours, next: {full, reason, since}}}, last_prune_day, overlap_minutes, full_rescan_hours}` |
 | GET | `/api/archive/status` | Obsidian 아카이브 상태 `{ enabled, vault, folder, check: {ok, obsidian, path, error?} \| null, today_rel, today_url (obsidian://, 파일 있을 때), last_write_at, last_write_path, last_error, last_error_at, last_embed: {day, result}, pending_days }` — 아래 "Obsidian 아카이브" |
+| GET | `/api/setup?refresh=1` | 시작하기 점검(위 "시작하기") `{checked_at, sources: [{key, label, via: connector\|mcp\|gh, status: connected\|needs-auth\|not-connected\|pending\|error, detail?, fix?: {text, url?, command?}}], slack_team_id: {status: ok\|missing\|n/a, value}, signing: {status: ok\|untrusted\|missing\|error, identity, command, detail?}, complete, onboarding: {dismissed_at}}` — 켠 소스만. (sources, 팀 ID) 가 같으면 1분 캐시(동시 요청은 한 번만 띄움), `refresh=1` 은 새로 |
+| POST | `/api/setup/dismiss` | `{dismissed?: boolean}`(기본 true) → `{onboarding: {dismissed_at}}` — 시작하기 창이 저절로 뜨지 않게. `~/.ned/onboarding.json`(config.yaml 아님), false 면 지움 |
 | POST | `/api/archive/flush` | 오늘(+대기 중인 날) 리포트를 지금 씀 → `{ ok, written: [day], error?, status }` · 409 아카이브 꺼짐 · 500 쓰기 실패(`status.last_error`) |
 | GET | `/api/outputs?limit=50` | 정리 결과물 목록(최신순, `markdown` 뺌) `[{ id, ts, kind, title, sources, chat_id?, message_ts?, vault_rel?, vault_path?, obsidian_url?, vault_error? }]` |
 | GET | `/api/outputs/:id` | 결과물 하나(`markdown` 포함). 404 |
@@ -568,6 +583,7 @@ detail `이력 · M/D · …`, `tab: home` / `anchor: card:<slack|mail|jira|gh|c
                          history.{enabled=true, display.{slack_hours=24, mail_days=3}, collect.{slack_hours=24}, keep_days.{slack=30, mail=30, jira=90, github=90, calendar=90}} (수집 이력)
   state.json             menu bar / 대시보드가 읽는 단일 뷰 (sessions, attention, last_briefing, daily_failed_at, quiet …)
   cursor.json            heartbeat 가 처리한 마지막 이벤트 ts
+  onboarding.json        시작하기 창 닫음 {dismissed_at} (POST /api/setup/dismiss)
   events/YYYY-MM-DD.jsonl  훅(packages/hook/ned-hook.sh)이 append 하는 이벤트. 로컬 날짜 기준
   briefings/<iso-ts>.json  heartbeat / daily 브리핑 결과 (status, ok, action_items, updates, fyi, sessions, cost_usd, 실패 시 raw)
   briefings/sent.log     이미 알린 항목 키 (title 또는 url) — 중복 억제

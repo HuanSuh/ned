@@ -208,6 +208,7 @@ function writeData(home, f) {
   fs.writeFileSync(path.join(home, "state.json"), JSON.stringify(f.state, null, 2));
   fs.writeFileSync(path.join(home, "costs.json"), JSON.stringify({ days: { [ymd(new Date())]: { total_usd: 3.42, runs: 9, jobs: { agenda: { usd: 2.1, runs: 3 }, heartbeat: { usd: 1.32, runs: 6 } } } } }, null, 2));
   fs.writeFileSync(path.join(home, "reviewed.json"), JSON.stringify({ "a-jira": f.state.attention.find((a) => a.id === "a-jira").reviewed_at, "jira:NED-15": Date.now() }, null, 2));
+  fs.writeFileSync(path.join(home, "onboarding.json"), JSON.stringify({ dismissed_at: Date.now() })); // 시작하기 stays closed: screens stay comparable
 }
 
 // ---------------------------------------------------------------- daemon

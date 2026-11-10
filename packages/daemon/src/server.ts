@@ -23,6 +23,7 @@ import { checkStatus, dismissAttention, heartbeat, listBriefings, runCheck } fro
 import { log } from "./paths.js";
 import { listOutputs, outputFile, readOutput } from "./outputs.js";
 import { checkVault } from "./vault.js";
+import { readOnboarding, setOnboardingDismissed, setupCheck } from "./setup-check.js";
 import { onMailReviewed, type MarkReadOutcome } from "./mail-read.js";
 import { SOURCE_KEY, readSourceReviewed, readState, setReviewed, writeState } from "./state.js";
 import { noteActivity, schedulerStatus } from "./scheduler.js";
@@ -493,6 +494,16 @@ export function startServer(getConfig: () => NedConfig): void {
   app.post("/api/archive/flush", (c) => {
     const r = archiveFlushNow(loadConfig());
     return c.json({ ...r, status: archiveStatus(loadConfig()) }, r.ok ? 200 : /꺼져/.test(r.error ?? "") ? 409 : 500);
+  });
+
+  // 시작하기 (src/setup-check.ts): per-source connector / gh status, Slack 팀 ID, code signing — cached 1 min, ?refresh=1 forces.
+  app.get("/api/setup", async (c) => {
+    const r = await setupCheck(loadConfig(), { refresh: c.req.query("refresh") === "1" });
+    return c.json({ ...r, onboarding: readOnboarding() });
+  });
+  app.post("/api/setup/dismiss", async (c) => {
+    const { dismissed } = (await readBody(c)) as { dismissed?: unknown };
+    return c.json({ onboarding: setOnboardingDismissed(dismissed !== false) });
   });
 
   registerSearch(app); // GET /api/search (src/search.ts) — before the static catch-all

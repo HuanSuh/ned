@@ -28,6 +28,11 @@ struct NedApp: App {
             fflush(stdout)
             exit(0)
         }
+        // Headless register / unregister (/ned:install "자동 실행" step — works whether or not Ned is already running:
+        // SMAppService.mainApp is per bundle, so the running app's menu toggle sees it on its next refresh). Exits.
+        for (flag, on) in [("--login-item-register", true), ("--login-item-unregister", false)] where CommandLine.arguments.contains(flag) {
+            exit(LoginItem.headless(register: on))
+        }
     }
 
     /// No status item scene: the menu bar item is an AppKit NSStatusItem owned by AppDelegate

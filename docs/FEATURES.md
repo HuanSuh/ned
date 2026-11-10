@@ -20,6 +20,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - **수집 이력**: 소스별 보관(`history.keep_days.*`), 증분 수집(Slack 전체 재검색 창 `history.collect.slack_hours`), 카드·순찰·초안은 표시 구간(`history.display.*`).
 - **링크 열기**: Slack·Figma·Notion 링크는 앱으로(`dashboard.open_links_in_app`), 앱 없으면 웹. Slack 은 팀 ID `dashboard.slack_team_id` 필요.
 - **설치**: 플러그인 `ned@ned`(마켓플레이스 `HuanSuh/ned`) → `/ned:install`. 업데이트 `/plugin update ned`→`/reload-plugins`→`/ned:install`.
+- **시작하기**(첫 실행·설정 → 시작하기): 커넥터 연결·Slack 팀 ID·자동 실행·코드 서명 점검.
 - **설정**(하단 "저장"): 외형(테마 `dashboard.theme`, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`, 링크 열기) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(위 순찰·감속 키, `signal_check_minutes`, `agenda_refresh_minutes`, `agenda_source_minutes.*`) · 쓰기 액션(`actions.*`, 말투 `reply_tone`·`reply_tone_by_source.*`, 오늘 한 액션) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(`claude_model`, `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd` $15). 저장마다 백업 10개.
 
 ## 상세
@@ -217,11 +218,17 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 설치: `/plugin marketplace add HuanSuh/ned` → `/plugin install ned@ned` → `/reload-plugins` → `/ned:install`. 사전 조건 node 22+·pnpm·Xcode 명령줄 도구·claude CLI(없으면 설치 안내 후 멈춤). Ned.app 은 공증이 없어 내려받지 않고 각 Mac 에서 빌드. 세션 훅은 새 세션(또는 `/reload-plugins`)부터 기록.
 - 데이터: 플러그인 캐시(`~/.claude/plugins/cache/ned/ned/<버전>/`)는 업데이트마다 경로가 바뀌므로, `/ned:install` 이 소스를 고정 경로 `~/.ned/runtime/` 로 동기화해 거기서 빌드하고 Ned.app 의 `nedRepoPath` 를 그곳으로 둔다. `~/.claude/settings.json` 에 예전 방식(절대 경로) Ned 훅이 남아 있으면 지운다(이벤트 이중 기록 방지, 백업 `settings.json.ned-backup`).
 - 언제: 업데이트 = `/plugin update ned` → `/reload-plugins`(또는 새 세션) → `/ned:install`(같은 명령, 멱등). reload 를 빼면 이 세션은 업데이트 전 버전을 쓰고 있어 `/ned:install` 이 "다시 로드 후 실행" 으로 멈춘다(옛 버전 재설치 방지). 새 빌드는 `~/.ned/runtime.next` 에서 끝까지 만든 뒤에만 교체하므로 실패해도 기존 설치가 유지되고, 로그는 `~/.ned/logs/install.log`. `/ned:status` 는 읽기만 — 데몬·앱·런타임 vs 플러그인 버전("업데이트 필요")·최근 로그·옛 훅 잔존. `/ned:uninstall` 은 확인 후 앱·런타임 삭제(데이터 `~/.ned` 유지), 이어서 `/plugin uninstall ned`.
-- 처음 한 번: 설정 → 외형 → 링크 열기에서 Slack 팀 ID 입력, claude.ai 커넥터(Slack·Gmail·Calendar·Jira·GitHub)를 본인 계정으로 연결 — Ned 는 토큰을 갖지 않는다.
+- 설치 중 점검(`/ned:install`): 빌드 **전에** 코드 서명 인증서("Ned Local Signing")가 없으면 지금 만들지 묻는다(`scripts/make-signing-cert.sh`, macOS 대화상자 승인 — 없으면 ad-hoc 서명이라 재설치마다 권한을 다시 물음). 설치 뒤 `ned setup-check`(아래 "시작하기")로 소스별 연결 상태와 할 일을 표로 보여 주고, 처음 설치면 로그인할 때 자동 실행할지 묻는다(예 → `Ned --login-item-register`).
+- 처음 한 번: claude.ai 커넥터(Slack·Gmail·Calendar·Jira)를 본인 계정으로 연결, GitHub 은 `gh auth login` — Ned 는 토큰을 갖지 않는다. Slack 팀 ID 입력. 모두 대시보드 **시작하기** 창에서 확인·입력할 수 있다.
 - 레포에서 직접 설치(개발용): `scripts/install.sh` — 체크아웃에서 빌드하고 `settings.json` 에 훅 등록. 플러그인과 같이 쓰지 말 것. 릴리스 절차는 `docs/RELEASE.md`.
 
+### 시작하기 — 첫 실행 점검
+- 보여 주는 것: "시작하기" 창 — 소스 연결(설정에서 켠 소스만: Slack·Gmail·Google Calendar·Jira(Atlassian) 커넥터, GitHub `gh`, Sentry MCP) 상태 칩 연결됨/인증 필요/연결 안 됨/연결 중/확인 실패 + 할 일("claude.ai 에서 연결" → https://claude.ai/settings/connectors, `gh auth login`), Slack 팀 ID 입력·저장(`dashboard.slack_team_id`, Slack 소스가 켜졌을 때), 자동 실행(Login Item) 토글, 코드 서명 상태 + 실행할 명령(`bash …/scripts/make-signing-cert.sh` — 다음 `/ned:install` 부터 적용).
+- 데이터: `GET /api/setup`(1분 캐시, "다시 확인" = `?refresh=1`) — claude 를 한 번 띄워 시작 줄(system/init)의 커넥터 상태만 읽고 바로 끈다(모델 호출·비용 없음; `claude mcp list` 는 인증 필요를 연결됨으로 보여서 안 씀). GitHub 은 `gh auth status`, 서명은 `security find-identity -v -p codesigning`. 닫음은 `POST /api/setup/dismiss` → `~/.ned/onboarding.json`(설정 아님). 자동 실행은 Ned.app 만 알 수 있어 앱 창에서만 토글(브라우저로 연 대시보드는 "메뉴 > Login Items 에 등록" 안내). CLI: `node dist/cli.js setup-check [--json]`.
+- 언제: 대시보드를 처음 열 때 준비 안 된 항목이 있고 아직 닫은 적이 없으면 저절로 뜬다. 닫으면(✕·닫기·Esc) 다시 안 뜨고, 설정 상단 "시작하기" 버튼으로 언제든 다시 연다.
+
 ### 설정 탭
-상단 바로가기: 외형 · 소스 · 알림 · 순찰 주기 · 수집·보관 · 쓰기 액션 · 아카이브 · Claude. "다시 불러오기", 하단 "● 저장 안 된 변경" + "저장".
+상단 바로가기: 외형 · 소스 · 알림 · 순찰 주기 · 수집·보관 · 쓰기 액션 · 아카이브 · Claude. "시작하기"(위 "시작하기") · "다시 불러오기", 하단 "● 저장 안 된 변경" + "저장".
 - **외형**: 테마 🖥️시스템/☀️라이트/🌙다크 `dashboard.theme`(바로 미리보기, 저장해야 유지) · 홈 카드 배치 ↑/↓·1열/2열 `dashboard.card_order`/`dashboard.card_span` · "홈 배치 잠금" `dashboard.locked` · "팔로업 채널을 별도 카드로" `dashboard.watch_cards` · "배치 초기화" · 링크 열기 "링크를 앱으로 열기" `dashboard.open_links_in_app` + Slack/Figma/Notion 체크(`dashboard.open_links_in_app_by_service.*`, 끄면 흐려짐) · "Slack 팀 ID" `dashboard.slack_team_id` · "Slack 워크스페이스 주소" `dashboard.slack_team_domain`(위 "링크 열기 — 앱 딥링크").
 - **소스**: Gmail/Slack/Jira/GitHub/Sentry/캘린더 `sources.*`(끄면 조회·보고 안 함). Slack: 팔로업 채널 `filters.slack.watch_channels` · 트래킹 제외 채널 `filters.slack.exclude_channels`(팔로업보다 우선) · 답 필요 해제 이모지 `filters.slack.ack_reactions` · 한 번에 확인할 이모지 `filters.slack.ack_check_max`(3) · 그룹 멘션 `filters.slack.group_mentions`(유저그룹 ID·핸들). Jira: 제외 프로젝트 `filters.jira.exclude_projects`. 칩 입력: ⏎/쉼표 추가, 빈 입력 Backspace 삭제.
 - **알림**: 알림 켜기 `notifications.enabled` · 소스별 `notifications.kinds.*` · 아침 브리핑 알림 `notifications.briefing` · 소리 `notifications.sound` · 묶음 기준 `notifications.summary_threshold`(기본 3) · 조용한 시간 `quiet_hours`(기본 23:00~08:00) · 그 시간엔 보내지 않음/소리 없이 `notifications.quiet_delivery`.
@@ -336,4 +343,5 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 세션 만들기: `/api/sessions/create`(대화창 확인 카드 [실행], 진행은 `/api/sessions/create/:job_id`)
 - 통신기: `/api/chat`(SSE) · `/api/chat/:id` · `/api/chat/:id/stop` · `/api/chats` · `/api/chat/actions/validate`(확인 카드 검증) · `/api/chat/:id/action`(카드 상태 저장)
 - 아카이브: `/api/archive/status`(볼트 배지·마지막 쓰기·마지막 오류) · `/api/archive/flush`(지금 쓰기) · `/api/outputs`(정리 결과물 목록) · `/api/outputs/:id`(하나, 마크다운 포함) · `/api/outputs/:id/reveal`(Finder 에서 보기)
+- 시작하기: `/api/setup`(점검 결과, `?refresh=1` 다시 확인) · `/api/setup/dismiss`(창 닫음 기록, `{dismissed:false}` 면 되돌림)
 - 설정: `/api/config`(GET/PUT — 바뀐 키만, 충돌 시 409) · `/api/config/backups` · `/api/config/restore`(이전 설정으로 되돌리기)

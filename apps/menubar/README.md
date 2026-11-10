@@ -131,6 +131,10 @@ when the frame is missing / zero-sized or the window is occluded (icon not on sc
 Menu Bar or behind the notch). Use it instead of looking at the menu bar.
 `--login-item-selftest` registers then unregisters the Login Item and logs both results.
 `--login-item-status` prints `SMAppService.mainApp.status` to stdout and exits (read-only, no UI; see Login Item below).
+`--login-item-register` / `--login-item-unregister` do the same register / unregister call as the menu toggle, print the
+same status line and exit (0, or 1 when the call failed; `requiresApproval` also opens the Login Items pane). No UI, no daemon —
+`/ned:install` runs `/Applications/Ned.app/Contents/MacOS/Ned --login-item-register` whether or not Ned is already running
+(registration is per bundle; the running app's menu toggle refreshes when the menu opens).
 `--persona-selftest` logs persona resolution and exercises the persona PUT (see Persona below).
 `--wake-selftest` fakes a wedged-after-sleep daemon (SIGSTOP on the child) and runs the wake check (see Sleep / wake below).
 `--notify-selftest` runs synthetic state.json through the notification planner and the badge / open-item /
@@ -195,6 +199,11 @@ The toggle next to **Login Items 에 등록** shows **자동 시작: 켜짐 / �
 | `requiresApproval` | Registered, but macOS wants the user's OK (common for ad-hoc-signed bundles) |
 | `notRegistered` | Not registered (toggle off) |
 | `notFound` | macOS has no record for this bundle path — normal for a dev bundle that was never registered |
+
+Dashboard 시작하기 (`public/app/features/onboarding.js`): `webkit.messageHandlers.loginItem` (`LoginItemHandler` in
+`DashboardWindow.swift`, a `WKScriptMessageHandlerWithReply`) — `postMessage({op: "get"})` / `{op: "set", enabled}` →
+Promise `{status, enabled, message?}` (`status` = `LoginItem.describe`). Same `LoginItem` path as the menu toggle; only the
+dashboard page (`http://127.0.0.1:<port>`) may call it. A plain browser has no handler and shows the menu hint instead.
 
 Status is per bundle path: check the installed app with `/Applications/Ned.app/Contents/MacOS/Ned --login-item-status`
 (only with a build that has this flag — an older binary ignores it and launches normally).
