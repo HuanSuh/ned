@@ -50,36 +50,13 @@ struct NedApp: App {
         }
     }
 
-    /// No status item scene: the menu bar item is an AppKit NSStatusItem owned by AppDelegate
-    /// (StatusItemController). A Settings scene is the minimum an `App` needs — but Ned's settings live in the dashboard
-    /// (설정 탭), so its window must never stay up as an empty "Ned Settings": SettingsRedirect closes it at once.
+    /// No status item scene: the menu bar item is an AppKit NSStatusItem owned by AppDelegate (StatusItemController).
+    /// An `App` needs one scene. It used to be `Settings { EmptyView() }`, and SwiftUI brought that empty "Ned Settings"
+    /// window up at every launch on macOS 26 (no saved state; refusing untitled / reopen and ordering the dashboard
+    /// before activating did not stop it). A MenuBarExtra that is never inserted has no window and no status item — so
+    /// there is nothing to open. Ned's settings live in the dashboard (설정 탭).
     var body: some Scene {
-        Settings { SettingsRedirect() }
-    }
-}
-
-/// The SwiftUI Settings window's content — a fallback: AppDelegate already refuses the untitled-file and reopen paths that
-/// raised it at launch. It closes its own window as soon as it appears and, when the person asked for it (⌘, / app menu
-/// "Settings…"), opens the dashboard's 설정 → 앱(Ned.app) instead. Shown within the first seconds of
-/// launch it was not asked for (window restoration / activation brought it up): it only closes, so a launch never
-/// opens the dashboard against LaunchBehavior. Either way the event is logged to find what raised it.
-struct SettingsRedirect: View {
-    /// Below this many seconds after launch the window counts as not asked for.
-    static let launchGrace: TimeInterval = 5
-    static let launchedAt = Date()
-
-    var body: some View {
-        Color.clear.frame(width: 1, height: 1)
-            .onAppear {
-                DispatchQueue.main.async {
-                    for w in NSApp.windows where w.identifier?.rawValue.contains("Settings") == true || w.title.hasSuffix("Settings") {
-                        w.close()
-                    }
-                    let early = Date().timeIntervalSince(Self.launchedAt) < Self.launchGrace
-                    DaemonManager.shared.note("settings window: appeared \(early ? "at launch — closed (not asked for)" : "— closed, opening 설정 → 앱")")
-                    if !early { DashboardWindowController.shared.show(section: "s-app") }
-                }
-            }
+        MenuBarExtra("Ned", isInserted: .constant(false)) { EmptyView() }
     }
 }
 
@@ -91,7 +68,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pet: DesktopPetController?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
-        _ = SettingsRedirect.launchedAt // pin the launch time (a static let is set on first read)
         LaunchBehavior.registerDefaults()
         LaunchBehavior.captureLaunchEvent()
     }
