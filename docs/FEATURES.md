@@ -6,20 +6,21 @@
 ## 요약
 
 Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub·Sentry)를 모아 보여 주는 로컬 대시보드(탭: 홈·인박스·타임라인·설정). 전역 키: h 홈, i 인박스, r 지금 점검, ⌘K·/ 검색, ⌘J 통신기.
-- **홈**: 일정(일/주, ＋·드래그로 일정 만들기, ⋯ 수락/미정/거절), 할 일(NED 액션 아이템 / 개인 할 일, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, 이력 7/30일, ↻ 소스별 갱신), 팔로업 채널 카드(멘션 없이 따라가는 채널 요약, "나한테" 강조).
-- **인박스**: 우선·기타·기록(브리핑) 3탭 + "장비실"(세션 상태, 대화창 배지). 키 j/k·e·⏎·1/2/3.
+- **홈**: 일정(일/주, ＋·드래그로 만들기, ⋯ 응답), 할 일(NED 액션 아이템 / 개인 할 일, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, 이력 7/30일, ↻ 소스별 갱신), 팔로업 채널 카드(멘션 없이 따라가는 채널 요약).
+- **인박스**: 우선·기타·기록(브리핑) 3탭 + "장비실"(세션 상태). 키 j/k·e·⏎·1/2/3.
 - **타임라인**: 세션 이벤트·브리핑 시간순(필터)
-- **순찰/브리핑**: "지금 점검"(r) = 소스를 새로 가져와 판단 → 알림·attention. 자동 순찰 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑 `briefing_time`(실패 시 10분 뒤 3회 재시도).
+- **순찰/브리핑**: "지금 점검"(r) = 소스를 새로 가져와 판단 → 알림·attention. 자동 순찰 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑 `briefing_time`(실패 시 재시도).
 - **야간·유휴 감속**: 조용한 시간·유휴(`idle_schedule`)엔 자동 실행을 늦추거나 멈춤(`quiet_schedule.mode` normal/slow/pause), 수동은 즉시.
-- **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기 확인 카드, `actions.chat_session_create` 면 새 세션; 회의·문서·메일 정리는 노트로), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글.
-- **답장 초안 ✎**: 초안 3개 → 복사/열기/보내기. 카드·이력·팔로업 카드(모든 행·요약 줄)에 있음(팔로업은 스레드 답글). Slack·메일·Jira 는 2단계: 미답 질문을 "답할 것"(답한 건 ✓, 내 답글 전 질문은 "이전")으로 뽑아 번호대로 1:1 답, 멘션 제안 토글. 오래된 발췌면 스레드부터 읽음. 실제 쓰기는 설정 → 쓰기 액션에서 켠 것만(gmail_draft·session_send 기본 켬): `actions.slack_send`·`gmail_draft`·`gmail_send`·`session_send`·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯. 오늘 한 액션에 출처 칩.
-- **확인 완료 ✓**: 항목을 처리됨으로 접음(✓ 시각 뒤 변경이 오면 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`)면 자동 해제.
+- **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기 확인 카드, `actions.chat_session_create` 면 새 세션; 정리는 노트로), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글.
+- **답장 초안 ✎**: 초안 3개 → 복사/열기/보내기. 카드·이력·팔로업 카드에 있음. Slack·메일·Jira 는 미답 질문을 "답할 것"으로 뽑아 번호대로 1:1 답. 실제 쓰기는 설정 → 쓰기 액션에서 켠 것만(gmail_draft·session_send 기본 켬): `actions.slack_send`·`gmail_draft`·`gmail_send`·`session_send`·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯.
+- **확인 완료 ✓**: 항목을 처리됨으로 접음(새 변경이 오면 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`)면 자동 해제.
 - **Gmail 읽음 표시**(`actions.gmail_mark_read`, 끔): 메일 ✓ 면 Gmail 도 읽음.
 - **검색 ⌘K**: 통합 검색(초성·수집 이력).
-- **아카이브(Obsidian)**: 볼트 `archive.vault` + `archive.enabled` → 매일 `<archive.folder>/Daily/…/날짜.md`(마커 밖 메모 보존), `archive.daily_embed`.
-- **수집 이력**: 소스별 보관(`history.keep_days.*`), 증분 수집(Slack 전체 재검색 창 `history.collect.slack_hours`), 카드·순찰·초안은 표시 구간(`history.display.*`) — Slack 미답 요청은 기간 무관.
+- **아카이브(Obsidian)**: 볼트 `archive.vault` + `archive.enabled` → 매일 `<archive.folder>/Daily/…/날짜.md`, `archive.daily_embed`.
+- **수집 이력**: 소스별 보관(`history.keep_days.*`), 증분 수집(Slack 전체 재검색 창 `history.collect.slack_hours`), 카드·순찰·초안은 표시 구간(`history.display.*`).
 - **링크 열기**: Slack·Figma·Notion 링크는 앱으로(`dashboard.open_links_in_app`), 앱 없으면 웹. Slack 은 팀 ID `dashboard.slack_team_id` 필요.
-- **설정**(하단 "저장"): 외형(테마 `dashboard.theme`, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`, 링크 열기) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(위 순찰·감속 키, `signal_check_minutes`, `agenda_refresh_minutes`, `agenda_source_minutes.*`) · 쓰기 액션(`actions.*`, 말투 `reply_tone`·`reply_tone_by_source.*`, 오늘 한 액션) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(`claude_model`, `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd` $15 — 닿으면 자동 실행·대화 멈춤). 저장마다 백업 10개.
+- **설치·업데이트**: Claude Code 플러그인 — `/plugin marketplace add HuanSuh/ned` → `/plugin install ned@ned` → `/ned:install`(이 Mac 에서 빌드). 업데이트는 `/plugin update ned` 후 다시 `/ned:install`. `/ned:status`·`/ned:uninstall`.
+- **설정**(하단 "저장"): 외형(테마 `dashboard.theme`, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`, 링크 열기) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(위 순찰·감속 키, `signal_check_minutes`, `agenda_refresh_minutes`, `agenda_source_minutes.*`) · 쓰기 액션(`actions.*`, 말투 `reply_tone`·`reply_tone_by_source.*`, 오늘 한 액션) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(`claude_model`, `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd` $15). 저장마다 백업 10개.
 
 ## 상세
 
@@ -210,6 +211,14 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 언제 쓰나: 아침 브리핑·순찰 알림·쓰기 성공·결과물 저장 직후 바로, 그 밖의 변화(순찰 횟수·소스 갱신)는 1분 틱에서 마지막 쓰기 후 5분 지나면. 자정 넘어 끝난 순찰은 그 순찰이 시작된 날 파일로, 지난 날 파일은 그 뒤로 안 건드림.
 - 내 데일리 노트 embed(`archive.daily_embed`, 기본 꺼짐): 켜면 그날 내 데일리 노트가 **이미 있을 때만**(없으면 만들지 않음) "## 📝 Notes & Logs" 바로 아래에 `<!-- ned:embed -->![[Ned/Daily/YYYY-MM/YYYY-MM-DD]]<!-- ned:/embed -->` 한 줄. 다른 줄은 손대지 않음. 데일리 노트 위치는 `<볼트>/.obsidian/daily-notes.json` 의 folder·format(없으면 건너뜀).
 - 설정: 설정 → 아카이브 — "아카이브 켜기" `archive.enabled`(기본 꺼짐) · "볼트 경로" `archive.vault`(절대 경로, 있는 폴더여야 하고 ~/.ned·Ned 레포 안은 거부 — `.obsidian` 이 있으면 "볼트 확인됨" 배지, 없으면 경고만) · "Ned 폴더" `archive.folder` · "담을 것" `archive.include.briefings`·`archive.include.updates`·`archive.include.actions`·`archive.include.outputs`·`archive.include.history`(📥 들어온 것, 기본 켬)·`archive.include.sessions`(기본 꺼짐) · "내 데일리 노트에 embed" `archive.daily_embed`. 상태 줄: 오늘 리포트 경로("Obsidian 에서 열기"), 마지막 쓰기, 대기 중인 날, 마지막 오류(권한 거부면 macOS 파일 접근 허용 안내), "지금 쓰기"(`/api/archive/flush`), 상태는 `/api/archive/status`. 쓰기가 실패해도 데몬은 계속 돌고 다음 틱에 다시 시도(쓰는 중 파일이 계속 바뀌면 4번까지 다시 합친 뒤 다음 틱으로, 7일 넘게 못 쓴 날은 경고 후 포기).
+
+### 설치·업데이트 — Claude Code 플러그인
+- 보여 주는 것: Ned 는 Claude Code 플러그인 `ned@ned`(마켓플레이스 = 이 레포 `HuanSuh/ned`, 기본 브랜치 main 이 설치본). 플러그인이 주는 것: 세션 훅 8개(`hooks/hooks.json` — SessionStart·UserPromptSubmit·Stop·StopFailure·Notification·SubagentStart·SubagentStop·SessionEnd → `$NED_HOME/events/`)와 명령 `/ned:install`·`/ned:status`·`/ned:uninstall`.
+- 설치: `/plugin marketplace add HuanSuh/ned` → `/plugin install ned@ned` → `/ned:install`. 사전 조건 node 22+·pnpm·Xcode 명령줄 도구·claude CLI(없으면 설치 안내 후 멈춤). Ned.app 은 공증이 없어 내려받지 않고 각 Mac 에서 빌드. 세션 훅은 새 세션(또는 `/reload-plugins`)부터 기록.
+- 데이터: 플러그인 캐시(`~/.claude/plugins/cache/ned/ned/<버전>/`)는 업데이트마다 경로가 바뀌므로, `/ned:install` 이 소스를 고정 경로 `~/.ned/runtime/` 로 동기화해 거기서 빌드하고 Ned.app 의 `nedRepoPath` 를 그곳으로 둔다. `~/.claude/settings.json` 에 예전 방식(절대 경로) Ned 훅이 남아 있으면 지운다(이벤트 이중 기록 방지, 백업 `settings.json.ned-backup`).
+- 언제: 업데이트 = `/plugin update ned` → `/ned:install`(같은 명령, 멱등). `/ned:status` 는 읽기만 — 데몬·앱·런타임 vs 플러그인 버전("업데이트 필요")·최근 로그·옛 훅 잔존. `/ned:uninstall` 은 확인 후 앱·런타임 삭제(데이터 `~/.ned` 유지), 이어서 `/plugin uninstall ned`.
+- 처음 한 번: 설정 → 외형 → 링크 열기에서 Slack 팀 ID 입력, claude.ai 커넥터(Slack·Gmail·Calendar·Jira·GitHub)를 본인 계정으로 연결 — Ned 는 토큰을 갖지 않는다.
+- 레포에서 직접 설치(개발용): `scripts/install.sh` — 체크아웃에서 빌드하고 `settings.json` 에 훅 등록. 플러그인과 같이 쓰지 말 것. 릴리스 절차는 `docs/RELEASE.md`.
 
 ### 설정 탭
 상단 바로가기: 외형 · 소스 · 알림 · 순찰 주기 · 수집·보관 · 쓰기 액션 · 아카이브 · Claude. "다시 불러오기", 하단 "● 저장 안 된 변경" + "저장".

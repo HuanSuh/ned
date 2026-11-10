@@ -34,6 +34,11 @@ describe("plugin manifests", () => {
     expect(entry.source).toBe("./");
     expect(entry.version).toBeUndefined();
   });
+
+  it("CHANGELOG.md has an entry for the current version (docs/RELEASE.md)", () => {
+    const log = fs.readFileSync(path.join(ROOT, "CHANGELOG.md"), "utf8");
+    expect(log).toMatch(new RegExp(`^## ${plugin.version.replace(/\./g, "\\.")}\\b`, "m"));
+  });
 });
 
 describe("plugin hooks (hooks/hooks.json)", () => {
