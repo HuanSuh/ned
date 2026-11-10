@@ -58,8 +58,9 @@ struct NedApp: App {
     }
 }
 
-/// The SwiftUI Settings window's content. It closes its own window as soon as it appears and, when the person asked for
-/// it (⌘, / app menu "Settings…"), opens the dashboard's 설정 → 앱(Ned.app) instead. Shown within the first seconds of
+/// The SwiftUI Settings window's content — a fallback: AppDelegate already refuses the untitled-file and reopen paths that
+/// raised it at launch. It closes its own window as soon as it appears and, when the person asked for it (⌘, / app menu
+/// "Settings…"), opens the dashboard's 설정 → 앱(Ned.app) instead. Shown within the first seconds of
 /// launch it was not asked for (window restoration / activation brought it up): it only closes, so a launch never
 /// opens the dashboard against LaunchBehavior. Either way the event is logged to find what raised it.
 struct SettingsRedirect: View {
@@ -139,10 +140,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated { DaemonManager.shared.stopSync() }
     }
     /// Dock icon click (while the dashboard made the app .regular) reopens the dashboard.
+    /// Reopen (Dock / Finder / a second `open`) shows the dashboard. Returns false: with true AppKit goes on to its own
+    /// reopen, and SwiftUI answers that by opening the app's only scene — the empty Settings window (the "Ned Settings"
+    /// flash at launch / reopen). The dashboard is Ned's window; nothing else should open.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         MainActor.assumeIsolated { DashboardWindowController.shared.show() }
-        return true
+        return false
     }
+    /// No "untitled document" at launch: SwiftUI would open the Settings scene for it. LaunchBehavior decides the dashboard.
+    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
 }
