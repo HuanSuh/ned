@@ -51,7 +51,7 @@ enum PetSelfTest {
               "glow colour: idle = --dim light, others = the edge colour")
         check(PetColors.moodSymbol(.needsInput) == "keyboard" && !PetMood.allCases.contains { PetColors.moodSymbol($0).hasPrefix("hand.") }, "입력 기다림 symbol = keyboard (no hand)")
         check(PetColors.messageEdge(PetSnapshot.slack, ned, dark: true).0 == ned.accent, "message bubble edge = accent")
-        check(PetCharacter.breath >= 3 && PetCharacter.idleScale <= 1.02, "motion: glow breath ≥ 3 s, idle scale ≤ 2 % (no bounce / shake)")
+        check(PetCharacter.breath >= 1.2 && PetCharacter.breath <= 2.5 && PetCharacter.idleScale <= 1.02, "motion: glow breath 1.2–2.5 s (quick back-light pulse), idle scale ≤ 2 % (no bounce / shake)")
 
         // Inbox: seed, seen, kind toggles, quiet, bundling, greeting.
         func item(_ k: String, _ kind: String, _ pk: String?, ts: Double = 0) -> FeedItem { FeedItem(key: k, kind: kind, pet_kind: pk, title: "t-\(k)", ts: ts) }
