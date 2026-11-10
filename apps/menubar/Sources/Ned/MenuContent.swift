@@ -8,6 +8,7 @@ struct MenuContent: View {
     @State private var loginItem = LoginItem()
     @AppStorage(LaunchBehavior.openAtLaunchKey) private var openAtLaunch = true
     @AppStorage(LaunchBehavior.openAtLoginLaunchKey) private var openAtLoginLaunch = false
+    @AppStorage(DesktopPetController.enabledKey) private var desktopPet = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -113,6 +114,8 @@ struct MenuContent: View {
                     .disabled(!openAtLaunch)
                     .help("로그인 직후 자동 시작됐을 때도 대시보드를 엽니다 (기본: 메뉴 막대만)")
             }
+            Toggle("데스크톱 펫 표시", isOn: $desktopPet).toggleStyle(.checkbox).font(.caption)
+                .help("화면에 늘 떠 있는 작은 \(store.persona.displayName) — 클릭하면 대시보드, 드래그로 이동, 우클릭 → 숨기기")
             Button("저장소 위치…") { chooseRepo() }.buttonStyle(.link).font(.caption)
                 .help(daemon.repoPath ?? "")
         }

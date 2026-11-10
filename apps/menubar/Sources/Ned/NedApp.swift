@@ -7,6 +7,14 @@ struct NedApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     init() {
+        // Headless pet checks — before StatusItemGuard touches any defaults. Selftest uses its own defaults suite;
+        // snapshot writes PNGs only to the given directory.
+        if CommandLine.arguments.contains("--pet-selftest") { exit(MainActor.assumeIsolated { PetSelfTest.run() }) }
+        if let i = CommandLine.arguments.firstIndex(of: "--pet-snapshot") {
+            let args = CommandLine.arguments
+            let dir = i + 1 < args.count ? args[i + 1] : NSTemporaryDirectory() + "ned-pet-snapshot"
+            exit(MainActor.assumeIsolated { PetSnapshot.run(dir: dir) })
+        }
         // Forget any "hidden" flag AppKit wrote into our defaults (legacy MenuBarExtra "Item-0" keys and the
         // AppKit item's own autosave name) before the status item exists — see StatusItemController.
         MainActor.assumeIsolated { StatusItemGuard.clearFlags() }
@@ -47,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sigterm: DispatchSourceSignal?
     private var store: StateStore?
     private var statusItem: StatusItemController?
+    private var pet: DesktopPetController?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         LaunchBehavior.registerDefaults()
@@ -65,6 +74,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let store = StateStore()
             self.store = store
             statusItem = StatusItemController(store: store)
+            // Floating Ned (off by default; menu toggle "데스크톱 펫 표시").
+            let pet = DesktopPetController()
+            pet.attach(store: store)
+            self.pet = pet
             StatusItemGuard.shared.start()
             DaemonManager.shared.start()
             Notifier.shared.start()
