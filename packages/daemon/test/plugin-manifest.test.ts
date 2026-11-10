@@ -35,3 +35,28 @@ describe("plugin manifests", () => {
     expect(entry.version).toBeUndefined();
   });
 });
+
+describe("plugin hooks (hooks/hooks.json)", () => {
+  const hooks = readJson("hooks/hooks.json").hooks as Record<string, { hooks: { type: string; command: string; timeout: number }[] }[]>;
+  // install-hooks.mjs is a script with side effects — read its EVENTS list as text.
+  const src = fs.readFileSync(path.join(ROOT, "packages/hook/install-hooks.mjs"), "utf8");
+  const EVENTS = JSON.parse(/EVENTS = (\[[^\]]*\])/.exec(src)![1]) as string[];
+
+  it("registers ned-hook.sh for exactly the events install-hooks.mjs registers", () => {
+    expect(EVENTS).toHaveLength(8);
+    expect(Object.keys(hooks).sort()).toEqual([...EVENTS].sort());
+  });
+
+  it("each command runs the bundled hook through ${CLAUDE_PLUGIN_ROOT}, quoted, timeout 5", () => {
+    for (const ev of EVENTS) {
+      expect(hooks[ev]).toHaveLength(1);
+      const [h] = hooks[ev][0].hooks;
+      expect(h).toEqual({ type: "command", command: '/bin/sh "${CLAUDE_PLUGIN_ROOT}/packages/hook/ned-hook.sh"', timeout: 5 });
+    }
+  });
+
+  it("the referenced script exists and is executable", () => {
+    const p = path.join(ROOT, "packages/hook/ned-hook.sh");
+    expect(fs.statSync(p).mode & 0o111).not.toBe(0);
+  });
+});
