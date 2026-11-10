@@ -81,7 +81,9 @@ describe("plugin commands (/ned:install · /ned:status · /ned:uninstall)", () =
       const md = fs.readFileSync(path.join(ROOT, "commands", `${name}.md`), "utf8");
       const fm = frontmatter(md);
       expect(fm?.description).toBeTruthy();
-      expect(fm?.["allowed-tools"]).toBeTruthy();
+      // No pre-approved Bash: the permission prompt is the second gate before a script that deletes/installs runs
+      // (an env-prefixed command can't be matched by a narrow allow rule anyway — permissions docs).
+      expect(fm?.["allowed-tools"] ?? "").not.toMatch(/\bBash\b/);
       // Installing/removing software only when the user types it — Claude must not run these on its own.
       expect(fm?.["disable-model-invocation"] === "true").toBe(manualOnly);
       expect(md).toContain(`"\${CLAUDE_PLUGIN_ROOT}/${script}"`);
@@ -90,5 +92,10 @@ describe("plugin commands (/ned:install · /ned:status · /ned:uninstall)", () =
   }
   it("install/uninstall run in plugin mode", () => {
     for (const n of ["install", "uninstall"]) expect(fs.readFileSync(path.join(ROOT, "commands", `${n}.md`), "utf8")).toContain("NED_PLUGIN_MODE=1 bash");
+  });
+  it("install runs in the background and tells the update order: update → /reload-plugins → /ned:install", () => {
+    const md = fs.readFileSync(path.join(ROOT, "commands", "install.md"), "utf8");
+    expect(md).toContain("run_in_background");
+    expect(md).toMatch(/\/plugin update ned` → `\/reload-plugins`.*→ `\/ned:install`/);
   });
 });

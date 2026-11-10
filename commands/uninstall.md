@@ -1,6 +1,6 @@
 ---
 description: Ned 제거 — 앱 종료·삭제, 런타임 삭제 (데이터 ~/.ned 는 유지). 확인 후 실행
-allowed-tools: Bash, AskUserQuestion
+allowed-tools: AskUserQuestion
 disable-model-invocation: true
 ---
 
@@ -14,7 +14,7 @@ Ned 를 이 Mac 에서 제거한다.
 
 ## 2. 실행
 
-진행하면 Bash 도구로 그대로 실행한다:
+진행하면 Bash 도구로 그대로 실행한다. 이 명령은 미리 승인되어 있지 않으므로 사용자가 권한 확인을 한 번 더 거친다:
 
 ```
 NED_PLUGIN_MODE=1 bash "${CLAUDE_PLUGIN_ROOT}/scripts/uninstall.sh" < /dev/null
