@@ -50,6 +50,9 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
     func show() {
         if window == nil { build() }
+        // Window on screen first, then become a regular app and activate: activating while no window is visible makes
+        // SwiftUI open the app's only scene — the empty Settings window (the "Ned Settings" flash at every launch).
+        window?.makeKeyAndOrderFront(nil)
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)

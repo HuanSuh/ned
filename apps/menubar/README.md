@@ -15,7 +15,7 @@ The daemon and the dashboard HTML are unchanged; the app only wraps them.
 
 | File | Role |
 | --- | --- |
-| `Sources/Ned/NedApp.swift` | `@main` app (Settings scene whose content `SettingsRedirect` closes at once — ⌘, → 설정 → 앱; the delegate refuses the untitled-file / reopen paths that used to raise it), app delegate (store, status item, starts/stops the daemon, SIGTERM → quit) |
+| `Sources/Ned/NedApp.swift` | `@main` app (its one scene a never-inserted `MenuBarExtra` — a `Settings` scene came up empty at every launch on macOS 26), app delegate (store, status item, starts/stops the daemon, SIGTERM → quit) |
 | `Sources/Ned/StatusItemController.swift` | `NSStatusItem` (unique autosave name, icon/badge/count), MenuContent popover, StatusItemGuard, `UpdateChecker` (업데이트 확인 alert) |
 | `Sources/Ned/MenuContent.swift` | Dropdown: status line (`MenuStatus`, pure) + 4 items (`MenuView`), repo picker, `LoginItem`, `--menu-snapshot` |
 | `Sources/Ned/StateStore.swift` | `state.json` model, directory watcher, daemon HTTP calls |
