@@ -8,19 +8,19 @@
 Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub·Sentry)를 모아 보여 주는 로컬 대시보드(탭: 홈·인박스·타임라인·설정). 전역 키: h 홈, i 인박스, r 지금 점검, ⌘K·/ 검색, ⌘J 통신기.
 - **홈**: 일정(일/주, ＋·드래그로 만들기, ⋯ 응답), 할 일(NED 액션 아이템 / 개인 할 일, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, 이력 7/30일, ↻ 소스별 갱신), 팔로업 카드(멘션 없는 채널 요약).
 - **인박스**: 우선·기타·기록(브리핑) 3탭 + "장비실"(세션 상태).
-- **타임라인**: 세션 이벤트·브리핑 시간순
+- **타임라인**: 이벤트·브리핑 시간순
 - **순찰/브리핑**: "지금 점검"(r) = 소스 새로 가져와 판단 → 알림·attention. 자동 순찰 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑 `briefing_time`(실패 시 재시도).
 - **야간·유휴 감속**: 조용한 시간·유휴(`idle_schedule`)엔 자동 실행을 늦추거나 멈춤(`quiet_schedule.mode` normal/slow/pause), 수동은 즉시.
 - **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기 확인 카드, `actions.chat_session_create` 면 새 세션; 정리는 노트로), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글.
 - **답장 초안 ✎**: 초안 3개 → 복사/열기/보내기. Slack·메일·Jira 는 미답 질문을 "답할 것"으로 뽑아 1:1 답. 쓰기는 설정 → 쓰기 액션에서 켠 것만(gmail_draft·session_send 기본 켬): `actions.slack_send`·`gmail_draft`·`gmail_send`·`session_send`·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯.
-- **확인 완료 ✓**: 처리됨으로 접음(새 변경이 오면 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`)면 자동 해제.
+- **확인 완료 ✓**: 처리됨으로 접음(새 변경 시 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`)면 자동 해제.
 - **Gmail 읽음 표시**(`actions.gmail_mark_read`): 메일 ✓ = Gmail 읽음.
-- **검색 ⌘K**: 통합 검색
+- **검색**: ⌘K 통합 검색
 - **아카이브(Obsidian)**: 볼트 `archive.vault` + `archive.enabled` → 매일 `<archive.folder>/Daily/…/날짜.md`, `archive.daily_embed`.
 - **수집 이력**: 소스별 보관(`history.keep_days.*`), 증분 수집(Slack 전체 재검색 창 `history.collect.slack_hours`), 카드·순찰·초안은 표시 구간(`history.display.*`).
 - **링크 열기**: Slack·Figma·Notion 링크는 앱으로(`dashboard.open_links_in_app`, Slack 은 팀 ID `dashboard.slack_team_id`), 없으면 웹.
 - **설치**: 플러그인 `ned@ned` → `/ned:install`. 업데이트 `/plugin update ned`→`/reload-plugins`→`/ned:install`.
-- **Ned.app 메뉴**: 상태 한 줄 + 대시보드 열기·설정…·업데이트 확인·종료, 앱 설정은 설정 → 앱.
+- **Ned.app 메뉴**: 상태 줄 + 대시보드 열기·설정…·업데이트 확인·종료. 앱 설정·`updates.*` 는 설정 → 앱.
 - **시작하기**(첫 실행·설정): 커넥터 연결·Slack 팀 ID·자동 실행·코드 서명 점검.
 - **데스크톱 펫**(외형 `pet.enabled`, 끔): 늘 떠 있는 Ned, 테두리 색 = 상태, 새 소식 말풍선(`pet.messages.*`).
 - **설정**(하단 "저장"): 외형(테마 `dashboard.theme`, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`, 링크 열기) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(위 순찰·감속 키, `signal_check_minutes`, `agenda_refresh_minutes`, `agenda_source_minutes.*`) · 쓰기 액션(`actions.*`, 말투 `reply_tone`·`reply_tone_by_source.*`, 오늘 한 액션) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(`claude_model`, `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd`).
@@ -233,6 +233,9 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 보여 주는 것: 메뉴 막대 아이콘을 누르면 짧은 메뉴 — 상태 한 줄(데몬 점: 정상 = 페르소나 LED 색·시작 중 = 노랑·꺼짐 = 빨강, + "마지막 점검 N분 전"/"아직 점검 전", 시작 중엔 "시작 중 n/4 · 단계", 꺼지면 "꺼져 있음" + [다시 시작]; 확인할 것이 있으면 줄 끝에 숫자 배지, 목록은 대시보드에서) + **대시보드 열기** · **설정…**(대시보드 설정 탭의 "앱" 묶음으로) · **업데이트 확인** · **종료**. 마우스를 올리면 데몬 pid·저장소 경로·state.json 읽기 실패가 툴팁으로.
 - 설정 → **앱 (Ned.app)** 묶음: 자동 실행(로그인할 때 Ned 실행, Login Items + "자동 시작: 켜짐/꺼짐(승인 필요)") · 실행 시 대시보드 열기 · 자동 시작 시에도 열기 · 저장소 위치(경로 + "변경…" → 앱의 폴더 선택 창) · 로그(`~/.ned/logs/app-daemon.log`, "Finder 에서 보기") · 데몬 다시 시작 · 업데이트 확인. 앱 쪽 설정(UserDefaults·SMAppService)이라 config.yaml 키가 없고 하단 "저장"과 무관하게 **바꾸는 즉시 적용**. Ned.app 창에서만 바꿀 수 있고(앱 브리지 `appSettings`), 브라우저로 연 대시보드는 "Ned.app 창에서 열면 바꿀 수 있어요" 한 줄 + 업데이트 확인만.
 - 업데이트 확인: `GET /api/update-check`(10분 캐시, 버튼은 `?refresh=1`) — 설치된 런타임(`~/.ned/runtime/.claude-plugin/plugin.json`)의 버전과 최신 버전을 semver 로 비교. 최신 버전은 `gh api` 로 GitHub main 의 plugin.json(비공개 레포라 `gh auth login` 필요), 안 되면 로컬 마켓플레이스 사본(`~/.claude/plugins/marketplaces/ned/`), 둘 다 안 되면 "확인 실패(사유)". 결과: "최신 버전 (X.Y.Z)" 또는 "X → Y 업데이트 있음 — Claude Code 에서 `/plugin update ned` → `/reload-plugins` → `/ned:install`" + [명령 복사]. 앱이 직접 설치하지 않는다(위 "설치·업데이트").
+- **자동 업데이트**(설정 → 앱 → "업데이트" 소묶음 — 이 세 키는 하단 **"저장"**으로 저장, 브라우저에서도 보임): `updates.auto_check`(새 버전 자동 확인, 기본 켬) · `updates.check_hours`(확인 주기 시간, 기본 24, 최소 1) · `updates.auto_install`(자동 설치, 기본 끔). 데몬 스케줄러가 주기마다 위와 같은 확인을 하고, 새 버전이면 **알림 한 번**(같은 버전은 다시 안 알림, 조용한 시간이면 끝난 뒤 — `notifications.quiet_delivery` silent 면 바로) + 메뉴 상태 줄 아래 "업데이트 있음 X.Y.Z"(누르면 설정 → 앱) + 설정 묶음 상태 줄. 기록은 `~/.ned/update-state.json`(마지막 확인·알린 버전·마지막 설치 시도).
+  - 자동 설치(`updates.auto_install`)는 새 버전이 있고 + 조용한 시간이거나 유휴 + 실행 중·입력 대기 세션이 없고(Orca 워커 포함) + 마지막 실패 뒤 24시간이 지났을 때만. 버튼 **"지금 확인"**(`GET /api/update-check?refresh=1`) · 새 버전이 있으면 **"지금 업데이트"**(한 번 더 확인 → `POST /api/update/install`, 위 조건은 건너뜀).
+  - 설치: 데몬이 `scripts/self-update.sh` 를 분리된 프로세스로 띄운다 — `claude plugin marketplace update ned` → `claude plugin update ned@ned` → 새 버전의 `scripts/install.sh`(`/ned:install` 과 같은 설치, 앱·데몬이 잠시 내려갔다 다시 뜸). 한 번에 하나(`~/.ned/self-update.lock`), 로그 `~/.ned/logs/self-update.log`. 앱이 다시 뜨면 알림 한 번: "Ned X.Y.Z 로 업데이트됨 — 열린 Claude Code 세션은 /reload-plugins" 또는 "업데이트 실패 — 기존 설치 유지, 로그 …". 상태 조회 `GET /api/update/status`.
 - 점검: `Ned --menu-snapshot <dir>`(상태별 메뉴 PNG, 라이트/다크) · `Ned --appsettings-selftest`(브리지 키 화이트리스트·출처 거부).
 
 ### 데스크톱 펫 — 화면에 늘 떠 있는 Ned (Ned.app)
@@ -254,7 +257,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - **수집·보관**: 수집 이력 기록 `history.enabled`(`c-hist-on`) · 표시 구간 Slack 시간 `history.display.slack_hours`·메일 일 `history.display.mail_days` · 수집 창 Slack 전체 재검색 시간 `history.collect.slack_hours`(`c-hist-collect-slack-h`, 24) · 보관 기간 Slack/메일/Jira/GitHub/캘린더 `history.keep_days.*`(0 = 기록 안 함) · 상태 줄(소스별 건수·일수·크기, 마지막 수집·전체 재검색, 다음 수집 창 — `/api/history/status`).
 - **아카이브**: 켜기 `archive.enabled` · 볼트 경로 `archive.vault` · Ned 폴더 `archive.folder` · 담을 것 `archive.include.*` · 내 데일리 노트 embed `archive.daily_embed` · 상태·"지금 쓰기"(위 "아카이브 — Obsidian").
 - **Claude**: 모델 `claude_model`(비우면 기본) · 최대 턴 `claude_max_turns`(25) · 하루 사용 상한 `agenda_daily_budget_usd`(15, 닿으면 자동 실행과 대화가 멈춤, 버튼 실행은 계속).
-- **앱 (Ned.app)**: 자동 실행·실행 시 대시보드 열기·자동 시작 시에도 열기·저장소 위치·로그·데몬 다시 시작·업데이트 확인 — 즉시 적용, "저장" 대상 아님(위 "Ned.app 메뉴 막대 · 설정 → 앱").
+- **앱 (Ned.app)**: 자동 실행·실행 시 대시보드 열기·자동 시작 시에도 열기·저장소 위치·로그·데몬 다시 시작 — 즉시 적용, "저장" 대상 아님. "업데이트" 소묶음 `updates.auto_check`·`updates.check_hours`·`updates.auto_install` 은 "저장"으로(위 "Ned.app 메뉴 막대 · 설정 → 앱").
 - **저장·되돌리기**:
   - 보여 주는 것: 하단 "● 저장 안 된 변경" + "저장". 바뀐 항목만 저장("바뀐 항목이 없어."면 저장할 게 없음). 다른 곳(다른 탭·config.yaml 직접 수정·데몬 업그레이드)에서 그 사이 바뀌었으면 덮어쓰지 않고 최신 값을 불러온 뒤 내가 수정한 항목은 유지 → 다시 저장.
   - 데이터: `PUT /api/config`(부분 패치 + 마지막으로 읽은 시점 비교, 어긋나면 409). 저장할 때마다 직전 config.yaml 을 `~/.ned/config-backups/` 에 백업(최근 10개).
@@ -295,6 +298,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `claude_model` · `claude_max_turns` · `agenda_daily_budget_usd` | null · 25 · 15 | Claude |
 | `archive.enabled` · `archive.vault` · `archive.folder` · `archive.daily_embed` | false · "" · Ned · false | 아카이브 |
 | `archive.include.briefings` · `archive.include.updates` · `archive.include.actions` · `archive.include.outputs` · `archive.include.sessions` · `archive.include.history` | true · true · true · true · false · true | 아카이브 → 담을 것 |
+| `updates.auto_check` · `updates.check_hours` · `updates.auto_install` | true · 24 · false | 앱 (Ned.app) → 업데이트 ("저장"으로) |
 | `history.enabled` | true | 수집·보관 → 수집 이력 기록 |
 | `history.display.slack_hours` · `history.display.mail_days` | 24 · 3 | 수집·보관 → 표시 구간 |
 | `history.collect.slack_hours` | 24 (1~168) | 수집·보관 → 수집 창 (Slack 전체 재검색) |
@@ -366,5 +370,5 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 통신기: `/api/chat`(SSE) · `/api/chat/:id` · `/api/chat/:id/stop` · `/api/chats` · `/api/chat/actions/validate`(확인 카드 검증) · `/api/chat/:id/action`(카드 상태 저장)
 - 아카이브: `/api/archive/status`(볼트 배지·마지막 쓰기·마지막 오류) · `/api/archive/flush`(지금 쓰기) · `/api/outputs`(정리 결과물 목록) · `/api/outputs/:id`(하나, 마크다운 포함) · `/api/outputs/:id/reveal`(Finder 에서 보기)
 - 시작하기: `/api/setup`(점검 결과, `?refresh=1` 다시 확인) · `/api/setup/dismiss`(창 닫음 기록, `{dismissed:false}` 면 되돌림)
-- 업데이트 확인: `/api/update-check`(`{current, latest, source, update_available, checked_at, steps, error?}`, 10분 캐시, `?refresh=1`)
+- 업데이트: `/api/update-check`(`{current, latest, source, update_available, checked_at, steps, error?, status}`, 10분 캐시, `?refresh=1` 은 새로 + 기록) · `/api/update/status`(자동 업데이트 상태: 설정·마지막/다음 확인·마지막 설치 시도) · `/api/update/install`(지금 업데이트, 202 시작 / 409 이유)
 - 설정: `/api/config`(GET/PUT — 바뀐 키만, 충돌 시 409) · `/api/config/backups` · `/api/config/restore`(이전 설정으로 되돌리기)

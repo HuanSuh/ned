@@ -13,7 +13,8 @@ struct MenuContent: View {
         TimelineView(.periodic(from: .now, by: 30)) { ctx in
             MenuView(status: MenuStatus.make(daemon: daemon.status, bootStage: daemon.bootStage, statusLine: daemon.statusLine,
                                               repoPath: daemon.repoPath, lastHeartbeatAt: store.state.last_heartbeat_at,
-                                              attention: store.attentionCount, readError: store.lastError, now: ctx.date),
+                                              attention: store.attentionCount, readError: store.lastError,
+                                              update: store.state.update_available?.latest, now: ctx.date),
                      persona: store.persona, checkingUpdate: updates.checking,
                      actions: MenuActions(
                         restart: { daemon.restart() },
@@ -33,10 +34,12 @@ struct MenuStatus: Equatable {
     /// Tooltip: the supervisor line (pid / failure), repo, state.json read error.
     var detail: String
     var attention: Int
+    /// 자동 업데이트: a newer version the daemon found (state.update_available) → "업데이트 있음 X.Y.Z" under the line.
+    var update: String? = nil
 
     /// Dot colours are the old daemon line's: running/external = persona LED, checking/starting = yellow, failed = red.
     static func make(daemon: DaemonManager.Status, bootStage: DaemonManager.BootStage, statusLine: String, repoPath: String?,
-                     lastHeartbeatAt: Double?, attention: Int, readError: String?, now: Date = Date()) -> MenuStatus {
+                     lastHeartbeatAt: Double?, attention: Int, readError: String?, update: String? = nil, now: Date = Date()) -> MenuStatus {
         var tip = [statusLine, repoPath.map { "저장소: \($0)" } ?? "저장소 미지정"]
         if let e = readError { tip.append("state.json 읽기 실패 (이전 상태 표시 중): \(e)") }
         let kind: Kind, msg: String
@@ -51,7 +54,7 @@ struct MenuStatus: Equatable {
             kind = .ok
             msg = lastHeartbeatAt.map { "마지막 점검 \(ago($0, now: now))" } ?? "아직 점검 전"
         }
-        return MenuStatus(kind: kind, message: msg, detail: tip.joined(separator: "\n"), attention: max(0, attention))
+        return MenuStatus(kind: kind, message: msg, detail: tip.joined(separator: "\n"), attention: max(0, attention), update: update)
     }
 
     /// "방금" · "N분 전" · "N시간 전" · "N일 전" (ms since 1970). A future time (clock skew) reads as 방금.
@@ -82,7 +85,15 @@ struct MenuView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            statusLine.padding(.horizontal, 10).padding(.top, 9).padding(.bottom, 8)
+            statusLine.padding(.horizontal, 10).padding(.top, 9).padding(.bottom, status.update == nil ? 8 : 3)
+            if let v = status.update {
+                Button(action: actions.openSettings) {
+                    Label("업데이트 있음 \(v)", systemImage: "arrow.up.circle.fill").font(.caption.weight(.medium))
+                }
+                .buttonStyle(.plain).foregroundStyle(persona.accent)
+                .help("새 버전 \(v) — 설정 → 앱에서 업데이트")
+                .padding(.horizontal, 10).padding(.bottom, 7)
+            }
             Divider().padding(.horizontal, 6)
             VStack(spacing: 0) {
                 MenuRow(title: "대시보드 열기", symbol: "macwindow", action: actions.openDashboard)
@@ -284,6 +295,8 @@ enum MenuSnapshot {
                            lastHeartbeatAt: ms(7200), attention: 0, readError: "dataCorrupted", now: now), (.off, "꺼져 있음")),
             ("attention", S.make(daemon: .running(pid: 4242), bootStage: .dashboard, statusLine: "데몬 실행 중 (pid 4242)", repoPath: "/r",
                                  lastHeartbeatAt: ms(30), attention: 3, readError: nil, now: now), (.ok, "마지막 점검 방금")),
+            ("update", S.make(daemon: .running(pid: 4242), bootStage: .dashboard, statusLine: "데몬 실행 중 (pid 4242)", repoPath: "/r",
+                              lastHeartbeatAt: ms(600), attention: 1, readError: nil, update: "0.3.0", now: now), (.ok, "마지막 점검 10분 전")),
         ]
         for c in cases where (c.status.kind, c.status.message) != c.expect {
             print("menu-snapshot: FAIL — \(c.name) → \(c.status.kind.rawValue) \"\(c.status.message)\", want \(c.expect.0.rawValue) \"\(c.expect.1)\""); failed += 1

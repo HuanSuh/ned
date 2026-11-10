@@ -15,7 +15,7 @@ import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runCh
 import { validateChatAction } from "./chat-actions.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, normalizePet, restoreConfigBackup, saveConfig, slackTeamDomainError, slackTeamIdError, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type NedPet, type PersonaId } from "./config.js";
+import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, normalizeUpdates, normalizePet, restoreConfigBackup, saveConfig, slackTeamDomainError, slackTeamIdError, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type NedPet, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { historyStatus, queryHistory } from "./history.js";
@@ -26,8 +26,9 @@ import { listOutputs, outputFile, readOutput } from "./outputs.js";
 import { checkVault } from "./vault.js";
 import { readOnboarding, setOnboardingDismissed, setupCheck } from "./setup-check.js";
 import { updateCheck } from "./update-check.js";
+import { installNow, recordCheck, updateStatus } from "./self-update.js";
 import { onMailReviewed, type MarkReadOutcome } from "./mail-read.js";
-import { SOURCE_KEY, readSourceReviewed, readState, setReviewed, writeState } from "./state.js";
+import { SOURCE_KEY, readSourceReviewed, readState, readUpdateBadge, setReviewed, writeState } from "./state.js";
 import { noteActivity, schedulerStatus } from "./scheduler.js";
 import { registerSearch } from "./search.js";
 import { markThreadSeen } from "./slack-threads.js";
@@ -109,6 +110,7 @@ export function mergeConfigPatch(cur: NedConfig, body: Partial<NedConfig>): NedC
     archive: normalizeArchive(m.archive, cur.archive),
     history: normalizeHistory(m.history, cur.history),
     pet: normalizePet(m.pet, cur.pet),
+    updates: normalizeUpdates(m.updates, cur.updates),
   };
   // Re-normalized even without a dashboard patch: a 팔로업 channel added / removed in filters adds / drops its `watch:` card.
   merged.dashboard = normalizeDashboard(dashboard ?? {}, cur.dashboard, watchChannels(merged.filters));
@@ -520,7 +522,21 @@ export function startServer(getConfig: () => NedConfig): void {
   });
 
   // 업데이트 확인 (src/update-check.ts): installed runtime version vs GitHub main (gh) / the marketplace clone — cached 10 min, ?refresh=1 forces.
-  app.get("/api/update-check", async (c) => c.json(await updateCheck({ refresh: c.req.query("refresh") === "1" })));
+  // ?refresh=1 also records the result for 자동 업데이트 (update-state.json → state.update_available); `status` = config.updates,
+  // last / next automatic check, the last install attempt (src/self-update.ts updateStatus).
+  app.get("/api/update-check", async (c) => {
+    const refresh = c.req.query("refresh") === "1";
+    const r = await updateCheck({ refresh });
+    if (refresh) recordCheck(r, Date.now());
+    return c.json({ ...r, status: updateStatus(loadConfig()) });
+  });
+  // 설정 → 앱 → 업데이트 status line without running a check: config.updates, last/next check, last attempt, what is known newer.
+  app.get("/api/update/status", (c) => c.json({ ...updateStatus(loadConfig()), update_available: readUpdateBadge() }));
+  // 설정 → 앱 "지금 업데이트": fresh check, then scripts/self-update.sh detached (409 = nothing newer / already running).
+  app.post("/api/update/install", async (c) => {
+    const r = await installNow();
+    return c.json({ ...r, status: updateStatus(loadConfig()) }, r.started ? 202 : 409);
+  });
 
   registerSearch(app); // GET /api/search (src/search.ts) — before the static catch-all
   // Static files under public/ (proposals, svg mark, ...). Registered last so /api/* wins.

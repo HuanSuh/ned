@@ -32,11 +32,16 @@ const withBridge = () => {
   (window as unknown as { webkit?: unknown }).webkit = { messageHandlers: { appSettings: { postMessage: (m: Msg) => { sent.push(m); return reply(m); } } } };
 };
 const body = () => document.getElementById("app-body")!;
+const upd = () => document.getElementById("app-upd")!;
+const STATUS = (over: Record<string, unknown> = {}) => ({
+  auto: { auto_check: true, check_hours: 24, auto_install: false }, last_check_at: null, next_check_at: null, attempt: null, running: false, update_available: null, ...over,
+});
 
 beforeEach(() => {
   api.mockReset(); copyText.mockClear();
   sent = []; reply = async () => VALUES();
-  Object.assign(app.AP, { data: null, error: "", busy: "", upd: null, updBusy: false, updError: "", copied: false });
+  Object.assign(app.AP, { data: null, error: "", busy: "", upd: null, updBusy: false, updError: "", copied: false, status: null, confirm: false, installBusy: false, installMsg: "" });
+  api.mockImplementation(async (p: string) => (p === "/api/update/status" ? STATUS() : null));
   delete (window as unknown as { webkit?: unknown }).webkit;
   document.head.innerHTML = "";
   document.body.innerHTML = settingsHtml;
@@ -57,7 +62,8 @@ describe("section", () => {
     app.initAppSettings();
     expect(body().querySelector("[data-appnobridge]")!.textContent).toBe("Ned.app 창에서 열면 바꿀 수 있어요.");
     expect(body().querySelector("[data-appkey]")).toBeNull();
-    expect(body().querySelector("[data-appupd]")).not.toBeNull();
+    expect(upd().querySelector("[data-appupd]")).not.toBeNull(); // 업데이트 sub-group works without the bridge
+    expect(upd().querySelector("#c-upd-check")).not.toBeNull();
   });
 });
 
@@ -137,22 +143,63 @@ describe("bridge", () => {
 
 describe("업데이트 확인", () => {
   it("update available: X → Y, the Claude Code steps and 명령 복사 (copies all steps)", async () => {
-    api.mockResolvedValue({ current: "0.2.0", latest: "0.3.0", source: "github", update_available: true, steps: ["/plugin update ned", "/reload-plugins", "/ned:install"] });
+    api.mockImplementation(async (p: string) => (p === "/api/update/status" ? STATUS()
+      : { current: "0.2.0", latest: "0.3.0", source: "github", update_available: true, steps: ["/plugin update ned", "/reload-plugins", "/ned:install"], status: STATUS() }));
     app.initAppSettings();
-    body().querySelector<HTMLButtonElement>("[data-appupd]")!.click();
+    await flush();
+    upd().querySelector<HTMLButtonElement>("[data-appupd]")!.click();
     await flush();
     expect(api).toHaveBeenCalledWith("/api/update-check?refresh=1");
-    expect(body().textContent).toContain("0.2.0 → 0.3.0 업데이트 있음");
-    expect(body().textContent).toContain("/plugin update ned");
-    body().querySelector<HTMLButtonElement>("[data-appcopy]")!.click();
+    expect(upd().textContent).toContain("0.2.0 → 0.3.0 업데이트 있음");
+    expect(upd().textContent).toContain("/plugin update ned");
+    upd().querySelector<HTMLButtonElement>("[data-appcopy]")!.click();
     await flush();
     expect(copyText).toHaveBeenCalledWith("/plugin update ned\n/reload-plugins\n/ned:install");
-    expect(body().querySelector("[data-appcopy]")!.textContent).toBe("복사했어");
+    expect(upd().querySelector("[data-appcopy]")!.textContent).toBe("복사했어");
   });
 
   it("up to date / failure lines", () => {
     expect(app.updateHtml({ ...app.AP, upd: { current: "0.3.0", latest: "0.3.0", update_available: false, source: "github" } })).toContain("최신 버전 (0.3.0)");
     expect(app.updateHtml({ ...app.AP, upd: { current: "0.3.0", latest: null, update_available: false, error: "gh: 설치 안 됨" } })).toContain("확인 실패 (gh: 설치 안 됨)");
     expect(app.updateHtml({ ...app.AP, updError: "boom" })).toContain("확인 실패: boom");
+  });
+
+  it("지금 업데이트 asks inline first, then POST /api/update/install; a 409 shows why", async () => {
+    api.mockImplementation(async (p: string, o?: { method?: string }) => {
+      if (p === "/api/update/status") return STATUS({ update_available: { current: "0.2.0", latest: "0.3.0", notified: true } });
+      if (p === "/api/update/install" && o?.method === "POST") return { started: true, reason: "0.2.0 → 0.3.0", status: STATUS({ running: true }) };
+      return null;
+    });
+    app.initAppSettings();
+    await flush();
+    upd().querySelector<HTMLButtonElement>('[data-appinstall="ask"]')!.click();
+    expect(upd().textContent).toContain("0.3.0 로 업데이트할까?");
+    expect(api).not.toHaveBeenCalledWith("/api/update/install", expect.anything());
+    upd().querySelector<HTMLButtonElement>('[data-appinstall="go"]')!.click();
+    await flush();
+    expect(api).toHaveBeenCalledWith("/api/update/install", { method: "POST" });
+    expect(upd().textContent).toContain("업데이트 시작");
+    expect(upd().textContent).toContain("업데이트 중…");
+    expect(upd().querySelector("[data-appinstall]")).toBeNull(); // running: no second start
+  });
+
+  it("status lines: a failed attempt keeps the reason; auto check off says so", () => {
+    const h = app.updateHtml({ ...app.AP, status: STATUS({ attempt: { at: 1, result: "fail", to: "0.3.0", fail_line: "install: ✗ build failed", log: "/x/self-update.log" } }) });
+    expect(h).toContain("마지막 자동 설치 실패");
+    expect(h).toContain("install: ✗ build failed");
+    expect(h).toContain("기존 설치 유지");
+    expect(app.updateHtml({ ...app.AP, status: STATUS({ auto: { auto_check: false, check_hours: 24, auto_install: false } }) })).toContain("자동 확인 꺼짐");
+  });
+
+  it("config.updates inputs: renderUpdates fills them, readUpdates reads them back (saved with 저장)", () => {
+    app.initAppSettings();
+    expect(upd().textContent).toContain('"저장"');
+    app.renderUpdates({ updates: { auto_check: true, check_hours: 6, auto_install: true } });
+    expect(app.readUpdates()).toEqual({ auto_check: true, check_hours: 6, auto_install: true });
+    (document.getElementById("c-upd-hours") as HTMLInputElement).value = "0";
+    (document.getElementById("c-upd-check") as HTMLInputElement).checked = false;
+    expect(app.readUpdates()).toEqual({ auto_check: false, check_hours: 24, auto_install: true });
+    app.renderUpdates({ updates: { auto_check: false, check_hours: 24, auto_install: false } });
+    expect((document.getElementById("c-upd-hours") as HTMLInputElement).disabled).toBe(true);
   });
 });

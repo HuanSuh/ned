@@ -48,6 +48,22 @@ Ned.app 메뉴 "업데이트 확인"과 설정 → 앱의 같은 버튼이 `GET 
   실패하면 (b) `$CLAUDE_CONFIG_DIR`(없으면 `~/.claude`)`/plugins/marketplaces/<marketplace.json name>/.claude-plugin/plugin.json`. 둘 다 안 되면 `error` 에 둘의 사유.
 - 비교는 semver(프리릴리스 < 정식). 결과 10분 캐시(동시 요청은 한 번만), `?refresh=1` 은 새로. 테스트는 `setUpdateDeps({readFile, gh})` 로 파일·gh 를 바꾼다.
 
+### 자동 업데이트 (`src/self-update.ts`, `scripts/self-update.sh`)
+
+config `updates.{auto_check, check_hours, auto_install}`(기본 켬 · 24 · 끔). 스케줄러가 매 tick `updateTick(cfg, {quiet, idle, now})` 를 부른다(조용한 시간 pause 중에도).
+- 확인: `checkDue(last_check_at, check_hours)` 면 위 확인 → `recordCheck` 가 `$NED_HOME/update-state.json` 의 `available {current, latest}` 를 갱신(실패한 확인은 이전 값 유지)하고
+  `state.json` 의 `update_available {current, latest, notified}` 로 비춘다(`state.ts` `readUpdateBadge`, writeState 마다).
+- 알림: `announceVerdict` — 버전마다 한 번(`notified_version`), 조용한 시간엔 `notifications.quiet_delivery` 가 silent 일 때만, `notifications.enabled=false` 면 안 함.
+  알릴 때 `notified_version` 을 쓰고, Ned.app 은 `notified: true` 가 된 새 `latest` 를 배너로(NED_NOTIFY=app 이 아니면 osascript `notify()`).
+- 설치 조건 `installVerdict`(순수): 새 버전 + `auto_install` + (조용한 시간 또는 유휴) + `state.sessions` 에 running·waiting 없음(워커 포함) + 락 없음 +
+  마지막 실패 뒤 24시간(`RETRY_AFTER_FAIL_MS`; 2시간 넘은 "running" 은 실패로). "지금 업데이트"(`manual`)는 락·새 버전 여부만 본다.
+- 실행 `startSelfUpdate`: `/bin/bash <runtime>/scripts/self-update.sh --to X --from Y --marketplace <marketplace.json name> --plugin <plugin.json name>` 를
+  `detached: true`(setsid — install.sh 가 앱·데몬을 내려도 안 죽음), stdio = `~/.ned/logs/self-update.log`, `unref()`. `update-state.json` 에 `last_result: "running"`.
+- 스크립트: `$NED_HOME/self-update.lock`(mkdir + pid, 죽은 소유자면 인수) → `claude plugin marketplace update` → `claude plugin update <plugin>@<marketplace>` →
+  `installed_plugins.json` 의 installPath(없으면 `plugins/cache/<marketplace>/<plugin>/<to>`)의 버전이 `to` 인지 확인 → `NED_PLUGIN_MODE=1 bash …/scripts/install.sh < /dev/null` →
+  `update-state.json` 에 `last_result ok|fail`, `fail_line`(실패한 단계의 마지막 줄), `finished_at`(ok 면 `available` 비움). 전부 `main()` 안이라 install.sh 가 런타임 폴더를 바꿔도 안전.
+  종료 코드 0 / 1(단계 실패) / 2(인자) / 75(이미 실행 중). 테스트: `test/self-update.test.ts`(PATH 의 `claude` 스텁).
+
 `run` 은 시작 직후 heartbeat 를 한 번 돌린다. 이후 `heartbeat_minutes` 마다 tick 하며,
 새 세션 이벤트도 없고 `signal_check_minutes` 가 지나지 않았으면 LLM 을 부르지 않고 침묵한다.
 `briefing_time` 이 지난 첫 tick 은 `prompts/briefing.md` 로 아침 브리핑을 만든다 (하루 1회).
@@ -280,6 +296,8 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 | GET | `/api/archive/status` | Obsidian 아카이브 상태 `{ enabled, vault, folder, check: {ok, obsidian, path, error?} \| null, today_rel, today_url (obsidian://, 파일 있을 때), last_write_at, last_write_path, last_error, last_error_at, last_embed: {day, result}, pending_days }` — 아래 "Obsidian 아카이브" |
 | GET | `/api/setup?refresh=1` | 시작하기 점검(위 "시작하기") `{checked_at, sources: [{key, label, via: connector\|mcp\|gh, status: connected\|needs-auth\|not-connected\|pending\|error, detail?, fix?: {text, url?, command?}}], slack_team_id: {status: ok\|missing\|n/a, value}, signing: {status: ok\|untrusted\|missing\|error, identity, command, detail?}, complete, onboarding: {dismissed_at}}` — 켠 소스만. (sources, 팀 ID) 가 같으면 1분 캐시(동시 요청은 한 번만 띄움), `refresh=1` 은 새로 |
 | POST | `/api/setup/dismiss` | `{dismissed?: boolean}`(기본 true) → `{onboarding: {dismissed_at}}` — 시작하기 창이 저절로 뜨지 않게. `~/.ned/onboarding.json`(config.yaml 아님), false 면 지움 |
+| GET | `/api/update/status` | 자동 업데이트 상태 `{auto: config.updates, last_check_at, next_check_at, attempt: {at, result, from, to, log, fail_line} \| null, running, quiet_now, update_available}` — 확인을 돌리지 않음 |
+| POST | `/api/update/install` | 지금 업데이트: 새로 확인 → 새 버전이면 self-update.sh 시작 → 202 `{started, reason, check, status}`, 아니면 409(`reason`: 새 버전 없음 / 이미 업데이트 중) |
 | GET | `/api/update-check?refresh=1` | 업데이트 확인(위 "업데이트 확인") `{current, latest, source: github\|marketplace\|null, update_available, checked_at, repo, steps: ["/plugin update ned", "/reload-plugins", "/ned:install"], error?, note?}` — `note` = 마켓플레이스로 폴백했을 때 gh 가 안 된 이유. 10분 캐시, `refresh=1` 은 새로 |
 | POST | `/api/archive/flush` | 오늘(+대기 중인 날) 리포트를 지금 씀 → `{ ok, written: [day], error?, status }` · 409 아카이브 꺼짐 · 500 쓰기 실패(`status.last_error`) |
 | GET | `/api/outputs?limit=50` | 정리 결과물 목록(최신순, `markdown` 뺌) `[{ id, ts, kind, title, sources, chat_id?, message_ts?, vault_rel?, vault_path?, obsidian_url?, vault_error? }]` |

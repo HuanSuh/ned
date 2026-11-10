@@ -1,5 +1,6 @@
 import { DEFAULT_NOTIFICATIONS, type NedNotifications, type PersonaId } from "./config.js";
-import { REVIEWED_PATH, STATE_PATH, readJson, writeJsonAtomic } from "./paths.js";
+import path from "node:path";
+import { NED_HOME, REVIEWED_PATH, STATE_PATH, readJson, writeJsonAtomic } from "./paths.js";
 import { foldReviewMarks } from "./review-keys.js";
 import type { SessionView } from "./sessions.js";
 
@@ -61,6 +62,19 @@ export interface NedState {
   notifications: NedNotifications;
   /** attention items not marked 확인 완료 — for the menu-bar badge / counts. */
   attention_open_count: number;
+  /** A newer Ned plugin version found by the update check (src/self-update.ts); `notified` = announced once already. */
+  update_available?: UpdateBadge | null;
+}
+
+/** 자동 업데이트 bookkeeping (src/self-update.ts writes it, scripts/self-update.sh records the install result). */
+export const UPDATE_STATE_PATH = path.join(NED_HOME, "update-state.json");
+export interface UpdateBadge { current: string | null; latest: string; notified: boolean }
+/** update-state.json `available` → the state.json field (null when nothing newer is known). */
+export function readUpdateBadge(): UpdateBadge | null {
+  const u = readJson<{ available?: { current?: unknown; latest?: unknown } | null; notified_version?: unknown }>(UPDATE_STATE_PATH, {});
+  const a = u.available;
+  if (!a || typeof a.latest !== "string" || !a.latest) return null;
+  return { current: typeof a.current === "string" ? a.current : null, latest: a.latest, notified: u.notified_version === a.latest };
 }
 
 export function readState(): NedState {
@@ -120,6 +134,7 @@ export function writeState(state: NedState): void {
   const reviewed = readReviewed();
   state.attention = state.attention.map(({ reviewed_at: _old, ...a }) => (reviewed[a.id] != null && reviewed[a.id] >= (a.ts || 0) ? { ...a, reviewed_at: reviewed[a.id] } : a));
   state.attention_open_count = state.attention.filter((a) => !a.reviewed_at).length;
+  state.update_available = readUpdateBadge();
   state.updated_at = Date.now();
   state.daemon_pid = process.pid;
   writeJsonAtomic(STATE_PATH, state);

@@ -27,6 +27,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private let seenKey = "notifySeen:" + AppConfig.home
     private let briefingKey = "notifyLastBriefing:" + AppConfig.home
     private let seededKey = "notifySeeded:" + AppConfig.home
+    private let updateKey = "notifyLastUpdate:" + AppConfig.home
+    private let selfUpdateKey = "notifySelfUpdate:" + AppConfig.home
     static let quietDeliveryKey = "quietDelivery"
     nonisolated private static let kinds = ["session", "email", "slack", "jira", "github", "sentry", "calendar", "other", "briefing", "summary"]
 
@@ -51,6 +53,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 let s = await UNUserNotificationCenter.current().notificationSettings()
                 self.note("authorization granted=\(granted) status=\(Self.describe(s.authorizationStatus)) alert=\(s.alertSetting.rawValue) style=\(s.alertStyle.rawValue)" + (error.map { " error=\($0.localizedDescription)" } ?? ""))
                 self.ready = true
+                self.processSelfUpdateResult()
                 if let st = self.pending { self.pending = nil; self.process(st) }
             }
         }
@@ -77,6 +80,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func process(_ state: NedState) {
+        // 자동 업데이트: the daemon decided when (quiet hours, once per version) — post when it says notified.
+        if let p = Self.updateNotice(state.update_available, lastNotified: defaults.string(forKey: updateKey)) {
+            defaults.set(state.update_available?.latest, forKey: updateKey)
+            post(p)
+        }
         var seen = (defaults.dictionary(forKey: seenKey) as? [String: Double]) ?? [:]
         let now = Date().timeIntervalSince1970
         let currentIds = Set(state.attention.map(\.id))
@@ -197,6 +205,44 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         return plan
     }
 
+    /// (pure) "새 버전" banner for `state.update_available`, once per version, only after the daemon marked it notified.
+    nonisolated static func updateNotice(_ b: UpdateBadge?, lastNotified: String?) -> Planned? {
+        guard let b, b.notified == true, b.latest != lastNotified else { return nil }
+        return Planned(id: "update:\(b.latest)", title: "Ned 업데이트", body: "새 버전 \(b.latest) (지금 \(b.current ?? "?")) — 대시보드 설정 → 앱에서 업데이트",
+                       category: "ned.update", urgent: false, silent: false, sound: false, info: ["section": "s-app"])
+    }
+
+    /// (pure) After scripts/self-update.sh: `update-state.json` → one banner per attempt (keyed by last_attempt_at).
+    /// No key yet (first run with this feature) → only an attempt from the last 6 hours is announced.
+    nonisolated static func selfUpdateNotice(_ j: [String: Any], lastSeen: Double?, now: Double) -> (Planned, Double)? {
+        guard let at = (j["last_attempt_at"] as? NSNumber)?.doubleValue, let result = j["last_result"] as? String,
+              result == "ok" || result == "fail" else { return nil }
+        if let lastSeen, lastSeen == at { return nil }
+        if lastSeen == nil && now * 1000 - at > 6 * 3_600_000 { return nil }
+        let to = j["to"] as? String ?? "?"
+        let log = j["log"] as? String ?? "~/.ned/logs/self-update.log"
+        let p = result == "ok"
+            ? Planned(id: "selfupdate:\(Int(at))", title: "Ned \(to) 로 업데이트됨", body: "열린 Claude Code 세션은 /reload-plugins 를 실행하세요.",
+                      category: "ned.update", urgent: false, silent: false, sound: false, info: [:])
+            : Planned(id: "selfupdate:\(Int(at))", title: "Ned 업데이트 실패", body: "기존 설치 유지 — \((j["fail_line"] as? String).map { "\($0) · " } ?? "")로그 \(log)",
+                      category: "ned.update", urgent: false, silent: false, sound: false, info: ["section": "s-app"])
+        return (p, at)
+    }
+
+    /// Launch (after authorization): announce the last self-update's result once.
+    private func processSelfUpdateResult() {
+        let path = AppConfig.home + "/update-state.json"
+        guard let data = FileManager.default.contents(atPath: path),
+              let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+        let last = defaults.object(forKey: selfUpdateKey) as? Double
+        if let (p, at) = Self.selfUpdateNotice(j, lastSeen: last, now: Date().timeIntervalSince1970) {
+            defaults.set(at, forKey: selfUpdateKey)
+            post(p)
+        } else if last == nil, let at = (j["last_attempt_at"] as? NSNumber)?.doubleValue {
+            defaults.set(at, forKey: selfUpdateKey) // old attempt: seed, don't announce
+        }
+    }
+
     nonisolated private static func priority(_ a: AttentionItem) -> Int { a.kind == "session" ? 1 : 0 }
 
     private func post(_ p: Planned) {
@@ -234,6 +280,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let action = response.actionIdentifier
         let url = info["url"] as? String
         let attentionId = info["attentionId"] as? String
+        let section = info["section"] as? String
         await MainActor.run {
             note("action \(action) on \(response.notification.request.identifier)")
             switch action {
@@ -242,7 +289,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             case "dismiss":
                 if let attentionId { store?.dismiss(attentionId) }
             case UNNotificationDefaultActionIdentifier:
-                DashboardWindowController.shared.show()
+                if let section { DashboardWindowController.shared.show(section: section) }
+                else { DashboardWindowController.shared.show() }
             default:
                 break
             }
@@ -332,6 +380,23 @@ enum NotifySelfTest {
         let wok = ws.sessions.map(\.is_worker) == [true, false]
         if !wok { failures += 1 }
         print("== sessions decode is_worker (missing → false) [\(wok ? "OK" : "FAIL")]")
+        // 자동 업데이트 banners (pure deciders).
+        func expect(_ ok: Bool, _ msg: String) { print("\(ok ? "ok  " : "FAIL") update: \(msg)"); if !ok { failures += 1 } }
+        let badge = UpdateBadge(current: "0.2.0", latest: "0.3.0", notified: true)
+        expect(Notifier.updateNotice(badge, lastNotified: nil)?.id == "update:0.3.0", "new version, daemon notified → banner")
+        expect(Notifier.updateNotice(badge, lastNotified: "0.3.0") == nil, "same version again → nothing")
+        expect(Notifier.updateNotice(UpdateBadge(current: "0.2.0", latest: "0.3.0", notified: false), lastNotified: nil) == nil, "not yet notified by the daemon (quiet hours) → nothing")
+        expect(Notifier.updateNotice(nil, lastNotified: nil) == nil, "no update → nothing")
+        let decodedBadge = decode(#"{"updated_at":1,"update_available":{"current":"0.2.0","latest":"0.3.0","notified":true}}"#).update_available
+        expect(decodedBadge == badge, "state.json update_available decodes")
+        let now = Date().timeIntervalSince1970
+        let ok: [String: Any] = ["last_attempt_at": NSNumber(value: now * 1000 - 60_000), "last_result": "ok", "to": "0.3.0"]
+        expect(Notifier.selfUpdateNotice(ok, lastSeen: nil, now: now)?.0.title == "Ned 0.3.0 로 업데이트됨", "self-update ok → 업데이트됨")
+        expect(Notifier.selfUpdateNotice(ok, lastSeen: (ok["last_attempt_at"] as! NSNumber).doubleValue, now: now) == nil, "same attempt again → nothing")
+        let fail: [String: Any] = ["last_attempt_at": NSNumber(value: now * 1000 - 60_000), "last_result": "fail", "fail_line": "install: ✗", "log": "/l"]
+        expect(Notifier.selfUpdateNotice(fail, lastSeen: 1, now: now)?.0.body.contains("기존 설치 유지") == true, "self-update fail → 기존 설치 유지 + log")
+        expect(Notifier.selfUpdateNotice(["last_attempt_at": NSNumber(value: 1), "last_result": "running"], lastSeen: nil, now: now) == nil, "running → nothing")
+        expect(Notifier.selfUpdateNotice(["last_attempt_at": NSNumber(value: now * 1000 - 7 * 3_600_000), "last_result": "ok"], lastSeen: nil, now: now) == nil, "first run, old attempt → nothing")
         print(failures == 0 ? "notify selftest: all passed" : "notify selftest: \(failures) FAILED")
         return failures == 0 ? 0 : 1
     }

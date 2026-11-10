@@ -190,6 +190,11 @@ Click the menu bar item → a ~248 pt popover (`MenuView`, fed by `MenuContent`)
   `X → Y 업데이트 있음` + the Claude Code steps (`/plugin update ned` → `/reload-plugins` → `/ned:install`) and
   **명령 복사**, or `업데이트 확인 실패` + why. The app never installs anything itself. One `update check: …` log line.
 
+- **업데이트 있음 X.Y.Z** (accent, under the status line) while `state.update_available` is set (daemon 자동 업데이트,
+  `src/self-update.ts`) — click = 설정 → 앱. Notifier posts one banner per version once the daemon marks it `notified`
+  (`notifyLastUpdate:<home>`), and at launch one banner for the last self-update result in `$NED_HOME/update-state.json`
+  (`notifySelfUpdate:<home>`; 성공 "Ned X.Y.Z 로 업데이트됨 — … /reload-plugins", 실패 "업데이트 실패 — 기존 설치 유지, 로그 …"). Both open 설정 → 앱.
+
 Everything that used to be in the dropdown moved to the dashboard: attention list / sessions → 홈·인박스·장비실;
 Login Items, 실행 시 대시보드 열기, 자동 시작 시에도 열기, 저장소 위치…, 로그 열기 → **설정 → 앱 (Ned.app)**.
 

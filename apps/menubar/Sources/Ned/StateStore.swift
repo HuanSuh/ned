@@ -182,6 +182,13 @@ private struct Lossy<T: Decodable>: Decodable {
     }
 }
 
+/// `state.update_available` (daemon src/self-update.ts): a newer plugin version; `notified` = the daemon announced it.
+struct UpdateBadge: Codable, Equatable {
+    var current: String?
+    var latest: String
+    var notified: Bool?
+}
+
 struct NedState: Codable {
     var updated_at: Double = 0
     var daemon_pid: Int = 0
@@ -199,6 +206,8 @@ struct NedState: Codable {
     var attention_open_count: Int? = nil
     /// config.pet mirrored by the daemon on every settings save; `nil` = older daemon / not saved yet.
     var pet: PetSettings? = nil
+    /// 자동 업데이트: newer version known (menu status line, one notification per version).
+    var update_available: UpdateBadge? = nil
 
     var personaID: PersonaID { PersonaID(raw: persona) }
     /// Attention items still open (not 확인 완료) — what the dropdown lists.
@@ -222,6 +231,7 @@ struct NedState: Codable {
         notifications = (try? c.decodeIfPresent(NotifySettings.self, forKey: .notifications)) ?? NotifySettings()
         attention_open_count = try? c.decodeIfPresent(Int.self, forKey: .attention_open_count)
         pet = try? c.decodeIfPresent(PetSettings.self, forKey: .pet)
+        update_available = try? c.decodeIfPresent(UpdateBadge.self, forKey: .update_available)
     }
 
     /// Daemon writes state at least every heartbeat; treat >20 min silence as dead.
