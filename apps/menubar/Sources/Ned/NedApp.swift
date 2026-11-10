@@ -74,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let store = StateStore()
             self.store = store
             statusItem = StatusItemController(store: store)
-            // Floating Ned (off by default; menu toggle "데스크톱 펫 표시").
+            // Floating Ned (off by default; config.pet.enabled — 설정 → 외형 → 데스크톱 펫).
             let pet = DesktopPetController()
             pet.attach(store: store)
             self.pet = pet

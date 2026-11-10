@@ -89,6 +89,11 @@
 .intf.off { opacity: .45; }
 #c-openapp-svc { margin-top: 6px; }
 #c-openapp-svc.off { opacity: .45; } /* 링크를 앱으로 열기 off: service picks kept, dimmed */
+/* 데스크톱 펫: kind picks dim while the pet is off (values kept); a source-off kind (Sentry) dims on its own. */
+.form .f.pet { padding-top: 12px; border-top: 1px solid var(--line); }
+.form .f.pet > .lab.sub { margin-top: 6px; }
+#c-pet-msgs.off { opacity: .45; }
+#c-pet-msgs label:has(input:disabled) { opacity: .5; cursor: default; }
 /* sticky save bar */
 .sbar { position: sticky; bottom: 12px; z-index: 4; display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--pane); box-shadow: 0 6px 24px rgb(0 0 0 / .28); }
 .sbar .sp { flex: 1; }

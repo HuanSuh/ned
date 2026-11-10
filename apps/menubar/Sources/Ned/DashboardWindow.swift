@@ -15,6 +15,8 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     private var webView: WKWebView!
     private var waitTimer: Timer?
     private var loaded = false
+    /// Run once the dashboard page has finished loading (펫 설정… before the page is up).
+    private var pendingJS: String?
     /// When the boot screen went up (nil = not showing it).
     private var bootShownAt: Date?
     private var finishing = false
@@ -54,11 +56,19 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         if !loaded { waitForDaemon() }
     }
 
+    /// Desktop pet 우클릭 → 펫 설정…: the dashboard on 설정 → 외형 → 데스크톱 펫 (public/index.html #c-pet).
+    func showPetSettings() {
+        show()
+        let js = "location.hash = '#settings'; setTimeout(function () { var el = document.getElementById('c-pet'); if (el) el.scrollIntoView({ block: 'center' }); }, 80);"
+        if loaded, !webView.isLoading, webView.url?.scheme == "http" { runJS(js) } else { pendingJS = js }
+    }
+
     private func makeWebView(frame: NSRect) {
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .default()
         cfg.userContentController.add(BootMessageHandler(), name: "ned")
         cfg.userContentController.add(OpenLinkHandler(), name: "openLink")
+        cfg.userContentController.add(PetHandler(), name: "pet")
         cfg.userContentController.addScriptMessageHandler(LoginItemHandler(), contentWorld: .page, name: "loginItem")
         webView = WKWebView(frame: frame, configuration: cfg)
         webView.navigationDelegate = self
@@ -250,6 +260,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         // The reveal is one-shot (removed after the load, not at commit — that could race its injection):
         // later navigations inside the dashboard load without it.
         if loaded { webView.configuration.userContentController.removeAllUserScripts() }
+        if loaded, webView.url?.scheme == "http", let js = pendingJS { pendingJS = nil; runJS(js) }
         if loaded { DaemonManager.shared.note("dashboard window: loaded \(webView.url?.absoluteString ?? "?") title=\(webView.title ?? "")") }
     }
 
@@ -321,6 +332,23 @@ private final class OpenLinkHandler: NSObject, WKScriptMessageHandler {
                 return
             }
             DeepLink.open(deep, web: web)
+        }
+    }
+}
+
+/// 설정 → 외형 → 데스크톱 펫 → 위치 초기화 (public/app/tabs/settings-pet.js): `webkit.messageHandlers.pet.postMessage({op: "resetPosition"})`.
+/// Only the dashboard page (http://127.0.0.1:<port>) may post.
+private final class PetHandler: NSObject, WKScriptMessageHandler {
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard (message.body as? [String: Any])?["op"] as? String == "resetPosition" else { return }
+        let src = message.frameInfo.request.url
+        MainActor.assumeIsolated {
+            guard let src, src.scheme == "http", src.host == "127.0.0.1" || src.host == "localhost", (src.port ?? 80) == AppConfig.port else {
+                DaemonManager.shared.note("pet: ignored a message from \(src?.absoluteString ?? "?")")
+                return
+            }
+            DesktopPetController.current?.resetPosition()
+            DaemonManager.shared.note("pet: position reset (dashboard)")
         }
     }
 }

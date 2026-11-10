@@ -241,6 +241,7 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 | GET | `/api/state` | `state.json` (sessions, attention, last_briefing, …) |
 | GET | `/api/events?days=2` | 최근 N일의 훅 이벤트 (오래된 것부터) |
 | GET | `/api/briefings?limit=30` | 브리핑 히스토리 (최신 먼저) |
+| GET | `/api/feed` | 데스크톱 펫(Ned.app) 메시지 피드 `{items, pet, quiet, persona}` — `src/feed.ts`. 통신기 메시지 탭(`chat-core.js buildFeed`)과 같은 입력·규칙(열린 attention, 24h 안 UPDATE 브리핑 headline, 내 답 이후 새 답글이 있는 Slack 스레드 — 소스 slack 이 꺼지면 빠짐, 같은 url 은 한 번), 최신순. 각 항목 `key`·`kind`·`title`·`detail`·`url`·`ts` + `pet_kind`(`pet.messages` 토글: email→mail, thread→slack, other→null=항상) + `deep`(링크 열기 규칙의 앱 딥링크). 브라우저 전용 chatNotes 는 없음. `test/feed-shared.test.ts` 가 같은 fixture 로 buildFeed 와 key·kind 순서를 비교 |
 | GET / PUT | `/api/config` | `config.yaml` 조회 / 부분 갱신 |
 | POST | `/api/heartbeat?daily=1` | heartbeat 강제 실행 (agenda 는 오래됐을 때만 갱신 — 호환용) |
 | POST | `/api/check?daily=1` | 대시보드 '지금 점검': agenda 1단계 새로 고침 → heartbeat. 결과 브리핑(또는 `{status:"skipped"}`) 반환, 동시 호출은 한 실행을 공유 |
@@ -581,7 +582,8 @@ detail `이력 · M/D · …`, `tab: home` / `anchor: card:<slack|mail|jira|gh|c
                          agenda_all_limit=20 (mail/slack all[] 상한), agenda_context_batch=5 (2단계 배치 크기),
                          agenda_daily_budget_usd=15 (2단계 일일 예산), agenda_light_model="sonnet" (agenda 전 호출 모델, null = claude_model),
                          history.{enabled=true, display.{slack_hours=24, mail_days=3}, collect.{slack_hours=24}, keep_days.{slack=30, mail=30, jira=90, github=90, calendar=90}} (수집 이력)
-  state.json             menu bar / 대시보드가 읽는 단일 뷰 (sessions, attention, last_briefing, daily_failed_at, quiet …)
+                         pet.{enabled=false, messages.{greeting,session,slack,mail,jira,github,sentry,calendar,briefing}=true} (데스크톱 펫 — Ned.app 이 state.json `pet` 미러와 GET /api/feed 로 읽음; 설정 저장마다 state.json 에 비춤)
+  state.json             menu bar / 대시보드가 읽는 단일 뷰 (sessions, attention, last_briefing, daily_failed_at, quiet, persona·notifications·pet 미러 …)
   cursor.json            heartbeat 가 처리한 마지막 이벤트 ts
   onboarding.json        시작하기 창 닫음 {dismissed_at} (POST /api/setup/dismiss)
   events/YYYY-MM-DD.jsonl  훅(packages/hook/ned-hook.sh)이 append 하는 이벤트. 로컬 날짜 기준

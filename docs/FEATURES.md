@@ -15,13 +15,13 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - **답장 초안 ✎**: 초안 3개 → 복사/열기/보내기. Slack·메일·Jira 는 미답 질문을 "답할 것"으로 뽑아 번호대로 1:1 답. 쓰기는 설정 → 쓰기 액션에서 켠 것만(gmail_draft·session_send 기본 켬): `actions.slack_send`·`gmail_draft`·`gmail_send`·`session_send`·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯.
 - **확인 완료 ✓**: 처리됨으로 접음(새 변경이 오면 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`)면 자동 해제.
 - **Gmail 읽음 표시**(`actions.gmail_mark_read`, 끔): 메일 ✓ 면 Gmail 도 읽음.
-- **검색 ⌘K**: 통합 검색(초성·수집 이력).
+- **검색 ⌘K**: 통합 검색(초성·이력).
 - **아카이브(Obsidian)**: 볼트 `archive.vault` + `archive.enabled` → 매일 `<archive.folder>/Daily/…/날짜.md`, `archive.daily_embed`.
 - **수집 이력**: 소스별 보관(`history.keep_days.*`), 증분 수집(Slack 전체 재검색 창 `history.collect.slack_hours`), 카드·순찰·초안은 표시 구간(`history.display.*`).
 - **링크 열기**: Slack·Figma·Notion 링크는 앱으로(`dashboard.open_links_in_app`, Slack 은 팀 ID `dashboard.slack_team_id`), 없으면 웹.
 - **설치**: 플러그인 `ned@ned`(마켓플레이스 `HuanSuh/ned`) → `/ned:install`. 업데이트 `/plugin update ned`→`/reload-plugins`→`/ned:install`.
 - **시작하기**(첫 실행·설정): 커넥터 연결·Slack 팀 ID·자동 실행·코드 서명 점검.
-- **데스크톱 펫**(앱 메뉴 토글, 기본 끔): 늘 떠 있는 Ned — 오류·입력 대기·확인할 것·작업 중을 말풍선으로, 클릭 = 대시보드.
+- **데스크톱 펫**(외형 `pet.enabled`, 끔): 늘 떠 있는 Ned, 테두리 색 = 상태, 새 소식 말풍선(`pet.messages.*`).
 - **설정**(하단 "저장"): 외형(테마 `dashboard.theme`, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`, 링크 열기) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(위 순찰·감속 키, `signal_check_minutes`, `agenda_refresh_minutes`, `agenda_source_minutes.*`) · 쓰기 액션(`actions.*`, 말투 `reply_tone`·`reply_tone_by_source.*`, 오늘 한 액션) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(`claude_model`, `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd` $15).
 
 ## 상세
@@ -229,13 +229,17 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 언제: 대시보드를 처음 열 때 준비 안 된 항목이 있고 아직 닫은 적이 없으면 저절로 뜬다. 닫으면(✕·닫기·Esc) 다시 안 뜨고, 설정 상단 "시작하기" 버튼으로 언제든 다시 연다.
 
 ### 데스크톱 펫 — 화면에 늘 떠 있는 Ned (Ned.app)
-- 보여 주는 것: 대시보드를 열지 않아도 화면 구석(기본 주 화면 오른쪽 아래, Dock·메뉴 막대 피함)에 떠 있는 현재 페르소나 마크(페르소나를 바꾸면 따라 바뀜). 모든 데스크톱·전체 화면 앱 위에 뜨고 포커스를 뺏지 않는다. 우선순위 높은 상태 하나: 연결 끊김(흐리게) > "<worktree> 오류"(경고 테두리·흔들림) > "<worktree> 입력 기다림"/"입력 기다림 N"(손짓·바운스, Orca 워커 세션 제외) > "확인할 것 N"(배지 N) > "작업 중 N"(도는 점선) > 평소(숨쉬기만, 말풍선 없음). 상태가 바뀌면 말풍선이 5초 보였다 접히고, 입력 대기·확인할 것이 끝나 평소로 돌아가면 "끝" 2.5초. 마우스를 올리면 상위 3줄 요약(평소엔 페르소나의 "레이더 깨끗함" 류 한 줄). 상태 매핑은 순수 함수(`PetMapping`) — `--pet-selftest`, 화면은 `--pet-snapshot <dir>`.
-- 데이터: 메뉴 막대와 같은 `state.json`(세션 status·`is_worker`·열린 attention·`quiet`)과 데몬 감시 상태 — 데몬 변경 없음. 조용한 시간(`quiet`)엔 말풍선을 저절로 띄우지 않는다(올리면 보임). macOS "동작 줄이기"면 애니메이션 없음.
-- 버튼·설정: 메뉴(메뉴 막대 아이콘 클릭) "데스크톱 펫 표시" 토글 — 앱 쪽 설정(UserDefaults `desktopPetEnabled`, 기본 끔; config.yaml 키 없음). 클릭 = 대시보드 열기, 드래그 = 이동(위치 `desktopPetOrigin` 기억, 화면 밖이면 기본 위치로), 우클릭 = 대시보드 열기 · 숨기기. 통신기는 대시보드에서 ⌘J.
+- 보여 주는 것: 대시보드를 열지 않아도 화면 구석(기본 주 화면 오른쪽 아래, Dock·메뉴 막대 피함)에 떠 있는 현재 페르소나 마크(페르소나를 바꾸면 따라 바뀜). 모든 데스크톱·전체 화면 앱 위에 뜨고 포커스를 뺏지 않는다. 마우스를 올리면 손가락 커서(끄는 동안 쥔 손).
+  - 상태 = 둥근 카드의 **테두리 색 + 바깥 글로우**(통신기 Ned Net 과 같은 방식): 쉼 = 중립 테두리·글로우 없음, 작업 중 = 페르소나 보조색(Ned 는 민트)·약한 숨쉬기 글로우, 확인할 것 = 페르소나 색(배지 N), 입력 기다림 = 주황·키보드 아이콘(Orca 워커 세션 제외), 오류 = 빨강 점선·더 강한 글로우, 연결 끊김 = 회색·글로우 없음(마크 흐리게). 새 소식 말풍선은 페르소나 색. 움직임은 글로우의 느린 숨쉬기(3.6초)와 쉴 때 아주 작은 크기 변화뿐 — 바운스·흔들림·이모지 없음, 상태 전환은 0.5초 페이드. macOS "동작 줄이기"면 글로우 고정.
+  - **말풍선 = 통신기 "메시지" 탭과 같은 새 소식**: 새 항목이 오면 출처 아이콘 + 제목(+ 짧은 내용)을 채팅 말풍선으로 5.5초 띄우고 접는다. 여러 개면 차례로(최대 3개), 한 번에 3개 넘게 오면 "새 소식 N" 하나로. 이미 본 항목은 다시 안 띄우고(앱이 본 키를 기억, 처음 켤 때 있던 항목은 본 것으로), 하루 한 번 그날 처음 볼 때 페르소나 인사. 입력 기다림·확인할 것이 끝나 평소로 돌아가면 "끝", 데몬이 끊기면 "연결 끊김".
+  - 마우스를 올리면 상태 한 줄 + 최근 3개 목록(없으면 페르소나의 "레이더 깨끗함" 류 한 줄). 조용한 시간(`quiet`)엔 말풍선을 저절로 띄우지 않는다(올리면 보임).
+- 데이터: `GET /api/feed`(통신기 메시지와 같은 규칙 — 열린 attention·24시간 안 브리핑 UPDATE·내 답 이후 새 Slack 답글, 각 항목에 펫 종류와 앱 딥링크) + 메뉴 막대와 같은 `state.json`(세션 status·`is_worker`·열린 attention·`quiet`, 설정 저장 때 `pet` 도 비춰 둬 바로 반영). 상태 매핑·메시지 큐는 순수 함수 — `--pet-selftest`, 화면은 `--pet-snapshot <dir>`.
+- 버튼·설정: 설정 → 외형 → **데스크톱 펫** — "화면에 Ned 띄우기" `pet.enabled`(기본 끔) · "말풍선으로 알려 줄 것" 종류별 `pet.messages.greeting`(인사) · `pet.messages.session`(작업: 입력 기다림·오류·끝) · `pet.messages.slack`(멘션·DM·스레드 새 답글) · `pet.messages.mail` · `pet.messages.jira` · `pet.messages.github` · `pet.messages.sentry`(소스 → Sentry 가 꺼져 있으면 흐려짐) · `pet.messages.calendar` · `pet.messages.briefing`(아침 브리핑·순찰), 모두 기본 켬. 끈 종류는 말풍선만 안 띄우고 테두리 색·배지는 그대로, 기타 알림은 항상 표시. "위치 초기화"(Ned.app 창에서만) = 기본 위치로. 하단 "저장"으로 저장.
+  - 펫에서: 클릭 = 대시보드 열기, 말풍선 클릭 = 그 항목 열기(링크 열기 설정대로 앱 딥링크 또는 웹, 링크 없으면 대시보드), 드래그 = 이동(위치는 앱이 `desktopPetOrigin` 으로 기억, 화면 밖이면 기본 위치로), 우클릭 = 대시보드 열기 · 펫 설정…(이 묶음으로) · 숨기기(`pet.enabled` 를 끄고 저장). 앱에 남는 펫 상태는 위치와 본 메시지 키뿐.
 
 ### 설정 탭
 상단 바로가기: 외형 · 소스 · 알림 · 순찰 주기 · 수집·보관 · 쓰기 액션 · 아카이브 · Claude. "시작하기"(위 "시작하기") · "다시 불러오기", 하단 "● 저장 안 된 변경" + "저장".
-- **외형**: 테마 🖥️시스템/☀️라이트/🌙다크 `dashboard.theme`(바로 미리보기, 저장해야 유지) · 홈 카드 배치 ↑/↓·1열/2열 `dashboard.card_order`/`dashboard.card_span` · "홈 배치 잠금" `dashboard.locked` · "팔로업 채널을 별도 카드로" `dashboard.watch_cards` · "배치 초기화" · 링크 열기 "링크를 앱으로 열기" `dashboard.open_links_in_app` + Slack/Figma/Notion 체크(`dashboard.open_links_in_app_by_service.*`, 끄면 흐려짐) · "Slack 팀 ID" `dashboard.slack_team_id` · "Slack 워크스페이스 주소" `dashboard.slack_team_domain`(위 "링크 열기 — 앱 딥링크").
+- **외형**: 테마 🖥️시스템/☀️라이트/🌙다크 `dashboard.theme`(바로 미리보기, 저장해야 유지) · 홈 카드 배치 ↑/↓·1열/2열 `dashboard.card_order`/`dashboard.card_span` · "홈 배치 잠금" `dashboard.locked` · "팔로업 채널을 별도 카드로" `dashboard.watch_cards` · "배치 초기화" · 링크 열기 "링크를 앱으로 열기" `dashboard.open_links_in_app` + Slack/Figma/Notion 체크(`dashboard.open_links_in_app_by_service.*`, 끄면 흐려짐) · "Slack 팀 ID" `dashboard.slack_team_id` · "Slack 워크스페이스 주소" `dashboard.slack_team_domain`(위 "링크 열기 — 앱 딥링크") · 데스크톱 펫 `pet.enabled` + 말풍선 종류 `pet.messages.*` + 위치 초기화(위 "데스크톱 펫").
 - **소스**: Gmail/Slack/Jira/GitHub/Sentry/캘린더 `sources.*`(끄면 조회·보고 안 함). Slack: 팔로업 채널 `filters.slack.watch_channels` · 트래킹 제외 채널 `filters.slack.exclude_channels`(팔로업보다 우선) · 답 필요 해제 이모지 `filters.slack.ack_reactions` · 한 번에 확인할 이모지 `filters.slack.ack_check_max`(3) · 그룹 멘션 `filters.slack.group_mentions`(유저그룹 ID·핸들). Jira: 제외 프로젝트 `filters.jira.exclude_projects`. 칩 입력: ⏎/쉼표 추가, 빈 입력 Backspace 삭제.
 - **알림**: 알림 켜기 `notifications.enabled` · 소스별 `notifications.kinds.*` · 아침 브리핑 알림 `notifications.briefing` · 소리 `notifications.sound` · 묶음 기준 `notifications.summary_threshold`(기본 3) · 조용한 시간 `quiet_hours`(기본 23:00~08:00) · 그 시간엔 보내지 않음/소리 없이 `notifications.quiet_delivery`.
 - **순찰 주기**: heartbeat 간격 `heartbeat_minutes`(10) · 신호 조회 최소 간격 `signal_check_minutes`(60) · "바뀐 게 없으면 순찰 건너뛰기" `heartbeat_skip_unchanged`(켬) · 아침 브리핑 시각 `briefing_time`(09:00) · 홈 자동 갱신 기본 주기 `agenda_refresh_minutes`(60) · 소스별 주기 Slack/메일/캘린더/Jira/GitHub `agenda_source_minutes.*`(비우면 기본) · 조용한 시간 동작 `quiet_schedule.*` · 유휴 시 동작 `idle_schedule.*`(위 "야간 모드 · 유휴 모드").
@@ -278,6 +282,8 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `dashboard.open_links_in_app` · `dashboard.open_links_in_app_by_service.slack` · `dashboard.open_links_in_app_by_service.figma` · `dashboard.open_links_in_app_by_service.notion` | true · true · true · true | 외형 → 링크를 앱으로 열기 |
 | `dashboard.slack_team_id` | "" (`T…` 만) | 외형 → Slack 팀 ID |
 | `dashboard.slack_team_domain` | "" (= 모든 `*.slack.com`) | 외형 → Slack 워크스페이스 주소 |
+| `pet.enabled` | false | 외형 → 데스크톱 펫 → 화면에 Ned 띄우기 |
+| `pet.messages.greeting` · `pet.messages.session` · `pet.messages.slack` · `pet.messages.mail` · `pet.messages.jira` · `pet.messages.github` · `pet.messages.sentry` · `pet.messages.calendar` · `pet.messages.briefing` | 전부 true | 외형 → 데스크톱 펫 → 말풍선으로 알려 줄 것 |
 | `claude_model` · `claude_max_turns` · `agenda_daily_budget_usd` | null · 25 · 15 | Claude |
 | `archive.enabled` · `archive.vault` · `archive.folder` · `archive.daily_embed` | false · "" · Ned · false | 아카이브 |
 | `archive.include.briefings` · `archive.include.updates` · `archive.include.actions` · `archive.include.outputs` · `archive.include.sessions` · `archive.include.history` | true · true · true · true · false · true | 아카이브 → 담을 것 |
@@ -301,6 +307,8 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `c-cards` | 외형 → 홈 카드 배치 | `dashboard.card_order` / `dashboard.card_span` |
 | `c-openapp` | 외형 → 링크를 앱으로 열기 | `dashboard.open_links_in_app` |
 | `c-openapp-svc` | 외형 → 링크 열기 Slack/Figma/Notion (`data-olsvc`) | `dashboard.open_links_in_app_by_service.*` |
+| `c-pet-on` | 외형 → 데스크톱 펫 → 화면에 Ned 띄우기 | `pet.enabled` |
+| `c-pet-msgs` | 외형 → 데스크톱 펫 → 말풍선으로 알려 줄 것 (`data-petmsg`) | `pet.messages.*` |
 | `c-slack-team` | 외형 → Slack 팀 ID | `dashboard.slack_team_id` |
 | `c-slack-domain` | 외형 → Slack 워크스페이스 주소 | `dashboard.slack_team_domain` |
 | `c-sources` | 소스 토글 | `sources.*` |
@@ -341,7 +349,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 ## 부록 C — HTTP API (대시보드가 쓰는 로컬 API, 127.0.0.1)
 
 - 수집 이력: `/api/history`(카드 "지난 7일/30일", `source`·`days`·`q`·`channel`) · `/api/history/status`(설정 → 수집·보관 상태 줄)
-- 상태·데이터: `/api/state` · `/api/agenda` · `/api/briefings` · `/api/events` · `/api/costs` · `/api/actions`(오늘 한 액션) · `/api/search`(⌘K)
+- 상태·데이터: `/api/state` · `/api/agenda` · `/api/briefings` · `/api/feed`(데스크톱 펫 메시지 — 통신기 메시지 규칙 + `pet_kind`·`deep`, `pet` 설정·`quiet`) · `/api/events` · `/api/costs` · `/api/actions`(오늘 한 액션) · `/api/search`(⌘K)
 - 순찰·갱신: `/api/check`(지금 점검, GET 은 진행 상태) · `/api/heartbeat`(아침 브리핑 `?daily=1`) · `/api/agenda/refresh`(카드 ↻) · `/api/agenda/context`(맥락 지금 수집) · `/api/activity`(대시보드 활동 핑 — 유휴 해제)
 - 할 일·확인: `/api/todos` · `/api/todos/:id`(완료·삭제) · `/api/attention/:id/review`(확인 완료) · `/api/attention/:id/dismiss`(닫기)
 - 일정: `/api/calendar`(기간 조회) · `/api/calendar/events`(일정 만들기)

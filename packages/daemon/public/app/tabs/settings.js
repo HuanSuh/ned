@@ -10,6 +10,7 @@ import { readToneBySource, syncWriteActionGroups, writeActionsHtml } from "./set
 import { initArchive, readArchive, renderArchive } from "./settings-archive.js";
 import { initHistorySettings, readHistorySettings, renderHistorySettings } from "./settings-history.js";
 import { initLinkPrefs, linkPrefsError, readLinkPrefs, renderLinkPrefs } from "./settings-links.js";
+import { initPet, readPet, renderPet, syncPet } from "./settings-pet.js";
 import { persona } from "../features/personas.js";
 import { applyTheme, normTheme, syncTheme, themeHtml } from "../features/theme.js";
 import { loadAgenda } from "../main.js";
@@ -193,6 +194,7 @@ export function renderConfig(c = S.config, { preview = false } = {}) {
   $("c-theme").innerHTML = themeHtml(c.dashboard?.theme);
   renderCardLayout(c.dashboard ?? null);
   renderLinkPrefs(c.dashboard); // 링크 열기 (앱 딥링크) · Slack 팀 ID
+  renderPet(c); // 데스크톱 펫
   excl.slack = [...(c.filters?.slack?.exclude_channels || [])];
   excl.jira = [...(c.filters?.jira?.exclude_projects || [])];
   excl.watch = [...(c.filters?.slack?.watch_channels || [])];
@@ -215,7 +217,7 @@ export function renderConfig(c = S.config, { preview = false } = {}) {
   // Toggles come from config.sources keys, so new sources appear without touching this page.
   const keys = Object.keys(c.sources || {});
   $("c-sources").innerHTML = keys.length ? keys.map((k) => `<label><input type="checkbox" data-src="${esc(k)}" ${c.sources[k] ? "checked" : ""}>${esc(SOURCE_LABEL[k] || k)}</label>`).join("") : `<span class="hint">소스 없음</span>`;
-  syncSourceGroups(); syncWriteActions();
+  syncSourceGroups(); syncWriteActions(); syncPet();
   $("c-model").value = c.claude_model ?? "";
   $("c-turns").value = c.claude_max_turns ?? "";
   $("c-budget").value = c.agenda_daily_budget_usd ?? "";
@@ -268,6 +270,7 @@ export function readBody() {
     agenda_daily_budget_usd: Number($("c-budget").value),
     archive: readArchive(),
     history: readHistorySettings(),
+    pet: readPet(),
   };
 }
 
@@ -381,6 +384,7 @@ export function init() {
   initArchive();
   initHistorySettings();
   initLinkPrefs();
+  initPet();
 }
 
 // ---------- 새 버전 감지: daemon build changed since page load → 저장 잠금 (build.js shows the reload banner) ----------
