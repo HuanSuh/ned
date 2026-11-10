@@ -46,7 +46,7 @@ export function onboardingHtml(ob, { inApp }) {
       + `<p class="hint">Slack 링크를 앱으로 열 때 필요해. Slack 앱 → 워크스페이스 이름 → 워크스페이스 설정 URL 또는 about 의 T… ID.</p>`;
   }
   let login;
-  if (!inApp) login = `<div class="obh"><h4>자동 실행</h4></div><p class="hint">Ned.app 창에서만 바꿀 수 있어 — 메뉴 막대 Ned 메뉴 > <b>Login Items 에 등록</b>.</p>`;
+  if (!inApp) login = `<div class="obh"><h4>자동 실행</h4></div><p class="hint">Ned.app 창에서만 바꿀 수 있어 — 대시보드 <b>설정 → 앱(Ned.app)</b> 에서.</p>`;
   else {
     const st = ob.login?.status;
     const on = st === "enabled" || st === "requiresApproval";

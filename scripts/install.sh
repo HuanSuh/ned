@@ -2,7 +2,7 @@
 # Install (or update — same command, idempotent) Ned on this Mac: deps → build daemon → Ned.app → hooks.
 # Ned.app supervises the daemon itself (spawns `node packages/daemon/dist/cli.js run` under `nedRepoPath`,
 # restarts it, stops it on quit), so the old com.ned.daemon LaunchAgent is removed if present.
-# Autostart: turn on "Login Items 에 등록" in the menu.
+# Autostart: dashboard 설정 → 앱(Ned.app) → "로그인할 때 Ned 실행".
 #
 # Two modes:
 #   plugin  (NED_PLUGIN_MODE=1, what /ned:install runs): the source is the plugin cache
@@ -244,9 +244,9 @@ fi
 
 echo
 echo "✓ Ned installed."
-echo "  app       : $DEST  (menu: 'Login Items 에 등록' to autostart)"
+echo "  app       : $DEST  (autostart: 대시보드 설정 → 앱(Ned.app))"
 echo "  daemon    : $BUILD/packages/daemon/dist/cli.js"
-echo "  dashboard : http://127.0.0.1:7777  (or 메뉴 > 대시보드)"
+echo "  dashboard : http://127.0.0.1:7777  (or 메뉴 > 대시보드 열기)"
 echo "  config    : $NED_HOME/config.yaml"
 echo "  logs      : $NED_HOME/logs/app-daemon.log (supervisor + daemon output), $NED_HOME/logs/daemon.log"
 if [ -n "$PLUGIN_MODE" ]; then

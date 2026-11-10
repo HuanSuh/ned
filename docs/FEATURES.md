@@ -226,7 +226,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 
 ### 시작하기 — 첫 실행 점검
 - 보여 주는 것: "시작하기" 창 — 소스 연결(설정에서 켠 소스만: Slack·Gmail·Google Calendar·Jira(Atlassian) 커넥터, GitHub `gh`, Sentry MCP) 상태 칩 연결됨/인증 필요/연결 안 됨/연결 중/확인 실패 + 할 일("claude.ai 에서 연결" → https://claude.ai/settings/connectors, `gh auth login`), Slack 팀 ID 입력·저장(`dashboard.slack_team_id`, Slack 소스가 켜졌을 때), 자동 실행(Login Item) 토글, 코드 서명 상태 + 실행할 명령(`bash …/scripts/make-signing-cert.sh` — 다음 `/ned:install` 부터 적용).
-- 데이터: `GET /api/setup`(1분 캐시, "다시 확인" = `?refresh=1`) — claude 를 한 번 띄워 시작 줄(system/init)의 커넥터 상태만 읽고 바로 끈다(모델 호출·비용 없음; `claude mcp list` 는 인증 필요를 연결됨으로 보여서 안 씀). GitHub 은 `gh auth status`, 서명은 `security find-identity -v -p codesigning`. 닫음은 `POST /api/setup/dismiss` → `~/.ned/onboarding.json`(설정 아님). 자동 실행은 Ned.app 만 알 수 있어 앱 창에서만 토글(브라우저로 연 대시보드는 "메뉴 > Login Items 에 등록" 안내). CLI: `node dist/cli.js setup-check [--json]`.
+- 데이터: `GET /api/setup`(1분 캐시, "다시 확인" = `?refresh=1`) — claude 를 한 번 띄워 시작 줄(system/init)의 커넥터 상태만 읽고 바로 끈다(모델 호출·비용 없음; `claude mcp list` 는 인증 필요를 연결됨으로 보여서 안 씀). GitHub 은 `gh auth status`, 서명은 `security find-identity -v -p codesigning`. 닫음은 `POST /api/setup/dismiss` → `~/.ned/onboarding.json`(설정 아님). 자동 실행은 Ned.app 만 알 수 있어 앱 창에서만 토글(브라우저로 연 대시보드는 "Ned.app 창의 대시보드 설정 → 앱(Ned.app) 에서" 안내). CLI: `node dist/cli.js setup-check [--json]`.
 - 언제: 대시보드를 처음 열 때 준비 안 된 항목이 있고 아직 닫은 적이 없으면 저절로 뜬다. 닫으면(✕·닫기·Esc) 다시 안 뜨고, 설정 상단 "시작하기" 버튼으로 언제든 다시 연다.
 
 ### Ned.app 메뉴 막대 · 설정 → 앱

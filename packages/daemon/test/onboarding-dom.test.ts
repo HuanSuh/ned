@@ -59,7 +59,7 @@ describe("onboardingHtml (pure)", () => {
     expect(h).toContain("<code>gh auth login</code>");
     expect(h).toContain("bash /x/scripts/make-signing-cert.sh");
     expect(h).toContain("다음 설치부터");
-    expect(h).toContain("Login Items 에 등록"); // browser: menu hint, no toggle
+    expect(h).toContain("설정 → 앱(Ned.app)"); // browser: where to change it, no toggle
     expect(h).not.toContain('id="ob-login"');
     // connected rows have no 다시 확인; broken rows do
     expect((h.match(/data-obrefresh/g) || []).length).toBe(3); // header + gmail + github
