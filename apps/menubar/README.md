@@ -23,6 +23,7 @@ The daemon and the dashboard HTML are unchanged; the app only wraps them.
 | `Sources/Ned/DashboardWindow.swift` | Single dashboard window (`WKWebView`), placeholder, external links |
 | `Sources/Ned/Notifier.swift` | Native notifications: diffs `state.json`, seen-id store, actions |
 | `Sources/Ned/AppConfig.swift` | `NED_HOME` / `NED_PORT` / user defaults |
+| `Sources/Ned/DesktopPet.swift` | Desktop pet: floating `NSPanel`, state → expression mapping, bubble, `--pet-selftest` / `--pet-snapshot` |
 | `Resources/Ned.icns` | App icon, generated from `packages/daemon/public/proposals/ned-glasses.svg` by `scripts/make-icon.sh` |
 
 Requires macOS 14+ and Swift 6.2 (Xcode 26).
@@ -136,6 +137,7 @@ same status line and exit (0, or 1 when the call failed; `requiresApproval` also
 `/ned:install` runs `/Applications/Ned.app/Contents/MacOS/Ned --login-item-register` whether or not Ned is already running
 (registration is per bundle; the running app's menu toggle refreshes when the menu opens).
 `--persona-selftest` logs persona resolution and exercises the persona PUT (see Persona below).
+`--pet-selftest` / `--pet-snapshot <dir>` (headless, stdout) check the desktop pet (see Desktop pet below).
 `--wake-selftest` fakes a wedged-after-sleep daemon (SIGSTOP on the child) and runs the wake check (see Sleep / wake below).
 `--notify-selftest` runs synthetic state.json through the notification planner and the badge / open-item /
 `is_worker` decoding, prints the results and exits non-zero on failure (headless).
@@ -315,6 +317,41 @@ existing items as seen instead of notifying. Session ids are forgotten once they
 (the next alert notifies again); others after 7 days. Every request and its result is logged to
 `$NED_HOME/logs/app-daemon.log` as `notify: …`. Notifications need the bundle (`scripts/package.sh`);
 the bare `.build/release/Ned` binary cannot use `UNUserNotificationCenter`.
+
+## Desktop pet
+
+A small floating Ned (the current persona's mark) that stays on screen without the dashboard — like the "pets"
+in other agent apps. **Off by default**; the menu's **데스크톱 펫 표시** checkbox flips the `desktopPetEnabled`
+user default (app-side, no `config.yaml` key) and `DesktopPetController` follows it by KVO (also when 우클릭 → 숨기기
+turns it off). Code: `Sources/Ned/DesktopPet.swift`.
+
+- **Window**: one `NSPanel` (`.borderless` + `.nonactivatingPanel`, never key/main, transparent, `level = .floating`,
+  `[.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]`), 240×160 pt with the 72 pt character at the bottom-right
+  and the bubble above it. Shadows are drawn by SwiftUI (`hasShadow = false`: the panel's own shadow would outline the
+  empty area). Default position: bottom-right of the main screen's `visibleFrame` (Dock / menu bar excluded). Drag the
+  character to move it; the origin is saved as `desktopPetOrigin` (`"x,y"`) and is reset to the default when less
+  than half of the character would be on a screen (also on screen-configuration changes).
+- **Mouse** (only over the character, `PetHitView`): click = dashboard (`DashboardWindowController.shared.show()`, the
+  menu's path), drag = move, right-click = 대시보드 열기 · 숨기기, hover = top-3 summary bubble. The app has no
+  native path to the 통신기 (it is the dashboard's ⌘J), so the menu has no item for it.
+- **State → expression** (`PetMapping.expression`, pure): offline (`!daemonAlive && !isHealthy && !isBooting`, same as
+  the menu's warning) > blocked (a session `error`) > needsInput (`waiting`, Orca workers excluded) > attention
+  (open count, also shown as a badge under higher moods) > running > idle. Copy: 연결 끊김 / `<worktree> 오류` · 오류 N /
+  `<worktree> 입력 기다림` · 입력 기다림 N / 확인할 것 N / 작업 중 N; idle has no bubble.
+- **Bubble** (`PetModel`): on a mood/text change it shows for 5 s; needsInput/attention → idle shows 끝 for 2.5 s;
+  badge-only changes stay silent. During quiet hours (`state.json` `quiet`) nothing pops up by itself — hover still works.
+- **Motion**: SwiftUI `phaseAnimator` / one repeat-forever rotation (Core Animation, no `Timer`): idle breathes,
+  blocked shakes then pauses, needsInput bounces + 👋, running has a turning dashed ring. "동작 줄이기"
+  (`accessibilityDisplayShouldReduceMotion`, followed live) → static.
+
+```sh
+.build/debug/Ned --pet-selftest            # mapping / bubble / placement / toggle → panel; PASS/FAIL lines, exit 1 on failure
+.build/debug/Ned --pet-snapshot /tmp/pet   # PNGs: pet-<mood>-ned-{light,dark}.png ×6, pet-hover-ned-*, pet-running-<persona>-*
+```
+
+The selftest uses its own defaults suite (`com.ned.menubar.pet-selftest`, removed afterwards) and briefly shows the
+panel to check the toggle; the snapshot renders `PetView` with `ImageRenderer` (bubble open, motion off) over a
+desktop-like backdrop.
 
 ## Persona
 

@@ -6,22 +6,23 @@
 ## 요약
 
 Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub·Sentry)를 모아 보여 주는 로컬 대시보드(탭: 홈·인박스·타임라인·설정). 전역 키: h 홈, i 인박스, r 지금 점검, ⌘K·/ 검색, ⌘J 통신기.
-- **홈**: 일정(일/주, ＋·드래그로 만들기, ⋯ 응답), 할 일(NED 액션 아이템 / 개인 할 일, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, 이력 7/30일, ↻ 소스별 갱신), 팔로업 채널 카드(멘션 없이 따라가는 채널 요약).
+- **홈**: 일정(일/주, ＋·드래그로 만들기, ⋯ 응답), 할 일(NED 액션 아이템 / 개인 할 일, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, 이력 7/30일, ↻ 소스별 갱신), 팔로업 카드(멘션 없는 채널 요약).
 - **인박스**: 우선·기타·기록(브리핑) 3탭 + "장비실"(세션 상태). 키 j/k·e·⏎·1/2/3.
 - **타임라인**: 세션 이벤트·브리핑 시간순(필터)
-- **순찰/브리핑**: "지금 점검"(r) = 소스를 새로 가져와 판단 → 알림·attention. 자동 순찰 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑 `briefing_time`(실패 시 재시도).
+- **순찰/브리핑**: "지금 점검"(r) = 소스 새로 가져와 판단 → 알림·attention. 자동 순찰 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑 `briefing_time`(실패 시 재시도).
 - **야간·유휴 감속**: 조용한 시간·유휴(`idle_schedule`)엔 자동 실행을 늦추거나 멈춤(`quiet_schedule.mode` normal/slow/pause), 수동은 즉시.
 - **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기 확인 카드, `actions.chat_session_create` 면 새 세션; 정리는 노트로), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글.
-- **답장 초안 ✎**: 초안 3개 → 복사/열기/보내기. 카드·이력·팔로업 카드에 있음. Slack·메일·Jira 는 미답 질문을 "답할 것"으로 뽑아 번호대로 1:1 답. 실제 쓰기는 설정 → 쓰기 액션에서 켠 것만(gmail_draft·session_send 기본 켬): `actions.slack_send`·`gmail_draft`·`gmail_send`·`session_send`·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯.
-- **확인 완료 ✓**: 항목을 처리됨으로 접음(새 변경이 오면 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`)면 자동 해제.
+- **답장 초안 ✎**: 초안 3개 → 복사/열기/보내기. Slack·메일·Jira 는 미답 질문을 "답할 것"으로 뽑아 번호대로 1:1 답. 쓰기는 설정 → 쓰기 액션에서 켠 것만(gmail_draft·session_send 기본 켬): `actions.slack_send`·`gmail_draft`·`gmail_send`·`session_send`·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯.
+- **확인 완료 ✓**: 처리됨으로 접음(새 변경이 오면 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`)면 자동 해제.
 - **Gmail 읽음 표시**(`actions.gmail_mark_read`, 끔): 메일 ✓ 면 Gmail 도 읽음.
 - **검색 ⌘K**: 통합 검색(초성·수집 이력).
 - **아카이브(Obsidian)**: 볼트 `archive.vault` + `archive.enabled` → 매일 `<archive.folder>/Daily/…/날짜.md`, `archive.daily_embed`.
 - **수집 이력**: 소스별 보관(`history.keep_days.*`), 증분 수집(Slack 전체 재검색 창 `history.collect.slack_hours`), 카드·순찰·초안은 표시 구간(`history.display.*`).
-- **링크 열기**: Slack·Figma·Notion 링크는 앱으로(`dashboard.open_links_in_app`), 앱 없으면 웹. Slack 은 팀 ID `dashboard.slack_team_id` 필요.
+- **링크 열기**: Slack·Figma·Notion 링크는 앱으로(`dashboard.open_links_in_app`, Slack 은 팀 ID `dashboard.slack_team_id`), 없으면 웹.
 - **설치**: 플러그인 `ned@ned`(마켓플레이스 `HuanSuh/ned`) → `/ned:install`. 업데이트 `/plugin update ned`→`/reload-plugins`→`/ned:install`.
-- **시작하기**(첫 실행·설정 → 시작하기): 커넥터 연결·Slack 팀 ID·자동 실행·코드 서명 점검.
-- **설정**(하단 "저장"): 외형(테마 `dashboard.theme`, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`, 링크 열기) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(위 순찰·감속 키, `signal_check_minutes`, `agenda_refresh_minutes`, `agenda_source_minutes.*`) · 쓰기 액션(`actions.*`, 말투 `reply_tone`·`reply_tone_by_source.*`, 오늘 한 액션) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(`claude_model`, `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd` $15). 저장마다 백업 10개.
+- **시작하기**(첫 실행·설정): 커넥터 연결·Slack 팀 ID·자동 실행·코드 서명 점검.
+- **데스크톱 펫**(앱 메뉴 토글, 기본 끔): 늘 떠 있는 Ned — 오류·입력 대기·확인할 것·작업 중을 말풍선으로, 클릭 = 대시보드.
+- **설정**(하단 "저장"): 외형(테마 `dashboard.theme`, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`, 링크 열기) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(위 순찰·감속 키, `signal_check_minutes`, `agenda_refresh_minutes`, `agenda_source_minutes.*`) · 쓰기 액션(`actions.*`, 말투 `reply_tone`·`reply_tone_by_source.*`, 오늘 한 액션) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(`claude_model`, `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd` $15).
 
 ## 상세
 
@@ -226,6 +227,11 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 보여 주는 것: "시작하기" 창 — 소스 연결(설정에서 켠 소스만: Slack·Gmail·Google Calendar·Jira(Atlassian) 커넥터, GitHub `gh`, Sentry MCP) 상태 칩 연결됨/인증 필요/연결 안 됨/연결 중/확인 실패 + 할 일("claude.ai 에서 연결" → https://claude.ai/settings/connectors, `gh auth login`), Slack 팀 ID 입력·저장(`dashboard.slack_team_id`, Slack 소스가 켜졌을 때), 자동 실행(Login Item) 토글, 코드 서명 상태 + 실행할 명령(`bash …/scripts/make-signing-cert.sh` — 다음 `/ned:install` 부터 적용).
 - 데이터: `GET /api/setup`(1분 캐시, "다시 확인" = `?refresh=1`) — claude 를 한 번 띄워 시작 줄(system/init)의 커넥터 상태만 읽고 바로 끈다(모델 호출·비용 없음; `claude mcp list` 는 인증 필요를 연결됨으로 보여서 안 씀). GitHub 은 `gh auth status`, 서명은 `security find-identity -v -p codesigning`. 닫음은 `POST /api/setup/dismiss` → `~/.ned/onboarding.json`(설정 아님). 자동 실행은 Ned.app 만 알 수 있어 앱 창에서만 토글(브라우저로 연 대시보드는 "메뉴 > Login Items 에 등록" 안내). CLI: `node dist/cli.js setup-check [--json]`.
 - 언제: 대시보드를 처음 열 때 준비 안 된 항목이 있고 아직 닫은 적이 없으면 저절로 뜬다. 닫으면(✕·닫기·Esc) 다시 안 뜨고, 설정 상단 "시작하기" 버튼으로 언제든 다시 연다.
+
+### 데스크톱 펫 — 화면에 늘 떠 있는 Ned (Ned.app)
+- 보여 주는 것: 대시보드를 열지 않아도 화면 구석(기본 주 화면 오른쪽 아래, Dock·메뉴 막대 피함)에 떠 있는 현재 페르소나 마크(페르소나를 바꾸면 따라 바뀜). 모든 데스크톱·전체 화면 앱 위에 뜨고 포커스를 뺏지 않는다. 우선순위 높은 상태 하나: 연결 끊김(흐리게) > "<worktree> 오류"(경고 테두리·흔들림) > "<worktree> 입력 기다림"/"입력 기다림 N"(손짓·바운스, Orca 워커 세션 제외) > "확인할 것 N"(배지 N) > "작업 중 N"(도는 점선) > 평소(숨쉬기만, 말풍선 없음). 상태가 바뀌면 말풍선이 5초 보였다 접히고, 입력 대기·확인할 것이 끝나 평소로 돌아가면 "끝" 2.5초. 마우스를 올리면 상위 3줄 요약(평소엔 페르소나의 "레이더 깨끗함" 류 한 줄). 상태 매핑은 순수 함수(`PetMapping`) — `--pet-selftest`, 화면은 `--pet-snapshot <dir>`.
+- 데이터: 메뉴 막대와 같은 `state.json`(세션 status·`is_worker`·열린 attention·`quiet`)과 데몬 감시 상태 — 데몬 변경 없음. 조용한 시간(`quiet`)엔 말풍선을 저절로 띄우지 않는다(올리면 보임). macOS "동작 줄이기"면 애니메이션 없음.
+- 버튼·설정: 메뉴(메뉴 막대 아이콘 클릭) "데스크톱 펫 표시" 토글 — 앱 쪽 설정(UserDefaults `desktopPetEnabled`, 기본 끔; config.yaml 키 없음). 클릭 = 대시보드 열기, 드래그 = 이동(위치 `desktopPetOrigin` 기억, 화면 밖이면 기본 위치로), 우클릭 = 대시보드 열기 · 숨기기. 통신기는 대시보드에서 ⌘J.
 
 ### 설정 탭
 상단 바로가기: 외형 · 소스 · 알림 · 순찰 주기 · 수집·보관 · 쓰기 액션 · 아카이브 · Claude. "시작하기"(위 "시작하기") · "다시 불러오기", 하단 "● 저장 안 된 변경" + "저장".
