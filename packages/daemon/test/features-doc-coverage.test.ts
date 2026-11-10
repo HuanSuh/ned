@@ -52,6 +52,8 @@ function configKeys(): string[] {
     ...sub("history.display"),
     ...sub("history.keep_days"),
     ...sub("history.collect"),
+    ...sub("pet"),
+    ...sub("pet.messages"),
   ];
 }
 

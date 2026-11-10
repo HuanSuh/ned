@@ -15,11 +15,12 @@ import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runCh
 import { validateChatAction } from "./chat-actions.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, restoreConfigBackup, saveConfig, slackTeamDomainError, slackTeamIdError, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type PersonaId } from "./config.js";
+import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, normalizePet, restoreConfigBackup, saveConfig, slackTeamDomainError, slackTeamIdError, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type NedPet, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { historyStatus, queryHistory } from "./history.js";
 import { checkStatus, dismissAttention, heartbeat, listBriefings, runCheck } from "./heartbeat.js";
+import { buildFeed } from "./feed.js";
 import { log } from "./paths.js";
 import { listOutputs, outputFile, readOutput } from "./outputs.js";
 import { checkVault } from "./vault.js";
@@ -106,6 +107,7 @@ export function mergeConfigPatch(cur: NedConfig, body: Partial<NedConfig>): NedC
     idle_schedule: normalizeIdleSchedule(m.idle_schedule, cur.idle_schedule),
     archive: normalizeArchive(m.archive, cur.archive),
     history: normalizeHistory(m.history, cur.history),
+    pet: normalizePet(m.pet, cur.pet),
   };
   // Re-normalized even without a dashboard patch: a 팔로업 channel added / removed in filters adds / drops its `watch:` card.
   merged.dashboard = normalizeDashboard(dashboard ?? {}, cur.dashboard, watchChannels(merged.filters));
@@ -126,10 +128,12 @@ export function archivePatchError(cur: NedConfig, next: NedConfig): string | nul
 
 /** Mirror persona + notification settings into state.json right away (dashboard / Ned.app read them there). */
 function mirrorToState(cfg: NedConfig): void {
-  const st = readState();
-  if (st.persona !== cfg.persona || JSON.stringify(st.notifications) !== JSON.stringify(cfg.notifications)) {
+  // pet: Ned.app watches state.json, so a 설정 → 데스크톱 펫 save shows / hides the pet right away (GET /api/feed carries it too).
+  const st = readState() as ReturnType<typeof readState> & { pet?: NedPet };
+  if (st.persona !== cfg.persona || JSON.stringify(st.notifications) !== JSON.stringify(cfg.notifications) || JSON.stringify(st.pet) !== JSON.stringify(cfg.pet)) {
     st.persona = cfg.persona;
     st.notifications = cfg.notifications;
+    st.pet = cfg.pet;
     writeState(st);
   }
 }
@@ -160,6 +164,14 @@ export function startServer(getConfig: () => NedConfig): void {
   });
   app.get("/api/events", (c) => c.json(readRecentEvents(Number(c.req.query("days") ?? 2))));
   app.get("/api/briefings", (c) => c.json(listBriefings(Number(c.req.query("limit") ?? 30))));
+  // 메시지 피드 for the desktop pet (src/feed.ts — the 통신기 buildFeed rules) + the pet settings and quiet flag it needs.
+  app.get("/api/feed", (c) => {
+    const cfg = loadConfig();
+    const state = readState();
+    const a = readAgenda();
+    const items = buildFeed({ state, briefings: listBriefings(30), agenda: { slack: cfg.sources.slack ? a.slack : null } }, Date.now(), cfg.dashboard);
+    return c.json({ items, pet: cfg.pet, quiet: state.quiet, persona: cfg.persona });
+  });
   app.get("/api/config", (c) => c.json(configView(loadConfig())));
   app.put("/api/config", async (c) => {
     let raw: unknown;

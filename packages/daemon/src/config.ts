@@ -78,6 +78,29 @@ export interface NedConfig {
   archive: NedArchive;
   /** 수집 이력 (src/history.ts): what agenda collected, kept per source; Slack·메일 cards / patrol / drafts read their display window from it. */
   history: NedHistory;
+  /** 데스크톱 펫 (Ned.app): shown or not, and which message kinds pop a bubble — 설정 → 외형 → 데스크톱 펫. */
+  pet: NedPet;
+}
+
+/** The pet's message toggles (GET /api/feed items carry one as `pet_kind`; src/feed.ts PET_KIND_OF). greeting is the app's own. */
+export const PET_MESSAGE_KINDS = ["greeting", "session", "slack", "mail", "jira", "github", "sentry", "calendar", "briefing"] as const;
+export type PetMessageKind = (typeof PET_MESSAGE_KINDS)[number];
+export interface NedPet {
+  /** Off by default: an update never puts a window on the user's screen unannounced. */
+  enabled: boolean;
+  /** Per kind: false = no automatic bubble for it (status colour / badge are not affected). Missing = on. */
+  messages: Record<PetMessageKind, boolean>;
+}
+export const DEFAULT_PET: NedPet = { enabled: false, messages: Object.fromEntries(PET_MESSAGE_KINDS.map((k) => [k, true])) as Record<PetMessageKind, boolean> };
+/** Merge a (partial) pet patch over `base`; non-booleans keep the base value, unknown kinds are dropped. */
+export function normalizePet(raw: unknown, base: NedPet = DEFAULT_PET): NedPet {
+  const r = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const m = (r.messages && typeof r.messages === "object" && !Array.isArray(r.messages) ? r.messages : {}) as Record<string, unknown>;
+  const bm = base.messages ?? DEFAULT_PET.messages;
+  return {
+    enabled: typeof r.enabled === "boolean" ? r.enabled : base.enabled === true,
+    messages: Object.fromEntries(PET_MESSAGE_KINDS.map((k) => [k, typeof m[k] === "boolean" ? m[k] : bm[k] !== false])) as Record<PetMessageKind, boolean>,
+  };
 }
 
 export const HISTORY_SOURCES = ["slack", "mail", "jira", "github", "calendar"] as const;
@@ -640,6 +663,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   chat_ignore_budget: false,
   archive: DEFAULT_ARCHIVE,
   history: DEFAULT_HISTORY,
+  pet: DEFAULT_PET,
 };
 
 /** A finite number within [min, max] (truncated when `int`), else `fallback`. */
@@ -673,6 +697,7 @@ export function loadConfig(): NedConfig {
       chat_ignore_budget: parsed.chat_ignore_budget === true,
       archive: normalizeArchive(parsed.archive),
       history: normalizeHistory(parsed.history),
+      pet: normalizePet(parsed.pet),
       dashboard: normalizeDashboard(parsed.dashboard, DEFAULT_DASHBOARD, watchChannels(filters)),
       agenda_source_minutes: normalizeAgendaSourceMinutes(parsed.agenda_source_minutes),
       quiet_schedule: normalizeQuietSchedule(parsed.quiet_schedule),

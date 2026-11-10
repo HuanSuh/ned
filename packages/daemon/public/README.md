@@ -21,6 +21,7 @@ daemon(`src/server.ts`) 이 `http://127.0.0.1:<port>/` 에서 그대로 서빙�
 | `app/ui/toast.js` | `toast()` |
 | `app/tabs/home.js` · `inbox.js` · `timeline.js` · `settings.js` | 탭별 렌더와 그 탭 안 이벤트 |
 | `app/tabs/settings-archive.js` | 설정 → 아카이브(`config.archive`): 켜기·볼트 경로·Ned 폴더·담을 것·데일리 노트 embed(`readArchive` → 저장 PUT), 상태 줄(`GET /api/archive/status` — 볼트 배지·마지막 쓰기·마지막 오류, "지금 쓰기" = `POST /api/archive/flush`) |
+| `app/tabs/settings-pet.js` | 설정 → 외형 → 데스크톱 펫(`config.pet`): `c-pet-on`(`pet.enabled`) · `c-pet-msgs`(`data-petmsg`, `pet.messages.*` 9종 — 펫이 꺼지면 흐려짐, 소스 Sentry 가 꺼지면 Sentry 칸 비활성) · `c-pet-reset`(위치 초기화, Ned.app 창에서만 — `webkit.messageHandlers.pet`). `readPet` → 저장 PUT `{pet}`, 더티 스냅샷 포함 |
 | `app/tabs/settings-links.js` | 설정 → 외형 → 링크 열기(`config.dashboard.open_links_in_app`·`open_links_in_app_by_service.*`·`slack_team_id`): `c-openapp`·`c-openapp-svc`(`data-olsvc`, 마스터가 꺼지면 흐려짐)·`c-slack-team`(`T…` 아니면 줄 아래 안내 + 저장 안 함)·`c-slack-domain`(`slack_team_domain`, `Acme.slack.com` → `acme`, 형식이 아니면 안내 + 저장 안 함) — `readLinkPrefs` 가 `dashboard` 에 합쳐져 저장 PUT, 더티 스냅샷에도 포함 |
 | `app/tabs/settings-history.js` | 설정 → 수집·보관(`config.history`): 이력 기록 켜기·표시 구간(Slack 시간·메일 일)·수집 창(Slack 전체 재검색 시간 `collect.slack_hours`, `c-hist-collect-slack-h`)·소스별 보관 기간(`readHistorySettings` → 저장 PUT), 상태 줄(`GET /api/history/status`) |
 | `app/features/histview.js` | 카드의 수집 이력 토글 `표시 구간 \| 지난 7일 \| 30일`(`histBar`, `histList` — `GET /api/history`, 카드별 `ned.cardhist.<id>`, agenda `updated_at` 바뀌면 다시 받음): 메일·Slack 전체 보기, Jira·GitHub 목록 아래, 팔로업 카드(`channel=`), 일정 calnav "이력" |
