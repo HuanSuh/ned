@@ -36,9 +36,14 @@ scripts/package.sh              # bundle: .build/Ned.app (icon, version 0.2.0, L
 scripts/make-icon.sh            # only when the SVG changes: regenerates Resources/Ned.icns
 ```
 
-From the repo root, `scripts/install.sh` builds everything, installs the hooks, removes the old
-`com.ned.daemon` LaunchAgent, copies the bundle to `/Applications/Ned.app` and opens it.
-`scripts/uninstall.sh` quits the app, removes it and the hooks, and leaves `~/.ned` alone.
+Users install through the Claude Code plugin: `/ned:install` runs `scripts/install.sh` in plugin mode, which
+syncs the plugin to `~/.ned/runtime`, builds there, copies the bundle to `/Applications/Ned.app` and sets
+`nedRepoPath` to the runtime (see the root README and `docs/RELEASE.md`).
+
+For development, from the repo root, `scripts/install.sh` builds everything in the checkout, installs the hooks in
+`~/.claude/settings.json`, removes the old `com.ned.daemon` LaunchAgent, copies the bundle to `/Applications/Ned.app`
+and opens it. `scripts/uninstall.sh` quits the app, removes it and the hooks, and leaves `~/.ned` alone. Don't mix
+this with the plugin install (the hooks would be registered twice).
 
 The `-parse-as-library` flag in `Package.swift` is required. Without it the app exits right
 after launch.
@@ -86,7 +91,7 @@ child's stdout/stderr.
 
 - **Repo**: the nearest ancestor of the app bundle containing `packages/daemon` (dev builds live in
   `apps/menubar/.build`), else the `nedRepoPath` user default. Set it from **저장소 위치…**
-  (`install.sh` writes it for `/Applications/Ned.app`).
+  (`install.sh` writes it for `/Applications/Ned.app` — `~/.ned/runtime` for a plugin install, the checkout otherwise).
 - **`node` / `claude`**: taken from `zsh -lic`, then `zsh -lc`, then `/opt/homebrew/bin`, `/usr/local/bin`,
   `~/.nvm/versions/node/*/bin`, `~/.local/bin`, `~/.claude/local`. The first `node` with major ≥ 18 wins.
   A non-interactive login shell often misses nvm and returns an old system node. Their directories are

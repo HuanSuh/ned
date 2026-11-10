@@ -1,0 +1,16 @@
+{
+  "name": "ned",
+  "description": "Ned — Claude Code 세션·업무 신호 대시보드 (HuanSuh/ned). 기본 브랜치(main)가 설치본.",
+  "owner": {
+    "name": "HuanSuh",
+    "url": "https://github.com/HuanSuh"
+  },
+  "plugins": [
+    {
+      "name": "ned",
+      "source": "./",
+      "description": "세션 이벤트 훅 + /ned:install·status·uninstall — 데몬과 Ned.app 은 각 Mac 에서 빌드한다.",
+      "category": "productivity"
+    }
+  ]
+}

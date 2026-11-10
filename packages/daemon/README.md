@@ -9,6 +9,9 @@ menu bar 앱과 로컬 대시보드가 읽는 `state.json` 을 유지한다. 읽
 
 ## Build
 
+사용자 설치는 Claude Code 플러그인(`/ned:install` — 루트 [README](../../README.md)): 소스를 `~/.ned/runtime/` 으로 동기화해 거기서 빌드하고,
+Ned.app 이 그 경로의 `packages/daemon/dist/cli.js run` 을 띄운다. 세션 훅은 플러그인 `hooks/hooks.json` 이 등록한다. 개발 중에는:
+
 ```sh
 pnpm install            # 모노레포 루트에서 한 번
 pnpm --filter @ned/daemon build   # tsc → dist/

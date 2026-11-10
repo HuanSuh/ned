@@ -7,6 +7,10 @@ NED_HOME="${NED_HOME:-$HOME/.ned}"
 payload=$(cat 2>/dev/null)
 printf '{}\n'
 [ -n "$payload" ] || exit 0
+# Without the Command Line Tools, /usr/bin/python3 is only a stub that pops up the "install developer tools"
+# dialog — on every hook event, right after a plugin install on a fresh Mac (before /ned:install checks for
+# them). xcode-select -p just fails there, silently; events are recorded once the tools are installed.
+xcode-select -p >/dev/null 2>&1 || exit 0
 
 mkdir -p "$NED_HOME/events" 2>/dev/null || exit 0
 
