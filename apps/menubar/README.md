@@ -347,7 +347,7 @@ only the position (`desktopPetOrigin`) and the seen message keys (`desktopPetSee
 - **State → look** (`PetMapping.expression`, pure): offline > blocked (`error`) > needsInput (`waiting`, Orca workers
   excluded) > attention (open count, badge also under higher moods) > running > idle. Shown as the card's edge colour +
   outer glow, the way 통신기 does it (`comms.css` `--cm-edge` / `--cm-glow`), from the persona's dashboard tokens
-  (`PetColors.tokens`, tokens.css): idle = neutral `--edge`, no glow · running = `--mint` (the 통신기 `--cm-rx` of ned;
+  (`PetColors.tokens`, tokens.css): idle = neutral `--edge` with a soft `--dim` glow · running = `--mint` (the 통신기 `--cm-rx` of ned;
   the other personas' `--cm-rx` is their accent, so the pet uses `--mint` for all to keep 작업 중 ≠ 확인할 것), faint
   breathing glow · attention = persona accent, thicker edge + glow · needsInput = `--amber` · blocked = `--red` dashed
   with the strongest glow (tokens.css keeps red outlined so it never reads as Ned's red accent) · offline = grey, no
@@ -361,7 +361,8 @@ only the position (`desktopPetOrigin`) and the seen message keys (`desktopPetSee
   Greeting: `Persona.greeting(at:)` once a day, at the first non-quiet look of the day (`greet:YYYY-MM-DD` seen key).
   While the pet is hidden new items only become seen. Status notes: "끝" (needsInput/attention → idle, session kind)
   and "연결 끊김".
-- **Motion**: only the glow's slow breath (3.6 s ease-in-out, `phaseAnimator`) and an idle scale ≤ 1.5 %; mood and
+- **Motion**: only the glow's slow breath (`PetGlow`: 3 s ease-in-out `phaseAnimator`, halo radius 6 ↔ 18 at 20 % ↔ 100 % of the
+  state's strength plus a tight inner ring, on the card and the bubbles — every state but offline) and an idle scale ≤ 1.5 %; mood and
   bubble changes cross-fade in 0.5 s. No bounce / shake / spinning ring. "동작 줄이기" → glow fixed, no breath.
 
 ```sh

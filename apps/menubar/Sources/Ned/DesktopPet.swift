@@ -176,8 +176,8 @@ enum PetPlacement {
 enum PetLayout {
     static let panel = CGSize(width: 280, height: 300)
     static let character: CGFloat = 76
-    /// Room around the character card for its glow.
-    static let inset: CGFloat = 10
+    /// Room around the character card for its glow (the breath reaches radius 18).
+    static let inset: CGFloat = 14
     /// Character card (rounded, state-coloured edge) and the persona mark inside it.
     static let card: CGFloat = 64
     static let tile: CGFloat = 54
@@ -337,15 +337,21 @@ enum PetColors {
         case .idle: return neutral(p, dark)
         }
     }
-    /// Outer glow strength (0 = none): 오류 strongest, 확인할 것 next, 작업 중 faint, 쉼·연결 끊김 none.
+    /// Outer glow strength (0 = none): 오류 strongest, 확인할 것 next, 작업 중·쉼 softer, 연결 끊김 none.
+    /// Every state but 연결 끊김 breathes (PetGlow), so the pet always reads as alive.
     static func glow(_ m: PetMood) -> Double {
         switch m {
-        case .offline, .idle: return 0
-        case .blocked: return 0.9
-        case .attention: return 0.7
-        case .needsInput: return 0.6
-        case .running: return 0.35
+        case .offline: return 0
+        case .idle: return 0.3
+        case .running: return 0.55
+        case .needsInput: return 0.75
+        case .attention: return 0.85
+        case .blocked: return 1
         }
+    }
+    /// The glow's colour: the edge colour, except 쉼 — its neutral edge is too faint to glow, so a soft --dim light.
+    static func glowColor(_ m: PetMood, _ p: Persona, dark: Bool) -> Color {
+        m == .idle ? dim(dark) : edge(m, p, dark: dark)
     }
     /// Message bubbles (new items) wear the accent like 확인할 것; status notes keep their own colour.
     static func messageEdge(_ m: PetMessage, _ p: Persona, dark: Bool) -> (Color, Double) {
@@ -427,7 +433,7 @@ struct PetView: View {
         VStack(alignment: .trailing, spacing: 8) {
             Spacer(minLength: 0)
             if let c = model.content {
-                PetBubble(content: c, mood: model.expression.mood, persona: p)
+                PetBubble(content: c, mood: model.expression.mood, persona: p, reduceMotion: model.reduceMotion)
                     .transition(.opacity)
                     .id(bubbleID(c))
             }
@@ -465,6 +471,7 @@ struct PetBubble: View {
     let content: PetBubbleContent
     let mood: PetMood
     let persona: Persona
+    var reduceMotion: Bool = false
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
@@ -473,6 +480,7 @@ struct PetBubble: View {
             if case .message(let m) = content { return PetColors.messageEdge(m, persona, dark: dark) }
             return (PetColors.edge(mood, persona, dark: dark), PetColors.glow(mood))
         }()
+        let glowColor: Color = { if case .message = content { return edge }; return PetColors.glowColor(mood, persona, dark: dark) }()
         VStack(alignment: .leading, spacing: 6) {
             switch content {
             case .message(let m):
@@ -499,7 +507,7 @@ struct PetBubble: View {
                 .overlay(RoundedRectangle(cornerRadius: PetLayout.bubbleRadius, style: .continuous)
                     .strokeBorder(edge.opacity(0.8), lineWidth: 1))
                 .shadow(color: .black.opacity(dark ? 0.45 : 0.18), radius: 6, y: 2)
-                .shadow(color: edge.opacity(glow * 0.6), radius: 10)
+                .modifier(PetGlow(color: glowColor, strength: glow * 0.7, reduceMotion: reduceMotion))
         )
         .petFrame(-1) // the drawn bubble only — the click / hover area (PetBubbleHitView)
         // Hug the text like a chat bubble, at most the panel's width, right-aligned over the character.
@@ -524,7 +532,7 @@ struct PetBubble: View {
 }
 
 /// The persona mark on a rounded card whose edge + outer glow carry the state colour. Motion: only a slow glow
-/// breath (3.6 s ease-in-out; none at rest — 쉼 has no glow) and, at rest, a ≤1.5 % scale breath — no bounce, no shake, no emoji. 동작 줄이기 = still.
+/// breath (PetGlow, 3 s ease-in-out — every state but 연결 끊김) and, at rest, a ≤1.5 % scale breath — no bounce, no shake, no emoji. 동작 줄이기 = still.
 struct PetCharacter: View {
     let mood: PetMood
     let persona: Persona
@@ -532,7 +540,7 @@ struct PetCharacter: View {
     let reduceMotion: Bool
     @Environment(\.colorScheme) private var scheme
 
-    static let breath: Double = 3.6
+    static let breath: Double = PetGlow.breath
     static let idleScale: CGFloat = 1.015
 
     var body: some View {
@@ -556,12 +564,12 @@ struct PetCharacter: View {
 
         Group {
             if reduceMotion || mood == .offline {
-                card.shadow(color: edge.opacity(glow), radius: 10)
+                card.modifier(PetGlow(color: PetColors.glowColor(mood, persona, dark: dark), strength: glow, reduceMotion: true))
             } else {
-                card.phaseAnimator([false, true]) { c, up in
-                    c.shadow(color: edge.opacity(up ? glow : glow * 0.35), radius: up ? 13 : 7)
-                        .scaleEffect(mood == .idle && up ? Self.idleScale : 1)
-                } animation: { _ in .easeInOut(duration: Self.breath) }
+                card.modifier(PetGlow(color: PetColors.glowColor(mood, persona, dark: dark), strength: glow, reduceMotion: false))
+                    .phaseAnimator([false, true]) { c, up in
+                        c.scaleEffect(mood == .idle && up ? Self.idleScale : 1)
+                    } animation: { _ in .easeInOut(duration: Self.breath) }
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -877,5 +885,28 @@ final class DesktopPetController: NSObject {
         container.addSubview(hit)
         p.contentView = container
         return p
+    }
+}
+
+/// The breathing outer glow of the card and the bubbles: a soft halo that swells and fades (radius 6 ↔ 18, 20 % ↔ 100 %
+/// of `strength`) on a slow ease-in-out cycle, plus a tight inner ring so the edge itself brightens with it.
+/// 동작 줄이기 (or a snapshot) = the halo held at its middle, no motion.
+struct PetGlow: ViewModifier {
+    static let breath: Double = 3.0
+    let color: Color
+    let strength: Double
+    let reduceMotion: Bool
+
+    func body(content: Content) -> some View {
+        if strength <= 0 {
+            content
+        } else if reduceMotion {
+            content.shadow(color: color.opacity(strength * 0.4), radius: 3).shadow(color: color.opacity(strength * 0.7), radius: 12)
+        } else {
+            content.phaseAnimator([false, true]) { c, up in
+                c.shadow(color: color.opacity(strength * (up ? 0.55 : 0.15)), radius: up ? 4 : 2)
+                    .shadow(color: color.opacity(strength * (up ? 1 : 0.2)), radius: up ? 18 : 6)
+            } animation: { _ in .easeInOut(duration: Self.breath) }
+        }
     }
 }
