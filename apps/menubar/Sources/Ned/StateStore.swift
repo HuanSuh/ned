@@ -112,6 +112,67 @@ struct NotifySettings: Codable, Sendable {
     func kindEnabled(_ kind: String) -> Bool { kinds[kind] ?? true }
 }
 
+/// `config.pet` (daemon src/config.ts NedPet) — mirrored into state.json and returned by GET /api/feed.
+/// Missing / partial = the daemon defaults (off, every message kind on).
+struct PetSettings: Codable, Equatable, Sendable {
+    var enabled: Bool = false
+    /// pet.messages.<kind> (greeting/session/slack/mail/jira/github/sentry/calendar/briefing). Missing kind = on.
+    var messages: [String: Bool] = [:]
+
+    init(enabled: Bool = false, messages: [String: Bool] = [:]) { self.enabled = enabled; self.messages = messages }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
+        messages = (try? c.decodeIfPresent([String: Bool].self, forKey: .messages)) ?? [:]
+    }
+
+    /// `nil` kind (attention kind "other") has no toggle: always on.
+    func messageOn(_ kind: String?) -> Bool { kind.map { messages[$0] ?? true } ?? true }
+}
+
+/// One GET /api/feed item (daemon src/feed.ts FeedItem — the 통신기 메시지 rules + `pet_kind` + `deep`).
+struct FeedItem: Codable, Equatable, Sendable {
+    var key: String
+    var kind: String = "other"
+    /// The pet.messages toggle it falls under; `nil` = none (always shown).
+    var pet_kind: String? = nil
+    var title: String
+    var detail: String = ""
+    var url: String? = nil
+    /// App deep link per 설정 → 링크 열기 (what the dashboard's openLink would hand over), else nil.
+    var deep: String? = nil
+    var ts: Double = 0
+
+    init(key: String, kind: String = "other", pet_kind: String? = nil, title: String, detail: String = "", url: String? = nil, deep: String? = nil, ts: Double = 0) {
+        self.key = key; self.kind = kind; self.pet_kind = pet_kind; self.title = title; self.detail = detail; self.url = url; self.deep = deep; self.ts = ts
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        key = try c.decode(String.self, forKey: .key)
+        kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? "other"
+        pet_kind = try? c.decodeIfPresent(String.self, forKey: .pet_kind)
+        title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
+        detail = (try? c.decodeIfPresent(String.self, forKey: .detail)) ?? ""
+        url = try? c.decodeIfPresent(String.self, forKey: .url)
+        deep = try? c.decodeIfPresent(String.self, forKey: .deep)
+        ts = (try? c.decodeIfPresent(Double.self, forKey: .ts)) ?? 0
+    }
+}
+
+struct FeedResponse: Decodable {
+    var items: [FeedItem]
+    var pet: PetSettings?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        items = (try c.decodeIfPresent([Lossy<FeedItem>].self, forKey: .items) ?? []).compactMap(\.value)
+        pet = try? c.decodeIfPresent(PetSettings.self, forKey: .pet)
+    }
+    enum CodingKeys: String, CodingKey { case items, pet }
+}
+
 /// Decodes an element, or drops it (logging) instead of failing the whole array.
 private struct Lossy<T: Decodable>: Decodable {
     let value: T?
@@ -136,6 +197,8 @@ struct NedState: Codable {
     var notifications = NotifySettings()
     /// Daemon's count of attention not marked 확인 완료. `nil` = older daemon → derived from `reviewed_at`.
     var attention_open_count: Int? = nil
+    /// config.pet mirrored by the daemon on every settings save; `nil` = older daemon / not saved yet.
+    var pet: PetSettings? = nil
 
     var personaID: PersonaID { PersonaID(raw: persona) }
     /// Attention items still open (not 확인 완료) — what the dropdown lists.
@@ -158,6 +221,7 @@ struct NedState: Codable {
         persona = try? c.decodeIfPresent(String.self, forKey: .persona)
         notifications = (try? c.decodeIfPresent(NotifySettings.self, forKey: .notifications)) ?? NotifySettings()
         attention_open_count = try? c.decodeIfPresent(Int.self, forKey: .attention_open_count)
+        pet = try? c.decodeIfPresent(PetSettings.self, forKey: .pet)
     }
 
     /// Daemon writes state at least every heartbeat; treat >20 min silence as dead.
@@ -192,6 +256,17 @@ final class StateStore: ObservableObject {
     var attentionCount: Int { state.openCount }
     var runningCount: Int { state.sessions.filter { $0.status == "running" }.count }
 
+    /// 데스크톱 펫: config.pet (from state.json on a settings save, and from GET /api/feed) and the 메시지 feed.
+    @Published private(set) var pet = PetSettings()
+    @Published private(set) var feed: [FeedItem] = []
+    /// A feed answer arrived at least once (before that the pet stays hidden and seeds nothing).
+    @Published private(set) var feedLoaded = false
+    /// Last state.json `pet` seen: only a *change* there is applied — a later state write by the heartbeat carries the
+    /// same (possibly older) mirror, which must not undo a newer value read from GET /api/feed (e.g. a hand edit).
+    private var lastStatePet: PetSettings?
+    private var feedInFlight = false
+    private var feedAgain = false
+
     /// The app's single store (for `--persona-selftest`).
     static weak var current: StateStore?
 
@@ -224,6 +299,8 @@ final class StateStore: ObservableObject {
                 personaOverride = nil
             }
             state = decoded
+            if let p = decoded.pet, p != lastStatePet { lastStatePet = p; if pet != p { pet = p } }
+            fetchFeed()
             if personaID != before {
                 let p = persona
                 DaemonManager.shared.note("persona \(before.rawValue) -> \(personaID.rawValue) (state.json persona=\(decoded.persona ?? "nil")) label=\(p.symbol(decoded.daemonAlive ? (decoded.openCount == 0 ? .idle : .attention) : .offline)) accent=\(p.accentHex) header=\(p.headerTitle)")
@@ -291,6 +368,71 @@ final class StateStore: ObservableObject {
     }
 
     func triggerHeartbeat() { post("/api/heartbeat") }
+
+    /// GET /api/feed — after every state.json reload (debounced there) and the 15 s safety timer. One request at a time;
+    /// a reload during one runs one more right after. Failure keeps the last feed / pet settings.
+    func fetchFeed() {
+        if feedInFlight { feedAgain = true; return }
+        feedInFlight = true
+        Self.getFeed(port: port) { decoded in
+            self.feedInFlight = false
+            if let decoded {
+                if self.feed != decoded.items { self.feed = decoded.items }
+                if let p = decoded.pet, p != self.pet { self.pet = p }
+                if !self.feedLoaded { self.feedLoaded = true }
+            }
+            if self.feedAgain { self.feedAgain = false; self.fetchFeed() }
+        }
+    }
+
+    /// The pet's 숨기기 (and anything else that flips it from the app): saved through the daemon, applied locally right away.
+    func setPetEnabled(_ on: Bool) {
+        pet.enabled = on
+        Self.putPetEnabled(on, port: port) { result in
+            DaemonManager.shared.note("PUT /api/config pet.enabled=\(on) -> \(result)")
+            self.fetchFeed()
+        }
+    }
+
+    /// One GET /api/feed → decoded (nil on any failure). `done` runs on the main actor.
+    nonisolated static func getFeed(port: Int, done: @escaping @MainActor (FeedResponse?) -> Void) {
+        var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/feed")!)
+        req.timeoutInterval = 3
+        URLSession.shared.dataTask(with: req) { data, resp, err in
+            let ok = err == nil && (resp as? HTTPURLResponse)?.statusCode == 200
+            let decoded = ok ? data.flatMap { try? JSONDecoder().decode(FeedResponse.self, from: $0) } : nil
+            Task { @MainActor in done(decoded) }
+        }.resume()
+    }
+
+    /// PUT /api/config {pet: {enabled}} with config's current `if_updated_at` (GET /api/config first; one retry on 409
+    /// with the token the 409 returns). `done("HTTP 200")` / the error, on the main actor.
+    nonisolated static func putPetEnabled(_ on: Bool, port: Int, done: @escaping @MainActor (String) -> Void) {
+        let base = "http://127.0.0.1:\(port)/api/config"
+        @Sendable func put(_ token: Double?, retry: Bool) {
+            var req = URLRequest(url: URL(string: base)!)
+            req.httpMethod = "PUT"
+            req.timeoutInterval = 3
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            var body: [String: Any] = ["pet": ["enabled": on]]
+            if let token { body["if_updated_at"] = token }
+            req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            URLSession.shared.dataTask(with: req) { data, resp, err in
+                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                let current = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any])?["current"] as? [String: Any]
+                let next = current?["updated_at"] as? Double
+                if code == 409, retry, let next { put(next, retry: false); return }
+                let result = err?.localizedDescription ?? "HTTP \(code)"
+                Task { @MainActor in done(result) }
+            }.resume()
+        }
+        var get = URLRequest(url: URL(string: base)!)
+        get.timeoutInterval = 3
+        URLSession.shared.dataTask(with: get) { data, _, _ in
+            let token = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any])?["updated_at"] as? Double
+            put(token, retry: true)
+        }.resume()
+    }
 
     /// 페르소나 submenu: switch immediately, PUT {persona} to the daemon's config route, revert on failure.
     func setPersona(_ id: PersonaID) {

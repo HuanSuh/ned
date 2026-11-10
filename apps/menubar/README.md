@@ -23,7 +23,8 @@ The daemon and the dashboard HTML are unchanged; the app only wraps them.
 | `Sources/Ned/DashboardWindow.swift` | Single dashboard window (`WKWebView`), placeholder, external links |
 | `Sources/Ned/Notifier.swift` | Native notifications: diffs `state.json`, seen-id store, actions |
 | `Sources/Ned/AppConfig.swift` | `NED_HOME` / `NED_PORT` / user defaults |
-| `Sources/Ned/DesktopPet.swift` | Desktop pet: floating `NSPanel`, state → expression mapping, bubble, `--pet-selftest` / `--pet-snapshot` |
+| `Sources/Ned/DesktopPet.swift` | Desktop pet: floating `NSPanel`, state → look mapping, message inbox / queue, bubble, hit views |
+| `Sources/Ned/DesktopPetSelfTest.swift` | `--pet-selftest` / `--pet-snapshot` |
 | `Resources/Ned.icns` | App icon, generated from `packages/daemon/public/proposals/ned-glasses.svg` by `scripts/make-icon.sh` |
 
 Requires macOS 14+ and Swift 6.2 (Xcode 26).
@@ -321,37 +322,53 @@ the bare `.build/release/Ned` binary cannot use `UNUserNotificationCenter`.
 ## Desktop pet
 
 A small floating Ned (the current persona's mark) that stays on screen without the dashboard — like the "pets"
-in other agent apps. **Off by default**; the menu's **데스크톱 펫 표시** checkbox flips the `desktopPetEnabled`
-user default (app-side, no `config.yaml` key) and `DesktopPetController` follows it by KVO (also when 우클릭 → 숨기기
-turns it off). Code: `Sources/Ned/DesktopPet.swift`.
+in other agent apps. **Off by default**. Its settings live in `config.yaml` `pet` (dashboard 설정 → 외형 → 데스크톱 펫):
+`pet.enabled` and `pet.messages.<kind>` (greeting/session/slack/mail/jira/github/sentry/calendar/briefing). The app
+reads them from `state.json` `pet` (the daemon mirrors it on every settings save — applied only when that mirror
+*changes*, so a stale copy written by a later heartbeat can't undo a newer value) and from `GET /api/feed` (fresh from
+config.yaml, polled after every state.json reload and by the 15 s timer). The menu has no pet toggle. UserDefaults keeps
+only the position (`desktopPetOrigin`) and the seen message keys (`desktopPetSeen`, newest 600). Code:
+`Sources/Ned/DesktopPet.swift` (+ `DesktopPetSelfTest.swift`), config / feed reads in `StateStore.swift`.
 
 - **Window**: one `NSPanel` (`.borderless` + `.nonactivatingPanel`, never key/main, transparent, `level = .floating`,
-  `[.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]`), 240×160 pt with the 72 pt character at the bottom-right
-  and the bubble above it. Shadows are drawn by SwiftUI (`hasShadow = false`: the panel's own shadow would outline the
-  empty area). Default position: bottom-right of the main screen's `visibleFrame` (Dock / menu bar excluded). Drag the
-  character to move it; the origin is saved as `desktopPetOrigin` (`"x,y"`) and is reset to the default when less
-  than half of the character would be on a screen (also on screen-configuration changes).
-- **Mouse** (only over the character, `PetHitView`): click = dashboard (`DashboardWindowController.shared.show()`, the
-  menu's path), drag = move, right-click = 대시보드 열기 · 숨기기, hover = top-3 summary bubble. The app has no
-  native path to the 통신기 (it is the dashboard's ⌘J), so the menu has no item for it.
-- **State → expression** (`PetMapping.expression`, pure): offline (`!daemonAlive && !isHealthy && !isBooting`, same as
-  the menu's warning) > blocked (a session `error`) > needsInput (`waiting`, Orca workers excluded) > attention
-  (open count, also shown as a badge under higher moods) > running > idle. Copy: 연결 끊김 / `<worktree> 오류` · 오류 N /
-  `<worktree> 입력 기다림` · 입력 기다림 N / 확인할 것 N / 작업 중 N; idle has no bubble.
-- **Bubble** (`PetModel`): on a mood/text change it shows for 5 s; needsInput/attention → idle shows 끝 for 2.5 s;
-  badge-only changes stay silent. During quiet hours (`state.json` `quiet`) nothing pops up by itself — hover still works.
-- **Motion**: SwiftUI `phaseAnimator` / one repeat-forever rotation (Core Animation, no `Timer`): idle breathes,
-  blocked shakes then pauses, needsInput bounces + 👋, running has a turning dashed ring. "동작 줄이기"
-  (`accessibilityDisplayShouldReduceMotion`, followed live) → static.
+  `[.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]`), 280×300 pt with the 76 pt character at the bottom-right
+  and the bubble above it. Shadows / glow are drawn by SwiftUI (`hasShadow = false`). Default position: bottom-right of
+  the main screen's `visibleFrame`. Drag the character to move it; the origin is saved as `desktopPetOrigin` (`"x,y"`)
+  and is reset to the default when less than half of the character would be on a screen. 설정 → 위치 초기화 posts
+  `webkit.messageHandlers.pet` `{op: "resetPosition"}` (`DashboardWindow.swift` `PetHandler`, dashboard origin only).
+- **Mouse** (`PetHitView` over the character, `PetBubbleHitView` over the drawn bubble — its frame comes from SwiftUI via
+  a preference): pointing-hand cursor over both (closed hand while dragging; set on enter/move because cursor rects
+  don't work in a never-key panel). Character click = dashboard, drag = move, right-click = 대시보드 열기 · 펫 설정…
+  (`DashboardWindowController.showPetSettings()` → `#settings`, scrolled to `#c-pet`) · 숨기기
+  (`StateStore.setPetEnabled(false)` → `PUT /api/config {pet:{enabled:false}, if_updated_at}`, one retry on 409).
+  Bubble click = that item: `deep` (app deep link the daemon computed with the 링크 열기 rules) through `DeepLink.open`
+  with the web fallback, else the `url` in the browser, else the dashboard. Hovering the character opens the list
+  (status line + newest 3 of switched-on kinds); it stays while the pointer moves onto it.
+- **State → look** (`PetMapping.expression`, pure): offline > blocked (`error`) > needsInput (`waiting`, Orca workers
+  excluded) > attention (open count, badge also under higher moods) > running > idle. Shown as the card's edge colour +
+  outer glow, the way 통신기 does it (`comms.css` `--cm-edge` / `--cm-glow`): idle/running = persona accent, needsInput =
+  `--amber`, attention = accent with a stronger glow and thicker edge, blocked = `--red` dashed (tokens.css keeps red
+  outlined so it never reads as Ned's red accent), offline = grey, no glow, mark desaturated. Values are the dashboard
+  tokens (ned persona), commented at `PetColors`. No emoji overlay; the bubble's first line carries an SF Symbol.
+- **Messages** (`PetInbox`, pure): GET /api/feed items (the 통신기 메시지 rules, daemon `src/feed.ts`) whose key was
+  never seen pop as chat bubbles (source symbol + title + one detail line) for 5.5 s each, oldest first, at most 3
+  waiting; more than 3 at once (or a queue overflow) → one "새 소식 N". First run seeds every current key as seen.
+  A switched-off kind (`pet.messages.<pet_kind>` false) pops nothing but still becomes seen; `pet_kind` null (attention
+  kind other) has no toggle. Quiet hours (`state.json` `quiet`): nothing pops (items become seen), hover still works.
+  Greeting: `Persona.greeting(at:)` once a day, at the first non-quiet look of the day (`greet:YYYY-MM-DD` seen key).
+  While the pet is hidden new items only become seen. Status notes: "끝" (needsInput/attention → idle, session kind)
+  and "연결 끊김".
+- **Motion**: only the glow's slow breath (3.6 s ease-in-out, `phaseAnimator`) and an idle scale ≤ 1.5 %; mood and
+  bubble changes cross-fade in 0.5 s. No bounce / shake / spinning ring. "동작 줄이기" → glow fixed, no breath.
 
 ```sh
-.build/debug/Ned --pet-selftest            # mapping / bubble / placement / toggle → panel; PASS/FAIL lines, exit 1 on failure
-.build/debug/Ned --pet-snapshot /tmp/pet   # PNGs: pet-<mood>-ned-{light,dark}.png ×6, pet-hover-ned-*, pet-running-<persona>-*
+.build/debug/Ned --pet-selftest            # mapping / colours / inbox (seed, seen, kind toggles, quiet, burst, greeting) / queue / settings path / panel; exit 1 on failure
+.build/debug/Ned --pet-snapshot /tmp/pet   # PNGs ×2 themes: pet-<mood>-ned ×6, pet-msg-{slack,mail,greeting,summary}, pet-hover-ned, pet-msg-slack-<persona>
+NED_PET_SELFTEST_PORT=<port> .build/debug/Ned --pet-selftest   # + live PUT pet.enabled → GET /api/feed against an isolated daemon
 ```
 
 The selftest uses its own defaults suite (`com.ned.menubar.pet-selftest`, removed afterwards) and briefly shows the
-panel to check the toggle; the snapshot renders `PetView` with `ImageRenderer` (bubble open, motion off) over a
-desktop-like backdrop.
+panel; the snapshot renders `PetView` with `ImageRenderer` (bubble open, motion off) over a desktop-like backdrop.
 
 ## Persona
 

@@ -9,7 +9,7 @@ enum PetMood: String, CaseIterable, Sendable {
     case offline, blocked, needsInput, attention, running, idle
 }
 
-/// Only what `StateStore` / `DaemonManager` already have (no daemon change).
+/// Only what `StateStore` / `DaemonManager` already have.
 struct PetInput: Sendable {
     struct Session: Sendable {
         var worktree: String
@@ -30,13 +30,12 @@ struct PetLine: Equatable, Sendable {
 
 struct PetExpression: Equatable, Sendable {
     var mood: PetMood
-    /// Every applicable line, priority order. The first is the mood's bubble; the hover bubble shows the top 3.
+    /// Every applicable status line, priority order. The first is the hover bubble's status line.
     var lines: [PetLine]
     /// Open attention count on the character (not while offline).
     var badge: Int?
 
-    /// Bubble text on a state change (`nil` for idle).
-    var bubble: String? { lines.first?.text }
+    var status: PetLine? { lines.first }
     var summary: [PetLine] { Array(lines.prefix(3)) }
 
     static let idle = PetExpression(mood: .idle, lines: [], badge: nil)
@@ -69,6 +68,85 @@ enum PetMapping {
     }
 }
 
+// MARK: - Messages (pure; checked by --pet-selftest)
+
+/// One chat-style bubble: a feed item (GET /api/feed), the day's greeting, a "새 소식 N" bundle or a status note (끝 / 연결 끊김).
+struct PetMessage: Equatable, Sendable {
+    var key: String
+    /// Feed kind (session/email/slack/thread/jira/github/sentry/calendar/briefing/other) or greeting/summary/done/offline.
+    var kind: String
+    /// The pet.messages toggle (nil = none).
+    var petKind: String?
+    var title: String
+    var detail: String = ""
+    var url: String? = nil
+    var deep: String? = nil
+
+    init(key: String, kind: String, petKind: String?, title: String, detail: String = "", url: String? = nil, deep: String? = nil) {
+        self.key = key; self.kind = kind; self.petKind = petKind; self.title = title; self.detail = detail; self.url = url; self.deep = deep
+    }
+
+    init(_ f: FeedItem) {
+        self.init(key: f.key, kind: f.kind, petKind: f.pet_kind, title: f.title, detail: f.detail, url: f.url, deep: f.deep)
+    }
+
+    static func greeting(_ p: Persona, at date: Date) -> PetMessage {
+        PetMessage(key: PetInbox.greetingKey(date), kind: "greeting", petKind: "greeting", title: p.greeting(at: date))
+    }
+    static func summary(_ items: [PetMessage]) -> PetMessage {
+        PetMessage(key: "summary:\(items.first?.key ?? "")", kind: "summary", petKind: nil, title: "새 소식 \(items.count)",
+                   detail: items.prefix(2).map(\.title).joined(separator: " · "))
+    }
+    static let done = PetMessage(key: "status:done", kind: "done", petKind: "session", title: PetMapping.doneText)
+    static let offline = PetMessage(key: "status:offline", kind: "offline", petKind: nil, title: "연결 끊김", detail: "데몬이 응답하지 않아요")
+}
+
+/// What pops up: new feed keys only (seen ones never again), first run seeds everything as seen (= 통신기),
+/// switched-off kinds and quiet hours pop nothing (their keys still become seen), more than `maxBurst` at once → one
+/// "새 소식 N", and the persona greeting once a day (first non-quiet look of the day). The seen keys are all it keeps.
+struct PetInbox: Equatable {
+    static let maxBurst = 3
+    static let keep = 600
+
+    /// Oldest first; `nil` = never seeded (first run).
+    private(set) var seen: [String]?
+
+    init(seen: [String]?) { self.seen = seen }
+
+    var seeded: Bool { seen != nil }
+    func hasSeen(_ key: String) -> Bool { seen?.contains(key) == true }
+
+    static func greetingKey(_ date: Date) -> String {
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return String(format: "greet:%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    /// `feed` newest first (as the daemon sends it). `greeting` = today's greeting, or nil when the pet isn't showing.
+    mutating func ingest(_ feed: [FeedItem], prefs: PetSettings, quiet: Bool, greeting: PetMessage?) -> [PetMessage] {
+        var s = seen ?? []
+        let firstRun = seen == nil
+        let known = Set(s)
+        let fresh = feed.filter { !known.contains($0.key) }.reversed().map(PetMessage.init)
+        s.append(contentsOf: fresh.map(\.key))
+        var out: [PetMessage] = []
+        if !quiet, let g = greeting, prefs.messageOn("greeting"), !known.contains(g.key) {
+            s.append(g.key)
+            out.append(g)
+        }
+        if s.count > Self.keep { s.removeFirst(s.count - Self.keep) }
+        seen = s
+        guard !firstRun, !quiet else { return out }
+        let shown = fresh.filter { prefs.messageOn($0.petKind) }
+        out += shown.count > Self.maxBurst ? [PetMessage.summary(Array(shown.reversed()))] : shown
+        return out
+    }
+
+    /// The hover list: the newest `n` feed items of switched-on kinds.
+    static func recent(_ feed: [FeedItem], prefs: PetSettings, n: Int = 3) -> [PetMessage] {
+        Array(feed.filter { prefs.messageOn($0.pet_kind) }.prefix(n)).map(PetMessage.init)
+    }
+}
+
 /// Where the panel goes: the saved origin if the character is still (mostly) on a screen, else the default
 /// (bottom-right of the main screen's visible frame — Dock and menu bar excluded).
 enum PetPlacement {
@@ -96,9 +174,17 @@ enum PetPlacement {
 
 /// Fixed panel geometry: the character sits at the bottom-right, the bubble grows up/left from it.
 enum PetLayout {
-    static let panel = CGSize(width: 240, height: 160)
-    static let character: CGFloat = 72
-    static let inset: CGFloat = 8
+    static let panel = CGSize(width: 280, height: 300)
+    static let character: CGFloat = 76
+    /// Room around the character card for its glow.
+    static let inset: CGFloat = 10
+    /// Character card (rounded, state-coloured edge) and the persona mark inside it.
+    static let card: CGFloat = 64
+    static let tile: CGFloat = 54
+    /// = 통신기 --cm-radius (16px) for the bubble; the card keeps the same look at its size.
+    static let bubbleRadius: CGFloat = 16
+    static let cardRadius: CGFloat = 18
+    static let bubbleWidth: CGFloat = panel.width - 2 * inset - 6
     /// In AppKit coordinates (origin bottom-left) of a panel of `size`.
     static func characterRect(in size: CGSize) -> CGRect {
         CGRect(x: size.width - inset - character, y: inset, width: character, height: character)
@@ -107,16 +193,31 @@ enum PetLayout {
 
 // MARK: - Model
 
+/// What the bubble shows right now.
+enum PetBubbleContent: Equatable {
+    case message(PetMessage)
+    /// Hover: the status line (if not idle) + the newest messages, or the persona's "nothing new".
+    case list(status: PetLine?, items: [PetMessage], empty: String?)
+}
+
 @MainActor
 final class PetModel: ObservableObject {
     @Published private(set) var expression = PetExpression.idle
     @Published private(set) var persona: PersonaID = .ned
-    /// The state-change bubble currently shown (auto-collapses).
-    @Published private(set) var bubbleText: String?
-    @Published var hovering = false
+    /// The message bubble on screen (auto-collapses); queued ones follow in order.
+    @Published private(set) var current: PetMessage?
+    @Published private(set) var queue: [PetMessage] = []
+    @Published private(set) var recent: [PetMessage] = []
+    /// Hover list open (mouse over the character, or still over the open list).
+    @Published var listOpen = false
     @Published var reduceMotion: Bool
+    /// Mouse over the bubble: the current message stays until it leaves.
+    var bubbleHovered = false { didSet { if !bubbleHovered, current != nil { schedule(1.5) } } }
+    /// Bubble rows in AppKit panel coordinates (row index → rect), reported by `PetView` for `PetBubbleHitView`.
+    @Published var bubbleFrame: CGRect = .zero
+    var rowFrames: [Int: CGRect] = [:]
 
-    static let bubbleSeconds: TimeInterval = 5
+    static let bubbleSeconds: TimeInterval = 5.5
     static let doneSeconds: TimeInterval = 2.5
     private var hideWork: DispatchWorkItem?
 
@@ -125,52 +226,106 @@ final class PetModel: ObservableObject {
     }
 
     /// `quiet` = the daemon's quiet hours (`state.json` `quiet`): no automatic bubble, hover still works.
-    func update(_ e: PetExpression, persona p: PersonaID, quiet: Bool) {
+    /// `sessionOn` = pet.messages.session (the 끝 note belongs to it).
+    func update(_ e: PetExpression, persona p: PersonaID, quiet: Bool, sessionOn: Bool = true) {
         if p != persona { persona = p }
         guard e != expression else { return }
         let prev = expression
         expression = e
-        guard e.mood != prev.mood || e.bubble != prev.bubble else { return } // badge-only change
-        if quiet { collapse(); return }
-        if let b = e.bubble { flash(b, for: Self.bubbleSeconds) }
-        else if PetMapping.showsDone(from: prev.mood, to: e.mood) { flash(PetMapping.doneText, for: Self.doneSeconds) }
-        else { collapse() }
+        guard e.mood != prev.mood, !quiet else { return }
+        if e.mood == .offline { enqueue([.offline]) }
+        else if prev.mood == .offline { drop("status:offline") }
+        else if sessionOn, PetMapping.showsDone(from: prev.mood, to: e.mood) { enqueue([.done]) }
     }
 
-    /// Lines in the bubble right now: hover → top 3 (or the persona's "nothing new"), else the auto bubble.
-    var visibleLines: [PetLine] {
-        if hovering { return expression.summary.isEmpty ? [PetLine(mood: .idle, text: persona.persona.nothingNew)] : expression.summary }
-        guard let t = bubbleText else { return [] }
-        return [PetLine(mood: t == PetMapping.doneText ? .idle : expression.mood, text: t)]
+    func setRecent(_ r: [PetMessage]) { if r != recent { recent = r } }
+
+    /// Up to `PetInbox.maxBurst` waiting (current excluded); overflow folds the waiting ones into one "새 소식 N".
+    func enqueue(_ msgs: [PetMessage]) {
+        guard !msgs.isEmpty else { return }
+        var q = queue + msgs.filter { m in m.key != current?.key && !queue.contains { $0.key == m.key } }
+        if q.count > PetInbox.maxBurst {
+            let greet = q.filter { $0.kind == "greeting" }
+            let rest = q.filter { $0.kind != "greeting" }
+            q = greet + [PetMessage.summary(rest.reversed())]
+        }
+        queue = q
+        if current == nil { next() }
     }
 
-    /// For snapshots: show a fixed state with its bubble open, no timers.
-    func pin(_ e: PetExpression, persona p: PersonaID, bubble: String?, hovering h: Bool) {
+    var content: PetBubbleContent? {
+        if listOpen {
+            let status = expression.mood == .idle ? nil : expression.status
+            return .list(status: status, items: recent, empty: status == nil && recent.isEmpty ? persona.persona.nothingNew : nil)
+        }
+        return current.map(PetBubbleContent.message)
+    }
+
+    /// For snapshots: a fixed state with its bubble open, no timers.
+    func pin(_ e: PetExpression, persona p: PersonaID, message: PetMessage?, recent r: [PetMessage] = [], list: Bool = false) {
         hideWork?.cancel()
-        expression = e; persona = p; bubbleText = bubble; hovering = h; reduceMotion = true
+        expression = e; persona = p; current = message; queue = []; recent = r; listOpen = list; reduceMotion = true
     }
 
-    private func flash(_ text: String, for seconds: TimeInterval) {
+    private func next() {
+        guard !queue.isEmpty else { current = nil; hideWork?.cancel(); return }
+        current = queue.removeFirst()
+        schedule(current?.kind == "done" ? Self.doneSeconds : Self.bubbleSeconds)
+    }
+
+    private func drop(_ key: String) {
+        queue.removeAll { $0.key == key }
+        if current?.key == key { next() }
+    }
+
+    private func schedule(_ seconds: TimeInterval) {
         hideWork?.cancel()
-        bubbleText = text
-        let w = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.bubbleText = nil } }
+        let w = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if self.bubbleHovered { self.schedule(1.5) } else { self.next() }
+            }
+        }
         hideWork = w
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: w)
     }
 
-    private func collapse() {
-        hideWork?.cancel(); hideWork = nil
-        bubbleText = nil
-    }
+    /// Tests: show the next message now (as if the timer fired).
+    func advance() { next() }
 }
 
 // MARK: - Views
 
-private enum PetColors {
-    static let warning = Color(hex: 0xFF453A)
-    static let waiting = Color(hex: 0xFF9F0A)
+/// Colours are the dashboard's tokens (packages/daemon/public/css/tokens.css, ned persona): --amber, --red, --bubble,
+/// --edge; the edge / glow follow 통신기 comms.css (--cm-edge = accent 70 %, --cm-glow = accent 50 %).
+enum PetColors {
+    static func waiting(_ dark: Bool) -> Color { dark ? Color(hex: 0xF0AD3C) : Color(hex: 0xA96B00) } // --amber
+    static func error(_ dark: Bool) -> Color { dark ? Color(hex: 0xF08C80) : Color(hex: 0x8F1D17) }   // --red
+    static func card(_ dark: Bool) -> Color { dark ? Color(hex: 0x1B2337) : Color(hex: 0xF8F3EA) }    // --bubble
+    static func text(_ dark: Bool) -> Color { dark ? Color(hex: 0xE8EBF3) : Color(hex: 0x1C2133) }    // --fg
+    static func dim(_ dark: Bool) -> Color { dark ? Color(hex: 0x9CA6BD) : Color(hex: 0x5D6376) }     // --dim
+    static let offline = Color(hex: 0x626D88)                                                         // --faint
 
-    static func icon(_ m: PetMood) -> String {
+    /// Edge colour of the card / bubble for a mood.
+    static func edge(_ m: PetMood, _ p: Persona, dark: Bool) -> Color {
+        switch m {
+        case .offline: return offline
+        case .blocked: return error(dark)
+        case .needsInput: return waiting(dark)
+        case .attention, .running, .idle: return p.accent
+        }
+    }
+    /// Outer glow strength (0 = none): 확인할 것 = accent 진하게, offline = none.
+    static func glow(_ m: PetMood) -> Double {
+        switch m {
+        case .offline: return 0
+        case .attention, .blocked: return 0.8
+        case .needsInput: return 0.65
+        case .running, .idle: return 0.5
+        }
+    }
+
+    static func moodSymbol(_ m: PetMood) -> String {
         switch m {
         case .offline: return "bolt.horizontal.circle"
         case .blocked: return "exclamationmark.triangle.fill"
@@ -181,14 +336,29 @@ private enum PetColors {
         }
     }
 
-    static func tint(_ m: PetMood, _ p: Persona) -> Color {
-        switch m {
-        case .offline: return .gray
-        case .blocked: return warning
-        case .needsInput: return waiting
-        case .attention: return p.accent
-        case .running: return p.led
-        case .idle: return p.led
+    /// Source icon per message kind (SF Symbols — no emoji).
+    static func kindSymbol(_ kind: String) -> String {
+        switch kind {
+        case "slack", "thread": return "number"
+        case "email": return "envelope.fill"
+        case "jira": return "checklist"
+        case "github": return "arrow.triangle.pull"
+        case "sentry": return "ant.fill"
+        case "calendar": return "calendar"
+        case "session": return "terminal.fill"
+        case "briefing": return "antenna.radiowaves.left.and.right"
+        case "greeting": return "sun.max.fill"
+        case "summary": return "tray.full.fill"
+        case "done": return "checkmark.circle.fill"
+        case "offline": return "bolt.horizontal.circle"
+        default: return "bell.fill"
+        }
+    }
+    static func kindTint(_ kind: String, _ p: Persona, dark: Bool) -> Color {
+        switch kind {
+        case "offline": return offline
+        case "session": return waiting(dark)
+        default: return p.accent
         }
     }
 }
@@ -205,85 +375,158 @@ enum PetArt {
     }
 }
 
-struct PetView: View {
-    @ObservedObject var model: PetModel
-
-    var body: some View {
-        let p = model.persona.persona
-        VStack(alignment: .trailing, spacing: 6) {
-            Spacer(minLength: 0)
-            let lines = model.visibleLines
-            if !lines.isEmpty {
-                PetBubble(lines: lines, persona: p)
-                    .transition(model.reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.9, anchor: .bottomTrailing)))
-            }
-            PetCharacter(mood: model.expression.mood, persona: p, badge: model.expression.badge, reduceMotion: model.reduceMotion)
-        }
-        .padding(PetLayout.inset)
-        .frame(width: PetLayout.panel.width, height: PetLayout.panel.height, alignment: .bottomTrailing)
-        .animation(model.reduceMotion ? nil : .easeOut(duration: 0.2), value: model.visibleLines)
+private struct BubbleFrameKey: PreferenceKey {
+    static let defaultValue: [Int: CGRect] = [:]
+    static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) { value.merge(nextValue()) { $1 } }
+}
+private extension View {
+    /// Report this view's frame in the panel's coordinate space under `id` (-1 = whole bubble, ≥0 = a list row).
+    func petFrame(_ id: Int) -> some View {
+        background(GeometryReader { g in Color.clear.preference(key: BubbleFrameKey.self, value: [id: g.frame(in: .named("pet"))]) })
     }
 }
 
+struct PetView: View {
+    @ObservedObject var model: PetModel
+    private static let fade: Animation = .easeInOut(duration: 0.5)
+
+    var body: some View {
+        let p = model.persona.persona
+        VStack(alignment: .trailing, spacing: 8) {
+            Spacer(minLength: 0)
+            if let c = model.content {
+                PetBubble(content: c, mood: model.expression.mood, persona: p)
+                    .transition(.opacity)
+                    .id(bubbleID(c))
+            }
+            PetCharacter(mood: model.expression.mood, persona: p, badge: model.expression.badge, reduceMotion: model.reduceMotion)
+                .frame(width: PetLayout.character, height: PetLayout.character)
+        }
+        .padding(PetLayout.inset)
+        .frame(width: PetLayout.panel.width, height: PetLayout.panel.height, alignment: .bottomTrailing)
+        .coordinateSpace(name: "pet")
+        .animation(Self.fade, value: model.content)
+        .animation(Self.fade, value: model.expression.mood)
+        .onPreferenceChange(BubbleFrameKey.self) { frames in
+            // SwiftUI (top-left origin) → AppKit panel coordinates (bottom-left).
+            let h = PetLayout.panel.height
+            let flip = { (r: CGRect) in CGRect(x: r.minX, y: h - r.maxY, width: r.width, height: r.height) }
+            MainActor.assumeIsolated {
+                model.rowFrames = frames.filter { $0.key >= 0 }.mapValues(flip)
+                let b = frames[-1].map(flip) ?? .zero
+                if model.bubbleFrame != b { model.bubbleFrame = b }
+            }
+        }
+    }
+
+    private func bubbleID(_ c: PetBubbleContent) -> String {
+        switch c {
+        case .message(let m): return "m:" + m.key
+        case .list: return "list"
+        }
+    }
+}
+
+/// Chat-style bubble (통신기 메시지 탭): source icon + one-line title (+ short detail); the hover list stacks rows.
+/// Rounded like the card, edge + glow in the pet's state colour.
 struct PetBubble: View {
-    let lines: [PetLine]
+    let content: PetBubbleContent
+    let mood: PetMood
     let persona: Persona
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, l in
-                HStack(spacing: 5) {
-                    Image(systemName: PetColors.icon(l.mood)).font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(PetColors.tint(l.mood, persona))
-                    Text(l.text).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.middle)
-                        .foregroundStyle(scheme == .dark ? Color(hex: 0xF2F2F4) : Color(hex: 0x1D1D1F))
+        let dark = scheme == .dark
+        let edge = PetColors.edge(mood, persona, dark: dark)
+        VStack(alignment: .leading, spacing: 6) {
+            switch content {
+            case .message(let m):
+                row(icon: PetColors.kindSymbol(m.kind), tint: PetColors.kindTint(m.kind, persona, dark: dark), title: m.title, detail: m.detail, lines: 2, dark: dark)
+            case .list(let status, let items, let empty):
+                if let s = status {
+                    row(icon: PetColors.moodSymbol(s.mood), tint: PetColors.edge(s.mood, persona, dark: dark), title: s.text, detail: "", lines: 1, dark: dark, bold: true)
+                    if !items.isEmpty { Divider().opacity(0.5) }
+                }
+                ForEach(Array(items.enumerated()), id: \.offset) { i, m in
+                    row(icon: PetColors.kindSymbol(m.kind), tint: PetColors.kindTint(m.kind, persona, dark: dark), title: m.title, detail: m.detail, lines: 1, dark: dark)
+                        .petFrame(i)
+                }
+                if let e = empty {
+                    row(icon: PetColors.moodSymbol(.idle), tint: persona.accent, title: e, detail: "", lines: 1, dark: dark)
                 }
             }
         }
-        .padding(.horizontal, 10).padding(.vertical, 7)
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .fixedSize(horizontal: false, vertical: true)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(scheme == .dark ? Color(hex: 0x2C2E33) : Color.white)
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(scheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.10), lineWidth: 0.5))
-                .shadow(color: .black.opacity(scheme == .dark ? 0.45 : 0.18), radius: 4, y: 1.5)
+            RoundedRectangle(cornerRadius: PetLayout.bubbleRadius, style: .continuous)
+                .fill(PetColors.card(dark))
+                .overlay(RoundedRectangle(cornerRadius: PetLayout.bubbleRadius, style: .continuous)
+                    .strokeBorder(edge.opacity(mood == .offline ? 0.6 : 0.7), lineWidth: 1))
+                .shadow(color: .black.opacity(dark ? 0.45 : 0.18), radius: 6, y: 2)
+                .shadow(color: edge.opacity(PetColors.glow(mood) * 0.5), radius: 10)
         )
-        .frame(maxWidth: PetLayout.panel.width - 2 * PetLayout.inset, alignment: .trailing)
-        .padding(.trailing, 6)
+        .petFrame(-1) // the drawn bubble only — the click / hover area (PetBubbleHitView)
+        // Hug the text like a chat bubble, at most the panel's width, right-aligned over the character.
+        .frame(maxWidth: PetLayout.bubbleWidth, alignment: .trailing)
+        .padding(.trailing, 4)
+    }
+
+    @ViewBuilder
+    private func row(icon: String, tint: Color, title: String, detail: String, lines: Int, dark: Bool, bold: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+            Image(systemName: icon).font(.system(size: 11, weight: .semibold)).foregroundStyle(tint).frame(width: 14)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 12, weight: bold ? .semibold : .medium)).lineLimit(lines).truncationMode(.tail)
+                    .foregroundStyle(PetColors.text(dark))
+                if !detail.isEmpty {
+                    Text(detail).font(.system(size: 11)).lineLimit(1).truncationMode(.tail).foregroundStyle(PetColors.dim(dark))
+                }
+            }
+        }
+        .contentShape(Rectangle())
     }
 }
 
+/// The persona mark on a rounded card whose edge + outer glow carry the state colour. Motion: only a slow glow
+/// breath (3.6 s ease-in-out) and, at rest, a ≤1.5 % scale breath — no bounce, no shake, no emoji. 동작 줄이기 = still.
 struct PetCharacter: View {
     let mood: PetMood
     let persona: Persona
     let badge: Int?
     let reduceMotion: Bool
+    @Environment(\.colorScheme) private var scheme
+
+    static let breath: Double = 3.6
+    static let idleScale: CGFloat = 1.015
 
     var body: some View {
-        let tile: CGFloat = 58
-        ZStack {
-            if mood == .running { RunningRing(color: persona.led, still: reduceMotion) }
-            if mood == .blocked {
-                RoundedRectangle(cornerRadius: 17, style: .continuous).stroke(PetColors.warning, lineWidth: 3)
-                    .frame(width: tile + 8, height: tile + 8)
-                    .shadow(color: PetColors.warning.opacity(0.6), radius: 4)
-            }
+        let dark = scheme == .dark
+        let edge = PetColors.edge(mood, persona, dark: dark)
+        let glow = PetColors.glow(mood)
+        let shape = RoundedRectangle(cornerRadius: PetLayout.cardRadius, style: .continuous)
+        let card = ZStack {
+            shape.fill(PetColors.card(dark))
             Image(nsImage: PetArt.mark(persona.id)).resizable().interpolation(.high)
-                .frame(width: tile, height: tile)
-                .clipShape(RoundedRectangle(cornerRadius: tile * 14 / 64, style: .continuous))
-                // Hairline so the dark tile still reads on a dark desktop.
-                .overlay(RoundedRectangle(cornerRadius: tile * 14 / 64, style: .continuous).stroke(Color.white.opacity(0.22), lineWidth: 1))
-                .shadow(color: .black.opacity(0.35), radius: 3, y: 1.5)
+                .frame(width: PetLayout.tile, height: PetLayout.tile)
+                .clipShape(RoundedRectangle(cornerRadius: PetLayout.tile * 14 / 64, style: .continuous))
                 .saturation(mood == .offline ? 0 : 1)
-                .opacity(mood == .offline ? 0.45 : 1)
+                .opacity(mood == .offline ? 0.5 : 1)
         }
-        .frame(width: PetLayout.character, height: PetLayout.character)
-        .modifier(PetMotion(mood: mood, still: reduceMotion))
-        .overlay(alignment: .topLeading) {
-            if mood == .needsInput {
-                Image(systemName: "hand.wave.fill").font(.system(size: 15)).foregroundStyle(PetColors.waiting)
-                    .shadow(color: .black.opacity(0.3), radius: 1.5).offset(x: 1, y: 1)
+        .frame(width: PetLayout.card, height: PetLayout.card)
+        // Error is drawn dashed (tokens.css: --red is outlined/dashed so it never reads as the accent — Ned's accent is red too).
+        .overlay(shape.strokeBorder(edge.opacity(mood == .offline ? 0.7 : 0.9),
+                                    style: StrokeStyle(lineWidth: mood == .attention || mood == .blocked ? 2.5 : 1.5, dash: mood == .blocked ? [5, 3] : [])))
+        .shadow(color: .black.opacity(dark ? 0.45 : 0.2), radius: 4, y: 1.5)
+
+        Group {
+            if reduceMotion || glow == 0 {
+                card.shadow(color: edge.opacity(glow), radius: 10)
+            } else {
+                card.phaseAnimator([false, true]) { c, up in
+                    c.shadow(color: edge.opacity(up ? glow : glow * 0.35), radius: up ? 13 : 7)
+                        .scaleEffect(mood == .idle && up ? Self.idleScale : 1)
+                } animation: { _ in .easeInOut(duration: Self.breath) }
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -293,61 +536,11 @@ struct PetCharacter: View {
                     .background(Capsule().fill(persona.accent))
                     .overlay(Capsule().stroke(Color.white.opacity(0.85), lineWidth: 1.2))
                     .shadow(color: .black.opacity(0.3), radius: 1.5)
+                    .offset(x: 2, y: -2)
             }
         }
         .accessibilityElement()
         .accessibilityLabel(Text(persona.displayName))
-    }
-}
-
-/// Dashed arc around the tile; one SwiftUI repeat-forever rotation (Core Animation, no Timer).
-private struct RunningRing: View {
-    let color: Color
-    let still: Bool
-    @State private var spin = false
-
-    var body: some View {
-        Circle().trim(from: 0, to: 0.72)
-            .stroke(color.opacity(0.85), style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [5, 5]))
-            .frame(width: 70, height: 70)
-            .rotationEffect(.degrees(spin ? 360 : 0))
-            .animation(still ? nil : .linear(duration: 3).repeatForever(autoreverses: false), value: spin)
-            .onAppear { if !still { spin = true } }
-    }
-}
-
-/// idle: breathing · blocked: shake then pause · needsInput: bounce then pause · others: still.
-/// "동작 줄이기" → no motion at all.
-private struct PetMotion: ViewModifier {
-    let mood: PetMood
-    let still: Bool
-
-    enum Shake: CaseIterable { case rest, left, right, left2, right2
-        var angle: Double { switch self { case .rest: 0; case .left: -6; case .right: 6; case .left2: -3; case .right2: 3 } }
-    }
-    enum Bounce: CaseIterable { case rest, up, down
-        var dy: CGFloat { switch self { case .rest, .down: 0; case .up: -7 } }
-    }
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if still {
-            content
-        } else {
-            switch mood {
-            case .idle:
-                content.phaseAnimator([false, true]) { c, big in c.scaleEffect(big ? 1.035 : 1, anchor: .bottom) }
-                    animation: { _ in .easeInOut(duration: 2.4) }
-            case .blocked:
-                content.phaseAnimator(Shake.allCases) { c, s in c.rotationEffect(.degrees(s.angle)) }
-                    animation: { s in s == .rest ? .easeOut(duration: 0.08).delay(1.6) : .linear(duration: 0.07) }
-            case .needsInput:
-                content.phaseAnimator(Bounce.allCases) { c, b in c.offset(y: b.dy) }
-                    animation: { b in b == .up ? .easeOut(duration: 0.22) : b == .down ? .easeIn(duration: 0.22) : .linear(duration: 0.01).delay(1.4) }
-            case .offline, .attention, .running:
-                content
-            }
-        }
     }
 }
 
@@ -359,7 +552,16 @@ final class PetPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-/// Mouse over the character only: click → dashboard, drag → move (origin saved), right-click → menu, hover → summary.
+/// Pointer over the pet: a pointing hand (clickable), a closed hand while dragging. The panel is never key, so cursor
+/// rects don't apply — the cursor is set on enter / move and put back to the arrow on exit.
+enum PetCursor {
+    static let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect]
+    @MainActor static func over() { NSCursor.pointingHand.set() }
+    @MainActor static func dragging() { NSCursor.closedHand.set() }
+    @MainActor static func out() { NSCursor.arrow.set() }
+}
+
+/// Mouse over the character only: click → dashboard, drag → move (origin saved), right-click → menu, hover → list.
 final class PetHitView: NSView {
     weak var controller: DesktopPetController?
     private var startMouse: NSPoint = .zero
@@ -372,10 +574,11 @@ final class PetHitView: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+        addTrackingArea(NSTrackingArea(rect: .zero, options: PetCursor.options, owner: self))
     }
-    override func mouseEntered(with event: NSEvent) { controller?.model.hovering = true }
-    override func mouseExited(with event: NSEvent) { controller?.model.hovering = false }
+    override func mouseEntered(with event: NSEvent) { PetCursor.over(); controller?.hover(character: true) }
+    override func mouseMoved(with event: NSEvent) { if !dragged { PetCursor.over() } }
+    override func mouseExited(with event: NSEvent) { if !dragged { PetCursor.out() }; controller?.hover(character: false) }
 
     override func mouseDown(with event: NSEvent) {
         startMouse = NSEvent.mouseLocation
@@ -386,11 +589,17 @@ final class PetHitView: NSView {
         let p = NSEvent.mouseLocation
         let dx = p.x - startMouse.x, dy = p.y - startMouse.y
         if !dragged, hypot(dx, dy) < 3 { return }
+        if !dragged { PetCursor.dragging() }
         dragged = true
         window?.setFrameOrigin(NSPoint(x: startOrigin.x + dx, y: startOrigin.y + dy))
     }
     override func mouseUp(with event: NSEvent) {
-        if dragged { controller?.saveOrigin() } else { controller?.openDashboard() }
+        if dragged {
+            dragged = false
+            controller?.saveOrigin()
+            // saveOrigin may snap the panel back: point or arrow depending on where the pointer ended up.
+            if bounds.contains(convert(event.locationInWindow, from: nil)) { PetCursor.over() } else { PetCursor.out() }
+        } else { controller?.openDashboard() }
     }
     override func rightMouseDown(with event: NSEvent) {
         guard let menu = controller?.contextMenu() else { return }
@@ -398,33 +607,71 @@ final class PetHitView: NSView {
     }
 }
 
+/// Over the bubble (frame follows `PetModel.bubbleFrame`): click a message / list row → open it; hover keeps it open.
+final class PetBubbleHitView: NSView {
+    weak var controller: DesktopPetController?
+
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: PetCursor.options, owner: self))
+    }
+    override func mouseEntered(with event: NSEvent) { PetCursor.over(); controller?.hover(bubble: true) }
+    override func mouseMoved(with event: NSEvent) { PetCursor.over() }
+    override func mouseExited(with event: NSEvent) { PetCursor.out(); controller?.hover(bubble: false) }
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) {
+        guard let c = controller, let superview else { return }
+        c.clickBubble(at: superview.convert(event.locationInWindow, from: nil))
+    }
+}
+
 /// The floating Ned: one non-activating panel on every Space (and over full-screen apps), off by default.
-/// Shown while the `desktopPetEnabled` user default is on (menu toggle "데스크톱 펫 표시", 우클릭 "숨기기").
+/// Shown while `config.pet.enabled` (설정 → 외형 → 데스크톱 펫) is on; 우클릭 → 숨기기 saves it off through the daemon.
+/// UserDefaults keeps only the position and the seen message keys.
 @MainActor
 final class DesktopPetController: NSObject {
-    nonisolated static let enabledKey = "desktopPetEnabled"
     nonisolated static let originKey = "desktopPetOrigin"
+    nonisolated static let seenKey = "desktopPetSeen"
+
+    /// The app's pet (for the dashboard's 위치 초기화 bridge).
+    static weak var current: DesktopPetController?
 
     let defaults: UserDefaults
     let model: PetModel
     private(set) var panel: PetPanel?
-    private var kvo: NSKeyValueObservation?
+    private var bubbleHit: PetBubbleHitView?
+    private(set) var settings = PetSettings()
+    private(set) var inbox: PetInbox
     private var subs: Set<AnyCancellable> = []
     private var observers: [NSObjectProtocol] = []
+    private var overCharacter = false
+    private var overBubble = false
+    private var closeWork: DispatchWorkItem?
+
     /// Click / 대시보드 열기 — the menu's existing path.
     var openDashboardAction: () -> Void = { DashboardWindowController.shared.show() }
+    /// 펫 설정… — the dashboard on 설정 → 외형 → 데스크톱 펫.
+    var openSettingsAction: () -> Void = { DashboardWindowController.shared.showPetSettings() }
+    /// 숨기기 — saves pet.enabled = false (StateStore.setPetEnabled → PUT /api/config).
+    var hideAction: () -> Void = { StateStore.current?.setPetEnabled(false) }
+    /// A message's link: app deep link (DeepLink.open, web fallback) or the web URL.
+    var openURLAction: (_ deep: URL?, _ web: URL?) -> Void = { deep, web in
+        if let deep, DeepLink.isDeep(deep) { DeepLink.open(deep, web: web) } else if let web { NSWorkspace.shared.open(web) }
+    }
+    var now: () -> Date = Date.init
 
-    var isEnabled: Bool { defaults.bool(forKey: Self.enabledKey) }
+    var isEnabled: Bool { settings.enabled }
     var isShowing: Bool { panel?.isVisible == true }
 
     init(defaults: UserDefaults = .standard, model: PetModel? = nil) {
         self.defaults = defaults
         self.model = model ?? PetModel()
+        self.inbox = PetInbox(seen: defaults.stringArray(forKey: Self.seenKey))
         super.init()
-        kvo = defaults.observe(\.desktopPetEnabled, options: [.new]) { [weak self] _, _ in
-            if Thread.isMainThread { MainActor.assumeIsolated { self?.sync() } }
-            else { DispatchQueue.main.async { MainActor.assumeIsolated { self?.sync() } } }
-        }
+        Self.current = self
         let ws = NSWorkspace.shared.notificationCenter
         observers.append(ws.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.model.reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
@@ -432,10 +679,12 @@ final class DesktopPetController: NSObject {
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.place() }
         })
-        sync()
+        self.model.$bubbleFrame.sink { [weak self] f in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.bubbleHit?.frame = f } }
+        }.store(in: &subs)
     }
 
-    /// Follow the store (state.json) and the daemon supervisor (health) — both already published.
+    /// Follow the store (state.json + GET /api/feed) and the daemon supervisor (health) — both already published.
     func attach(store: StateStore, daemon: DaemonManager? = nil) {
         let daemon = daemon ?? .shared
         // objectWillChange fires before the new value lands: read on the next main-queue turn.
@@ -449,16 +698,34 @@ final class DesktopPetController: NSObject {
 
     func refresh(store: StateStore, daemon: DaemonManager) {
         let s = store.state
+        apply(settings: store.pet)
         let input = PetInput(
             alive: s.daemonAlive || daemon.isHealthy || daemon.isBooting,
             sessions: s.sessions.map { .init(worktree: $0.worktree, status: $0.status, isWorker: $0.is_worker) },
             openAttention: store.attentionCount)
-        model.update(PetMapping.expression(input), persona: store.personaID, quiet: s.quiet)
+        model.update(PetMapping.expression(input), persona: store.personaID, quiet: s.quiet, sessionOn: settings.messageOn("session"))
+        if store.feedLoaded { ingest(store.feed, quiet: s.quiet, persona: store.persona) }
     }
 
-    /// Show / hide to match the user default.
+    /// New feed items → bubbles (only while showing; hidden, they just become seen). Seen keys saved when they change.
+    func ingest(_ feed: [FeedItem], quiet: Bool, persona: Persona) {
+        let before = inbox
+        let msgs = inbox.ingest(feed, prefs: settings, quiet: quiet, greeting: isEnabled ? .greeting(persona, at: now()) : nil)
+        if inbox != before { defaults.set(inbox.seen, forKey: Self.seenKey) }
+        model.setRecent(PetInbox.recent(feed, prefs: settings))
+        if isEnabled { model.enqueue(msgs) }
+    }
+
+    /// config.pet → show / hide.
+    func apply(settings s: PetSettings) {
+        guard s != settings || (s.enabled != isShowing) else { return }
+        settings = s
+        sync()
+    }
+
+    /// Show / hide to match `settings.enabled`.
     func sync() {
-        if isEnabled {
+        if settings.enabled {
             if panel == nil { panel = makePanel() }
             place()
             panel?.orderFrontRegardless()
@@ -467,14 +734,55 @@ final class DesktopPetController: NSObject {
         }
     }
 
-    func hide() { defaults.set(false, forKey: Self.enabledKey) }
+    func hide() {
+        settings.enabled = false
+        sync()
+        hideAction()
+    }
 
     func openDashboard() { openDashboardAction() }
+
+    func hover(character on: Bool) { overCharacter = on; syncList() }
+    func hover(bubble on: Bool) { overBubble = on; model.bubbleHovered = on; syncList() }
+    /// The list opens over the character and stays while the mouse moves onto it; closes 0.3 s after leaving both.
+    private func syncList() {
+        closeWork?.cancel()
+        if overCharacter { model.listOpen = true; return }
+        guard model.listOpen, !overBubble else { return }
+        let w = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { guard let self, !self.overCharacter, !self.overBubble else { return }; self.model.listOpen = false } }
+        closeWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: w)
+    }
+
+    /// A click on the bubble (panel coordinates): the list row under it, else the current message.
+    func clickBubble(at p: CGPoint) {
+        switch model.content {
+        case .list(_, let items, _):
+            if let (i, _) = model.rowFrames.first(where: { $0.value.contains(p) }), i < items.count { open(items[i]) }
+        case .message(let m):
+            open(m)
+            model.advance()
+        case nil: break
+        }
+    }
+
+    /// Item url → its app deep link (설정 → 링크 열기, from the daemon) or the web; no url → the dashboard.
+    func open(_ m: PetMessage) {
+        let web = m.url.flatMap(URL.init(string:)).flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
+        let deep = m.deep.flatMap(URL.init(string:)).flatMap { DeepLink.isDeep($0) ? $0 : nil }
+        if deep == nil && web == nil { openDashboard() } else { openURLAction(deep, web) }
+    }
 
     func saveOrigin() {
         guard let o = panel?.frame.origin else { return }
         defaults.set(PetPlacement.encode(o), forKey: Self.originKey)
         place() // snaps back to the default if it was dropped off-screen
+    }
+
+    /// 설정 → 데스크톱 펫 → 위치 초기화.
+    func resetPosition() {
+        defaults.removeObject(forKey: Self.originKey)
+        place()
     }
 
     func place() {
@@ -488,14 +796,17 @@ final class DesktopPetController: NSObject {
     func contextMenu() -> NSMenu {
         let m = NSMenu()
         let open = NSMenuItem(title: "대시보드 열기", action: #selector(menuOpen), keyEquivalent: "")
+        let settings = NSMenuItem(title: "펫 설정…", action: #selector(menuSettings), keyEquivalent: "")
         let hide = NSMenuItem(title: "숨기기", action: #selector(menuHide), keyEquivalent: "")
-        for i in [open, hide] { i.target = self }
+        for i in [open, settings, hide] { i.target = self }
         m.addItem(open)
+        m.addItem(settings)
         m.addItem(.separator())
         m.addItem(hide)
         return m
     }
     @objc private func menuOpen() { openDashboard() }
+    @objc private func menuSettings() { openSettingsAction() }
     @objc private func menuHide() { hide() }
 
     private func makePanel() -> PetPanel {
@@ -518,6 +829,12 @@ final class DesktopPetController: NSObject {
         host.frame = container.bounds
         host.autoresizingMask = [.width, .height]
         container.addSubview(host)
+        let bubble = PetBubbleHitView(frame: model.bubbleFrame)
+        bubble.controller = self
+        bubble.setAccessibilityRole(.button)
+        bubble.setAccessibilityLabel("펫 말풍선 — 클릭하면 열기")
+        container.addSubview(bubble)
+        bubbleHit = bubble
         let hit = PetHitView(frame: PetLayout.characterRect(in: size))
         hit.controller = self
         hit.setAccessibilityRole(.button)
@@ -525,159 +842,5 @@ final class DesktopPetController: NSObject {
         container.addSubview(hit)
         p.contentView = container
         return p
-    }
-}
-
-extension UserDefaults {
-    /// KVO key path for `DesktopPetController.enabledKey` (the property name must equal the key).
-    @objc dynamic var desktopPetEnabled: Bool { bool(forKey: DesktopPetController.enabledKey) }
-}
-
-// MARK: - --pet-selftest / --pet-snapshot
-
-@MainActor
-enum PetSelfTest {
-    static func run() -> Int32 {
-        final class Tally { var failures = 0 }
-        let tally = Tally()
-        func check(_ ok: Bool, _ msg: String) { print("pet-selftest: \(ok ? "PASS" : "FAIL") — \(msg)"); fflush(stdout); if !ok { tally.failures += 1 } }
-        typealias S = PetInput.Session
-        func ex(_ i: PetInput) -> PetExpression { PetMapping.expression(i) }
-
-        // Mapping: priority, copy, worker exclusion.
-        var e = ex(PetInput(alive: true))
-        check(e.mood == .idle && e.bubble == nil && e.badge == nil, "idle: no sessions → idle, no bubble, no badge")
-        e = ex(PetInput(alive: false, sessions: [S(worktree: "a", status: "error")], openAttention: 3))
-        check(e.mood == .offline && e.bubble == "연결 끊김" && e.badge == nil, "offline beats everything: \(e.bubble ?? "nil")")
-        e = ex(PetInput(alive: true, sessions: [S(worktree: "ned-daemon", status: "waiting"), S(worktree: "ned-menubar", status: "error"), S(worktree: "x", status: "running")], openAttention: 2))
-        check(e.mood == .blocked && e.bubble == "ned-menubar 오류", "error beats waiting/attention/running: \(e.bubble ?? "nil")")
-        check(e.summary.map(\.text) == ["ned-menubar 오류", "ned-daemon 입력 기다림", "확인할 것 2"], "hover summary = top 3: \(e.summary.map(\.text))")
-        check(e.badge == 2, "badge = open attention under a higher mood")
-        e = ex(PetInput(alive: true, sessions: [S(worktree: "a", status: "error"), S(worktree: "b", status: "error")]))
-        check(e.bubble == "오류 2", "two errors → \(e.bubble ?? "nil")")
-        e = ex(PetInput(alive: true, sessions: [S(worktree: "ned-daemon", status: "waiting"), S(worktree: "r", status: "running")], openAttention: 1))
-        check(e.mood == .needsInput && e.bubble == "ned-daemon 입력 기다림", "waiting beats attention/running: \(e.bubble ?? "nil")")
-        e = ex(PetInput(alive: true, sessions: [S(worktree: "a", status: "waiting"), S(worktree: "b", status: "waiting"), S(worktree: "w", status: "waiting", isWorker: true)]))
-        check(e.bubble == "입력 기다림 2", "several waiting → count, worker not counted: \(e.bubble ?? "nil")")
-        e = ex(PetInput(alive: true, sessions: [S(worktree: "w", status: "waiting", isWorker: true)]))
-        check(e.mood == .idle, "worker-only waiting → idle (worker excluded): \(e.mood.rawValue)")
-        e = ex(PetInput(alive: true, sessions: [S(worktree: "w", status: "waiting", isWorker: true), S(worktree: "r", status: "running")], openAttention: 4))
-        check(e.mood == .attention && e.bubble == "확인할 것 4" && e.badge == 4, "worker waiting + attention → attention: \(e.bubble ?? "nil")")
-        e = ex(PetInput(alive: true, sessions: [S(worktree: "r1", status: "running"), S(worktree: "r2", status: "running", isWorker: true), S(worktree: "d", status: "done")]))
-        check(e.mood == .running && e.bubble == "작업 중 2", "running (workers included) → \(e.bubble ?? "nil")")
-        e = ex(PetInput(alive: true, sessions: [S(worktree: "d", status: "done"), S(worktree: "i", status: "idle")]))
-        check(e.mood == .idle, "done/idle sessions only → idle")
-        check(PetMapping.showsDone(from: .needsInput, to: .idle) && PetMapping.showsDone(from: .attention, to: .idle)
-              && !PetMapping.showsDone(from: .running, to: .idle) && !PetMapping.showsDone(from: .needsInput, to: .running), "끝 only for needsInput/attention → idle")
-
-        // Bubble model: state change → bubble, quiet hours → none, resolved → 끝, hover → summary.
-        let m = PetModel(reduceMotion: true)
-        let waiting = ex(PetInput(alive: true, sessions: [S(worktree: "ned-daemon", status: "waiting")]))
-        m.update(waiting, persona: .ned, quiet: false)
-        check(m.bubbleText == "ned-daemon 입력 기다림", "state change shows bubble: \(m.bubbleText ?? "nil")")
-        m.update(.idle, persona: .ned, quiet: false)
-        check(m.bubbleText == PetMapping.doneText, "needsInput → idle shows 끝: \(m.bubbleText ?? "nil")")
-        m.update(waiting, persona: .ned, quiet: true)
-        check(m.bubbleText == nil, "quiet hours: no automatic bubble")
-        m.hovering = true
-        check(m.visibleLines.map(\.text) == ["ned-daemon 입력 기다림"], "hover shows summary even in quiet hours")
-        m.update(.idle, persona: .alfred, quiet: false)
-        check(m.persona == .alfred && m.visibleLines.map(\.text) == [PersonaID.alfred.persona.nothingNew], "persona follows; idle hover = persona nothingNew")
-        m.hovering = false
-
-        // Placement.
-        let main = CGRect(x: 0, y: 80, width: 1440, height: 795)
-        let d = PetPlacement.origin(saved: nil, size: PetLayout.panel, screens: [main], main: main)
-        let c = PetLayout.characterRect(in: PetLayout.panel).offsetBy(dx: d.x, dy: d.y)
-        check(main.contains(c) && main.maxX - c.maxX == PetPlacement.margin && c.minY - main.minY == PetPlacement.margin, "default = bottom-right of visible frame: \(c)")
-        let kept = CGPoint(x: 300, y: 400)
-        check(PetPlacement.origin(saved: kept, size: PetLayout.panel, screens: [main], main: main) == kept, "on-screen saved origin kept")
-        check(PetPlacement.origin(saved: CGPoint(x: 5000, y: 400), size: PetLayout.panel, screens: [main], main: main) == d, "off-screen saved origin → default")
-        check(PetPlacement.decode(PetPlacement.encode(CGPoint(x: 12, y: -40))) == CGPoint(x: 12, y: -40) && PetPlacement.decode("junk") == nil, "origin encode/decode")
-
-        // Toggle → panel (own defaults suite; never com.ned.menubar).
-        let suite = "com.ned.menubar.pet-selftest"
-        UserDefaults().removePersistentDomain(forName: suite)
-        let defaults = UserDefaults(suiteName: suite)!
-        _ = NSApplication.shared
-        let ctl = DesktopPetController(defaults: defaults, model: PetModel(reduceMotion: true))
-        ctl.openDashboardAction = {}
-        check(!ctl.isEnabled && !ctl.isShowing && ctl.panel == nil, "default off: no panel")
-        defaults.set(true, forKey: DesktopPetController.enabledKey)
-        check(ctl.isShowing, "toggle on → panel shown")
-        if let p = ctl.panel {
-            check(p.level == .floating && p.styleMask.contains(.nonactivatingPanel) && !p.canBecomeKey && !p.isOpaque
-                  && p.collectionBehavior.isSuperset(of: [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]),
-                  "panel: floating, non-activating, never key, transparent, all Spaces + full screen")
-            check(NSScreen.screens.contains { $0.visibleFrame.intersects(p.frame) }, "panel on a screen: \(p.frame)")
-        }
-        ctl.hide()
-        check(!ctl.isEnabled && !ctl.isShowing, "우클릭 숨기기 → default off, panel hidden")
-        defaults.set(true, forKey: DesktopPetController.enabledKey)
-        check(ctl.isShowing, "toggle on again → shown")
-        defaults.set(false, forKey: DesktopPetController.enabledKey)
-        check(!ctl.isShowing, "toggle off → hidden")
-        check(ctl.contextMenu().items.filter { !$0.isSeparatorItem }.map(\.title) == ["대시보드 열기", "숨기기"], "context menu items")
-        UserDefaults().removePersistentDomain(forName: suite)
-
-        print("pet-selftest: \(tally.failures == 0 ? "OK" : "\(tally.failures) FAILED")")
-        fflush(stdout)
-        return tally.failures == 0 ? 0 : 1
-    }
-}
-
-@MainActor
-enum PetSnapshot {
-    /// Synthetic states, one per mood (persona ned) — bubble open as on a state change (idle: the hover bubble).
-    static let cases: [(PetMood, PetInput)] = {
-        typealias S = PetInput.Session
-        return [
-            (.idle, PetInput(alive: true)),
-            (.running, PetInput(alive: true, sessions: [S(worktree: "ned-menubar", status: "running"), S(worktree: "ned-daemon", status: "running")])),
-            (.needsInput, PetInput(alive: true, sessions: [S(worktree: "ned-daemon", status: "waiting"), S(worktree: "ned-menubar", status: "running")], openAttention: 2)),
-            (.attention, PetInput(alive: true, sessions: [S(worktree: "ned-menubar", status: "running")], openAttention: 3)),
-            (.blocked, PetInput(alive: true, sessions: [S(worktree: "ned-menubar", status: "error"), S(worktree: "ned-daemon", status: "waiting")], openAttention: 1)),
-            (.offline, PetInput(alive: false)),
-        ]
-    }()
-
-    static func run(dir: String) -> Int32 {
-        _ = NSApplication.shared
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        var written = 0, failed = 0
-        func render(_ name: String, _ e: PetExpression, persona: PersonaID, bubble: String?, hover: Bool, dark: Bool) {
-            let m = PetModel(reduceMotion: true)
-            m.pin(e, persona: persona, bubble: bubble, hovering: hover)
-            // Backdrop stands in for the desktop so the transparent panel is reviewable.
-            let view = PetView(model: m)
-                .background(dark ? Color(hex: 0x23262C) : Color(hex: 0xDDE2E8))
-                .environment(\.colorScheme, dark ? .dark : .light)
-            let r = ImageRenderer(content: view)
-            r.scale = 2
-            let path = "\(dir)/\(name)-\(dark ? "dark" : "light").png"
-            guard let cg = r.cgImage, let png = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]),
-                  FileManager.default.createFile(atPath: path, contents: png) else {
-                print("pet-snapshot: FAIL — \(path)"); failed += 1; return
-            }
-            print("pet-snapshot: \(path) (\(cg.width)×\(cg.height))")
-            written += 1
-        }
-        for dark in [false, true] {
-            for (mood, input) in cases {
-                let e = PetMapping.expression(input)
-                if e.mood != mood { print("pet-snapshot: FAIL — \(mood.rawValue) case maps to \(e.mood.rawValue)"); failed += 1 }
-                render("pet-\(mood.rawValue)-ned", e, persona: .ned, bubble: e.bubble, hover: e.bubble == nil, dark: dark)
-            }
-            // Hover summary (top 3) and the other personas' marks.
-            let busy = PetMapping.expression(cases[4].1)
-            render("pet-hover-ned", busy, persona: .ned, bubble: nil, hover: true, dark: dark)
-            for id in PersonaID.allCases where id != .ned {
-                let e = PetMapping.expression(cases[1].1)
-                render("pet-running-\(id.rawValue)", e, persona: id, bubble: e.bubble, hover: false, dark: dark)
-            }
-        }
-        print("pet-snapshot: \(written) written, \(failed) failed → \(dir)")
-        fflush(stdout)
-        return failed == 0 ? 0 : 1
     }
 }
