@@ -186,6 +186,9 @@ export interface SchedulerDeps {
   onDailyFailed?: (at: number, attempts: number) => void;
   /** After an automatic heartbeat: when the next one is planned (state.next_heartbeat_at). */
   onHeartbeat?: (nextAt: number) => void;
+  /** 자동 업데이트 (src/self-update.ts updateTick): every tick, with quiet / idle — it decides itself whether a check or an
+   *  install is due. Runs before the quiet/idle pause (a paused tick still checks), never awaited by the tick. */
+  updates?: (cfg: NedConfig, ctx: { quiet: boolean; idle: boolean; now: number }) => Promise<unknown>;
   log: (msg: string) => void;
 }
 
@@ -374,6 +377,8 @@ export function createScheduler(d: SchedulerDeps): Scheduler {
         idle = { ...idle, mode: isch.mode, factor: isch.mode === "slow" ? isch.slow_factor : 1 }; // settings change applies now
       }
       idleNow = idle;
+
+      if (d.updates) void track(d.updates(cfg, { quiet: q.active, idle: idle.active, now: t }));
 
       if (quietEnded || idleEnded) {
         d.log(`${quietEnded ? "quiet" : "idle"}: ended — full refresh`);

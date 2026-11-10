@@ -63,6 +63,22 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         if loaded, !webView.isLoading, webView.url?.scheme == "http" { runJS(js) } else { pendingJS = js }
     }
 
+    /// Settings section to scroll to once the dashboard has loaded (menu 설정… while the boot screen is up).
+    private var pendingSection: String?
+
+    /// Menu 설정…: the dashboard's settings tab at `section` (an element id, e.g. "s-app" = 설정 → 앱).
+    func show(section: String) {
+        show()
+        guard section.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) else { return }
+        if loaded, !webView.isLoading, isDashboard(webView.url), webView.url?.scheme == "http" { runJS(Self.openSectionJS(section)) }
+        else { pendingSection = section }
+    }
+
+    /// settings-app.js `nedOpenSettings(id)`; an older dashboard without it still lands on the settings tab.
+    static func openSectionJS(_ id: String) -> String {
+        "window.nedOpenSettings ? window.nedOpenSettings('\(id)') : (location.hash = '#settings');"
+    }
+
     private func makeWebView(frame: NSRect) {
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .default()
@@ -70,6 +86,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         cfg.userContentController.add(OpenLinkHandler(), name: "openLink")
         cfg.userContentController.add(PetHandler(), name: "pet")
         cfg.userContentController.addScriptMessageHandler(LoginItemHandler(), contentWorld: .page, name: "loginItem")
+        cfg.userContentController.addScriptMessageHandler(AppSettingsHandler(), contentWorld: .page, name: "appSettings")
         webView = WKWebView(frame: frame, configuration: cfg)
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -262,6 +279,10 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         if loaded { webView.configuration.userContentController.removeAllUserScripts() }
         if loaded, webView.url?.scheme == "http", let js = pendingJS { pendingJS = nil; runJS(js) }
         if loaded { DaemonManager.shared.note("dashboard window: loaded \(webView.url?.absoluteString ?? "?") title=\(webView.title ?? "")") }
+        if loaded, webView.url?.scheme == "http", let s = pendingSection {
+            pendingSection = nil
+            runJS(Self.openSectionJS(s))
+        }
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
@@ -383,6 +404,195 @@ private final class LoginItemHandler: NSObject, WKScriptMessageHandlerWithReply 
             if let m = li.message { reply["message"] = m }
             replyHandler(reply, nil)
         }
+    }
+}
+
+/// 설정 → 앱 (public/app/tabs/settings-app.js): `webkit.messageHandlers.appSettings.postMessage(msg)` → Promise of the
+/// current values (AppSettingsBridge.snapshot). msg = {op: "get"} · {op: "set", key, value: Bool} (key ∈ Key) ·
+/// {op: "action", name} (name ∈ Action). Anything else, or a message not from the dashboard page
+/// (http://127.0.0.1|localhost:<port>), is refused with an error string (the page shows it).
+private final class AppSettingsHandler: NSObject, WKScriptMessageHandlerWithReply {
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage,
+                               replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
+        let parsed = AppSettingsBridge.parse(message.body)
+        let src = message.frameInfo.request.url
+        MainActor.assumeIsolated {
+            guard AppSettingsBridge.originAllowed(src, port: AppConfig.port) else {
+                DaemonManager.shared.note("app settings: ignored a message from \(src?.absoluteString ?? "?")")
+                replyHandler(nil, "not allowed")
+                return
+            }
+            switch parsed {
+            case .failure(let e):
+                DaemonManager.shared.note("app settings: refused — \(e.text)")
+                replyHandler(nil, e.text)
+            case .success(let req):
+                if req != .get { DaemonManager.shared.note("app settings: dashboard → \(req)") }
+                let extra = AppSettingsBridge.perform(req)
+                var reply = AppSettingsBridge.snapshot(loginItem: extra.loginItem)
+                if extra.cancelled { reply["cancelled"] = true }
+                replyHandler(reply, nil)
+            }
+        }
+    }
+}
+
+/// The appSettings bridge without WebKit: message parsing (whitelist), origin check, applying, the reply.
+/// Pure parts are what `--appsettings-selftest` checks.
+@MainActor
+enum AppSettingsBridge {
+    enum Key: String, CaseIterable { case loginItem, openAtLaunch, openAtLoginLaunch }
+    enum Action: String, CaseIterable { case chooseRepo, revealLog, restartDaemon }
+    enum Request: Equatable, CustomStringConvertible {
+        case get
+        case set(key: Key, value: Bool)
+        case action(Action)
+        var description: String {
+            switch self {
+            case .get: return "get"
+            case .set(let k, let v): return "set \(k.rawValue)=\(v)"
+            case .action(let a): return "action \(a.rawValue)"
+            }
+        }
+    }
+    struct Refusal: Error, Equatable { let text: String }
+
+    /// UserDefaults key behind each bool setting (the same keys LaunchBehavior reads). loginItem is SMAppService, not defaults.
+    static func defaultsKey(_ k: Key) -> String? {
+        switch k {
+        case .loginItem: return nil
+        case .openAtLaunch: return LaunchBehavior.openAtLaunchKey
+        case .openAtLoginLaunch: return LaunchBehavior.openAtLoginLaunchKey
+        }
+    }
+
+    nonisolated static func parse(_ body: Any) -> Result<Request, Refusal> {
+        guard let d = body as? [String: Any], let op = d["op"] as? String else { return .failure(Refusal(text: "bad message")) }
+        switch op {
+        case "get": return .success(.get)
+        case "set":
+            guard let ks = d["key"] as? String, let k = Key(rawValue: ks) else { return .failure(Refusal(text: "unknown key")) }
+            // JS true/false arrive as NSNumber; reject numbers/strings that only look boolean.
+            guard let n = d["value"] as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { return .failure(Refusal(text: "value must be a boolean")) }
+            return .success(.set(key: k, value: n.boolValue))
+        case "action":
+            guard let ns = d["name"] as? String, let a = Action(rawValue: ns) else { return .failure(Refusal(text: "unknown action")) }
+            return .success(.action(a))
+        default: return .failure(Refusal(text: "unknown op"))
+        }
+    }
+
+    /// Only the dashboard page itself: http, 127.0.0.1 / localhost, the daemon's port.
+    nonisolated static func originAllowed(_ url: URL?, port: Int) -> Bool {
+        guard let url, url.scheme == "http", url.host == "127.0.0.1" || url.host == "localhost" else { return false }
+        return (url.port ?? 80) == port
+    }
+
+    /// Apply `req`. `defaults` is injectable (selftest suite); loginItem / actions only run against the real app.
+    @discardableResult
+    static func perform(_ req: Request, defaults: UserDefaults = .standard) -> (loginItem: LoginItem?, cancelled: Bool) {
+        switch req {
+        case .get: return (nil, false)
+        case .set(let k, let v):
+            if let key = defaultsKey(k) { defaults.set(v, forKey: key); return (nil, false) }
+            var li = LoginItem()
+            li.set(v)
+            return (li, false)
+        case .action(.chooseRepo): return (nil, !RepoPicker.choose())
+        case .action(.revealLog):
+            DaemonManager.shared.openLog()
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: AppConfig.daemonLogPath)])
+            return (nil, false)
+        case .action(.restartDaemon):
+            DaemonManager.shared.note("app settings: 데몬 다시 시작 (dashboard)")
+            DaemonManager.shared.restart()
+            return (nil, false)
+        }
+    }
+
+    /// The reply: current values. `loginItem` = the state right after a set (keeps its failure message), else read now.
+    static func snapshot(defaults: UserDefaults = .standard, loginItem: LoginItem? = nil, readLoginItem: Bool = true) -> [String: Any] {
+        var out: [String: Any] = [
+            "openAtLaunch": defaults.bool(forKey: LaunchBehavior.openAtLaunchKey),
+            "openAtLoginLaunch": defaults.bool(forKey: LaunchBehavior.openAtLoginLaunchKey),
+            "logPath": AppConfig.daemonLogPath,
+        ]
+        out["repoPath"] = DaemonManager.shared.repoPath ?? NSNull()
+        if readLoginItem || loginItem != nil {
+            var li = loginItem ?? LoginItem()
+            if loginItem == nil { li.refresh() }
+            var l: [String: Any] = ["status": LoginItem.describe(li.status), "enabled": li.enabled]
+            if let m = li.message { l["message"] = m }
+            out["loginItem"] = l
+        }
+        return out
+    }
+}
+
+/// `--appsettings-selftest` (headless, stdout): the bridge's whitelist (keys / ops / actions / value type), the origin check,
+/// and set → snapshot on a throwaway defaults suite. Never registers a Login Item, opens a panel or restarts anything.
+@MainActor
+enum AppSettingsSelfTest {
+    static func run() -> Int32 {
+        final class Tally { var failures = 0 }
+        let tally = Tally()
+        func check(_ ok: Bool, _ msg: String) { print("appsettings-selftest: \(ok ? "PASS" : "FAIL") — \(msg)"); if !ok { tally.failures += 1 } }
+        typealias B = AppSettingsBridge
+        let t = NSNumber(value: true), f = NSNumber(value: false)
+        check(B.parse(["op": "get"]) == .success(.get), "get")
+        for k in B.Key.allCases {
+            check(B.parse(["op": "set", "key": k.rawValue, "value": t]) == .success(.set(key: k, value: true)), "set \(k.rawValue)=true accepted")
+        }
+        check(B.parse(["op": "set", "key": "openAtLaunch", "value": f]) == .success(.set(key: .openAtLaunch, value: false)), "set false accepted")
+        for bad in ["nedPort", "nedRepoPath", "desktopPetEnabled", "toolCache.node", "", "OPENATLAUNCH"] {
+            check(B.parse(["op": "set", "key": bad, "value": t]) == .failure(.init(text: "unknown key")), "unknown key \"\(bad)\" refused")
+        }
+        check(B.parse(["op": "set", "value": t]) == .failure(.init(text: "unknown key")), "missing key refused")
+        check(B.parse(["op": "set", "key": "openAtLaunch", "value": NSNumber(value: 1)]) == .failure(.init(text: "value must be a boolean")), "number 1 refused as value")
+        check(B.parse(["op": "set", "key": "openAtLaunch", "value": "true"]) == .failure(.init(text: "value must be a boolean")), "string \"true\" refused as value")
+        check(B.parse(["op": "set", "key": "openAtLaunch"]) == .failure(.init(text: "value must be a boolean")), "missing value refused")
+        for a in B.Action.allCases { check(B.parse(["op": "action", "name": a.rawValue]) == .success(.action(a)), "action \(a.rawValue) accepted") }
+        for bad in ["quit", "setRepoPath", "openURL", ""] {
+            check(B.parse(["op": "action", "name": bad]) == .failure(.init(text: "unknown action")), "unknown action \"\(bad)\" refused")
+        }
+        check(B.parse(["op": "delete"]) == .failure(.init(text: "unknown op")), "unknown op refused")
+        check(B.parse("get") == .failure(.init(text: "bad message")), "non-object body refused")
+        check(B.parse(["key": "openAtLaunch"]) == .failure(.init(text: "bad message")), "body without op refused")
+
+        let port = 7791
+        for (u, ok) in [("http://127.0.0.1:\(port)/#settings", true), ("http://localhost:\(port)/", true),
+                        ("http://127.0.0.1:\(port + 1)/", false), ("https://127.0.0.1:\(port)/", false), ("http://evil.example:\(port)/", false),
+                        ("http://127.0.0.1/", false), ("about:blank", false), ("file:///tmp/x.html", false), ("http://127.0.0.1.evil.example:\(port)/", false)] {
+            check(B.originAllowed(URL(string: u), port: port) == ok, "origin \(u) → \(ok ? "allowed" : "refused")")
+        }
+        check(!B.originAllowed(nil, port: port), "no origin refused")
+
+        let suite = "com.ned.menubar.appsettings-selftest"
+        guard let d = UserDefaults(suiteName: suite) else { print("appsettings-selftest: FAIL — no defaults suite"); return 1 }
+        d.removePersistentDomain(forName: suite)
+        LaunchBehavior.registerDefaults(d)
+        var snap = B.snapshot(defaults: d, readLoginItem: false)
+        check(snap["openAtLaunch"] as? Bool == true && snap["openAtLoginLaunch"] as? Bool == false, "defaults: openAtLaunch=true openAtLoginLaunch=false")
+        B.perform(.set(key: .openAtLaunch, value: false), defaults: d)
+        B.perform(.set(key: .openAtLoginLaunch, value: true), defaults: d)
+        snap = B.snapshot(defaults: d, readLoginItem: false)
+        check(snap["openAtLaunch"] as? Bool == false && snap["openAtLoginLaunch"] as? Bool == true, "set → snapshot reflects the new values")
+        check(d.bool(forKey: LaunchBehavior.openAtLoginLaunchKey) && !d.bool(forKey: LaunchBehavior.openAtLaunchKey), "written to the LaunchBehavior keys")
+        check(LaunchBehavior.decide(args: ["Ned"], env: [:], defaults: d, eventAvailable: true, eventSaysLoginItem: false, sinceLogin: .some(3600)).open == false,
+              "LaunchBehavior follows openAtLaunch=false")
+        check((snap["logPath"] as? String)?.hasSuffix("/logs/app-daemon.log") == true && snap["loginItem"] == nil, "snapshot: logPath, no loginItem read when asked not to")
+        check(B.openSectionJSOK, "설정… JS calls nedOpenSettings('s-app') with a fallback")
+        d.removePersistentDomain(forName: suite)
+        print("appsettings-selftest: \(tally.failures == 0 ? "ALL PASS" : "\(tally.failures) FAILED")")
+        fflush(stdout)
+        return tally.failures == 0 ? 0 : 1
+    }
+}
+
+extension AppSettingsBridge {
+    static var openSectionJSOK: Bool {
+        let js = DashboardWindowController.openSectionJS("s-app")
+        return js.contains("nedOpenSettings('s-app')") && js.contains("#settings")
     }
 }
 

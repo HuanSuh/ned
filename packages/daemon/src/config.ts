@@ -80,6 +80,8 @@ export interface NedConfig {
   history: NedHistory;
   /** 데스크톱 펫 (Ned.app): shown or not, and which message kinds pop a bubble — 설정 → 외형 → 데스크톱 펫. */
   pet: NedPet;
+  /** 자동 업데이트 (src/self-update.ts): periodic update check + opt-in self-install. 설정 → 앱 → 업데이트. */
+  updates: NedUpdates;
 }
 
 /** The pet's message toggles (GET /api/feed items carry one as `pet_kind`; src/feed.ts PET_KIND_OF). greeting is the app's own. */
@@ -193,6 +195,25 @@ export function normalizeArchive(raw: unknown, base: NedArchive = DEFAULT_ARCHIV
     daily_embed: bool(r.daily_embed, base.daily_embed),
     include: { briefings: bool(inc.briefings, bi.briefings), updates: bool(inc.updates, bi.updates), actions: bool(inc.actions, bi.actions), outputs: bool(inc.outputs, bi.outputs), sessions: bool(inc.sessions, bi.sessions), history: bool(inc.history, bi.history ?? true) },
   };
+}
+
+export interface NedUpdates {
+  /** Look for a new plugin version every `check_hours` (GET /api/update-check's check) and notify once per version. */
+  auto_check: boolean;
+  /** Hours between automatic checks (≥ 1). */
+  check_hours: number;
+  /** Install a found update by itself while quiet / idle and no session is running or waiting (scripts/self-update.sh). */
+  auto_install: boolean;
+}
+export const DEFAULT_UPDATES: NedUpdates = { auto_check: true, check_hours: 24, auto_install: false };
+
+/** Merge a (partial) updates patch over `base`: booleans only as booleans, check_hours a finite number clamped to [1, 720]. */
+export function normalizeUpdates(raw: unknown, base: NedUpdates = DEFAULT_UPDATES): NedUpdates {
+  const r = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
+  const n = Number(r.check_hours);
+  const hours = r.check_hours == null || r.check_hours === "" || !Number.isFinite(n) ? base.check_hours : Math.max(1, Math.min(720, n));
+  return { auto_check: bool(r.auto_check, base.auto_check), check_hours: hours, auto_install: bool(r.auto_install, base.auto_install) };
 }
 
 export const DASHBOARD_CARDS = ["slack", "mail", "jira", "github"] as const;
@@ -664,6 +685,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   archive: DEFAULT_ARCHIVE,
   history: DEFAULT_HISTORY,
   pet: DEFAULT_PET,
+  updates: DEFAULT_UPDATES,
 };
 
 /** A finite number within [min, max] (truncated when `int`), else `fallback`. */
@@ -698,6 +720,7 @@ export function loadConfig(): NedConfig {
       archive: normalizeArchive(parsed.archive),
       history: normalizeHistory(parsed.history),
       pet: normalizePet(parsed.pet),
+      updates: normalizeUpdates(parsed.updates),
       dashboard: normalizeDashboard(parsed.dashboard, DEFAULT_DASHBOARD, watchChannels(filters)),
       agenda_source_minutes: normalizeAgendaSourceMinutes(parsed.agenda_source_minutes),
       quiet_schedule: normalizeQuietSchedule(parsed.quiet_schedule),

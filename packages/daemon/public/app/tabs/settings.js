@@ -7,6 +7,7 @@ import { readCardLayout, renderCardLayout } from "../features/cardlayout.js";
 import { ACTION_DEFAULTS, ACTION_KO } from "../features/drafts.js";
 import { originChip } from "../features/draftref.js";
 import { readToneBySource, syncWriteActionGroups, writeActionsHtml } from "./settings-actions.js";
+import { initAppSettings, readUpdates, renderUpdates } from "./settings-app.js";
 import { initArchive, readArchive, renderArchive } from "./settings-archive.js";
 import { initHistorySettings, readHistorySettings, renderHistorySettings } from "./settings-history.js";
 import { initLinkPrefs, linkPrefsError, readLinkPrefs, renderLinkPrefs } from "./settings-links.js";
@@ -223,6 +224,7 @@ export function renderConfig(c = S.config, { preview = false } = {}) {
   $("c-budget").value = c.agenda_daily_budget_usd ?? "";
   renderArchive(c); // 아카이브 (Obsidian)
   renderHistorySettings(c); // 수집·보관
+  renderUpdates(c); // 앱 → 업데이트 (config.updates — saved with 저장, unlike the rest of 앱)
   $("c-msg").textContent = ""; $("c-msg").className = "msg";
   savedBody = readBody(); saved = snap(); syncDirty();
   syncSaveLock();
@@ -269,6 +271,7 @@ export function readBody() {
     claude_max_turns: Number($("c-turns").value),
     agenda_daily_budget_usd: Number($("c-budget").value),
     archive: readArchive(),
+    ...(readUpdates() ? { updates: readUpdates() } : {}), // 앱 → 업데이트
     history: readHistorySettings(),
     pet: readPet(),
   };
@@ -382,6 +385,7 @@ export function init() {
   onBuildStale(syncSaveLock);
   initRestore();
   initArchive();
+  initAppSettings(); // 앱 (Ned.app): its own section + nav link, applied at once through the app bridge (not the form)
   initHistorySettings();
   initLinkPrefs();
   initPet();

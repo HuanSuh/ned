@@ -113,13 +113,18 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     @objc fileprivate func toggle(_ sender: Any?) {
         if popover.isShown { popover.performClose(sender); return }
         guard let b = statusItem.button else { return }
-        // Fresh content per open: MenuContent's onAppear (login item refresh, ⌥ → 페르소나) runs every time.
+        // Fresh content per open (the status line's relative time starts from now).
         let host = NSHostingController(rootView: MenuContent(store: store, daemon: daemon))
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: b.bounds, of: b, preferredEdge: .minY)
         b.highlight(true)
+    }
+
+    /// A menu row was picked (대시보드 열기 · 설정…): close like a menu does.
+    func closePopover() {
+        if popover.isShown { popover.performClose(nil) }
     }
 
     func popoverDidClose(_ notification: Notification) {
@@ -236,7 +241,7 @@ enum StatusItemSelfTest {
         check(ObjectIdentifier(c.statusItem) == id && item.button?.image !== before, "re-render swaps the image on the same NSStatusItem (no re-creation)")
         let host = NSHostingController(rootView: MenuContent(store: store, daemon: .shared))
         let size = host.view.fittingSize
-        check(size.width >= 300 && size.height > 50, "popover content (MenuContent) fitting size \(Int(size.width))×\(Int(size.height))")
+        check(size.width >= MenuView.width && size.height > 50, "popover content (MenuContent) fitting size \(Int(size.width))×\(Int(size.height))")
         // Popover open → close once through toggle() (method calls only, no input): close must reach popoverDidClose,
         // which drops the content controller. The close animates, so spin the run loop until it lands.
         func spin(until done: () -> Bool) {
@@ -256,5 +261,75 @@ enum StatusItemSelfTest {
         print("statusitem-selftest: \(failures == 0 ? "ALL PASS" : "\(failures) FAILED")")
         fflush(stdout)
         exit(failures == 0 ? 0 : 1)
+    }
+}
+
+/// Menu "업데이트 확인": GET /api/update-check?refresh=1 (src/update-check.ts) → a small alert. Ned.app never installs —
+/// an update is the Claude Code flow (/plugin update ned → /reload-plugins → /ned:install), offered as [명령 복사].
+@MainActor
+final class UpdateChecker: ObservableObject {
+    static let shared = UpdateChecker()
+    @Published private(set) var checking = false
+
+    struct Result: Decodable, Equatable {
+        var current: String?
+        var latest: String?
+        var source: String?
+        var update_available: Bool
+        var steps: [String]?
+        var error: String?
+        var note: String?
+    }
+
+    /// (pure) Alert text for a result / a request failure. `copy` = the steps to put on the clipboard (nil → no button).
+    static func message(_ r: Result?, failure: String?) -> (title: String, info: String, copy: String?) {
+        guard let r else { return ("업데이트 확인 실패", failure ?? "데몬이 응답하지 않아요 — 메뉴의 상태 줄을 확인하세요.", nil) }
+        guard let latest = r.latest else { return ("업데이트 확인 실패", r.error ?? "최신 버전을 읽지 못했어요.", nil) }
+        let from = r.source == "marketplace" ? "\n(마켓플레이스 사본 기준 — gh 로 GitHub 을 읽지 못함)" : ""
+        if r.update_available {
+            let steps = r.steps ?? []
+            return ("\(r.current ?? "?") → \(latest) 업데이트 있음",
+                    "Claude Code 에서 차례로 실행하세요:\n" + steps.joined(separator: " → ") + from, steps.isEmpty ? nil : steps.joined(separator: "\n"))
+        }
+        if r.current == nil { return ("업데이트 확인 실패", r.error ?? "설치된 버전을 읽지 못했어요.", nil) }
+        return ("최신 버전 (\(r.current ?? latest))", "설치된 버전이 최신이에요." + from, nil)
+    }
+
+    func check() {
+        guard !checking else { return }
+        checking = true
+        Task { @MainActor in
+            var result: Result?
+            var failure: String?
+            do {
+                var req = URLRequest(url: AppConfig.baseURL.appendingPathComponent("api/update-check").appending(queryItems: [URLQueryItem(name: "refresh", value: "1")]))
+                req.timeoutInterval = 40
+                let (data, resp) = try await URLSession.shared.data(for: req)
+                if let h = resp as? HTTPURLResponse, h.statusCode == 404 { failure = "이 데몬은 업데이트 확인을 몰라요 (/ned:install 로 업데이트)." }
+                else { result = try JSONDecoder().decode(Result.self, from: data) }
+            } catch {
+                failure = "데몬에 묻지 못했어요: \(error.localizedDescription)"
+            }
+            checking = false
+            let m = Self.message(result, failure: failure)
+            DaemonManager.shared.note("update check: \(m.title)\(result?.error.map { " — \($0)" } ?? failure.map { " — \($0)" } ?? "")")
+            StatusItemController.shared?.closePopover()
+            let a = NSAlert()
+            a.messageText = m.title
+            a.informativeText = m.info
+            if let copy = m.copy {
+                a.addButton(withTitle: "명령 복사")
+                a.addButton(withTitle: "닫기")
+                NSApp.activate(ignoringOtherApps: true)
+                if a.runModal() == .alertFirstButtonReturn {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(copy, forType: .string)
+                }
+            } else {
+                a.addButton(withTitle: "확인")
+                NSApp.activate(ignoringOtherApps: true)
+                a.runModal()
+            }
+        }
     }
 }

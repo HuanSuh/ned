@@ -15,6 +15,13 @@ struct NedApp: App {
             let dir = i + 1 < args.count ? args[i + 1] : NSTemporaryDirectory() + "ned-pet-snapshot"
             exit(MainActor.assumeIsolated { PetSnapshot.run(dir: dir) })
         }
+        // Headless: appSettings bridge whitelist / origin / set on its own defaults suite; menu PNGs into the given directory.
+        if CommandLine.arguments.contains("--appsettings-selftest") { exit(MainActor.assumeIsolated { AppSettingsSelfTest.run() }) }
+        if let i = CommandLine.arguments.firstIndex(of: "--menu-snapshot") {
+            let args = CommandLine.arguments
+            let dir = i + 1 < args.count ? args[i + 1] : NSTemporaryDirectory() + "ned-menu-snapshot"
+            exit(MainActor.assumeIsolated { MenuSnapshot.run(dir: dir) })
+        }
         // Forget any "hidden" flag AppKit wrote into our defaults (legacy MenuBarExtra "Item-0" keys and the
         // AppKit item's own autosave name) before the status item exists — see StatusItemController.
         MainActor.assumeIsolated { StatusItemGuard.clearFlags() }
@@ -92,7 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if CommandLine.arguments.contains("--persona-selftest") {
                 Task { await PersonaSelfTest.run() }
             }
-            // Diagnostic: exercise the same register/unregister path as the menu toggle and log it.
+            // Diagnostic: exercise the same register/unregister path as 설정 → 앱 (자동 실행) and log it.
             if CommandLine.arguments.contains("--login-item-selftest") {
                 var li = LoginItem()
                 li.set(true)

@@ -58,6 +58,13 @@ Ned 는 Claude Code 플러그인으로 배포된다. 이 레포(`github.com/Huan
   `install.sh` 는 이것을 감지하고(옛 버전 디렉터리의 `.orphaned_at`, 또는 `installed_plugins.json` 의 installPath 와 불일치) "/reload-plugins 후 다시" 로 멈춘다.
 - 자동 업데이트: 서드파티 마켓플레이스는 기본으로 꺼져 있어 수동으로 받는다. 켜려면 `/plugin` → Marketplaces → ned → Enable auto-update.
   자동 업데이트를 켜도 Ned.app 재빌드는 `/ned:install` 이 한다.
+- Ned 자체의 자동 업데이트(대시보드 설정 → 앱 → 업데이트, config `updates.*`): 데몬이 `updates.check_hours`(기본 24)마다
+  GitHub main(`gh`) 또는 마켓플레이스 사본의 plugin.json 버전을 보고, 새 버전이면 알림 한 번 + 메뉴에 "업데이트 있음 X.Y.Z".
+  `updates.auto_install` 을 켜면(기본 끔) 조용한 시간·유휴 + 실행 중/입력 대기 세션 없음일 때 `scripts/self-update.sh` 가
+  `claude plugin marketplace update ned` → `claude plugin update ned@ned` → 새 버전의 `install.sh`(위 `/ned:install` 과 같음)를
+  분리된 프로세스로 돌린다. 설정의 "지금 업데이트"도 같은 경로. 실패하면 기존 설치 유지 + 24시간 뒤 재시도, 로그
+  `~/.ned/logs/self-update.log`, 결과 `~/.ned/update-state.json`. 끝나면 열린 세션은 `/reload-plugins`.
+  그래서 **version 을 올려야** 자동 업데이트도 새 버전을 본다(main 의 `.claude-plugin/plugin.json`).
 - 업데이트가 필요한지는 `/ned:status` 의 "⚠ 업데이트 필요"(런타임 버전 ≠ 플러그인 버전)로 안다.
 - `/ned:install` 은 새 버전을 `~/.ned/runtime.next` 에서 끝까지 빌드한 뒤에만 기존 런타임·앱을 바꾼다.
   실패하면 기존 설치는 그대로 남는다. 로그는 `~/.ned/logs/install.log`.

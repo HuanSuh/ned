@@ -32,7 +32,7 @@ Claude Code 에서:
 처음 한 번:
 - claude.ai → 설정 → 커넥터에서 Slack·Gmail·Google Calendar·Atlassian(Jira)·GitHub 를 **본인 계정으로** 연결.
 - 대시보드 설정 → 외형 → 링크 열기에서 Slack 팀 ID 입력(Slack 링크를 앱으로 열 때).
-- 메뉴 > "Login Items 에 등록"(자동 실행). 서명 경고가 나오면 `bash ~/.ned/runtime/scripts/make-signing-cert.sh` 한 번 —
+- 대시보드 설정 → 앱(Ned.app) → "로그인할 때 Ned 실행"(자동 실행). 서명 경고가 나오면 `bash ~/.ned/runtime/scripts/make-signing-cert.sh` 한 번 —
   재설치마다 macOS 가 권한을 다시 묻지 않게 된다([apps/menubar/README.md](apps/menubar/README.md)).
 
 | 하고 싶은 것 | 명령 |

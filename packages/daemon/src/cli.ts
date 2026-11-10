@@ -4,6 +4,7 @@ import { archiveTick } from "./archive.js";
 import { buildPrompt, enabledSources, readAgenda, refreshAgenda, runningSources } from "./agenda.js";
 import { loadConfig, type NedConfig } from "./config.js";
 import { WAKE_GAP_MS, createScheduler, eventsActivityAt, hidIdleMs } from "./scheduler.js";
+import { updateTick } from "./self-update.js";
 import { createOnlineCheck } from "./online.js";
 import { todayCost } from "./costs.js";
 import { buildHeartbeatPrompt, hadGoodDailyOn, heartbeat, heartbeatWatchKey, pendingSessionNews, refreshSessions } from "./heartbeat.js";
@@ -83,6 +84,7 @@ async function main(): Promise<void> {
           s.next_heartbeat_at = nextAt;
           fs.writeFileSync(STATE_PATH, JSON.stringify(s, null, 2));
         },
+        updates: (c, ctx) => updateTick(c, ctx), // 자동 업데이트: config.updates (src/self-update.ts)
         log,
       });
       await sched.tick();
