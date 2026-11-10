@@ -26,7 +26,8 @@ Ned 는 Claude Code 플러그인으로 배포된다. 이 레포(`github.com/Huan
 ## 승격 (dev → main)
 
 1. **이 Mac 에서 설치 확인** — 메인 세션이 dev 를 설치해 본다. **clean 워킹트리에서**(`git status` 가 비어 있음) 한다.
-   로컬 경로로 추가한 마켓플레이스는 캐시 없이 워킹트리를 그대로 읽기 때문에, 커밋 안 한 변경까지 설치된다.
+   로컬 경로로 추가한 마켓플레이스는 `installed_plugins.json` 에 캐시 경로(`~/.claude/plugins/cache/ned/ned/<version>/`)를 적지만,
+   `/ned:*` 명령의 `${CLAUDE_PLUGIN_ROOT}` 는 워킹트리 경로로 치환된다(2026-11 확인) — 커밋 안 한 변경까지 설치된다.
    ```sh
    git status --short                               # 비어 있어야 함
    claude plugin validate .                         # ✔ Validation passed (CLAUDE.md 경고만 — 플러그인 루트의 CLAUDE.md 는 로드 안 됨)
