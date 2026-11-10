@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Read-only Ned status (what /ned:status runs): daemon API, app process, nedRepoPath, runtime vs plugin version,
+# last app-daemon.log lines, leftover settings.json hooks. Changes nothing.
+#
+# Usage: scripts/status.sh [plugin-root]   (plugin-root = ${CLAUDE_PLUGIN_ROOT}; default: this checkout)
+# Environment: NED_HOME, NED_PORT (7777), NED_DEFAULTS_DOMAIN (com.ned.menubar),
+#              NED_CLAUDE_SETTINGS (~/.claude/settings.json) — tests point these at temp values.
+set -uo pipefail
+PLUGIN_ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd -P)}"
+NED_HOME="${NED_HOME:-$HOME/.ned}"
+PORT="${NED_PORT:-7777}"
+DOMAIN="${NED_DEFAULTS_DOMAIN:-com.ned.menubar}"
+SETTINGS="${NED_CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
+version_of() { node -p "require(process.argv[1]).version" "$1/.claude-plugin/plugin.json" 2>/dev/null || echo "?"; }
+
+echo "## daemon (http://127.0.0.1:$PORT)"
+if state="$(curl -s --max-time 3 "http://127.0.0.1:$PORT/api/state")" && [ -n "$state" ]; then
+  printf '%s' "$state" | node -e '
+    let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      try {
+        const j = JSON.parse(s);
+        const sessions = Array.isArray(j.sessions) ? j.sessions : [];
+        const by = {};
+        for (const x of sessions) by[x.status ?? "?"] = (by[x.status ?? "?"] ?? 0) + 1;
+        const t = (ms) => (ms ? new Date(ms).toLocaleString("ko-KR") : "—");
+        console.log("  up — daemon_pid " + (j.daemon_pid ?? "?") + (j.quiet ? " (조용한 시간)" : ""));
+        console.log("  heartbeat: last " + t(j.last_heartbeat_at) + " · next " + t(j.next_heartbeat_at));
+        const b = j.last_briefing;
+        console.log("  last briefing: " + (b ? t(b.ts) + " " + (b.type ?? "") + " — " + (b.headline ?? "") : "—"));
+        console.log("  sessions: " + sessions.length + (sessions.length ? " (" + Object.entries(by).map(([k, v]) => k + " " + v).join(", ") + ")" : ""));
+        console.log("  attention open: " + (j.attention_open_count ?? 0));
+      } catch { console.log("  up, but /api/state is not JSON: " + s.slice(0, 120)); }
+    });'
+else
+  echo "  down — no answer (Ned.app 이 꺼져 있거나 데몬이 아직 안 뜸)"
+fi
+
+echo "## app"
+if pids="$(pgrep -x Ned)"; then echo "  Ned running (pid $(echo $pids))"; else echo "  Ned not running"; fi
+
+echo "## runtime"
+REPO="$(defaults read "$DOMAIN" nedRepoPath 2>/dev/null || true)"
+PV="$(version_of "$PLUGIN_ROOT")"
+echo "  plugin   : $PV  ($PLUGIN_ROOT)"
+if [ -z "$REPO" ]; then
+  echo "  nedRepoPath: (unset in $DOMAIN) — /ned:install 을 아직 안 돌림"
+else
+  RV="$(version_of "$REPO")"
+  echo "  nedRepoPath: $REPO"
+  echo "  runtime  : $RV$([ -f "$REPO/.ned-runtime" ] && sed -n 's/^synced=/, synced /p' "$REPO/.ned-runtime")"
+  [ -f "$REPO/packages/daemon/dist/cli.js" ] || echo "  ! $REPO/packages/daemon/dist/cli.js 없음 — 빌드 안 됨"
+  if [ "$RV" != "$PV" ]; then echo "  ⚠ 업데이트 필요: 런타임 $RV ≠ 플러그인 $PV → /ned:install"; else echo "  ✓ 런타임이 플러그인 버전과 같음"; fi
+fi
+
+echo "## log ($NED_HOME/logs/app-daemon.log, last 10)"
+if [ -f "$NED_HOME/logs/app-daemon.log" ]; then tail -n 10 "$NED_HOME/logs/app-daemon.log" | sed 's/^/  /'; else echo "  (none)"; fi
+
+echo "## old settings.json hooks ($SETTINGS)"
+if [ -f "$SETTINGS" ]; then
+  n="$(node -e '
+    const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    let n = 0;
+    for (const groups of Object.values(s.hooks ?? {})) for (const g of groups ?? []) if ((g.hooks ?? []).some((h) => String(h.command ?? "").includes("ned-hook.sh"))) n++;
+    console.log(n);' "$SETTINGS" 2>/dev/null || echo "?")"
+  if [ "$n" = "0" ]; then echo "  none ✓"
+  else echo "  ⚠ $n Ned hook entr$([ "$n" = 1 ] && echo y || echo ies) left — plugin hooks + these = events logged twice. /ned:install removes them."; fi
+else
+  echo "  (no settings file)"
+fi
