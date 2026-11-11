@@ -350,6 +350,8 @@ describe("status.sh", () => {
     const r = run(e, "status.sh", { NED_PORT: "1" });
     expect(r.code).toBe(0);
     expect(r.out).toContain("down — no answer");
+    expect(r.out).toContain("## MCP (http://127.0.0.1:1/mcp)\n  응답 없음");
+    expect(r.out).toContain("/mcp 로 확인");
     expect(r.out).toMatch(/plugin\s+: \d+\.\d+\.\d+/);
     expect(r.out).toContain("plugin check: in-place");
     expect(r.out).toContain("nedRepoPath: (unset");

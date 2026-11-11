@@ -45,6 +45,29 @@ describe("plugin manifests", () => {
   });
 });
 
+describe("plugin MCP server (.mcp.json)", () => {
+  // Format per https://code.claude.com/docs/en/plugins-reference (.mcp.json at the plugin root, an `mcpServers` map)
+  // and https://code.claude.com/docs/en/mcp ("type": "http" + "url"; an entry with a url but no type is read as stdio).
+  const mcp = readJson(".mcp.json");
+
+  it("declares exactly one http server `ned` → the daemon's /mcp on the default loopback port", () => {
+    expect(Object.keys(mcp)).toEqual(["mcpServers"]);
+    expect(Object.keys(mcp.mcpServers)).toEqual(["ned"]);
+    expect(mcp.mcpServers.ned).toEqual({ type: "http", url: "http://127.0.0.1:7777/mcp" });
+  });
+
+  it("the default port matches config.yaml's default and the route the daemon registers", async () => {
+    const { DEFAULT_CONFIG } = await import("../src/config.js");
+    expect(new URL(mcp.mcpServers.ned.url).port).toBe(String(DEFAULT_CONFIG.port));
+    expect(fs.readFileSync(path.join(ROOT, "packages/daemon/src/mcp.ts"), "utf8")).toContain('app.post("/mcp"');
+  });
+
+  it("a remote MCP server needs a privacy link (claude plugin validate PRIVACY_URL_MISSING)", () => {
+    expect(readJson(".claude-plugin/plugin.json").privacyPolicyUrl).toMatch(/^https:\/\//);
+    expect(fs.readFileSync(path.join(ROOT, "README.md"), "utf8")).toMatch(/^## Privacy$/m);
+  });
+});
+
 describe("plugin hooks (hooks/hooks.json)", () => {
   const hooks = readJson("hooks/hooks.json").hooks as Record<string, { hooks: { type: string; command: string; timeout: number }[] }[]>;
   // install-hooks.mjs is a script with side effects — read its EVENTS list as text.
