@@ -1204,6 +1204,7 @@ final class DesktopPetController: NSObject {
             activatedFrom = nil
             if prev.bundleIdentifier != Bundle.main.bundleIdentifier { prev.activate(options: []) }
         }
+        syncList() // esc with the mouse already elsewhere → the hover list closes now (still held while sending)
     }
 
     private func makeField() -> PetReplyField {
