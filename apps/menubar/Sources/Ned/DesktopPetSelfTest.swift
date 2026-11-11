@@ -126,6 +126,85 @@ enum PetSelfTest {
         if case .list(nil, [], let empty) = m.content { check(empty == PersonaID.alfred.persona.nothingNew, "idle, no messages: persona nothingNew") } else { check(false, "idle hover list") }
         m.listOpen = false
 
+        // 세션에 답하기 (PetReply + PetModel hold).
+        let sessions = [
+            S(worktree: "old-wt", status: "waiting", id: "s-old", summary: "허락해 줘", ts: 100),
+            S(worktree: "fb-74", status: "waiting", id: "s-new", summary: "Claude needs your permission", ts: 300),
+            S(worktree: "w", status: "waiting", isWorker: true, id: "s-worker", ts: 400),
+            S(worktree: "r", status: "running", id: "s-run", ts: 500),
+            S(worktree: "noterm", status: "waiting", id: "s-noterm", canReply: false, ts: 200),
+        ]
+        var r = PetReply()
+        r.setTargets(PetReply.waiting(sessions))
+        check(r.targets.map(\.id) == ["s-new", "s-noterm", "s-old"] && r.current?.id == "s-new", "reply targets: waiting, no workers, newest first — default = most recent (\(r.targets.map(\.id)))")
+        r.cycle(1); check(r.current?.id == "s-noterm", "⇧⇥ / › → next waiting session")
+        check(!r.openInput() && r.beginSend("ㄱㄱ") == nil && r.phase == .idle, "can_reply false → no input, no send (터미널에서 직접 입력)")
+        r.cycle(1); r.cycle(1); check(r.current?.id == "s-new", "cycling wraps around")
+        r.cycle(-1); check(r.current?.id == "s-old", "‹ goes back (wraps)")
+        r.select("s-new")
+        check(r.openInput() && r.phase == .input && r.active, "… → input mode")
+        check(r.beginSend("   ") == nil && r.phase == .input, "empty text is not sent")
+        check(r.beginSend(String(repeating: "x", count: PetReply.maxText + 1)) == nil, "over 2,000 chars is not sent")
+        let go = r.beginSend("  ㄱㄱ \n")
+        check(go?.id == "s-new" && go?.text == "ㄱㄱ" && r.phase == .sending, "⏎ / quick → (session id, trimmed text), phase sending")
+        r.setTargets(PetReply.waiting(sessions.filter { $0.id != "s-new" }))
+        check(r.current?.id == "s-new", "the answered session stays pinned while sending even if it left the list")
+        r.setTargets(PetReply.waiting(sessions))
+        r.finish(SessionSendOutcome(status: 200, error: nil))
+        check(r.phase == .result(ok: true, text: "보냄 ✓") && r.active, "200 → '보냄 ✓' result (still holding the bubble)")
+        r.endResult()
+        check(!r.active && !r.targets.contains { $0.id == "s-new" } && r.current?.id == "s-noterm", "after the result: back to idle, the sent session leaves the targets (\(r.targets.map(\.id)))")
+        r.setTargets(PetReply.waiting(sessions))
+        check(!r.targets.contains { $0.id == "s-new" }, "still hidden while the session shows the event we answered")
+        var moved = sessions; moved[1].ts = 900
+        r.setTargets(PetReply.waiting(moved))
+        check(r.targets.first?.id == "s-new", "a newer event of that session (it asks again) brings it back")
+        r.select("s-old"); _ = r.openInput(); r.text = "계속 진행해"
+        _ = r.beginSend(r.text)
+        r.finish(SessionSendOutcome(status: 409, error: "…열려 있지 않다"))
+        check(r.phase == .result(ok: false, text: "터미널이 닫혀 있어 보낼 수 없음 — 터미널에서 직접 입력"), "409 → the closed-terminal line")
+        r.endResult()
+        check(!r.active && r.text == "계속 진행해" && r.targets.contains { $0.id == "s-old" }, "failed send: back to idle, typed text kept, session still answerable")
+        check(PetReply.resultText(SessionSendOutcome(status: 502, error: "orca terminal send 실패: boom")) == "보내지 못함: orca terminal send 실패: boom"
+              && PetReply.resultText(SessionSendOutcome(status: 0, error: nil)) == "데몬이 응답하지 않아요", "other failures: the daemon's reason / no daemon")
+        _ = r.openInput(); r.cancel()
+        check(r.phase == .idle && !r.active, "esc → input closed")
+
+        // PetModel: the bubble holds while replying, then goes on; session bubbles pick their session; strip placement.
+        let pm = PetModel(reduceMotion: true)
+        pm.setReplyTargets(PetReply.waiting(sessions))
+        let sessMsg = PetMessage(key: "att:session:s-old", kind: "session", petKind: "session", title: "old-wt: 입력 대기")
+        pm.enqueue([sessMsg, PetMessage(key: "x2", kind: "slack", petKind: "slack", title: "x2")])
+        check(pm.current?.key == "att:session:s-old" && pm.replyStrip?.target.id == "s-old", "session message bubble → strip answers that session (\(pm.replyStrip?.target.id ?? "nil"))")
+        check(pm.replyStrip?.quick == PetReply.defaultQuick && pm.replyStrip?.count == 3, "strip: default quick buttons ㄱㄱ·승인·계속, 3 waiting")
+        pm.updateReply { _ = $0.openInput() }
+        pm.timerFired()
+        check(pm.current?.key == "att:session:s-old", "input mode: the auto-collapse timer does not move on (next() held)")
+        pm.updateReply { _ = $0.beginSend("승인") }
+        pm.timerFired()
+        check(pm.current?.key == "att:session:s-old", "sending: still held")
+        pm.updateReply { $0.finish(SessionSendOutcome(status: 200, error: nil)) }
+        pm.timerFired()
+        check(pm.current?.key == "att:session:s-old" && pm.replyStrip?.phase == .result(ok: true, text: "보냄 ✓"), "result line shown, still held")
+        pm.updateReply { $0.endResult() }
+        pm.timerFired()
+        check(pm.current?.key == "x2" && !pm.reply.active, "result over → normal flow resumes (next bubble)")
+        check(pm.replyStrip == nil, "a non-session bubble carries no strip when idle")
+        pm.listOpen = true
+        pm.setRecent((1...3).map { PetMessage(key: "rr\($0)", kind: "slack", petKind: "slack", title: "rr\($0)") })
+        if case .list(_, let items, _) = pm.content { check(items.count == 1 && pm.replyStrip != nil, "hover list with a waiting session: strip + 1 recent row (fits the panel)") } else { check(false, "hover list") }
+        pm.updateReply { _ = $0.openInput() }
+        if case .list(_, let items, _) = pm.content { check(items.isEmpty, "replying from the hover list: rows folded away") } else { check(false, "hover list while replying") }
+        pm.updateReply { $0.cancel() }
+        pm.replyOn = false
+        check(pm.replyStrip == nil, "actions.session_send off → no strip")
+        pm.listOpen = false
+        check(PetModel.sessionID(of: sessMsg) == "s-old" && PetModel.sessionID(of: PetMessage(key: "att:x", kind: "slack", petKind: "slack", title: "")) == nil, "session id from a session message key")
+        let feedReply = try? JSONDecoder().decode(FeedResponse.self, from: Data(#"{"items":[],"quick_replies":["진행","아니"],"session_send":false}"#.utf8))
+        check(feedReply?.quick_replies == ["진행", "아니"] && feedReply?.session_send == false, "GET /api/feed quick_replies / session_send decode")
+        let sv = try? JSONDecoder().decode(NedState.self, from: Data(#"{"sessions":[{"id":"a","can_reply":false},{"id":"b"}]}"#.utf8))
+        check(sv?.sessions.map(\.can_reply) == [false, true], "state sessions can_reply decode (missing → true)")
+
         // Placement.
         let main = CGRect(x: 0, y: 80, width: 1440, height: 795)
         let d = PetPlacement.origin(saved: nil, size: PetLayout.panel, screens: [main], main: main)
@@ -144,7 +223,13 @@ enum PetSelfTest {
         check(fr?.items.map(\.key) == ["att:s", "att:o"] && fr?.items.first?.deep?.hasPrefix("slack://") == true && fr?.items.last?.pet_kind == nil && fr?.pet?.enabled == false,
               "GET /api/feed decodes (bad item dropped, pet_kind / deep kept)")
 
-        // Controller (own defaults suite; never com.ned.menubar).
+        // Controller (own defaults suite; never com.ned.menubar). It puts a real (non-activating) panel on screen —
+        // NED_PET_SELFTEST_HEADLESS=1 stops before it (pure logic only, nothing drawn on the desktop).
+        if ProcessInfo.processInfo.environment["NED_PET_SELFTEST_HEADLESS"] == "1" {
+            print("pet-selftest: \(tally.failures == 0 ? "OK" : "\(tally.failures) FAILED") (headless — controller / panel checks skipped)")
+            fflush(stdout)
+            return tally.failures == 0 ? 0 : 1
+        }
         let suite = "com.ned.menubar.pet-selftest"
         UserDefaults().removePersistentDomain(forName: suite)
         let defaults = UserDefaults(suiteName: suite)!
@@ -240,9 +325,9 @@ enum PetSnapshot {
         _ = NSApplication.shared
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         var written = 0, failed = 0
-        func render(_ name: String, _ e: PetExpression, persona: PersonaID, message: PetMessage?, list: Bool = false, recent r: [PetMessage] = [], dark: Bool) {
+        func render(_ name: String, _ e: PetExpression, persona: PersonaID, message: PetMessage?, list: Bool = false, recent r: [PetMessage] = [], reply: PetReply = PetReply(), dark: Bool) {
             let m = PetModel(reduceMotion: true)
-            m.pin(e, persona: persona, message: message, recent: r, list: list)
+            m.pin(e, persona: persona, message: message, recent: r, list: list, reply: reply)
             // Backdrop stands in for the desktop so the transparent panel is reviewable.
             let view = PetView(model: m)
                 .background(dark ? Color(hex: 0x23262C) : Color(hex: 0xDDE2E8))
@@ -271,6 +356,19 @@ enum PetSnapshot {
             render("pet-msg-greeting", .idle, persona: .ned, message: .greeting(ned, at: morning), dark: dark)
             render("pet-msg-summary", running, persona: .ned, message: .summary(recent + [slack, mail]), dark: dark)
             render("pet-hover-ned", PetMapping.expression(cases[2].1), persona: .ned, message: nil, list: true, recent: recent, dark: dark)
+            // 세션에 답하기: a session bubble with its strip, the input open, a failed send; the hover list with 2 waiting.
+            typealias S = PetInput.Session
+            let waitingSessions = [S(worktree: "fb-74", status: "waiting", id: "s1", summary: "Claude needs your permission to use Bash", ts: 2),
+                                   S(worktree: "ned-daemon", status: "waiting", id: "s2", ts: 1)]
+            var rp = PetReply(); rp.setTargets(PetReply.waiting(waitingSessions))
+            let needs = PetMapping.expression(PetInput(alive: true, sessions: waitingSessions))
+            let sessMsg = PetMessage(key: "att:session:s1", kind: "session", petKind: "session", title: "fb-74: 입력 대기", detail: "Claude needs your permission to use Bash")
+            render("pet-reply-msg", needs, persona: .ned, message: sessMsg, reply: rp, dark: dark)
+            var rin = rp; _ = rin.openInput()
+            render("pet-reply-input", needs, persona: .ned, message: sessMsg, reply: rin, dark: dark)
+            var rfail = rp; _ = rfail.beginSend("승인"); rfail.finish(SessionSendOutcome(status: 409, error: nil))
+            render("pet-reply-fail", needs, persona: .ned, message: sessMsg, reply: rfail, dark: dark)
+            render("pet-reply-hover", needs, persona: .ned, message: nil, list: true, recent: recent, reply: rp, dark: dark)
             for id in PersonaID.allCases where id != .ned {
                 for i in [0, 1, 3] { // idle, running, attention — must read as three different states
                     let e = PetMapping.expression(cases[i].1)
