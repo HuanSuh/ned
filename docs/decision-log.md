@@ -64,3 +64,12 @@
 | --- | --- | --- |
 | 빈 "Ned Settings" 창 | SwiftUI Settings 장면 내용을 SettingsRedirect 로: 실행 5초 안이면 닫기만, 그 뒤(⌘, 등)면 닫고 설정 → 앱 | 앱 설정은 대시보드에 있다. 띄운 원인을 못 찾아 경로와 무관하게 막고 로그로 추적. |
 | 펫 글로우 (WU-02 "≥3초 숨쉬기" 뒤집음) | 반경 2↔6 반사광, 1.6초 주기 | 사용자: 넓은 글로우는 과하고, 좁게·빠르게. |
+
+## 2026-11-11 — Ned MCP 서버 (워커 ned-mcp)
+
+| 질문 | 결정 | 근거 |
+| --- | --- | --- |
+| 트랜스포트 | 데몬 안 Streamable HTTP `/mcp`(stateless·JSON 응답), 플러그인 `.mcp.json` 은 `type: http` | 런타임 경로(`~/.ned/runtime`)·node 위치 문제가 없는 http 가 stdio 보다 단순하고, 데몬이 꺼져 있으면 도구가 그냥 없다. SDK 가 웹 표준 Request/Response 트랜스포트를 줘서 hono 에 바로 붙는다. 세션 상태가 필요 없어 stateless. |
+| 포트 | `.mcp.json` 은 7777 고정, 다른 포트는 `claude mcp add` 수동 | 문서상 플러그인 MCP 설정에서 확실히 치환되는 건 `${CLAUDE_PLUGIN_ROOT}`·`${CLAUDE_PLUGIN_DATA}`·`${CLAUDE_PROJECT_DIR}` 뿐(`${VAR:-default}` 는 `.mcp.json` 일반 설명에만 있음) — 깨지면 모두에게 깨지니 확실한 쪽. |
+| 쓰기 범위 | `ned_mark_reviewed`(✓) 하나. 보내기·초안·세션 만들기는 후속 | ✓ 는 로컬 표시라 되돌릴 수 있고 대시보드와 같은 함수(`src/review.ts`)를 쓴다. 외부로 나가는 쓰기는 대시보드의 확인 단계·설정 토글 없이 열지 않는다. |
+| 보안 | 127.0.0.1 바인딩 + loopback 이 아닌 Host·Origin 403, 인증 없음 | `/api/*` 와 같은 수준. SDK 의 `allowedOrigins` 는 deprecated 라 직접 검사. |
