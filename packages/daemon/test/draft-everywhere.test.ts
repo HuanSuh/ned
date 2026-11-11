@@ -55,8 +55,8 @@ beforeAll(() => {
 });
 
 describe("origin", () => {
-  it("parseOrigin keeps the 4 known origins and ignores anything else", () => {
-    expect([...ACTION_ORIGINS]).toEqual(["chat", "card", "history", "watch"]);
+  it("parseOrigin keeps the known origins and ignores anything else", () => {
+    expect([...ACTION_ORIGINS]).toEqual(["chat", "card", "history", "watch", "session", "pet"]);
     for (const o of ACTION_ORIGINS) expect(parseOrigin(o)).toBe(o);
     for (const bad of ["", "CARD", "inbox", 1, null, undefined, {}]) expect(parseOrigin(bad)).toBeUndefined();
   });

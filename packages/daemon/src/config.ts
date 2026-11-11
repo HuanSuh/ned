@@ -252,6 +252,41 @@ export interface NedDashboard {
   slack_team_id: string;
   /** "<name>" of <name>.slack.com (SLACK_TEAM_DOMAIN_RE, lower-case). Set → only that workspace's links open in the app; "" = every *.slack.com. */
   slack_team_domain: string;
+  /** 세션에 답하기: the quick-reply buttons on a waiting session (dashboard session rows + the desktop pet's bubble). */
+  session_quick_replies: string[];
+}
+/** 세션 빠른 답 버튼: at most 5, each 1–20 chars (one line). */
+export const QUICK_REPLIES_MAX = 5;
+export const QUICK_REPLY_LEN = 20;
+export const DEFAULT_QUICK_REPLIES = ["ㄱㄱ", "승인", "계속"];
+/**
+ * dashboard.session_quick_replies: absent keeps `base`'s; an array (or a comma-separated string) → trimmed, one line,
+ * empty / duplicate dropped, each ≤ 20 chars, at most 5. [] is allowed (no quick buttons — the input stays).
+ * PUT /api/config rejects an over-long / too many list with a 400 first (quickRepliesError).
+ */
+export function normalizeQuickReplies(v: unknown, base: readonly string[] = DEFAULT_QUICK_REPLIES): string[] {
+  if (v === undefined) return [...base];
+  const xs = Array.isArray(v) ? v : typeof v === "string" ? v.split(",") : null;
+  if (!xs) return [...base];
+  const out: string[] = [];
+  for (const x of xs) {
+    if (typeof x !== "string") continue;
+    const t = x.replace(/\s+/g, " ").trim();
+    if (!t || out.includes(t)) continue;
+    out.push(t.slice(0, QUICK_REPLY_LEN));
+    if (out.length >= QUICK_REPLIES_MAX) break;
+  }
+  return out;
+}
+/** PUT /api/config: dashboard.session_quick_replies that would be cut (> 5 buttons / a button > 20 chars / not a list) → the error, else null. */
+export function quickRepliesError(dashboard: unknown): string | null {
+  const v = dashboard && typeof dashboard === "object" ? (dashboard as { session_quick_replies?: unknown }).session_quick_replies : undefined;
+  if (v === undefined) return null;
+  if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) return "세션 빠른 답은 문자열 목록이어야 해";
+  const xs = v.map((x: string) => x.replace(/\s+/g, " ").trim()).filter(Boolean);
+  if (xs.length > QUICK_REPLIES_MAX) return `세션 빠른 답은 ${QUICK_REPLIES_MAX}개까지야`;
+  const long = xs.find((x) => x.length > QUICK_REPLY_LEN);
+  return long ? `세션 빠른 답은 버튼마다 ${QUICK_REPLY_LEN}자까지야 — "${long.slice(0, 30)}"` : null;
 }
 export const DEFAULT_OPEN_LINKS_BY_SERVICE: Record<LinkService, boolean> = { slack: true, figma: true, notion: true };
 export const DASHBOARD_THEMES = ["system", "light", "dark"] as const;
@@ -259,7 +294,7 @@ export type DashboardTheme = (typeof DASHBOARD_THEMES)[number];
 /** "system" | "light" | "dark"; anything else → "system". */
 export const normalizeTheme = (v: unknown): DashboardTheme => (DASHBOARD_THEMES.includes(v as DashboardTheme) ? (v as DashboardTheme) : "system");
 /** Slack first (most real-time), mail + Jira side by side, then GitHub. */
-export const DEFAULT_DASHBOARD: NedDashboard = { card_order: ["slack", "mail", "jira", "github"], card_span: { slack: 2, mail: 1, jira: 1, github: 2 }, layout: null, locked: false, watch_cards: true, theme: "system", open_links_in_app: true, open_links_in_app_by_service: DEFAULT_OPEN_LINKS_BY_SERVICE, slack_team_id: "", slack_team_domain: "" };
+export const DEFAULT_DASHBOARD: NedDashboard = { card_order: ["slack", "mail", "jira", "github"], card_span: { slack: 2, mail: 1, jira: 1, github: 2 }, layout: null, locked: false, watch_cards: true, theme: "system", open_links_in_app: true, open_links_in_app_by_service: DEFAULT_OPEN_LINKS_BY_SERVICE, slack_team_id: "", slack_team_domain: "", session_quick_replies: DEFAULT_QUICK_REPLIES };
 export const watchCardId = (channel: string): WatchCardId => `${WATCH_PREFIX}${channel}`;
 /** What DEFAULT_DASHBOARD's order/span become on the free grid: 일정 3 | cards 6 | 할 일 3, 12 rows tall. */
 export const DEFAULT_LAYOUT: Record<DashboardPanel, PanelRect> = {
@@ -312,9 +347,10 @@ export function normalizeLayout(raw: unknown, watch: readonly string[] = []): Ne
  * slack_team_id: absent keeps `base`'s; "" / null clears; "t0abc123" → "T0ABC123"; anything else not a team id keeps `base`'s
  * (PUT /api/config rejects it first with a 400 — slackTeamIdError).
  * slack_team_domain: same rules (normalizeSlackTeamDomain: lower-cased, scheme / .slack.com stripped; 400 — slackTeamDomainError).
+ * session_quick_replies: normalizeQuickReplies (absent keeps `base`'s; 400 — quickRepliesError).
  */
 export function normalizeDashboard(raw: unknown, base: NedDashboard = DEFAULT_DASHBOARD, watch: readonly string[] = []): NedDashboard {
-  const r = (raw && typeof raw === "object" ? raw : {}) as { card_order?: unknown; card_span?: unknown; layout?: unknown; locked?: unknown; watch_cards?: unknown; theme?: unknown; open_links_in_app?: unknown; open_links_in_app_by_service?: unknown; slack_team_id?: unknown; slack_team_domain?: unknown };
+  const r = (raw && typeof raw === "object" ? raw : {}) as { card_order?: unknown; card_span?: unknown; layout?: unknown; locked?: unknown; watch_cards?: unknown; theme?: unknown; open_links_in_app?: unknown; open_links_in_app_by_service?: unknown; slack_team_id?: unknown; slack_team_domain?: unknown; session_quick_replies?: unknown };
   const isCard = (v: unknown): v is DashboardCard => DASHBOARD_CARDS.includes(v as DashboardCard);
   const cardId = (v: unknown): DashboardCardId | null => (isCard(v) ? v : watchIdIn(v, watch));
   const ids = (xs: readonly unknown[]) => [...new Set(xs.map(cardId).filter((x): x is DashboardCardId => x !== null))];
@@ -341,7 +377,8 @@ export function normalizeDashboard(raw: unknown, base: NedDashboard = DEFAULT_DA
   const open_links_in_app_by_service = Object.fromEntries(LINK_SERVICES.map((s) => [s, typeof svcRaw[s] === "boolean" ? svcRaw[s] : base.open_links_in_app_by_service?.[s] !== false])) as Record<LinkService, boolean>;
   const baseDomain = normalizeSlackTeamDomain(base.slack_team_domain);
   const slack_team_domain = r.slack_team_domain === undefined ? baseDomain : normalizeSlackTeamDomain(r.slack_team_domain, baseDomain);
-  return { card_order: order, card_span, layout, locked, watch_cards, theme, open_links_in_app, open_links_in_app_by_service, slack_team_id, slack_team_domain };
+  const session_quick_replies = normalizeQuickReplies(r.session_quick_replies, normalizeQuickReplies(base.session_quick_replies));
+  return { card_order: order, card_span, layout, locked, watch_cards, theme, open_links_in_app, open_links_in_app_by_service, slack_team_id, slack_team_domain, session_quick_replies };
 }
 
 /** PUT /api/config: a non-empty dashboard.slack_team_domain that isn't a workspace subdomain → the error to show, else null. */

@@ -116,6 +116,8 @@ export interface ActionLogEntry {
 }
 
 const MAX_TEXT = 4000;
+/** source "session": what goes into an Orca terminal (세션에 답하기) — a reply, not a document. */
+export const SESSION_TEXT_MAX = 2000;
 const SLACK_SEND = "mcp__claude_ai_Slack__slack_send_message";
 const GMAIL_DRAFT = "mcp__claude_ai_Gmail__create_draft";
 const GMAIL_REPLY = "mcp__claude_ai_Gmail__reply";
@@ -187,9 +189,11 @@ export function parseSendRequest(body: Record<string, unknown>): SendRequest | s
   if (!sources.includes(source)) return `source must be ${sources.join(" | ")}`;
   const spec = SEND_MODES[source][mode];
   if (!spec) return `mode ${String(mode)} is not valid for source ${source} (${sources.map((s) => `${s}: ${Object.keys(SEND_MODES[s]).join(" | ")}`).join(" · ")})`;
-  const text = typeof body.text === "string" ? body.text.trim() : "";
+  // trim also drops trailing newlines: `orca terminal send --enter` is the one Enter (inner line breaks are kept).
+  const text = typeof body.text === "string" ? body.text.replace(/\r\n?/g, "\n").trim() : "";
   if (spec.text && !text) return "text required";
-  if (text.length > MAX_TEXT) return `text longer than ${MAX_TEXT} chars`;
+  const max = source === "session" ? SESSION_TEXT_MAX : MAX_TEXT;
+  if (text.length > max) return `text longer than ${max} chars`;
   const r = (body.ref && typeof body.ref === "object" ? body.ref : {}) as Record<string, unknown>;
   const ref: ActionRef = {};
   for (const k of ACTION_REF_FIELDS) {
@@ -547,11 +551,33 @@ export function matchTerminal(terms: OrcaTerminal[], pane: { tab?: string; leaf?
   return null;
 }
 
+/** The Orca runner sendToSession uses — tests swap in a mock (never a real `orca terminal send`). */
+let sessionOrca: OrcaExec = orca;
+export function _setSessionOrca(fn?: OrcaExec): void {
+  sessionOrca = fn ?? orca;
+}
+
+/**
+ * After a reply reached the session: its current "입력 대기" alert is answered — drop it from attention and remember
+ * that alert (the same record as 닫기, heartbeat dismissAttention), so the dashboard / Ned.app banner / pet don't raise
+ * it again while the session catches up. The session's next Notification (new alert_ts) shows as usual.
+ * Imported lazily: heartbeat → session-create → actions would otherwise be a cycle at load time.
+ */
+async function suppressSessionAlert(sessionId: string): Promise<void> {
+  try {
+    const { dismissAttention } = await import("./heartbeat.js");
+    dismissAttention(`session:${sessionId}`);
+  } catch (e) {
+    log(`send: could not clear the session alert for ${sessionId.slice(0, 8)} — ${String(e).slice(0, 200)}`);
+  }
+}
+
 async function sendToSession(req: SendRequest): Promise<{ status: 200 | 400 | 409 | 502; ok: boolean; action: string; detail: string }> {
   const sid = req.ref.session_id;
   if (!sid) return { status: 400, ok: false, action: "session_send", detail: "ref.session_id required" };
   const pane = sessionPane(sid);
   if (!pane) return { status: 409, ok: false, action: "session_send", detail: `세션 ${sid.slice(0, 8)} 은 Orca 터미널에서 실행된 기록이 없어 보낼 곳이 없다 (orca_pane 이벤트 없음). 터미널에서 직접 입력해줘.` };
+  const orca = sessionOrca;
   const list = await orca(["terminal", "list", "--json"]);
   const terms = ((list.json as { result?: { terminals?: OrcaTerminal[] } })?.result?.terminals ?? []) as OrcaTerminal[];
   if (!list.ok && !terms.length) return { status: 502, ok: false, action: "session_send", detail: `orca terminal list 실패: ${list.err}` };
@@ -559,6 +585,7 @@ async function sendToSession(req: SendRequest): Promise<{ status: 200 | 400 | 40
   if (!t) return { status: 409, ok: false, action: "session_send", detail: `세션 ${sid.slice(0, 8)} 의 Orca 터미널(tab ${pane.tab?.slice(0, 8) ?? "?"} / pane ${pane.leaf?.slice(0, 8) ?? "?"})이 지금 열려 있지 않다. 닫혔거나 다른 창으로 옮겨졌다.` };
   const sent = await orca(["terminal", "send", "--terminal", t.handle, "--text", req.text, "--enter", "--json"]);
   const ok = sent.ok && (sent.json as { ok?: boolean } | null)?.ok !== false;
+  if (ok) await suppressSessionAlert(sid);
   return {
     status: ok ? 200 : 502,
     ok,

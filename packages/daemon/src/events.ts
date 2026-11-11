@@ -17,6 +17,7 @@ export interface NedEvent {
   prompt?: string;
   orca_worktree?: string;
   orca_pane?: string;
+  orca_tab?: string;
   [k: string]: unknown;
 }
 
