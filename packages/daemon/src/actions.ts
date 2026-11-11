@@ -10,6 +10,7 @@ import type { ActionOrigin } from "./origin.js";
 import { parseOrigin } from "./origin.js";
 import { REF_FIELDS, githubTarget, jiraTarget, readDraft, sessionEvents, slackTarget, type DraftMeta, type DraftRef, type DraftSource } from "./drafts.js";
 import { NED_HOME, log } from "./paths.js";
+import { inReplyDialog, reduceSessions } from "./sessions.js";
 
 /** Append-only JSONL: one line per send attempt (allowed or not). */
 export const SENT_ACTIONS_LOG = path.join(NED_HOME, "sent-actions.log");
@@ -575,6 +576,9 @@ async function suppressSessionAlert(sessionId: string): Promise<void> {
 async function sendToSession(req: SendRequest): Promise<{ status: 200 | 400 | 409 | 502; ok: boolean; action: string; detail: string }> {
   const sid = req.ref.session_id;
   if (!sid) return { status: 400, ok: false, action: "session_send", detail: "ref.session_id required" };
+  const now = reduceSessions(sessionEvents(sid), 0)[0];
+  if (now && inReplyDialog(now))
+    return { status: 409, ok: false, action: "session_send", detail: `세션 ${sid.slice(0, 8)} 이 권한·선택 대화상자(${now.notification_type})를 띄우고 있어 보내지 않았다 — 글자는 무시되고 Enter 가 선택을 확정할 수 있다. 터미널에서 직접 선택해줘.` };
   const pane = sessionPane(sid);
   if (!pane) return { status: 409, ok: false, action: "session_send", detail: `세션 ${sid.slice(0, 8)} 은 Orca 터미널에서 실행된 기록이 없어 보낼 곳이 없다 (orca_pane 이벤트 없음). 터미널에서 직접 입력해줘.` };
   const orca = sessionOrca;

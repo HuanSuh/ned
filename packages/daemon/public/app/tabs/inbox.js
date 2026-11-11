@@ -4,7 +4,7 @@ import { draftBtn, mailRef, sessionRef, slackRef } from "../features/drafts.js";
 import { bfFailed, bfKind } from "../features/dailyfail.js";
 import { V, opener, quip, say } from "../features/personas.js";
 import { openAtt, srcKey } from "../features/reviewed.js";
-import { canReply, keepFocus, replyBox, replyMenu, replyOn, replySig } from "../features/sessreply.js";
+import { canReply, inDialog, keepFocus, replyBox, replyMenu, replyOn, replySig } from "../features/sessreply.js";
 import { loadState, renderHeader } from "../main.js";
 import { S, alive, saveRead, subscribe, ui } from "../state.js";
 import { PF, PILL_KINDS, pillRow, srcOn } from "../ui/chips.js";
@@ -173,7 +173,7 @@ export function renderDetail(it, m) {
     if (it.sess) {
       const x = it.sess;
       const evs = S.events.filter((e) => e.session_id === x.id).slice(-10).reverse();
-      ctx = say(`ned · ${hhmm(it.ts)}`, esc(x.status === "waiting" ? `${x.worktree} 가 네 허락을 기다리는 중.` : x.status === "error" ? `${x.worktree} 가 넘어졌어.` : `${x.worktree} 상태 바뀜.`), esc(x.status === "waiting" ? (replyOn() && canReply(x) ? "위에서 바로 답하거나 터미널에서 답해 주면 이어서 갈 거야." : "터미널로 가서 답해 주면 바로 이어서 갈 거야.") : x.status === "error" ? "다시 돌릴지 봐 줘." : ""))
+      ctx = say(`ned · ${hhmm(it.ts)}`, esc(x.status === "waiting" ? `${x.worktree} 가 네 허락을 기다리는 중.` : x.status === "error" ? `${x.worktree} 가 넘어졌어.` : `${x.worktree} 상태 바뀜.`), esc(x.status === "waiting" ? (replyOn() && canReply(x) && !inDialog(x) ? "위에서 바로 답하거나 터미널에서 답해 주면 이어서 갈 거야." : "터미널로 가서 답해 주면 바로 이어서 갈 거야.") : x.status === "error" ? "다시 돌릴지 봐 줘." : ""))
         + `<h3>세션 · ${esc(x.worktree)}</h3><dl class="kv"><dt>상태</dt><dd><span class="led ${STATUS_LED[x.status] || ""}"></span>${esc(STATUS_KO[x.status] || x.status)}</dd><dt>시작</dt><dd>${rel(x.since)} (${mdhm(x.since)})</dd>${x.origin === "chat" ? `<dt>출처</dt><dd>${chatOriginBadge(x)}</dd>` : ""}<dt>서브에이전트</dt><dd>${x.subagents_active}</dd><dt>경로</dt><dd class="mono" style="font-size:12px">${esc(x.cwd)}</dd>${x.last_prompt ? `<dt>프롬프트</dt><dd>» ${esc(x.last_prompt)}</dd>` : ""}</dl>
           <h3>최근 이벤트</h3>${evs.length ? `<div class="tlx">${evs.map((e) => `<div class="${e.event === "Notification" ? "hot" : e.event === "StopFailure" ? "err" : ""}"><span class="h">${hhmm(e.ts)}</span>${esc(EVENT_KO[e.event] || e.event)}${e.message || e.prompt ? ` — ${esc(String(e.message || e.prompt).slice(0, 140))}` : e.agent_type ? ` — ${esc(e.agent_type)}` : ""}</div>`).join("")}</div>` : `<div class="body" style="font-size:13px">이벤트 없음</div>`}`;
     } else if (it.briefing) {

@@ -139,6 +139,39 @@ describe("waiting session row", () => {
     expect(host().querySelector(".sreply.nohint")!.textContent).toContain("터미널에서 직접 입력");
   });
 
+  it("permission prompt (notification_type permission_prompt) → no quick buttons, no input, only the 터미널에서 직접 선택 line", () => {
+    S.state.sessions = [sess({ notification_type: "permission_prompt" } as Partial<Sess>)];
+    draw();
+    expect(host().querySelector("[data-srq]")).toBeNull();
+    expect(host().querySelector("[data-sri]")).toBeNull();
+    expect(host().querySelector(".sreply.dialog")!.textContent).toContain("터미널에서 직접 선택");
+    S.state.sessions = [sess({ notification_type: "idle_prompt" } as Partial<Sess>)];
+    draw();
+    expect(host().querySelector("[data-srq]")).not.toBeNull();
+  });
+
+  it("a quick button keeps what was being typed; ⏎ of the typed text clears it", async () => {
+    const inp = host().querySelector("[data-sri]") as HTMLInputElement;
+    inp.value = "나중에 보낼 글";
+    inp.dispatchEvent(new Event("input", { bubbles: true }));
+    click(host().querySelector('[data-srq="계속"]'));
+    await flush();
+    expect(SR.R.draft.get("sess-74")).toBe("나중에 보낼 글");
+    SR.R.sent.clear(); draw();
+    const again = host().querySelector("[data-sri]") as HTMLInputElement;
+    expect(again.value).toBe("나중에 보낼 글");
+    again.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await flush();
+    expect(SR.R.draft.has("sess-74")).toBe(false);
+  });
+
+  it("replySig changes when the ⋯ menu of that session opens (R.menu is where:id)", () => {
+    const x = sess({ status: "running" });
+    const before = SR.replySig(x);
+    SR.R.menu = "rail:sess-74";
+    expect(SR.replySig(x)).not.toBe(before);
+  });
+
   it("actions.session_send off → no reply UI at all", () => {
     S.config.actions.session_send = false;
     draw();

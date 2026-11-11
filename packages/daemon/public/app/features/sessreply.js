@@ -27,6 +27,10 @@ export const quickReplies = () => {
 export const replyOn = () => S.config?.actions?.session_send !== false;
 /** 옛 데몬(can_reply 없음)은 보낼 수 있다고 보고, 실제 가능 여부는 전송 때 409 로. */
 export const canReply = (x) => x?.can_reply !== false;
+/** = src/sessions.ts inReplyDialog: 권한·선택 대화상자를 띄운 대기 세션 — 글자는 무시되고 Enter 가 강조된 선택을 확정하므로 답하기 없음. */
+export const DIALOG_TYPES = ["permission_prompt", "elicitation_dialog"];
+export const inDialog = (x) => x?.status === "waiting" && DIALOG_TYPES.includes(x?.notification_type);
+export const DIALOG_MSG = "권한·선택 대화상자 — 터미널에서 직접 선택 (Enter = 강조된 항목, Esc = 거절)";
 
 /** 보낸 뒤 아직 세션이 반응하지 않았나 (새 이벤트 없음 · 90초 안). */
 export function sentPending(x, now = Date.now()) {
@@ -45,7 +49,7 @@ export function failText(r) {
 }
 
 /** 행 다시 그리기용 서명 — 인박스 상세의 sig 에 붙여 상태가 바뀌면 다시 그린다. */
-export const replySig = (x) => (x ? `${R.open.has(x.id)}|${R.busy.has(x.id)}|${sentPending(x)}|${R.menu === x.id}|${x.can_reply}|${replyOn()}|${quickReplies().join(",")}` : "");
+export const replySig = (x) => (x ? `${R.open.has(x.id)}|${R.busy.has(x.id)}|${sentPending(x)}|${!!R.menu?.endsWith(`:${x.id}`)}|${x.can_reply}|${x.notification_type}|${replyOn()}|${quickReplies().join(",")}` : "");
 
 /** ⋯ 버튼 (running / done 등 대기 아닌 세션, 보낼 곳이 있을 때만) + 열린 메뉴. */
 export function replyMenu(x, where) {
@@ -62,6 +66,7 @@ export function replyBox(x, where) {
   const waiting = x.status === "waiting";
   if (!waiting && !R.open.has(x.id)) return "";
   if (!canReply(x)) return waiting ? `<div class="sreply nohint" data-sr="${sid}" data-where="${wh}">터미널에서 직접 입력 — 이 세션은 Orca 터미널 기록이 없어 Ned 가 보낼 수 없어</div>` : "";
+  if (inDialog(x)) return `<div class="sreply nohint dialog" data-sr="${sid}" data-where="${wh}">${esc(DIALOG_MSG)}</div>`;
   const busy = R.busy.has(x.id), dis = busy ? " disabled" : "";
   const quick = waiting ? quickReplies() : [];
   return `<div class="sreply${busy ? " busy" : ""}" data-sr="${sid}" data-where="${wh}">`
@@ -86,8 +91,8 @@ export function keepFocus(render) {
 const rerender = () => emit("sessreply");
 const sessionOf = (sid) => (S.state?.sessions || []).find((s) => s.id === sid);
 
-/** 한 번 보내고 결과까지 (중복 클릭은 무시). 실패면 입력 글은 그대로 남는다. */
-export async function sendReply(sid, text) {
+/** 한 번 보내고 결과까지 (중복 클릭은 무시). 실패면 입력 글은 그대로 남는다. `fromInput` = 입력칸의 글을 보낸 것(성공하면 지움) — 빠른 버튼은 입력 중 글을 건드리지 않는다. */
+export async function sendReply(sid, text, { fromInput = false } = {}) {
   const t = String(text ?? "").trim();
   if (!t || R.busy.has(sid)) return null;
   if (t.length > TEXT_MAX) { toast(`${TEXT_MAX}자까지 보낼 수 있어 (지금 ${t.length}자)`); return null; }
@@ -103,7 +108,8 @@ export async function sendReply(sid, text) {
   R.busy.delete(sid);
   if (r.ok) {
     R.sent.set(sid, { at: Date.now(), ts: x?.last_event_ts || 0 });
-    R.draft.delete(sid); R.open.delete(sid);
+    if (fromInput) R.draft.delete(sid);
+    R.open.delete(sid);
     toast(`${name} 에 보냄`);
   } else toast(failText(r), 5000);
   rerender();
@@ -129,7 +135,7 @@ export function init(root = document) {
     const sid = box.dataset.sr;
     const q = t.closest("[data-srq]");
     if (q && !q.disabled) { ev.preventDefault(); sendReply(sid, q.dataset.srq); return; }
-    if (t.closest("[data-srsend]")) { ev.preventDefault(); sendReply(sid, box.querySelector("[data-sri]")?.value); return; }
+    if (t.closest("[data-srsend]")) { ev.preventDefault(); sendReply(sid, box.querySelector("[data-sri]")?.value, { fromInput: true }); return; }
     if (t.closest("[data-srclose]")) { ev.preventDefault(); R.open.delete(sid); rerender(); }
   });
   root.addEventListener("input", (ev) => {
@@ -148,6 +154,6 @@ export function init(root = document) {
     }
     if (ev.key !== "Enter" || ev.isComposing || ev.keyCode === 229) return; // 한글 조합 중 ⏎ 는 글자 확정
     ev.preventDefault(); // Shift+⏎ 도 줄바꿈 없음 — 한 줄 입력
-    if (!ev.shiftKey && sid) sendReply(sid, inp.value);
+    if (!ev.shiftKey && sid) sendReply(sid, inp.value, { fromInput: true });
   });
 }

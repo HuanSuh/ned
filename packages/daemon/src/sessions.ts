@@ -33,7 +33,19 @@ export interface SessionView {
    * Whether that terminal is open *now* is only known at send time (409).
    */
   can_reply: boolean;
+  /**
+   * The waiting Notification's `notification_type` (permission_prompt / idle_prompt / elicitation_dialog …), null once the
+   * session moves on. A dialog type (REPLY_DIALOG_TYPES) means the terminal shows a picker, not the prompt: typed text is
+   * ignored and the Enter of a reply confirms the highlighted option (Claude Code keybindings: Confirmation `confirm:yes`
+   * = Enter) — so the reply UIs show "터미널에서 직접 선택" and POST /api/send answers 409.
+   */
+  notification_type: string | null;
 }
+
+/** Notification types whose terminal shows a picker / form instead of the prompt — no typed replies. */
+export const REPLY_DIALOG_TYPES = ["permission_prompt", "elicitation_dialog"];
+export const inReplyDialog = (s: Pick<SessionView, "status" | "notification_type">): boolean =>
+  s.status === "waiting" && !!s.notification_type && REPLY_DIALOG_TYPES.includes(s.notification_type);
 
 const TERMINAL: SessionStatus[] = ["ended"];
 
@@ -81,6 +93,7 @@ export function reduceSessions(events: NedEvent[], staleMinutes: number, now = D
         alert_ts: null,
         is_worker: false,
         can_reply: false,
+        notification_type: null,
       };
       map.set(e.session_id, s);
     }
@@ -95,6 +108,8 @@ export function reduceSessions(events: NedEvent[], staleMinutes: number, now = D
       if (!e.cwd && !s.cwd) s.worktree = worktreeName(undefined, e.orca_worktree);
     }
 
+    // The dialog type belongs to the Notification that made it wait; any other status-changing event ends it.
+    if (["SessionStart", "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd"].includes(e.event)) s.notification_type = null;
     switch (e.event) {
       case "SessionStart":
         s.status = "running";
@@ -113,6 +128,7 @@ export function reduceSessions(events: NedEvent[], staleMinutes: number, now = D
         // permission_prompt / idle_prompt / elicitation → needs the human.
         s.status = "waiting";
         s.alert_ts = e.ts;
+        s.notification_type = typeof e.notification_type === "string" && e.notification_type ? e.notification_type.slice(0, 40) : null;
         if (e.message) s.last_summary = String(e.message).slice(0, 240);
         break;
       case "Stop":

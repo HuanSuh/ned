@@ -82,6 +82,40 @@ describe("can_reply", () => {
   });
 });
 
+describe("notification_type (권한·선택 대화상자)", () => {
+  it("the waiting Notification's type is on the session view, cleared once the session moves on", async () => {
+    writeEvents([ev("SessionStart", T0, { orca_pane: "tab1:leaf1" }), ev("Notification", T0 + 1, { notification_type: "permission_prompt", message: "Claude needs your permission to use Bash" })]);
+    refreshSessions(loadConfig());
+    const st = await (await request("/api/state")).json();
+    expect(st.sessions[0]).toMatchObject({ status: "waiting", notification_type: "permission_prompt" });
+    const [after] = reduceSessions([ev("Notification", T0, { notification_type: "permission_prompt" }), ev("UserPromptSubmit", T0 + 1)], 180, T0 + 10);
+    expect(after.notification_type).toBeNull();
+    const [idle] = reduceSessions([ev("Notification", T0, { notification_type: "idle_prompt" })], 180, T0 + 10);
+    expect(idle.notification_type).toBe("idle_prompt");
+  });
+
+  it("POST /api/send to a session showing a permission prompt → 409 without touching orca (Enter would confirm the highlighted option)", async () => {
+    writeEvents([ev("SessionStart", T0, { orca_pane: "tab1:leaf1" }), ev("Notification", T0 + 1, { notification_type: "permission_prompt" })]);
+    refreshSessions(loadConfig());
+    const m = mockOrca([{ handle: "term_x", tabId: "tab1", leafId: "leaf1" }]);
+    _setSessionOrca(m.fn);
+    const r = await request("/api/send", json("POST", { source: "session", mode: "session", text: "거절", ref: { session_id: "sess-1" } }));
+    const done = await waitJob((await r.json()).job_id);
+    expect(done.result).toMatchObject({ ok: false, http_status: 409 });
+    expect(done.result.error).toContain("permission_prompt");
+    expect(m.calls).toEqual([]);
+    expect(readState().attention.map((a) => a.id)).toContain("session:sess-1");
+  });
+
+  it("an idle_prompt wait is answerable as usual", async () => {
+    writeEvents([ev("SessionStart", T0, { orca_pane: "tab1:leaf1" }), ev("Notification", T0 + 1, { notification_type: "idle_prompt" })]);
+    refreshSessions(loadConfig());
+    _setSessionOrca(mockOrca([{ handle: "term_x", tabId: "tab1", leafId: "leaf1" }]).fn);
+    const r = await request("/api/send", json("POST", { source: "session", mode: "session", text: "계속", ref: { session_id: "sess-1" } }));
+    expect((await waitJob((await r.json()).job_id)).result).toMatchObject({ ok: true, http_status: 200 });
+  });
+});
+
 describe("POST /api/send — session text", () => {
   it("parseSendRequest: empty / whitespace → text required; > 2,000 chars → 400; trailing newlines dropped, inner kept", () => {
     expect(parseSendRequest({ source: "session", mode: "session", text: "  \n ", ref: { session_id: "s" } })).toBe("text required");
