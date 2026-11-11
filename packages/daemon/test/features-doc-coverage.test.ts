@@ -78,10 +78,10 @@ function settingsInputs(): string[] {
   return [...ids];
 }
 
-/** (c) /api routes registered in server.ts (and search.ts, mounted by it). */
+/** (c) /api routes registered in server.ts (and search.ts, mounted by it) + the MCP endpoint /mcp (mcp.ts). */
 function apiRoutes(): string[] {
-  const src = read("src/server.ts") + read("src/search.ts");
-  return [...new Set([...src.matchAll(/app\.(?:get|post|put|patch|delete)\(\s*"(\/api\/[^"]+)"/g)].map((m) => m[1]))];
+  const src = read("src/server.ts") + read("src/search.ts") + read("src/mcp.ts");
+  return [...new Set([...src.matchAll(/app\.(?:get|post|put|patch|delete)\(\s*"(\/api\/[^"]+|\/mcp)"/g)].map((m) => m[1]))];
 }
 
 const missing = (items: string[]) => [...new Set(items)].filter((i) => !allowed.has(i) && !inDoc(i));
@@ -91,7 +91,7 @@ describe("docs/FEATURES.md covers every feature surface", () => {
   it("inventories are non-trivial (the extractors still find things)", () => {
     expect(configKeys().length).toBeGreaterThan(50);
     expect(settingsInputs()).toEqual(expect.arrayContaining(["c-theme", "n-on", "x-watch-in", "actions.gmail_mark_read"]));
-    expect(apiRoutes()).toEqual(expect.arrayContaining(["/api/chat", "/api/config", "/api/search"]));
+    expect(apiRoutes()).toEqual(expect.arrayContaining(["/api/chat", "/api/config", "/api/search", "/mcp"]));
   });
 
   it("(a) config keys", () => {

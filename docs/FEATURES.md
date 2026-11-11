@@ -5,23 +5,23 @@
 
 ## 요약
 
-Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub·Sentry)를 모아 보여 주는 로컬 대시보드(탭: 홈·인박스·타임라인·설정). 전역 키: h 홈, i 인박스, r 지금 점검, ⌘K·/ 검색, ⌘J 통신기.
-- **홈**: 일정(일/주, ＋·드래그로 만들기, ⋯ 응답), 할 일(NED 액션 아이템 / 개인 할 일, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, 이력 7/30일, ↻ 소스별 갱신), 팔로업 카드(멘션 없는 채널 요약).
+Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub·Sentry)를 모으는 로컬 대시보드(탭: 홈·인박스·타임라인·설정). 전역 키: h 홈, i 인박스, r 지금 점검, ⌘K·/ 검색, ⌘J 통신기.
+- **홈**: 일정(일/주, ＋·드래그로 만들기, ⋯ 응답), 할 일(NED 액션·개인, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, 이력 7/30일, ↻ 소스별 갱신), 팔로업 카드(멘션 없는 채널 요약).
 - **인박스**: 우선·기타·기록(브리핑) 3탭 + "장비실"(세션 상태).
 - **타임라인**: 이벤트·브리핑 시간순
-- **순찰/브리핑**: "지금 점검"(r) = 소스 새로 가져와 판단 → 알림·attention. 자동 순찰 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑 `briefing_time`(실패 시 재시도).
-- **야간·유휴 감속**: 조용한 시간·유휴(`idle_schedule`)엔 자동 실행을 늦추거나 멈춤(`quiet_schedule.mode` normal/slow/pause), 수동은 즉시.
+- **순찰/브리핑**: "지금 점검"(r) = 소스 갱신 → 판단 → 알림. 자동 순찰 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑 `briefing_time`(실패 시 재시도).
+- **야간·유휴 감속**: 조용한 시간·유휴(`idle_schedule`)엔 자동 실행 감속·정지(`quiet_schedule.mode` normal/slow/pause), 수동은 즉시.
 - **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기 확인 카드, `actions.chat_session_create` 면 새 세션; 정리는 노트로), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글.
-- **답장 초안 ✎**: 초안 3개 → 복사/열기/보내기(Slack·메일·Jira 는 미답 질문별 1:1 답). 쓰기는 설정 → 쓰기 액션에서 켠 것만(`actions.*` — gmail_draft·session_send 기본 켬, Jira·GitHub·캘린더는 ⋯). **세션에 답하기**: 대기 세션 행·펫 말풍선에서 빠른 답(`dashboard.session_quick_replies`)·한 줄 입력 → 그 세션 Orca 터미널.
-- **확인 완료 ✓**: 처리됨으로 접음(새 변경 시 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`)면 자동 해제.
+- **답장 초안 ✎**: 초안 3개 → 복사/열기/보내기(Slack·메일·Jira 는 미답 질문별 1:1 답). 쓰기는 켠 것만(`actions.*` — gmail_draft·session_send 기본 켬, Jira·GitHub·캘린더는 ⋯). **세션에 답하기**: 대기 세션 행·펫 말풍선의 빠른 답(`dashboard.session_quick_replies`)·한 줄 입력 → Orca 터미널.
+- **확인 완료 ✓**: 접음(새 변경 시 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`)면 자동 해제.
 - **Gmail 읽음 표시**(`actions.gmail_mark_read`): 메일 ✓ = Gmail 읽음.
-- **검색**: ⌘K 통합 검색
+- **검색**: ⌘K
 - **아카이브(Obsidian)**: 볼트 `archive.vault` + `archive.enabled` → 매일 `<archive.folder>/Daily/…/날짜.md`, `archive.daily_embed`.
 - **수집 이력**: 소스별 보관(`history.keep_days.*`), 증분 수집(Slack 재검색 창 `history.collect.slack_hours`), 표시 구간(`history.display.*`).
-- **링크 열기**: Slack·Figma·Notion 링크는 앱으로(`dashboard.open_links_in_app`, Slack 은 팀 ID `dashboard.slack_team_id`), 없으면 웹.
-- **설치**: 플러그인 `ned@ned` → `/ned:install`. 업데이트 `/plugin update ned`→`/reload-plugins`→`/ned:install`.
-- **Ned.app 메뉴**: 상태 줄 + 대시보드 열기·설정…·업데이트 확인·종료. 앱 설정·`updates.*` 는 설정 → 앱.
-- **시작하기**(첫 실행·설정): 커넥터 연결·Slack 팀 ID·자동 실행·코드 서명 점검.
+- **링크 열기**: Slack·Figma·Notion 링크는 앱으로(`dashboard.open_links_in_app`, Slack 은 팀 ID `dashboard.slack_team_id`).
+- **설치**: 플러그인 `ned@ned`→`/ned:install`(업데이트 `/plugin update ned`→`/reload-plugins`→`/ned:install`), MCP `/mcp`(도구 `ned_attention` 등).
+- **Ned.app 메뉴**: 상태·대시보드·설정·업데이트·종료. 앱 설정·`updates.*`: 설정 → 앱.
+- **시작하기**: 커넥터·Slack 팀 ID·자동 실행·코드 서명 점검.
 - **데스크톱 펫**(외형 `pet.enabled`, 끔): 늘 떠 있는 Ned, 테두리 색 = 상태, 새 소식 말풍선(`pet.messages.*`).
 - **설정**(하단 "저장"): 외형(테마 `dashboard.theme`, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`, 링크 열기) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(위 순찰·감속 키, `signal_check_minutes`, `agenda_refresh_minutes`, `agenda_source_minutes.*`) · 쓰기 액션(`actions.*`, 말투 `reply_tone`·`reply_tone_by_source.*`, 오늘 한 액션) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(`claude_model`, `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd`).
 
@@ -232,6 +232,26 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 설치 중 점검(`/ned:install`): 빌드 **전에** 코드 서명 인증서("Ned Local Signing")가 없으면 지금 만들지 묻는다(`scripts/make-signing-cert.sh`, macOS 대화상자 승인 — 없으면 ad-hoc 서명이라 재설치마다 권한을 다시 물음). 설치 뒤 `ned setup-check`(아래 "시작하기")로 소스별 연결 상태와 할 일을 표로 보여 주고, 처음 설치면 로그인할 때 자동 실행할지 묻는다(예 → `Ned --login-item-register`).
 - 처음 한 번: claude.ai 커넥터(Slack·Gmail·Calendar·Jira)를 본인 계정으로 연결, GitHub 은 `gh auth login` — Ned 는 토큰을 갖지 않는다. Slack 팀 ID 입력. 모두 대시보드 **시작하기** 창에서 확인·입력할 수 있다.
 - 레포에서 직접 설치(개발용): `scripts/install.sh` — 체크아웃에서 빌드하고 `settings.json` 에 훅 등록. 플러그인과 같이 쓰지 말 것. 릴리스 절차는 `docs/RELEASE.md`.
+- MCP: 플러그인 루트 `.mcp.json` 이 데몬의 `/mcp` 를 `ned` MCP 서버로 등록한다(아래 "MCP 서버") — 설치 뒤 Claude Code 에서 `/mcp` 로 확인.
+
+### MCP 서버 — 어느 Claude Code 세션에서나 Ned 읽기
+- 보여 주는 것: 플러그인을 설치한 모든 Claude Code 세션에 `ned` MCP 서버(도구 이름 `mcp__plugin_ned_ned__<도구>`). "지금 봐야 할 것", 세션 상태, 최근 브리핑을 대화 중에 도구로 읽는다.
+- 엔드포인트: 데몬의 `POST /mcp`(MCP Streamable HTTP, `http://127.0.0.1:7777/mcp`). stateless(세션 ID 없음)·JSON 응답 — 요청마다 서버를 새로 만든다. `GET /mcp`·`DELETE /mcp` 는 405(SSE 스트림·세션 없음). 코드 `src/mcp.ts`(트랜스포트)·`src/mcp-tools.ts`(도구).
+- 도구:
+
+  | 도구 | 하는 일 | 인자 |
+  | --- | --- | --- |
+  | `ned_attention` | 열린 "확인할 것" — attention(브리핑·세션) + 소스 카드 항목(메일·Slack·Jira·GitHub, 응답 필요 일정), URL 중복 제거. 응답 필요 일정(시작 시각이 미래)이 맨 앞, 나머지는 최신순. 항목마다 `review_key`·`open`·`reviewed_at` | `source?`(slack·mail·jira·github·calendar·session·sentry·other), `limit?`(20, ≤100), `include_reviewed?` |
+  | `ned_sessions` | 세션 목록 — id 앞 8자·워크트리·상태·`waiting_for_input`·시작/마지막 시각·마지막 프롬프트/요약 | `status?`, `include_workers?`(true), `limit?`(20, ≤50) |
+  | `ned_briefing` | 최신 브리핑(또는 `since` 이후 브리핑들) — 헤드라인·할 일·업데이트·참고·상태 | `since?`(ISO), `limit?`(3, ≤5) |
+  | `ned_history` | 한 소스의 지난 N일 수집 이력(`/api/history` 와 같은 조건) | `source`, `days?`(1), `q?`, `channel?`, `limit?`(20, ≤100) |
+  | `ned_feed` | 메시지 피드(펫·통신기 "메시지"와 같은 규칙) 최근 n개 | `limit?`(10, ≤50) |
+  | `ned_mark_reviewed` | **유일한 쓰기** — `review_key` 로 확인 완료 ✓ / 해제(`reviewed:false`). `/api/attention/:id/review` 와 같은 검증(잘못된 키 400, 없는 attention 404)·부수효과(Slack 스레드 읽음 기준, `actions.gmail_mark_read` 면 Gmail 읽음) | `review_key`, `reviewed?`(true) |
+
+  결과: 요약 한 줄 + JSON(텍스트 블록 두 개). 목록은 limit, 문자열은 잘라서(제목 200자·본문 300~400자) 한 번에 토큰이 폭주하지 않게. 리소스: `ned://briefing/latest`(최신 브리핑 JSON), `ned://features`(이 문서 요약).
+- 보안: 데몬은 `127.0.0.1` 에만 열린다. DNS rebinding 방지로 Host 가 loopback(127.0.0.1·localhost·[::1])이 아니거나, Origin 헤더가 있는데 loopback 이 아니면 403(로그 `request-guard: refused`). 인증은 없다 — `/api`·`/mcp`(그리고 대시보드 정적 파일) 모두 같은 가드(`src/request-guard.ts`). 쓰기는 ✓ 하나뿐(메일 ✓ 는 `actions.gmail_mark_read` 면 Gmail 읽음 처리도 하므로 `openWorldHint: true`).
+- 설치·확인: 플러그인 `.mcp.json` = `{"mcpServers":{"ned":{"type":"http","url":"http://127.0.0.1:7777/mcp"}}}` — 포트 7777 고정. `port` 를 바꿨다면 `claude mcp add --transport http ned <데몬 주소>/mcp` 로 직접 등록하고 `/mcp` 에서 플러그인 쪽 `ned` 를 끈다. `/ned:status` 의 "MCP" 줄이 `/mcp` 응답 여부(초기화 요청 1회)를 보여 주고, 이 세션에 로드됐는지는 `/mcp` 로 본다. Ned.app(데몬)이 꺼져 있으면 Claude Code 가 연결을 몇 번 재시도한 뒤 `/mcp`·`claude mcp list` 에 연결 실패(✘ Failed to connect)로 표시하고 도구가 없다 — 데몬을 켠 뒤 `/mcp` 에서 다시 연결.
+- 후속(이번에 없음): 보내기(`/api/send`)·초안·세션 만들기 같은 쓰기 도구, 서버→클라이언트 알림(SSE), 다른 포트 자동 반영.
 
 ### 시작하기 — 첫 실행 점검
 - 보여 주는 것: "시작하기" 창 — 소스 연결(설정에서 켠 소스만: Slack·Gmail·Google Calendar·Jira(Atlassian) 커넥터, GitHub `gh`, Sentry MCP) 상태 칩 연결됨/인증 필요/연결 안 됨/연결 중/확인 실패 + 할 일("claude.ai 에서 연결" → https://claude.ai/settings/connectors, `gh auth login`), Slack 팀 ID 입력·저장(`dashboard.slack_team_id`, Slack 소스가 켜졌을 때), 자동 실행(Login Item) 토글, 코드 서명 상태 + 실행할 명령(`bash …/scripts/make-signing-cert.sh` — 다음 `/ned:install` 부터 적용).
@@ -384,3 +404,5 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 시작하기: `/api/setup`(점검 결과, `?refresh=1` 다시 확인) · `/api/setup/dismiss`(창 닫음 기록, `{dismissed:false}` 면 되돌림)
 - 업데이트: `/api/update-check`(`{current, latest, source, update_available, checked_at, steps, error?, status}`, 10분 캐시, `?refresh=1` 은 새로 + 기록) · `/api/update/status`(자동 업데이트 상태: 설정·마지막/다음 확인·마지막 설치 시도) · `/api/update/install`(지금 업데이트, 202 시작 / 409 이유)
 - 설정: `/api/config`(GET/PUT — 바뀐 키만, 충돌 시 409) · `/api/config/backups` · `/api/config/restore`(이전 설정으로 되돌리기)
+- MCP: `/mcp`(POST — MCP Streamable HTTP, stateless·JSON 응답, 도구 `ned_attention` 외 5개. GET/DELETE 405 — 위 "MCP 서버")
+- 공통: 모든 라우트(`/api/*`·`/mcp`·정적 파일)에서 loopback 이 아닌 Host·Origin 은 403(DNS rebinding 방지)

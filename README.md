@@ -43,6 +43,11 @@ Claude Code 에서:
 
 예전에 `scripts/install.sh` 로 설치했던 Mac 도 위 순서 그대로 — `/ned:install` 이 `~/.claude/settings.json` 의 옛 Ned 훅을 지운다.
 
+**Claude Code 에서 Ned 도구(MCP)**: 플러그인의 `.mcp.json` 이 데몬의 `http://127.0.0.1:7777/mcp` 를 `ned` MCP 서버로 등록한다 — 어느 세션에서든
+`ned_attention`(지금 볼 것)·`ned_sessions`·`ned_briefing`·`ned_history`·`ned_feed`·`ned_mark_reviewed`(✓) 를 쓴다. `/mcp` 로 연결 확인.
+Ned.app(데몬)이 꺼져 있으면 `/mcp` 에 연결 실패로 보이고 도구가 없다. 포트를 7777 이 아닌 값으로 바꿨다면 자동 등록은 맞지 않는다 —
+`claude mcp add --transport http ned <데몬 주소>/mcp`(예: 포트 7800 이면 `127.0.0.1:7800`)로 직접 등록하고 `/mcp` 에서 플러그인 쪽 `ned` 를 끈다. 자세히는 [`docs/FEATURES.md`](docs/FEATURES.md) "MCP 서버".
+
 ## 레포에서 직접 설치 (개발용)
 
 ```sh
@@ -66,4 +71,9 @@ bash scripts/uninstall.sh
 
 개발: `pnpm test`, `pnpm -s build`. 작업 규칙은 [`CLAUDE.md`](CLAUDE.md).
 
-라이선스: [MIT](LICENSE).
+라이선스: [MIT](LICENSE). [Privacy](#privacy)
+
+## Privacy
+
+Ned 는 이 Mac 에서만 돈다. 데몬·대시보드·MCP 엔드포인트(`/mcp`)는 `127.0.0.1` 에만 열리고, 모은 데이터는 `~/.ned` 에만 저장된다 — Ned 가 운영하는
+서버로 보내는 것은 없다. 업무 신호는 사용자의 claude CLI·claude.ai 커넥터·`gh` 로 읽는다(각 서비스의 약관을 따른다).

@@ -37,6 +37,30 @@ else
   echo "  down — no answer (Ned.app 이 꺼져 있거나 데몬이 아직 안 뜸)"
 fi
 
+echo "## MCP (http://127.0.0.1:$PORT/mcp)"
+# One initialize request (no session — the endpoint is stateless). Whether this Claude Code session loaded the plugin's
+# ned MCP server is not visible from here: check with /mcp in the session.
+init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ned-status","version":"0"}}}'
+mcp="$(curl -s --max-time 3 -w '\n%{http_code}' -X POST -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -d "$init" "http://127.0.0.1:$PORT/mcp")"
+code="${mcp##*$'\n'}"   # last line = HTTP status (curl -w); 000 / empty = no answer
+mcp="${mcp%$'\n'*}"
+if [ -z "$code" ] || [ "$code" = "000" ]; then
+  echo "  응답 없음 (데몬이 꺼져 있음)"
+elif [ "$code" = "403" ]; then
+  echo "  403 Host/Origin 거부 — $NED_HOME/logs/app-daemon.log 의 'request-guard: refused' 줄 확인"
+elif [ "$code" = "404" ]; then
+  echo "  응답은 있으나 MCP 가 아님 (런타임이 /mcp 이전 버전? → /ned:install): 404"
+else
+  printf '%s' "$mcp" | node -e '
+    let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      try {
+        const r = JSON.parse(s).result;
+        console.log(r?.serverInfo ? "  응답함 — " + r.serverInfo.name + " " + r.serverInfo.version + " (protocol " + r.protocolVersion + ")" : "  응답은 있으나 MCP 가 아님 (런타임이 /mcp 이전 버전? → /ned:install): " + s.slice(0, 120));
+      } catch { console.log("  응답은 있으나 MCP 가 아님 (런타임이 /mcp 이전 버전? → /ned:install): " + s.slice(0, 120)); }
+    });'
+fi
+echo "  이 세션에 ned MCP 서버가 로드됐는지는 Claude Code 에서 /mcp 로 확인 (도구 ned_attention·ned_sessions·…)"
+
 echo "## app"
 if pids="$(pgrep -x Ned)"; then echo "  Ned running (pid $(echo $pids))"; else echo "  Ned not running"; fi
 
