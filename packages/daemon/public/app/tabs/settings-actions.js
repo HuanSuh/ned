@@ -16,7 +16,18 @@ export const WA_GROUPS = [
 ];
 export const TONE_SOURCES = ["slack", "email", "session"];
 
+/** 세션 빠른 답 (config.dashboard.session_quick_replies): "ㄱㄱ, 승인 ,계속" → ["ㄱㄱ","승인","계속"] (빈 칸·중복 빠짐, 자르지 않음 — 검사는 아래). */
+export const QUICK_MAX = 5, QUICK_LEN = 20;
+export const parseQuickReplies = (s) => [...new Set(String(s ?? "").split(",").map((x) => x.replace(/\s+/g, " ").trim()).filter(Boolean))];
+/** = src/config.ts quickRepliesError (목록 기준): 너무 많음 / 너무 긺 → 안내, 괜찮으면 null. */
+export function quickRepliesMsg(list) {
+  if (list.length > QUICK_MAX) return `세션 빠른 답은 ${QUICK_MAX}개까지야`;
+  const long = list.find((x) => x.length > QUICK_LEN);
+  return long ? `세션 빠른 답은 버튼마다 ${QUICK_LEN}자까지야 — "${long.slice(0, 30)}"` : null;
+}
+
 const ACTION_HINT = {
+  session_send: "세션 ✎ 초안 보내기, 그리고 입력을 기다리는 세션 행 · 데스크톱 펫 말풍선의 빠른 답 / 한 줄 입력 → 그 세션의 Orca 터미널에 입력 + Enter (Orca 에서 실행된 세션만)",
   jira_comment: "Jira 항목 ⋯ → 코멘트 초안 → 확인 후 코멘트 등록",
   jira_transition: "Jira 항목 ⋯ → 상태 변경 (가능한 전환을 먼저 읽어 옴) → 확인 후 전환",
   github_review: "PR 항목 ⋯ → 리뷰 초안 / 승인 / 변경 요청 / 코멘트 (gh pr review · gh pr comment)",
