@@ -31,6 +31,7 @@ import { readSourceReviewed, readState, readUpdateBadge, writeState } from "./st
 import { noteActivity, schedulerStatus } from "./scheduler.js";
 import { registerSearch } from "./search.js";
 import { registerMcp } from "./mcp.js";
+import { requestGuardMiddleware } from "./request-guard.js";
 import { reviewItem } from "./review.js";
 import { addTodo, deleteTodo, listTodos, updateTodo } from "./todos.js";
 
@@ -146,6 +147,7 @@ function mirrorToState(cfg: NedConfig): void {
  */
 export function startServer(getConfig: () => NedConfig): void {
   const app = new Hono();
+  app.use("*", requestGuardMiddleware); // DNS rebinding: non-loopback Host / Origin → 403 on every route (src/request-guard.ts)
 
   app.get("/", (c) => {
     const index = path.join(PUBLIC_DIR, "index.html");

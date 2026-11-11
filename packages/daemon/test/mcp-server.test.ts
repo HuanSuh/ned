@@ -58,7 +58,8 @@ describe("MCP over Streamable HTTP (/mcp)", () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(["ned_attention", "ned_briefing", "ned_feed", "ned_history", "ned_mark_reviewed", "ned_sessions"]);
     expect(tools.find((t) => t.name === "ned_attention")!.annotations?.readOnlyHint).toBe(true);
-    expect(tools.find((t) => t.name === "ned_mark_reviewed")!.annotations?.readOnlyHint).toBe(false);
+    expect(tools.find((t) => t.name === "ned_mark_reviewed")!.annotations).toMatchObject({ readOnlyHint: false, openWorldHint: true });
+    expect(tools.find((t) => t.name === "ned_attention")!.description).toMatch(/응답 필요 일정.*맨 앞/);
 
     const att = (await client.callTool({ name: "ned_attention", arguments: { limit: 5 } })) as { content: { type: string; text: string }[]; isError?: boolean };
     console.log("ned_attention →", att.content[0].text, "\n", att.content[1].text.slice(0, 400));
@@ -79,20 +80,30 @@ describe("MCP over Streamable HTTP (/mcp)", () => {
     await client.close();
   });
 
-  it("Origin / Host guard: a foreign Origin or Host → 403, loopback Origin → 200", async () => {
+  // fetch won't let us set Host — a raw HTTP/1.1 request.
+  const rawRequest = (method: string, p: string, host: string, body = "") => new Promise<string>((resolve, reject) => {
+    const s = net.connect(PORT, "127.0.0.1", () => {
+      s.write(`${method} ${p} HTTP/1.1\r\nHost: ${host}\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
+    });
+    let out = "";
+    s.on("data", (d) => (out += d)).on("end", () => resolve(out)).on("error", reject);
+  });
+
+  it("Origin / Host guard on /mcp: a foreign Origin or Host → 403, loopback Origin → 200", async () => {
     expect((await post({ origin: "http://evil.example" })).status).toBe(403);
     expect((await post({ origin: "null" })).status).toBe(403);
     expect((await post({ origin: `http://localhost:${PORT}` })).status).toBe(200);
-    // fetch won't let us set Host — use a raw request
-    const raw = await new Promise<string>((resolve, reject) => {
-      const s = net.connect(PORT, "127.0.0.1", () => {
-        const body = JSON.stringify(INIT);
-        s.write(`POST /mcp HTTP/1.1\r\nHost: attacker.example:${PORT}\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
-      });
-      let out = "";
-      s.on("data", (d) => (out += d)).on("end", () => resolve(out)).on("error", reject);
-    });
-    expect(raw).toMatch(/^HTTP\/1\.1 403/);
+    expect(await rawRequest("POST", "/mcp", `attacker.example:${PORT}`, JSON.stringify(INIT))).toMatch(/^HTTP\/1\.1 403/);
+  });
+
+  it("the same guard covers /api/* and the dashboard: forged Host / foreign Origin → 403, loopback → 200", async () => {
+    expect(await rawRequest("GET", "/api/state", `attacker.example:${PORT}`)).toMatch(/^HTTP\/1\.1 403/);
+    expect(await rawRequest("GET", "/", `rebind.example:${PORT}`)).toMatch(/^HTTP\/1\.1 403/);
+    expect(await rawRequest("GET", "/api/state", `127.0.0.1:${PORT}`)).toMatch(/^HTTP\/1\.1 200/);
+    expect(await rawRequest("GET", "/api/state", `localhost:${PORT}`)).toMatch(/^HTTP\/1\.1 200/);
+    expect((await fetch(`http://127.0.0.1:${PORT}/api/state`, { headers: { origin: "http://evil.example" } })).status).toBe(403);
+    // Ned.app's WKWebView / the dashboard page: Origin http://127.0.0.1:<port>
+    expect((await fetch(`http://127.0.0.1:${PORT}/api/state`, { headers: { origin: `http://127.0.0.1:${PORT}` } })).status).toBe(200);
   });
 
   it("GET / DELETE → 405 (stateless: POST only)", async () => {

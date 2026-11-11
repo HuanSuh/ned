@@ -6,8 +6,8 @@
  *   c.req.raw 를 그대로 넘긴다). Stateless(sessionIdGenerator: undefined) + JSON 응답(enableJsonResponse) — 요청마다
  *   McpServer·트랜스포트를 새로 만들고 응답 뒤 닫는다(SDK 예제 simpleStatelessStreamableHttp 와 같은 방식).
  *   GET(서버→클라이언트 SSE 스트림)·DELETE(세션 종료)는 세션이 없으니 405.
- * - 로컬 전용: 데몬은 127.0.0.1 에만 묶여 있다. 여기에 더해 DNS rebinding 방지로 Host 가 loopback 이 아니거나,
- *   Origin 헤더가 있는데 http(s)://127.0.0.1|localhost|[::1] 가 아니면 403. 인증은 없다(/api 와 같은 수준).
+ * - 로컬 전용: 데몬은 127.0.0.1 에만 묶여 있고, DNS rebinding 방지 가드(src/request-guard.ts — server.ts 가 모든 라우트에
+ *   건다)가 loopback 이 아닌 Host·Origin 을 403. 인증은 없다(/api·/mcp 모두 같은 가드).
  * - 쓰기는 ned_mark_reviewed(✓) 하나뿐.
  */
 import fs from "node:fs";
@@ -31,25 +31,6 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const VERSION = (() => {
   try { return String(JSON.parse(fs.readFileSync(path.resolve(here, "../../../package.json"), "utf8")).version || "0.0.0"); } catch { return "0.0.0"; }
 })();
-
-const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
-
-/** null = allowed; else why the request is refused (403). No Origin header (CLI clients) is fine. */
-export function mcpRequestGuard(headers: { get(name: string): string | null }): string | null {
-  const host = headers.get("host");
-  if (host) {
-    let h: string;
-    try { h = new URL(`http://${host}`).hostname; } catch { return `bad Host: ${host.slice(0, 80)}`; }
-    if (!LOOPBACK.has(h)) return `Host not allowed: ${host.slice(0, 80)}`;
-  }
-  const origin = headers.get("origin");
-  if (origin != null) {
-    let u: URL;
-    try { u = new URL(origin); } catch { return `Origin not allowed: ${origin.slice(0, 80)}`; }
-    if (!/^https?:$/.test(u.protocol) || !LOOPBACK.has(u.hostname)) return `Origin not allowed: ${origin.slice(0, 80)}`;
-  }
-  return null;
-}
 
 /** What the tool handlers read — fresh from disk on every call (config.yaml, state.json, agenda.json, reviewed.json, briefings/). */
 export function readToolCtx(now = Date.now()): ToolCtx {
@@ -91,7 +72,7 @@ export function buildMcpServer(): McpServer {
 
   server.registerTool("ned_attention", {
     title: "Ned: 확인할 것",
-    description: "열린 '확인할 것' 목록(소스·제목·링크·시각·review_key·열림 여부), 최신 순.\nOpen attention items Ned collected (Slack, mail, Jira, GitHub, calendar RSVPs, sessions) — newest first, with review keys.",
+    description: "열린 '확인할 것' 목록(소스·제목·링크·시각·review_key·열림 여부) — 응답 필요 일정(시작 시각이 미래)은 맨 앞, 나머지는 최신순.\nOpen attention items Ned collected (Slack, mail, Jira, GitHub, calendar RSVPs, sessions) with review keys — RSVP-needed events first (future start), the rest newest first.",
     inputSchema: attentionInput,
     annotations: READ,
   }, (args) => guarded("ned_attention", () => toolAttention(args, readToolCtx()))());
@@ -128,7 +109,8 @@ export function buildMcpServer(): McpServer {
     title: "Ned: 확인 완료(✓)",
     description: "review_key 로 확인 완료(✓) 표시/해제 — 대시보드 ✓ 와 같다(메일은 설정에 따라 Gmail 읽음 처리도).\nMark / unmark an item as reviewed by its review_key (same as the dashboard ✓).",
     inputSchema: markReviewedInput,
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    // openWorld: with actions.gmail_mark_read on, a mail ✓ also marks the Gmail thread read (an outside side effect).
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, (args) => guarded("ned_mark_reviewed", () => toolMarkReviewed(args))());
 
   server.registerResource("briefing-latest", "ned://briefing/latest", {
@@ -150,16 +132,11 @@ export function buildMcpServer(): McpServer {
 }
 
 /** POST /mcp (JSON-RPC), GET / DELETE /mcp → 405 (stateless: no standalone SSE stream, no sessions). */
+// Host / Origin are checked before any route by the server-wide guard (src/request-guard.ts).
 export function registerMcp(app: Hono): void {
-  const refuse = (why: string) => {
-    log(`mcp: refused — ${why}`);
-    return Response.json({ jsonrpc: "2.0", error: { code: -32000, message: `Forbidden: ${why}` }, id: null }, { status: 403 });
-  };
   const notAllowed = () => Response.json({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed (stateless server: POST only)" }, id: null }, { status: 405, headers: { allow: "POST" } });
 
   app.post("/mcp", async (c) => {
-    const bad = mcpRequestGuard(c.req.raw.headers);
-    if (bad) return refuse(bad);
     const server = buildMcpServer();
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     try {
@@ -174,12 +151,6 @@ export function registerMcp(app: Hono): void {
       void server.close().catch(() => {});
     }
   });
-  app.get("/mcp", (c) => {
-    const bad = mcpRequestGuard(c.req.raw.headers);
-    return bad ? refuse(bad) : notAllowed();
-  });
-  app.delete("/mcp", (c) => {
-    const bad = mcpRequestGuard(c.req.raw.headers);
-    return bad ? refuse(bad) : notAllowed();
-  });
+  app.get("/mcp", () => notAllowed());
+  app.delete("/mcp", () => notAllowed());
 }

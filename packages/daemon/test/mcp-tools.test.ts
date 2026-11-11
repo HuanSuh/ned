@@ -59,7 +59,7 @@ function ctx(over: Partial<Ctx> = {}): Ctx {
 }
 
 describe("ned_attention", () => {
-  it("merges attention + agenda items, dedupes by URL, newest first, review keys from review-keys.ts", () => {
+  it("merges attention + agenda items, dedupes by URL; RSVP-needed events first (future ts), the rest newest first; review keys from review-keys.ts", () => {
     const rows = attentionRows(ctx());
     expect(rows.map((r) => [r.source, r.review_key, r.open])).toEqual([
       ["calendar", null, true], // future start
