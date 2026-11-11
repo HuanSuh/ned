@@ -361,4 +361,17 @@ describe("status.sh", () => {
     expect(fs.readFileSync(e.settings, "utf8")).toBe(body);
     expect(fs.readdirSync(e.base).sort()).toEqual(before.includes("stub.log") ? before : [...before, "stub.log"].sort());
   });
+
+  it("MCP line tells a 403 (Host/Origin guard) apart from a 404 (runtime without /mcp) and a good answer", () => {
+    // spawnSync blocks this process, so no in-process server can answer — a curl stub prints body + "\n<code>" (-w).
+    const e = setup();
+    const curl = (mcpBody: string, mcpCode: string) =>
+      fs.writeFileSync(path.join(e.stubDir, "curl"), `#!/bin/sh\ncase "$*" in *"/mcp"*) printf '%s\\n%s' '${mcpBody}' '${mcpCode}' ;; *) exit 7 ;; esac\n`, { mode: 0o755 });
+    curl('{"error":{"message":"Forbidden"}}', "403");
+    expect(run(e, "status.sh").out).toContain("403 Host/Origin 거부 — ");
+    curl("Not found", "404");
+    expect(run(e, "status.sh").out).toContain("MCP 가 아님 (런타임이 /mcp 이전 버전? → /ned:install): 404");
+    curl('{"result":{"protocolVersion":"2025-06-18","serverInfo":{"name":"ned","version":"9.9.9"}}}', "200");
+    expect(run(e, "status.sh").out).toContain("응답함 — ned 9.9.9 (protocol 2025-06-18)");
+  });
 });
