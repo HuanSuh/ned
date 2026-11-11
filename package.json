@@ -2,6 +2,7 @@
   "name": "ned",
   "private": true,
   "version": "0.3.1",
+  "license": "MIT",
   "description": "Ned — the guy in the monitor. A quiet assistant that watches your agent sessions and work signals, and briefs you.",
   "scripts": {
     "build": "pnpm -r build",

@@ -65,3 +65,5 @@ bash scripts/uninstall.sh
 | `.claude-plugin`, `hooks`, `commands` | 플러그인 매니페스트·마켓플레이스, 훅, `/ned:*` 명령 |
 
 개발: `pnpm test`, `pnpm -s build`. 작업 규칙은 [`CLAUDE.md`](CLAUDE.md).
+
+라이선스: [MIT](LICENSE).

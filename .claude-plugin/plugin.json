@@ -9,5 +9,6 @@
   },
   "homepage": "https://github.com/HuanSuh/ned",
   "repository": "https://github.com/HuanSuh/ned",
+  "license": "MIT",
   "keywords": ["dashboard", "briefing", "menubar", "macos", "hooks"]
 }
