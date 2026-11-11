@@ -20,6 +20,8 @@ struct PetInput: Sendable {
         var canReply: Bool = true
         var summary: String = ""
         var ts: Double = 0
+        /// Waiting on a permission / elicitation dialog (SessionView.inReplyDialog) — no typed replies.
+        var dialog: Bool = false
     }
     /// `false` = daemon not answering (same rule as the menu's "데몬이 꺼져 있어요" line).
     var alive: Bool
@@ -163,6 +165,12 @@ struct PetReplyTarget: Equatable, Sendable {
     var canReply: Bool
     /// last_event_ts — a send is "answered" until the session moves past it.
     var ts: Double
+    /// The terminal shows a permission / elicitation picker: typed text is ignored and the reply's Enter would confirm the
+    /// highlighted option (Claude Code Confirmation: Enter = confirm:yes) → only "터미널에서 직접 선택".
+    var dialog: Bool = false
+
+    /// Ned may type into it now.
+    var answerable: Bool { canReply && !dialog }
 }
 
 /// The bubble's reply strip: quick buttons (config.dashboard.session_quick_replies) + "…" one-line input, for the most
@@ -196,7 +204,7 @@ struct PetReply: Equatable {
     static func waiting(_ sessions: [PetInput.Session]) -> [PetReplyTarget] {
         sessions.filter { $0.status == "waiting" && !$0.isWorker && !$0.id.isEmpty }
             .sorted { $0.ts > $1.ts }
-            .map { PetReplyTarget(id: $0.id, worktree: $0.worktree, summary: $0.summary, canReply: $0.canReply, ts: $0.ts) }
+            .map { PetReplyTarget(id: $0.id, worktree: $0.worktree, summary: $0.summary, canReply: $0.canReply, ts: $0.ts, dialog: $0.dialog) }
     }
 
     mutating func setTargets(_ t: [PetReplyTarget]) {
@@ -223,7 +231,7 @@ struct PetReply: Equatable {
 
     /// "…" → input mode for the current target. false when there is none or it can't be replied to.
     mutating func openInput() -> Bool {
-        guard phase == .idle || phase == .input, let c = current, c.canReply else { return false }
+        guard phase == .idle || phase == .input, let c = current, c.answerable else { return false }
         pinned = c
         phase = .input
         return true
@@ -236,11 +244,20 @@ struct PetReply: Equatable {
         pinned = nil
     }
 
+    /// The input lost the keyboard (another app clicked, the pet hidden, replies switched off): close it, keep what was
+    /// typed so "…" reopens with it.
+    mutating func interrupt(keeping typed: String) {
+        guard phase == .input else { return }
+        text = typed
+        cancel()
+    }
+
     /// A quick button or ⏎: (session id, trimmed text) to POST, or nil (empty, too long, nothing to answer, busy).
+    /// Length is counted in UTF-16 units like the daemon (JS `length`), not grapheme clusters.
     mutating func beginSend(_ raw: String) -> (id: String, text: String)? {
-        guard phase == .idle || phase == .input, let c = current, c.canReply else { return nil }
+        guard phase == .idle || phase == .input, let c = current, c.answerable else { return nil }
         let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty, t.count <= Self.maxText else { return nil }
+        guard !t.isEmpty, t.utf16.count <= Self.maxText else { return nil }
         pinned = c
         phase = .sending
         return (c.id, t)
@@ -744,7 +761,9 @@ struct PetBubble: View {
                     chip("›", dark: dark).petFrame(PetControl.next)
                 }
             }
-            if !s.target.canReply {
+            if s.target.dialog {
+                Text("권한·선택 대화상자 — 터미널에서 직접 선택 (Enter = 강조된 항목, Esc = 거절)").font(.system(size: 10.5)).foregroundStyle(PetColors.dim(dark)).lineLimit(2)
+            } else if !s.target.canReply {
                 Text("터미널에서 직접 입력 — Orca 터미널 기록이 없어요").font(.system(size: 10.5)).foregroundStyle(PetColors.dim(dark)).lineLimit(2)
             } else {
                 switch s.phase {
@@ -1016,8 +1035,10 @@ final class DesktopPetController: NSObject {
         StateStore.sendToSession(id, text: text, port: AppConfig.port, done: done)
     }
     private var field: PetReplyField?
-    /// The app that was in front when the input opened, if Ned had to activate itself to get the keyboard (restored on close).
-    private var activatedFrom: NSRunningApplication?
+    /// The app in front when the reply input opened (never Ned itself) — gets the keyboard back when it closes.
+    private var prevApp: NSRunningApplication?
+    /// The 0.15 s fallback had to activate Ned to get the keyboard (→ yieldActivation on close).
+    private var activatedSelf = false
 
     var isEnabled: Bool { settings.enabled }
     var isShowing: Bool { panel?.isVisible == true }
@@ -1042,8 +1063,13 @@ final class DesktopPetController: NSObject {
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.layoutField() } }
         }.store(in: &subs)
         // Leaving input mode any way (sent, cancelled, the session vanished) takes the field and the key status away.
-        self.model.$reply.sink { [weak self] r in
-            DispatchQueue.main.async { MainActor.assumeIsolated { if r.phase != .input { self?.endInput() } } }
+        // Judged by the phase when the block runs, not the published value: a late idle must not close an input just opened.
+        self.model.$reply.sink { [weak self] _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { if let self, self.model.reply.phase != .input { self.endInput() } } }
+        }.store(in: &subs)
+        // Replies switched off (actions.session_send) while typing → close the input, keep the text.
+        self.model.$replyOn.sink { [weak self] on in
+            DispatchQueue.main.async { MainActor.assumeIsolated { if !on { self?.interruptInput() } } }
         }.store(in: &subs)
         self.model.onReplyIdle = { [weak self] in self?.syncList() }
     }
@@ -1066,7 +1092,7 @@ final class DesktopPetController: NSObject {
         let input = PetInput(
             alive: s.daemonAlive || daemon.isHealthy || daemon.isBooting,
             sessions: s.sessions.map { .init(worktree: $0.worktree, status: $0.status, isWorker: $0.is_worker, id: $0.id, canReply: $0.can_reply,
-                                             summary: $0.last_summary ?? $0.last_prompt ?? "", ts: $0.last_event_ts) },
+                                             summary: $0.last_summary ?? $0.last_prompt ?? "", ts: $0.last_event_ts, dialog: $0.inReplyDialog) },
             openAttention: store.attentionCount)
         model.update(PetMapping.expression(input), persona: store.personaID, quiet: s.quiet, sessionOn: settings.messageOn("session"))
         model.setReplyTargets(PetReply.waiting(input.sessions))
@@ -1098,6 +1124,7 @@ final class DesktopPetController: NSObject {
             place()
             panel?.orderFrontRegardless()
         } else {
+            interruptInput() // hidden mid-reply: close the input (text kept), give the keyboard back
             panel?.orderOut(nil)
         }
     }
@@ -1169,11 +1196,14 @@ final class DesktopPetController: NSObject {
     }
 
     /// "…": open the one-line input. The panel turns key for it — a non-activating panel takes the keyboard without
-    /// activating Ned; only if it still isn't key a moment later is Ned activated (and the previous app restored on close).
+    /// activating Ned; only if it still isn't key a moment later is Ned activated (cooperatively yielded back on close).
     func beginInput() {
         var opened = false
         model.updateReply { opened = $0.openInput() }
         guard opened, let panel else { return }
+        // Whoever has the keyboard now gets it back when the input closes (endInput).
+        let front = NSWorkspace.shared.frontmostApplication
+        prevApp = front?.processIdentifier == NSRunningApplication.current.processIdentifier ? nil : front
         let f = field ?? makeField()
         f.stringValue = model.reply.text
         if f.superview == nil { panel.contentView?.addSubview(f) }
@@ -1184,7 +1214,7 @@ final class DesktopPetController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, let panel = self.panel, self.model.reply.phase == .input, !panel.isKeyWindow else { return }
-                self.activatedFrom = NSWorkspace.shared.frontmostApplication
+                self.activatedSelf = true
                 NSApp.activate()
                 panel.makeKey()
                 if let f = self.field { panel.makeFirstResponder(f) }
@@ -1192,18 +1222,29 @@ final class DesktopPetController: NSObject {
         }
     }
 
-    /// Input closed (sent, esc, session gone): drop the field, give the key status back, restore the app in front.
+    /// The input lost the keyboard (another app clicked — `didResignKey`), the pet was hidden or replies were switched
+    /// off: close it, keeping what was typed for the next "…".
+    func interruptInput() {
+        if model.reply.phase == .input { model.updateReply { $0.interrupt(keeping: field?.stringValue ?? model.reply.text) } }
+        endInput()
+    }
+
+    /// Input closed (sent, esc, interrupted, session gone): drop the field and give the keyboard back to the app that had
+    /// it — only while Ned still holds it (the panel is key, or Ned activated itself and is still active). If the user
+    /// already clicked another app, nothing is re-activated. `resignKey()` is not called: it is only the notification hook.
     func endInput() {
         guard let f = field, f.superview != nil else { return }
         if model.reply.phase == .input { model.updateReply { $0.cancel() } }
         f.removeFromSuperview()
+        let holds = panel?.isKeyWindow == true || (activatedSelf && NSApp.isActive)
         panel?.makeFirstResponder(nil)
         panel?.allowKey = false
-        if panel?.isKeyWindow == true { panel?.resignKey() }
-        if let prev = activatedFrom {
-            activatedFrom = nil
-            if prev.bundleIdentifier != Bundle.main.bundleIdentifier { prev.activate(options: []) }
+        if holds, let prev = prevApp, prev.processIdentifier != NSRunningApplication.current.processIdentifier, !prev.isTerminated {
+            if activatedSelf { NSApp.yieldActivation(to: prev) } // macOS 14 cooperative activation
+            prev.activate(options: [])
         }
+        prevApp = nil
+        activatedSelf = false
         syncList() // esc with the mouse already elsewhere → the hover list closes now (still held while sending)
     }
 
@@ -1292,6 +1333,11 @@ final class DesktopPetController: NSObject {
         hit.setAccessibilityLabel("데스크톱 펫 — 클릭하면 대시보드")
         container.addSubview(hit)
         p.contentView = container
+        // Typing a reply and then clicking another app: the panel resigns key → close the input (text kept), so the
+        // auto-collapse timer and the hover list are never held by an input nobody is typing in.
+        observers.append(NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: p, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { if self?.model.reply.phase == .input { self?.interruptInput() } }
+        })
         return p
     }
 }

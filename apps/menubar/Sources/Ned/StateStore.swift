@@ -24,6 +24,10 @@ struct SessionView: Codable, Identifiable {
     var is_worker: Bool = false
     /// 세션에 답하기: Ned knows the session's Orca terminal (orca_pane hook event). Missing (older daemon) → true.
     var can_reply: Bool = true
+    /// The waiting Notification's type (daemon sessions.ts) — permission_prompt / elicitation_dialog = a picker in the terminal.
+    var notification_type: String? = nil
+    /// = daemon `inReplyDialog`: waiting on a picker, so no typed replies (Enter would confirm the highlighted option).
+    var inReplyDialog: Bool { status == "waiting" && ["permission_prompt", "elicitation_dialog"].contains(notification_type ?? "") }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -40,6 +44,7 @@ struct SessionView: Codable, Identifiable {
         orca_worktree = try c.decodeIfPresent(String.self, forKey: .orca_worktree)
         is_worker = (try? c.decodeIfPresent(Bool.self, forKey: .is_worker)) ?? false
         can_reply = (try? c.decodeIfPresent(Bool.self, forKey: .can_reply)) ?? true
+        notification_type = try? c.decodeIfPresent(String.self, forKey: .notification_type)
     }
 }
 
@@ -454,7 +459,8 @@ final class StateStore: ObservableObject {
                     return finish(SessionSendOutcome(status: r["http_status"] as? Int ?? 502, error: (r["error"] as? String) ?? (r["detail"] as? String)))
                 }
                 if (resp as? HTTPURLResponse)?.statusCode == 404 { return finish(SessionSendOutcome(status: 0, error: "결과를 알 수 없어요 (데몬 재시작?)")) }
-                guard Date() < deadline else { return finish(SessionSendOutcome(status: 0, error: "응답이 없어요")) }
+                // Not "failed": the send may well have gone through — the job just didn't report back in time.
+                guard Date() < deadline else { return finish(SessionSendOutcome(status: 0, error: "결과 확인 못 함 — 대시보드 '오늘 한 액션'에서 확인")) }
                 DispatchQueue.global().asyncAfter(deadline: .now() + 0.6) { poll(id, deadline: deadline) }
             }.resume()
         }

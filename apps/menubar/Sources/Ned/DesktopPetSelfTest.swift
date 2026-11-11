@@ -169,6 +169,21 @@ enum PetSelfTest {
               && PetReply.resultText(SessionSendOutcome(status: 0, error: nil)) == "데몬이 응답하지 않아요", "other failures: the daemon's reason / no daemon")
         _ = r.openInput(); r.cancel()
         check(r.phase == .idle && !r.active, "esc → input closed")
+        // Another app clicked while typing (panel resigns key) / pet hidden / replies off → interrupt keeps the text.
+        _ = r.openInput(); r.interrupt(keeping: "쓰다 만 답")
+        check(r.phase == .idle && !r.active && r.text == "쓰다 만 답", "input interrupted (resign key): phase idle, typed text kept")
+        r.interrupt(keeping: "x"); check(r.text == "쓰다 만 답", "interrupt outside input mode changes nothing")
+        // Length = UTF-16 units like the daemon: 1,001 👍 is 1,001 characters but 2,002 units → refused.
+        let thumbs = String(repeating: "👍", count: 1001)
+        check(thumbs.count <= PetReply.maxText && r.beginSend(thumbs) == nil && r.phase == .idle, "length checked in UTF-16 units (1,001 emoji = 2,002) → not sent")
+        check(r.beginSend(String(repeating: "👍", count: 1000)) != nil, "1,000 emoji = 2,000 units → sent")
+        r.finish(SessionSendOutcome(status: 200, error: nil)); r.endResult()
+        // Permission / elicitation picker in the terminal: no input, no quick send (Enter would confirm the highlighted option).
+        var pr = PetReply()
+        pr.setTargets(PetReply.waiting([S(worktree: "perm", status: "waiting", id: "s-perm", ts: 10, dialog: true)]))
+        check(pr.current?.dialog == true && !pr.openInput() && pr.beginSend("거절") == nil && pr.phase == .idle, "permission prompt session → no input, no send")
+        let dsv = try? JSONDecoder().decode(NedState.self, from: Data(#"{"sessions":[{"id":"a","status":"waiting","notification_type":"permission_prompt"},{"id":"b","status":"waiting","notification_type":"idle_prompt"},{"id":"c","status":"running","notification_type":"permission_prompt"}]}"#.utf8))
+        check(dsv?.sessions.map(\.inReplyDialog) == [true, false, false], "notification_type decode → inReplyDialog only for a waiting permission / elicitation prompt")
 
         // PetModel: the bubble holds while replying, then goes on; session bubbles pick their session; strip placement.
         let pm = PetModel(reduceMotion: true)
