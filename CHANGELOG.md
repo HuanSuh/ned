@@ -2,6 +2,11 @@
 
 Ned 플러그인(`ned@ned`) 버전 기록. 버전은 `.claude-plugin/plugin.json` 의 `version` — 올리는 규칙은 `docs/RELEASE.md`.
 
+## 0.3.2 — 2026-11-11
+
+- MIT 라이선스(`LICENSE`)를 설치본(main)에 포함. 플러그인 아이콘(`.claude-plugin/icon.png`) 추가.
+- README 설치 안내: pnpm 은 `npm i -g pnpm`, GitHub 자격 증명은 레포가 비공개인 동안만.
+
 ## 0.3.1 — 2026-11-11
 
 - 실행할 때 빈 "Ned Settings" 창이 깜빡이던 문제 제거 — 앱의 SwiftUI 장면을 메뉴 막대에 끼워 넣지 않는 `MenuBarExtra` 로 바꿈(열 장면이 없음).

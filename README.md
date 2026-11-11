@@ -8,8 +8,8 @@ Ned — the guy in the monitor. Claude Code 세션 이벤트와 업무 신호(Sl
 
 ## 설치 (Claude Code 플러그인)
 
-필요한 것: macOS 14+, node 22+, pnpm(`corepack enable`), Xcode 명령줄 도구(`xcode-select --install`), claude CLI,
-이 private 레포에 접근할 수 있는 GitHub 자격 증명.
+필요한 것: macOS 14+, node 22+, pnpm(`npm i -g pnpm`), Xcode 명령줄 도구(`xcode-select --install`), claude CLI.
+레포가 비공개인 동안은 GitHub 자격 증명(`gh auth login`)도 필요하다 — 공개되면 불필요.
 
 Claude Code 에서:
 
