@@ -70,6 +70,6 @@
 | 질문 | 결정 | 근거 |
 | --- | --- | --- |
 | 트랜스포트 | 데몬 안 Streamable HTTP `/mcp`(stateless·JSON 응답), 플러그인 `.mcp.json` 은 `type: http` | 런타임 경로(`~/.ned/runtime`)·node 위치 문제가 없는 http 가 stdio 보다 단순하고, 데몬이 꺼져 있으면 도구가 그냥 없다. SDK 가 웹 표준 Request/Response 트랜스포트를 줘서 hono 에 바로 붙는다. 세션 상태가 필요 없어 stateless. |
-| 포트 | `.mcp.json` 은 7777 고정, 다른 포트는 `claude mcp add` 수동 | 문서상 플러그인 MCP 설정에서 확실히 치환되는 건 `${CLAUDE_PLUGIN_ROOT}`·`${CLAUDE_PLUGIN_DATA}`·`${CLAUDE_PROJECT_DIR}` 뿐(`${VAR:-default}` 는 `.mcp.json` 일반 설명에만 있음) — 깨지면 모두에게 깨지니 확실한 쪽. |
+| 포트 | `.mcp.json` 은 7777 고정, 다른 포트는 `claude mcp add` 수동 | 문서상 플러그인 MCP 설정에서 확실히 치환되는 건 `${CLAUDE_PLUGIN_ROOT}`·`${CLAUDE_PLUGIN_DATA}`·`${CLAUDE_PROJECT_DIR}` 뿐(`${VAR:-default}` 는 `.mcp.json` 일반 설명에만 있음) — 깨지면 모두에게 깨지니 확실한 쪽. (리뷰 후 검토) `${user_config.port}` 는 MCP 설정에서 치환된다고 문서에 있어 설정 가능하지만, `userConfig` 는 플러그인 활성화 때 모든 사용자에게 입력을 묻고 Claude Code 버전 요구도 따라와 보류 — 다른 포트는 `claude mcp add`. |
 | 쓰기 범위 | `ned_mark_reviewed`(✓) 하나. 보내기·초안·세션 만들기는 후속 | ✓ 는 로컬 표시라 되돌릴 수 있고 대시보드와 같은 함수(`src/review.ts`)를 쓴다. 외부로 나가는 쓰기는 대시보드의 확인 단계·설정 토글 없이 열지 않는다. |
-| 보안 | 127.0.0.1 바인딩 + loopback 이 아닌 Host·Origin 403, 인증 없음 | `/api/*` 와 같은 수준. SDK 의 `allowedOrigins` 는 deprecated 라 직접 검사. |
+| 보안 | 127.0.0.1 바인딩 + loopback 이 아닌 Host·Origin 403, 인증 없음. (리뷰 후) 가드를 `src/request-guard.ts` 공용 미들웨어로 올려 `/api/*`·`/mcp`·정적 파일 모두에 건다 | DNS rebinding 은 `/api/*`(쓰기 포함)에도 같은 위협. 대시보드·Ned.app WKWebView(Origin `http://127.0.0.1:7777`)·status.sh·curl 은 모두 loopback 이라 호환. SDK 의 `allowedOrigins` 는 deprecated 라 직접 검사. |

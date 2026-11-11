@@ -260,6 +260,8 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 
 ### HTTP API
 
+모든 라우트(`/api/*`·`/mcp`·정적 파일)는 `src/request-guard.ts` 를 먼저 거친다 — loopback 이 아닌 Host·Origin 은 403(DNS rebinding 방지, Origin·Host 가 없으면 허용).
+
 | Method | Path | 설명 |
 |---|---|---|
 | GET | `/api/state` | `state.json` (sessions, attention, last_briefing, …) |
@@ -563,7 +565,7 @@ detail `이력 · M/D · …`, `tab: home` / `anchor: card:<slack|mail|jira|gh|c
 - 트랜스포트: `@modelcontextprotocol/sdk` 의 `WebStandardStreamableHTTPServerTransport` — 웹 표준 Request/Response 라 hono 의 `c.req.raw` 를 그대로 넘긴다.
   `sessionIdGenerator: undefined`(stateless) + `enableJsonResponse: true`. 요청마다 `buildMcpServer()` 로 McpServer·트랜스포트를 새로 만들고 응답 뒤 닫는다
   (SDK 예제 `simpleStatelessStreamableHttp.ts` 와 같은 방식). `GET`/`DELETE /mcp` → 405 `Allow: POST`.
-- 로컬 전용: `127.0.0.1` 바인딩에 더해 `mcpRequestGuard` — Host 가 loopback(127.0.0.1·localhost·[::1], 포트 무관)이 아니거나, Origin 이 있는데 `http(s)://` loopback 이 아니면 403
+- 로컬 전용: `127.0.0.1` 바인딩에 더해 서버 전체 가드 `src/request-guard.ts`(`app.use("*")` — `/api/*`·`/mcp`·정적 파일 모두) — Host 가 loopback(127.0.0.1·localhost·[::1], 포트 무관)이 아니거나, Origin 이 있는데 `http(s)://` loopback 이 아니면 403
   (DNS rebinding 방지; SDK 의 `allowedOrigins`·`allowedHosts` 옵션은 deprecated 라 "외부 미들웨어" 권고대로 직접). Origin 없음(CLI 클라이언트)은 허용. 인증 없음.
 - 도구: 순수 핸들러 `toolAttention`·`toolSessions`·`toolBriefing`·`toolHistory`·`toolFeed`(입력 + `ToolCtx` = config·state·agenda·reviewed·briefings·now) →
   `{summary, data, error?}`. `mcp.ts` 가 매 호출 `readToolCtx()` 로 디스크에서 새로 읽고, 결과를 텍스트 블록 두 개(요약 한 줄, JSON)로 싼다. `error` 면 `isError: true`.
@@ -574,7 +576,7 @@ detail `이력 · M/D · …`, `tab: home` / `anchor: card:<slack|mail|jira|gh|c
 - 리소스: `ned://briefing/latest`, `ned://features`(`readFeaturesSummary`).
 - 상한: `MAX_ATTENTION` 100 · `MAX_SESSIONS` 50 · `MAX_BRIEFINGS` 5(섹션당 15항목) · `MAX_HISTORY` 100 · `MAX_FEED` 50, 제목 200자·본문 300~400자 clip.
 - 데몬이 꺼져 있으면 Claude Code 는 연결을 최대 3번 재시도한 뒤 서버를 실패로 표시한다(`/mcp`, `claude mcp list` 의 `✘ Failed to connect`) — 도구가 없을 뿐 세션은 그대로.
-  403 을 받으면 Claude Code 는 서버를 "인증 필요" 로 표시하니, 그렇게 보이면 Host/Origin 거부(`app-daemon.log` 의 `mcp: refused`)를 의심한다.
+  403 을 받으면 Claude Code 는 서버를 "인증 필요" 로 표시하니, 그렇게 보이면 Host/Origin 거부(`app-daemon.log` 의 `request-guard: refused`)를 의심한다. `/ned:status` 의 MCP 줄도 403 을 따로 알린다.
 - 확인: `curl -s -X POST -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"x","version":"0"}}}' http://127.0.0.1:7777/mcp`
   (`/ned:status` 의 MCP 줄도 같은 요청). 테스트: `test/mcp-tools.test.ts`(핸들러), `test/mcp-server.test.ts`(빈 포트에 실제로 띄워 SDK Client 로 initialize → tools/list → tools/call, 403/405).
 
