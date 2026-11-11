@@ -106,8 +106,9 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 
 ### 세션에 답하기 — 대기 세션에 Ned 에서 바로
 - 보여 주는 것: 입력을 기다리는(waiting) 세션 행 — 인박스 장비실 · 휴대폰의 세션 서랍 · 인박스 "우선" 의 세션 상세 — 에 **빠른 버튼**(기본 `ㄱㄱ` · `승인` · `계속`) + **한 줄 입력**(⏎ 보내기, 한글 조합 중 ⏎ 는 글자 확정만, Shift+⏎ 는 아무 것도 안 함 — 한 줄). 행에는 세션이 마지막으로 남긴 것(Notification 본문·요약, 없으면 마지막 프롬프트)이 그대로 보여 무엇에 답하는지 알 수 있다. 보내는 동안 버튼·입력 비활성, 성공하면 토스트 "fb-74 에 보냄" + 행이 "보냄 — 응답 기다리는 중" 으로 바뀌고 그 세션의 다음 이벤트(보통 프롬프트 제출 → 실행 중)가 오면(최대 90초) 실제 상태로 돌아간다. 실행 중·완료 세션은 입력을 숨기고 행의 ⋯ → **"메시지 보내기"** 로 같은 입력(빠른 버튼 없음, 닫기·Esc)을 연다 — 실행 중 세션에 추가 지시.
-- **데스크톱 펫**에서도: 세션 "입력 대기" 말풍선과 마우스를 올린 목록에 답하기 줄 — 헤더 "<워크트리> 에 답하기"(여러 세션이 기다리면 ‹ n/m ›, 기본은 가장 최근에 기다리기 시작한 세션), 빠른 버튼, "…" = 한 줄 입력(⏎ 보내기 · esc 닫기 · ⇧⇥/↑↓ 다른 세션). 입력·전송·결과 중엔 말풍선이 저절로 접히지 않고, 결과 한 줄("보냄 ✓" / 실패 사유)을 2.5초 보여 준 뒤 평소 흐름으로. 입력하는 동안만 펫 패널이 키보드를 받는다(비활성 패널이라 보통 앞 앱은 그대로; 안 되면 그때만 Ned 를 활성화하고 닫을 때 앞 앱으로 되돌림).
+- **데스크톱 펫**에서도: 세션 "입력 대기" 말풍선과 마우스를 올린 목록에 답하기 줄 — 헤더 "<워크트리> 에 답하기"(여러 세션이 기다리면 ‹ n/m ›, 기본은 가장 최근에 기다리기 시작한 세션), 빠른 버튼, "…" = 한 줄 입력(⏎ 보내기 · esc 닫기 · ⇧⇥/↑↓ 다른 세션). 입력·전송·결과 중엔 말풍선이 저절로 접히지 않고, 결과 한 줄("보냄 ✓" / 실패 사유)을 2.5초 보여 준 뒤 평소 흐름으로. 입력하는 동안만 펫 패널이 키보드를 받는다(비활성 패널이라 보통 앞 앱은 그대로; 안 되면 그때만 Ned 를 활성화). 입력을 닫으면(⏎ 보냄·esc) 열 때 앞에 있던 앱으로 키보드를 돌려준다. 입력 중 다른 앱을 누르거나 펫을 숨기거나 세션 보내기를 끄면 입력은 닫히고 쓰던 글은 다음 "…" 에 남는다. 펫은 Orca 워커 세션(`is_worker`)에는 답하기 줄을 띄우지 않는다(펫 상태 색과 같은 규칙 — 대시보드 장비실은 워커 행에도 답하기가 있음).
 - 보낼 수 없을 때: 세션이 Orca 터미널에서 실행된 기록이 없으면(`can_reply` false — 훅 이벤트에 Orca pane 이 없음) 입력 대신 "터미널에서 직접 입력" 안내만. 기록은 있는데 그 터미널이 지금 닫혀 있으면 보낼 때 409 → "터미널이 닫혀 있어 보낼 수 없음 — 터미널에서 직접 입력"(입력한 글은 남음). 그 밖의 실패는 데몬이 준 사유 그대로. `actions.session_send` 를 끄면 답하기 UI 가 사라진다.
+- **권한·선택 대화상자**: 세션이 권한 프롬프트(`notification_type` permission_prompt)나 MCP 입력 대화상자(elicitation_dialog)로 기다리면 대시보드·펫 모두 빠른 버튼·입력 대신 "권한·선택 대화상자 — 터미널에서 직접 선택 (Enter = 강조된 항목, Esc = 거절)" 안내만. 그 화면에선 보낸 글자는 무시되고 Enter 가 강조된 항목(보통 "Yes")을 확정하기 때문 — "거절" 을 보내면 허용이 될 수 있다. 데몬도 이런 세션에는 `/api/send` 를 409 로 거절한다(초안 팝업·대화창 경로 포함). 숫자 키로 항목을 고르는 동작은 Claude Code 문서에 없어 "허용" 버튼도 두지 않았다.
 - 알림 중복 방지: 답을 보내 성공하면 그 세션의 지금 "입력 대기" 알림(attention)을 바로 내린다(✕ 닫기와 같은 기록) — 대시보드·Ned.app 배너·펫이 같은 알림을 다시 띄우지 않는다. 세션이 다시 물으면(새 Notification) 평소처럼 다시 뜬다.
 - 데이터: `POST /api/send {source:"session", mode:"session", ref:{session_id}, text, origin:"session"|"pet"}` → 202 + 폴링 → 세션의 Orca 터미널(훅 이벤트의 `orca_pane`/`orca_tab` → `orca terminal list` 에서 같은 pane)에 `orca terminal send --text … --enter`. 글은 2,000자까지, 앞뒤 공백·끝 줄바꿈은 지움(Enter 는 한 번). 대기 아닌 세션에도 보낼 수 있다. 모든 시도는 `~/.ned/sent-actions.log` → 설정 → 쓰기 액션 "오늘 한 액션"(출처 칩 "세션 행" / "펫").
 - 설정: 설정 → 쓰기 액션 → "세션 빠른 답" `dashboard.session_quick_replies`(쉼표 구분, 5개까지 · 버튼마다 20자까지, 비우면 버튼 없이 입력만 — 넘으면 저장 안 함/400) · "세션에 보내기" `actions.session_send`(기본 켬).
@@ -393,11 +394,11 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 ## 부록 C — HTTP API (대시보드가 쓰는 로컬 API, 127.0.0.1)
 
 - 수집 이력: `/api/history`(카드 "지난 7일/30일", `source`·`days`·`q`·`channel`) · `/api/history/status`(설정 → 수집·보관 상태 줄)
-- 상태·데이터: `/api/state`(세션마다 `can_reply` — Orca 터미널 기록이 있어 답할 수 있나) · `/api/agenda` · `/api/briefings` · `/api/feed`(데스크톱 펫 메시지 — 통신기 메시지 규칙 + `pet_kind`·`deep`, `pet` 설정·`quiet`, 세션에 답하기 `quick_replies`·`session_send`) · `/api/events` · `/api/costs` · `/api/actions`(오늘 한 액션) · `/api/search`(⌘K)
+- 상태·데이터: `/api/state`(세션마다 `can_reply` — Orca 터미널 기록이 있어 답할 수 있나, `notification_type` — 대기를 만든 알림 종류) · `/api/agenda` · `/api/briefings` · `/api/feed`(데스크톱 펫 메시지 — 통신기 메시지 규칙 + `pet_kind`·`deep`, `pet` 설정·`quiet`, 세션에 답하기 `quick_replies`·`session_send`) · `/api/events` · `/api/costs` · `/api/actions`(오늘 한 액션) · `/api/search`(⌘K)
 - 순찰·갱신: `/api/check`(지금 점검, GET 은 진행 상태) · `/api/heartbeat`(아침 브리핑 `?daily=1`) · `/api/agenda/refresh`(카드 ↻) · `/api/agenda/context`(맥락 지금 수집) · `/api/activity`(대시보드 활동 핑 — 유휴 해제)
 - 할 일·확인: `/api/todos` · `/api/todos/:id`(완료·삭제) · `/api/attention/:id/review`(확인 완료) · `/api/attention/:id/dismiss`(닫기)
 - 일정: `/api/calendar`(기간 조회) · `/api/calendar/events`(일정 만들기)
-- 초안·보내기: `/api/draft` · `/api/send`(세션에 답하기도 — `source:"session"`, 글 ≤2,000자, 터미널 없음/닫힘 409)
+- 초안·보내기: `/api/draft` · `/api/send`(세션에 답하기도 — `source:"session"`, 글 ≤2,000자, 터미널 없음/닫힘·권한 대화상자 대기 409)
 - 세션 만들기: `/api/sessions/create`(대화창 확인 카드 [실행], 진행은 `/api/sessions/create/:job_id`)
 - 통신기: `/api/chat`(SSE) · `/api/chat/:id` · `/api/chat/:id/stop` · `/api/chats` · `/api/chat/actions/validate`(확인 카드 검증) · `/api/chat/:id/action`(카드 상태 저장)
 - 아카이브: `/api/archive/status`(볼트 배지·마지막 쓰기·마지막 오류) · `/api/archive/flush`(지금 쓰기) · `/api/outputs`(정리 결과물 목록) · `/api/outputs/:id`(하나, 마크다운 포함) · `/api/outputs/:id/reveal`(Finder 에서 보기)

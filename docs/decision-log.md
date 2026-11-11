@@ -84,3 +84,6 @@
 | 텍스트 | session 만 2,000자, CRLF→LF, 앞뒤 공백·끝 줄바꿈 제거(Enter 는 `--enter` 한 번), 안 줄바꿈은 유지 | 끝 줄바꿈이 두 번째 Enter 가 되지 않게. 대시보드·펫 입력은 한 줄이라 안 줄바꿈은 대화창 제안에서만. |
 | 펫 포커스 | 패널은 입력 모드에서만 `allowKey` + `makeKey`(비활성 패널 → 앱 활성화 없이 키보드). 0.15초 뒤에도 key 가 아니면 그때만 `NSApp.activate`, 닫을 때 앞 앱 복귀 | 다른 앱 포커스를 불필요하게 뺏지 않기. 실기 확인은 사용자 몫(GUI 자동화 금지). |
 | 펫 클릭 처리 | 말풍선 위 히트 뷰가 컨트롤 프레임(PetControl id)으로 판정, 입력칸만 실제 NSTextField | 기존 PetBubbleHitView 구조 유지(SwiftUI 버튼은 히트 뷰에 가려짐). |
+| (리뷰) 권한 프롬프트 | permission_prompt·elicitation_dialog 대기 세션엔 답하기 UI 없이 "터미널에서 직접 선택", 데몬도 409 | Claude Code 문서(keybindings Confirmation: Enter = confirm:yes, Esc = confirm:no, ↑↓ 이동; permissions: 선택지 Yes / Yes, don't ask again / (가끔) switch to auto mode / No)에 숫자 키 선택이 없고 선택지 순서도 바뀐다 → "1"·"2" 버튼은 보류. 데몬 거절은 초안 팝업·대화창 경로까지 막으려고. |
+| (리뷰) 펫 포커스 반환 | 열 때 앞 앱 기록 → 닫을 때 Ned 가 아직 키보드를 쥐고 있으면 그 앱 activate(폴백으로 Ned 를 활성화했으면 yieldActivation 먼저). 다른 앱을 눌러 key 를 잃으면 입력을 닫고 글 보존, 재활성화 없음 | resignKey() 는 알림 메서드라 key 를 넘기지 않는다. 사용자가 고른 앱을 다시 빼앗지 않기. |
+| (리뷰) 워커 세션 | 펫은 워커 세션에 답하기 없음, 대시보드 장비실은 있음 | 펫 상태 색이 워커를 빼는 규칙과 맞춤. 대시보드에선 워커도 보이는 행이라 거기서 답하는 건 허용. |
