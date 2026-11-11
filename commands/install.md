@@ -67,6 +67,7 @@ NED_PLUGIN_MODE=1 bash "${CLAUDE_PLUGIN_ROOT}/scripts/install.sh" < /dev/null
 - 옛 훅 제거 결과(`Removed N …` 또는 `No Ned hooks to remove`)
 - 서명 경고(`ad-hoc 서명`)가 있었으면: `bash ~/.ned/runtime/scripts/make-signing-cert.sh` 를 한 번 실행하고 `/ned:install` 을 다시 하면 재설치마다 권한을 다시 묻지 않는다
 - 세션 훅은 **새 Claude Code 세션(또는 `/reload-plugins`)부터** 기록된다
+- Claude Code 세션에서 `/mcp` 로 `ned` 서버(플러그인 제공, `http://127.0.0.1:7777/mcp`)를 확인 — 도구 `ned_attention`·`ned_sessions`·`ned_briefing`·`ned_history`·`ned_feed`·`ned_mark_reviewed`
 - 메뉴 막대의 안경 아이콘 → 대시보드(처음이면). macOS 26 이상에서 아이콘이 안 보이면 시스템 설정 > 메뉴 막대에서 Ned 를 허용한다.
 
 ## 5. 연결 점검

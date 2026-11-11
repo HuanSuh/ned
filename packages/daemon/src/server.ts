@@ -9,7 +9,7 @@ import { appendActionLog, parseOrigin, parseSendRequest, readActionLog, type Sen
 import { parseCalendarCreate } from "./calendar-create.js";
 import { getSendJob, linkOf, startSendJob, viewJob } from "./send-jobs.js";
 import { knownRepoPaths, parseSessionCreate, sessionCreateDeps, startSessionCreate, validateSessionCreate } from "./session-create.js";
-import { AGENDA_SOURCES, agendaBusy, enabledSources, patchAgenda, readAgenda, runningSources, startAgendaRefresh, type AgendaSourceKey } from "./agenda.js";
+import { AGENDA_SOURCES, agendaBusy, enabledSources, readAgenda, runningSources, startAgendaRefresh, type AgendaSourceKey } from "./agenda.js";
 import { contextStatus, requestContext } from "./agenda-context.js";
 import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runChatTurn, setChatActionState, sseFrame, stopChat } from "./chat.js";
 import { validateChatAction } from "./chat-actions.js";
@@ -27,12 +27,12 @@ import { checkVault } from "./vault.js";
 import { readOnboarding, setOnboardingDismissed, setupCheck } from "./setup-check.js";
 import { updateCheck } from "./update-check.js";
 import { installNow, recordCheck, updateStatus } from "./self-update.js";
-import { onMailReviewed, type MarkReadOutcome } from "./mail-read.js";
-import { SOURCE_KEY, readSourceReviewed, readState, readUpdateBadge, setReviewed, writeState } from "./state.js";
+import { readSourceReviewed, readState, readUpdateBadge, writeState } from "./state.js";
 import { noteActivity, schedulerStatus } from "./scheduler.js";
 import { registerSearch } from "./search.js";
-import { markThreadSeen } from "./slack-threads.js";
-import { SRC_KEY_RE, normalizeReviewKey } from "./review-keys.js";
+import { registerMcp } from "./mcp.js";
+import { requestGuardMiddleware } from "./request-guard.js";
+import { reviewItem } from "./review.js";
 import { addTodo, deleteTodo, listTodos, updateTodo } from "./todos.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -147,6 +147,7 @@ function mirrorToState(cfg: NedConfig): void {
  */
 export function startServer(getConfig: () => NedConfig): void {
   const app = new Hono();
+  app.use("*", requestGuardMiddleware); // DNS rebinding: non-loopback Host / Origin → 403 on every route (src/request-guard.ts)
 
   app.get("/", (c) => {
     const index = path.join(PUBLIC_DIR, "index.html");
@@ -226,22 +227,12 @@ export function startServer(getConfig: () => NedConfig): void {
   });
   app.get("/api/check", (c) => c.json(checkStatus()));
   // 확인 완료 toggle: body {reviewed: boolean} (default true). The item stays in attention; counts skip it.
+  // Validation + Slack seen mark + Gmail mark-read live in src/review.ts (shared with the MCP tool ned_mark_reviewed).
   app.post("/api/attention/:id/review", async (c) => {
-    // Old thread-aware Slack keys (`…@<reply ts>`) are stored under their base key (review-keys.ts).
-    const id = normalizeReviewKey(c.req.param("id").trim());
     let reviewed = true;
     try { const b = (await c.req.json()) as { reviewed?: unknown }; if (typeof b?.reviewed === "boolean") reviewed = b.reviewed; } catch { /* no body = mark */ }
-    // A source prefix with an empty / malformed rest (a row whose key couldn't be built) is a client bug, not a lookup.
-    if (!id || (SRC_KEY_RE.test(id) && !SOURCE_KEY.test(id))) return c.json({ error: "bad review key" }, 400);
-    // Source items (mail: / slack: / jira: / github:) have no attention entry; their key is stable across agenda runs.
-    if (!SOURCE_KEY.test(id) && !readState().attention.some((a) => a.id === id)) return c.json({ error: "not found" }, 404);
-    const at = setReviewed(id, reviewed);
-    // Slack: the thread remembers the mark time as seen_reply_ts; only a message after it reopens it (same as the ✓ rule).
-    if (id.startsWith("slack:")) try { patchAgenda((a) => void markThreadSeen(a.slack, id, reviewed, at ?? Date.now())); } catch (e) { log(`review: thread seen mark failed — ${String(e).slice(0, 200)}`); }
-    // Mail + config.actions.gmail_mark_read: also mark the thread read in Gmail (background job; un-review never re-marks unread).
-    let mark_read: MarkReadOutcome | null = null;
-    if (reviewed && id.startsWith("mail:")) try { mark_read = await onMailReviewed(id, loadConfig()); } catch (e) { log(`review: gmail mark-read failed — ${String(e).slice(0, 200)}`); }
-    return c.json({ ok: true, id, reviewed_at: at, attention_open_count: readState().attention_open_count, ...(mark_read ? { mark_read } : {}) });
+    const r = await reviewItem(c.req.param("id"), reviewed);
+    return c.json(r.body, r.status);
   });
   app.post("/api/attention/:id/dismiss", (c) => {
     dismissAttention(c.req.param("id"));
@@ -539,6 +530,7 @@ export function startServer(getConfig: () => NedConfig): void {
   });
 
   registerSearch(app); // GET /api/search (src/search.ts) — before the static catch-all
+  registerMcp(app); // POST/GET/DELETE /mcp — MCP Streamable HTTP endpoint (src/mcp.ts)
   // Static files under public/ (proposals, svg mark, ...). Registered last so /api/* wins.
   app.get("/*", (c) => {
     const file = resolvePublic(c.req.path);
