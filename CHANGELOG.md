@@ -2,6 +2,16 @@
 
 Ned 플러그인(`ned@ned`) 버전 기록. 버전은 `.claude-plugin/plugin.json` 의 `version` — 올리는 규칙은 `docs/RELEASE.md`.
 
+## 0.4.0 — 2026-11-11
+
+- **세션에 답하기**: 입력을 기다리는 Claude Code 세션에 Ned 에서 바로 답한다 — 대시보드 세션 행의 빠른 버튼(기본 ㄱㄱ·승인·계속,
+  설정 `dashboard.session_quick_replies`)과 한 줄 입력, 데스크톱 펫 말풍선의 같은 입력(⏎ 전송·Esc 닫기, 닫으면 원래 앱으로 포커스 복귀).
+  실행 중 세션에도 ⋯ "메시지 보내기". 세션 뷰 `can_reply`(Orca 터미널 기록 유무), 답한 뒤 같은 세션의 "입력 기다림" 알림 억제.
+  권한·선택 대화상자(permission_prompt·elicitation_dialog)를 띄운 세션에는 보내지 않고 터미널 안내(409).
+- **MCP 서버**: 데몬 `POST /mcp`(Streamable HTTP, stateless) + 플러그인 `.mcp.json` — 어느 Claude Code 세션에서든 도구
+  `ned_attention`·`ned_sessions`·`ned_briefing`·`ned_history`·`ned_feed`·`ned_mark_reviewed`(✓). `/ned:status` 에 MCP 점검.
+- 보안: loopback 이 아닌 Host·Origin 요청을 `/api`·`/mcp`·정적 파일 전체에서 403(DNS rebinding 방지).
+
 ## 0.3.2 — 2026-11-11
 
 - MIT 라이선스(`LICENSE`)를 설치본(main)에 포함. 플러그인 아이콘(`.claude-plugin/icon.png`) 추가.
