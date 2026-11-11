@@ -4,8 +4,9 @@ import { draftBtn, mailRef, sessionRef, slackRef } from "../features/drafts.js";
 import { bfFailed, bfKind } from "../features/dailyfail.js";
 import { V, opener, quip, say } from "../features/personas.js";
 import { openAtt, srcKey } from "../features/reviewed.js";
+import { canReply, inDialog, keepFocus, replyBox, replyMenu, replyOn, replySig } from "../features/sessreply.js";
 import { loadState, renderHeader } from "../main.js";
-import { S, alive, saveRead, ui } from "../state.js";
+import { S, alive, saveRead, subscribe, ui } from "../state.js";
 import { PF, PILL_KINDS, pillRow, srcOn } from "../ui/chips.js";
 import { EVENT_KO, KIND_ICON, KIND_KO, STATUS_KO, STATUS_LED, iconBtn, openIcon, reviewIcon } from "../ui/icons.js";
 import { toast } from "../ui/toast.js";
@@ -172,7 +173,7 @@ export function renderDetail(it, m) {
     if (it.sess) {
       const x = it.sess;
       const evs = S.events.filter((e) => e.session_id === x.id).slice(-10).reverse();
-      ctx = say(`ned · ${hhmm(it.ts)}`, esc(x.status === "waiting" ? `${x.worktree} 가 네 허락을 기다리는 중.` : x.status === "error" ? `${x.worktree} 가 넘어졌어.` : `${x.worktree} 상태 바뀜.`), esc(x.status === "waiting" ? "터미널로 가서 답해 주면 바로 이어서 갈 거야." : x.status === "error" ? "다시 돌릴지 봐 줘." : ""))
+      ctx = say(`ned · ${hhmm(it.ts)}`, esc(x.status === "waiting" ? `${x.worktree} 가 네 허락을 기다리는 중.` : x.status === "error" ? `${x.worktree} 가 넘어졌어.` : `${x.worktree} 상태 바뀜.`), esc(x.status === "waiting" ? (replyOn() && canReply(x) && !inDialog(x) ? "위에서 바로 답하거나 터미널에서 답해 주면 이어서 갈 거야." : "터미널로 가서 답해 주면 바로 이어서 갈 거야.") : x.status === "error" ? "다시 돌릴지 봐 줘." : ""))
         + `<h3>세션 · ${esc(x.worktree)}</h3><dl class="kv"><dt>상태</dt><dd><span class="led ${STATUS_LED[x.status] || ""}"></span>${esc(STATUS_KO[x.status] || x.status)}</dd><dt>시작</dt><dd>${rel(x.since)} (${mdhm(x.since)})</dd>${x.origin === "chat" ? `<dt>출처</dt><dd>${chatOriginBadge(x)}</dd>` : ""}<dt>서브에이전트</dt><dd>${x.subagents_active}</dd><dt>경로</dt><dd class="mono" style="font-size:12px">${esc(x.cwd)}</dd>${x.last_prompt ? `<dt>프롬프트</dt><dd>» ${esc(x.last_prompt)}</dd>` : ""}</dl>
           <h3>최근 이벤트</h3>${evs.length ? `<div class="tlx">${evs.map((e) => `<div class="${e.event === "Notification" ? "hot" : e.event === "StopFailure" ? "err" : ""}"><span class="h">${hhmm(e.ts)}</span>${esc(EVENT_KO[e.event] || e.event)}${e.message || e.prompt ? ` — ${esc(String(e.message || e.prompt).slice(0, 140))}` : e.agent_type ? ` — ${esc(e.agent_type)}` : ""}</div>`).join("")}</div>` : `<div class="body" style="font-size:13px">이벤트 없음</div>`}`;
     } else if (it.briefing) {
@@ -183,7 +184,7 @@ export function renderDetail(it, m) {
     } else if (it.att) {
       ctx = `<h3>출처</h3><div class="body" style="font-size:13px">${esc(it.att.source)}</div>`;
     }
-    sig = `it:${it.key}:${it.title}:${it.detail}:${S.events.length}:${it.sess ? it.sess.status + it.sess.last_event_ts : ""}:${it.att?.reviewed_at || it.rat || 0}`;
+    sig = `it:${it.key}:${it.title}:${it.detail}:${S.events.length}:${it.sess ? it.sess.status + it.sess.last_event_ts + replySig(it.sess) : ""}:${it.att?.reviewed_at || it.rat || 0}`;
     html = `<div class="dwrap">${back}
         <div class="crumb"><span class="stk ${it.att ? "a" : it.label === "참고" ? "" : "b"}">${it.att ? "행동 필요" : esc(it.label)}</span><span>${KIND_ICON[it.kind] || ""} ${esc(KIND_KO[it.kind] || it.kind)}</span><span>· ${rel(it.ts)}</span></div>
         <h2>${esc(it.title)}</h2>
@@ -193,11 +194,12 @@ export function renderDetail(it, m) {
           ${openIcon(it.url)}${it.att ? reviewIcon(it.att) + iconBtn("close", "닫기 — 처리 완료로 치우기 (e)", { attrs: 'id="done"' }) : it.rk ? reviewIcon({ id: it.rk, reviewed_at: it.rat }) : ""}
           <span class="dkeys">${it.url ? "<kbd>⏎</kbd> 열기 · " : ""}${it.att ? "<kbd>e</kbd> 닫기" : ""}</span>
         </div>
+        ${it.sess ? replyBox(it.sess, "detail") : ""}
         <div class="ctx">${ctx}</div></div>`;
   }
   if (sig === ui.detailSig) return;
   ui.detailSig = sig;
-  box.innerHTML = html;
+  keepFocus(() => { box.innerHTML = html; });
   box.scrollTop = 0;
   $("done")?.addEventListener("click", dismissSelected);
   $("back")?.addEventListener("click", closeDetail);
@@ -219,18 +221,24 @@ export async function dismissSelected() {
 // ---------- sessions (rail + phone drawer) ----------
 /** 대화창(Ned Net)에서 만든 세션 (state sessions[].origin === "chat", src/session-create.ts). */
 export const chatOriginBadge = (x) => (x?.origin === "chat" ? ` <span class="origin-chat" title="Ned 대화창에서 시작한 세션${x.origin_terminal ? ` · ${esc(x.origin_terminal)}` : ""}">대화창에서 시작</span>` : "");
+/** One session unit: status, name, last summary / prompt (= what it is asking), ✎, and 세션에 답하기 (features/sessreply.js). */
+export const unitHtml = (x, where) => `<div class="unit${x.status === "waiting" ? " waiting" : ""}" title="${esc(x.cwd)}"><span class="led ${STATUS_LED[x.status] || ""}"></span><span class="nm">${esc(x.worktree)}${x.subagents_active ? ` <span class="sa">+${x.subagents_active}</span>` : ""}${chatOriginBadge(x)}</span><span class="r">${rel(x.last_event_ts)}${replyMenu(x, where)}</span><span class="s">${esc(x.last_summary || (x.last_prompt ? "» " + x.last_prompt : ""))}</span>${draftBtn("session", sessionRef(x), (S.state?.attention || []).some((a) => a.id === `session:${x.id}`) ? `session:${x.id}` : "")}${replyBox(x, where)}</div>`;
 export function renderSessions() {
   const ss = S.state?.sessions ?? [];
-  const units = ss.map((x) => `<div class="unit" title="${esc(x.cwd)}"><span class="led ${STATUS_LED[x.status] || ""}"></span><span class="nm">${esc(x.worktree)}${x.subagents_active ? ` <span class="sa">+${x.subagents_active}</span>` : ""}${chatOriginBadge(x)}</span><span class="r">${rel(x.last_event_ts)}</span><span class="s">${esc(x.last_summary || (x.last_prompt ? "» " + x.last_prompt : ""))}</span>${draftBtn("session", sessionRef(x), (S.state?.attention || []).some((a) => a.id === `session:${x.id}`) ? `session:${x.id}` : "")}</div>`).join("");
+  const units = ss.map((x) => unitHtml(x, "rail")).join("");
   const rack = units ? `<div class="rack">${units}</div>` : `<div class="none">출동 중인 에이전트 없음.</div>`;
   const tape = [...S.briefings].sort((a, b) => b.ts - a.ts).slice(0, 8).map((b) => `<div class="tr ${b.status === "NED_OK" ? "ok" : ""}"><span class="h">${dayLabel(b.ts) === "오늘" ? "" : esc(dayLabel(b.ts)) + " "}${hhmm(b.ts)}</span><span>${b.status === "NED_OK" ? "· 이상 무" : `▲ ${esc(b.headline || "업데이트")}`}</span></div>`).join("");
-  $("rail").innerHTML = `<h3>장비실 · 세션 <span class="n">${ss.length}</span><button class="btn small" id="rail-toggle" title="세션 패널 접기">접기</button></h3>${rack}<h3>순찰 기록 <span class="n">${S.briefings.length}</span></h3>${tape ? `<div class="tape">${tape}</div>` : `<div class="none">아직 기록 없음.</div>`}`;
+  keepFocus(() => {
+    $("rail").innerHTML = `<h3>장비실 · 세션 <span class="n">${ss.length}</span><button class="btn small" id="rail-toggle" title="세션 패널 접기">접기</button></h3>${rack}<h3>순찰 기록 <span class="n">${S.briefings.length}</span></h3>${tape ? `<div class="tape">${tape}</div>` : `<div class="none">아직 기록 없음.</div>`}`;
+    $("msess-rack").innerHTML = ss.map((x) => unitHtml(x, "drawer")).join("") || `<div class="none">출동 중인 에이전트 없음.</div>`;
+  });
   $("rail-toggle").onclick = () => setRail(true);
   const waiting = ss.filter((x) => x.status === "waiting" || x.status === "error").length;
   $("msess-sum").innerHTML = `▸ 장비실 · 세션 ${ss.length}${waiting ? ` &nbsp;<span class="stk a flat">대기 ${waiting}</span>` : ""}`;
-  $("msess-rack").innerHTML = units || `<div class="none">출동 중인 에이전트 없음.</div>`;
   syncRailButton();
 }
+// 세션에 답하기: 보내는 중 / 보냄 / ⋯ 메뉴가 바뀌면 rail · 서랍 · 상세를 다시 그린다 (상세는 sig 로).
+subscribe("sessreply", () => { if (!$("rail")) return; renderSessions(); if ($("detail") && $("items")) { const m = model(); renderDetail(listOf(m)[ui.sel], m); } });
 export function setRail(off) { ui.railOff = off; lsSet("ned.railOff", off ? "1" : "0"); $("inbox").classList.toggle("rail-off", off); syncRailButton(); }
 export function syncRailButton() {
   let b = $("rail-open");

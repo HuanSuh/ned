@@ -6,9 +6,9 @@ import { esc } from "../util.js";
 
 export const clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== ""));
 /** Where a draft / action was started (src/origin.ts): card row, "지난 N일" 이력 row, 팔로업 card, Ned Net 대화창. */
-export const ORIGINS = ["card", "history", "watch", "chat"];
-export const ORIGIN_KO = { chat: "대화창", card: "카드", history: "지난 N일", watch: "팔로업" };
-const ORIGIN_TITLE = { chat: "Ned Net 대화창의 확인 카드에서 실행", card: "홈 카드 행의 ✎ / ⋯ 에서 실행", history: "카드의 '지난 N일' 이력 행에서 실행", watch: "팔로업 채널 카드(행 · 최근 대화 · 요약 줄)에서 실행" };
+export const ORIGINS = ["card", "history", "watch", "chat", "session", "pet"];
+export const ORIGIN_KO = { chat: "대화창", card: "카드", history: "지난 N일", watch: "팔로업", session: "세션 행", pet: "펫" };
+const ORIGIN_TITLE = { chat: "Ned Net 대화창의 확인 카드에서 실행", card: "홈 카드 행의 ✎ / ⋯ 에서 실행", history: "카드의 '지난 N일' 이력 행에서 실행", watch: "팔로업 채널 카드(행 · 최근 대화 · 요약 줄)에서 실행", session: "대시보드 세션 행의 답하기(빠른 버튼 · 한 줄 입력)에서 실행", pet: "데스크톱 펫 말풍선의 답하기에서 실행" };
 /** 출처 chip for an action log entry (설정 → 오늘 한 액션); "" for older entries without origin. */
 export const originChip = (o) => (ORIGINS.includes(o) ? ` <span class="chipx org-${esc(o)}" title="${esc(ORIGIN_TITLE[o])}">${esc(ORIGIN_KO[o])}</span>` : "");
 const SLACK_P_RE = /\/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})/;

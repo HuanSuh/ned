@@ -22,6 +22,12 @@ struct SessionView: Codable, Identifiable {
     var orca_worktree: String? = nil
     /// Orca child worktree (the user's own agent worker): shown dimmed, never attention.
     var is_worker: Bool = false
+    /// 세션에 답하기: Ned knows the session's Orca terminal (orca_pane hook event). Missing (older daemon) → true.
+    var can_reply: Bool = true
+    /// The waiting Notification's type (daemon sessions.ts) — permission_prompt / elicitation_dialog = a picker in the terminal.
+    var notification_type: String? = nil
+    /// = daemon `inReplyDialog`: waiting on a picker, so no typed replies (Enter would confirm the highlighted option).
+    var inReplyDialog: Bool { status == "waiting" && ["permission_prompt", "elicitation_dialog"].contains(notification_type ?? "") }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -37,6 +43,8 @@ struct SessionView: Codable, Identifiable {
         subagents_active = try c.decodeIfPresent(Int.self, forKey: .subagents_active) ?? 0
         orca_worktree = try c.decodeIfPresent(String.self, forKey: .orca_worktree)
         is_worker = (try? c.decodeIfPresent(Bool.self, forKey: .is_worker)) ?? false
+        can_reply = (try? c.decodeIfPresent(Bool.self, forKey: .can_reply)) ?? true
+        notification_type = try? c.decodeIfPresent(String.self, forKey: .notification_type)
     }
 }
 
@@ -164,13 +172,27 @@ struct FeedItem: Codable, Equatable, Sendable {
 struct FeedResponse: Decodable {
     var items: [FeedItem]
     var pet: PetSettings?
+    /// 세션에 답하기: config.dashboard.session_quick_replies (nil = older daemon → PetReply.defaultQuick).
+    var quick_replies: [String]?
+    /// config.actions.session_send (nil = older daemon → on).
+    var session_send: Bool?
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         items = (try c.decodeIfPresent([Lossy<FeedItem>].self, forKey: .items) ?? []).compactMap(\.value)
         pet = try? c.decodeIfPresent(PetSettings.self, forKey: .pet)
+        quick_replies = try? c.decodeIfPresent([String].self, forKey: .quick_replies)
+        session_send = try? c.decodeIfPresent(Bool.self, forKey: .session_send)
     }
-    enum CodingKeys: String, CodingKey { case items, pet }
+    enum CodingKeys: String, CodingKey { case items, pet, quick_replies, session_send }
+}
+
+/// How one 세션에 답하기 send ended (POST /api/send → GET /api/send/:job_id): `status` = the job's http_status
+/// (0 = the daemon never answered), `error` = its reason when not ok.
+struct SessionSendOutcome: Equatable, Sendable {
+    var status: Int
+    var error: String?
+    var ok: Bool { status == 200 }
 }
 
 /// Decodes an element, or drops it (logging) instead of failing the whole array.
@@ -271,6 +293,9 @@ final class StateStore: ObservableObject {
     @Published private(set) var feed: [FeedItem] = []
     /// A feed answer arrived at least once (before that the pet stays hidden and seeds nothing).
     @Published private(set) var feedLoaded = false
+    /// 세션에 답하기 (GET /api/feed): the quick-reply buttons and whether actions.session_send is on.
+    @Published private(set) var quickReplies: [String] = PetReply.defaultQuick
+    @Published private(set) var sessionSendOn = true
     /// Last state.json `pet` seen: only a *change* there is applied — a later state write by the heartbeat carries the
     /// same (possibly older) mirror, which must not undo a newer value read from GET /api/feed (e.g. a hand edit).
     private var lastStatePet: PetSettings?
@@ -389,6 +414,9 @@ final class StateStore: ObservableObject {
             if let decoded {
                 if self.feed != decoded.items { self.feed = decoded.items }
                 if let p = decoded.pet, p != self.pet { self.pet = p }
+                if let q = decoded.quick_replies, q != self.quickReplies { self.quickReplies = q }
+                let on = decoded.session_send ?? true
+                if on != self.sessionSendOn { self.sessionSendOn = on }
                 if !self.feedLoaded { self.feedLoaded = true }
             }
             if self.feedAgain { self.feedAgain = false; self.fetchFeed() }
@@ -412,6 +440,40 @@ final class StateStore: ObservableObject {
             let ok = err == nil && (resp as? HTTPURLResponse)?.statusCode == 200
             let decoded = ok ? data.flatMap { try? JSONDecoder().decode(FeedResponse.self, from: $0) } : nil
             Task { @MainActor in done(decoded) }
+        }.resume()
+    }
+
+    /// 세션에 답하기 (the pet bubble): POST /api/send {source: session, mode: session, ref: {session_id}, text, origin: pet}
+    /// → 202 {job_id} → GET /api/send/:job_id every 0.6 s (a session send is one `orca terminal list` + `send`, a second or
+    /// two) for at most 20 s. Any other first answer (400 / 403 …) is the outcome itself. `done` on the main actor.
+    nonisolated static func sendToSession(_ sessionID: String, text: String, port: Int, done: @escaping @MainActor (SessionSendOutcome) -> Void) {
+        let base = "http://127.0.0.1:\(port)/api/send"
+        @Sendable func finish(_ o: SessionSendOutcome) { Task { @MainActor in done(o) } }
+        @Sendable func obj(_ d: Data?) -> [String: Any]? { d.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any] }
+        @Sendable func poll(_ id: String, deadline: Date) {
+            var req = URLRequest(url: URL(string: "\(base)/\(id)")!)
+            req.timeoutInterval = 3
+            URLSession.shared.dataTask(with: req) { data, resp, _ in
+                let j = obj(data)
+                if (resp as? HTTPURLResponse)?.statusCode == 200, j?["state"] as? String == "done", let r = j?["result"] as? [String: Any] {
+                    return finish(SessionSendOutcome(status: r["http_status"] as? Int ?? 502, error: (r["error"] as? String) ?? (r["detail"] as? String)))
+                }
+                if (resp as? HTTPURLResponse)?.statusCode == 404 { return finish(SessionSendOutcome(status: 0, error: "결과를 알 수 없어요 (데몬 재시작?)")) }
+                // Not "failed": the send may well have gone through — the job just didn't report back in time.
+                guard Date() < deadline else { return finish(SessionSendOutcome(status: 0, error: "결과 확인 못 함 — 대시보드 '오늘 한 액션'에서 확인")) }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.6) { poll(id, deadline: deadline) }
+            }.resume()
+        }
+        var req = URLRequest(url: URL(string: base)!)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 5
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["source": "session", "mode": "session", "text": text, "ref": ["session_id": sessionID], "origin": "pet"])
+        URLSession.shared.dataTask(with: req) { data, resp, err in
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            let j = obj(data)
+            if code == 202, let id = j?["job_id"] as? String { return poll(id, deadline: Date().addingTimeInterval(20)) }
+            finish(SessionSendOutcome(status: code, error: (j?["error"] as? String) ?? err?.localizedDescription))
         }.resume()
     }
 

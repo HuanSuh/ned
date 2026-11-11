@@ -6,7 +6,7 @@ import { diffConfig, isEmptyPatch, mergePatch } from "../features/config-diff.js
 import { readCardLayout, renderCardLayout } from "../features/cardlayout.js";
 import { ACTION_DEFAULTS, ACTION_KO } from "../features/drafts.js";
 import { originChip } from "../features/draftref.js";
-import { readToneBySource, syncWriteActionGroups, writeActionsHtml } from "./settings-actions.js";
+import { parseQuickReplies, quickRepliesMsg, readToneBySource, syncWriteActionGroups, writeActionsHtml } from "./settings-actions.js";
 import { initAppSettings, readUpdates, renderUpdates } from "./settings-app.js";
 import { initArchive, readArchive, renderArchive } from "./settings-archive.js";
 import { initHistorySettings, readHistorySettings, renderHistorySettings } from "./settings-history.js";
@@ -191,6 +191,8 @@ export function renderConfig(c = S.config, { preview = false } = {}) {
   renderWriteActions(c);
   renderActionLog(); loadActionLog();
   $("c-tone").value = c.reply_tone || "";
+  $("c-quick-replies").value = (Array.isArray(c.dashboard?.session_quick_replies) ? c.dashboard.session_quick_replies : ["ㄱㄱ", "승인", "계속"]).join(", ");
+  syncQuickReplies();
   if (preview) applyTheme(normTheme(c.dashboard?.theme)); else syncTheme(c.dashboard); // server value wins over the <head> cache (and drops an unsaved preview)
   $("c-theme").innerHTML = themeHtml(c.dashboard?.theme);
   renderCardLayout(c.dashboard ?? null);
@@ -262,7 +264,7 @@ export function readBody() {
     quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
     sources,
     filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack], ack_check_max: $("c-ackmax").value === "" ? null : Number($("c-ackmax").value), group_mentions: [...excl.group] }, jira: { exclude_projects: [...excl.jira] } },
-    dashboard: { ...readCardLayout(), theme: readTheme(), ...readLinkPrefs() },
+    dashboard: { ...readCardLayout(), theme: readTheme(), ...readLinkPrefs(), session_quick_replies: parseQuickReplies($("c-quick-replies").value) },
     notifications: readNotifications(),
     actions: Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])),
     reply_tone: $("c-tone").value.trim(),
@@ -285,8 +287,15 @@ let saved = "";
 let savedBody = null; // readBody() right after the last render: the PUT sends only diffConfig(savedBody, readBody())
 const snap = () => {
   const { dashboard: d, ...rest } = readBody();
-  return JSON.stringify({ ...rest, theme: d.theme, open_links_in_app: d.open_links_in_app, open_links_in_app_by_service: d.open_links_in_app_by_service, slack_team_id: d.slack_team_id, slack_team_domain: d.slack_team_domain });
+  return JSON.stringify({ ...rest, theme: d.theme, open_links_in_app: d.open_links_in_app, open_links_in_app_by_service: d.open_links_in_app_by_service, slack_team_id: d.slack_team_id, slack_team_domain: d.slack_team_domain, session_quick_replies: d.session_quick_replies });
 };
+/** 세션 빠른 답: 형식 안내 줄 (저장 때도 같은 검사로 막는다). */
+function syncQuickReplies() {
+  const err = quickRepliesMsg(parseQuickReplies($("c-quick-replies").value));
+  $("c-quick-replies-msg").textContent = err || "";
+  $("c-quick-replies-msg").style.color = err ? "var(--red)" : "";
+  return err;
+}
 export const isDirty = () => !!S.config && (snap() !== saved || !!readCardLayout().layout);
 export function syncDirty() {
   const d = isDirty();
@@ -364,6 +373,8 @@ export function init() {
     if (isEmptyPatch(patch)) { msg.className = "msg"; msg.textContent = "바뀐 항목이 없어."; return; }
     const linkErr = linkPrefsError(patch.dashboard);
     if (linkErr) { msg.className = "msg err"; msg.textContent = `저장 안 함: ${linkErr.msg}`; $(linkErr.id).focus(); return; }
+    const quickErr = patch.dashboard?.session_quick_replies ? quickRepliesMsg(patch.dashboard.session_quick_replies) : null;
+    if (quickErr) { msg.className = "msg err"; msg.textContent = `저장 안 함: ${quickErr}`; $("c-quick-replies").focus(); return; }
     btn.disabled = true; msg.className = "msg"; msg.textContent = "저장 중…";
     try {
       // Only the changed keys (sub-key level), plus the version this form was rendered from: a save made elsewhere since → 409.
@@ -388,6 +399,7 @@ export function init() {
   initAppSettings(); // 앱 (Ned.app): its own section + nav link, applied at once through the app bridge (not the form)
   initHistorySettings();
   initLinkPrefs();
+  $("c-quick-replies").addEventListener("input", syncQuickReplies);
   initPet();
 }
 

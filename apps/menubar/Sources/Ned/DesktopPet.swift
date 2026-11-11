@@ -15,6 +15,13 @@ struct PetInput: Sendable {
         var worktree: String
         var status: String
         var isWorker: Bool = false
+        /// 세션에 답하기 (PetReply): which session, can Ned type into its Orca terminal, what it asked, its last event.
+        var id: String = ""
+        var canReply: Bool = true
+        var summary: String = ""
+        var ts: Double = 0
+        /// Waiting on a permission / elicitation dialog (SessionView.inReplyDialog) — no typed replies.
+        var dialog: Bool = false
     }
     /// `false` = daemon not answering (same rule as the menu's "데몬이 꺼져 있어요" line).
     var alive: Bool
@@ -147,6 +154,161 @@ struct PetInbox: Equatable {
     }
 }
 
+// MARK: - 세션에 답하기 (pure; checked by --pet-selftest)
+
+/// One session waiting for the user that the bubble can answer.
+struct PetReplyTarget: Equatable, Sendable {
+    var id: String
+    var worktree: String
+    var summary: String
+    /// false = no Orca terminal on record → only "터미널에서 직접 입력".
+    var canReply: Bool
+    /// last_event_ts — a send is "answered" until the session moves past it.
+    var ts: Double
+    /// The terminal shows a permission / elicitation picker: typed text is ignored and the reply's Enter would confirm the
+    /// highlighted option (Claude Code Confirmation: Enter = confirm:yes) → only "터미널에서 직접 선택".
+    var dialog: Bool = false
+
+    /// Ned may type into it now.
+    var answerable: Bool { canReply && !dialog }
+}
+
+/// The bubble's reply strip: quick buttons (config.dashboard.session_quick_replies) + "…" one-line input, for the most
+/// recent waiting session (⇧⇥ / ↑↓ / ‹ › switch when several wait). While it is in use (input / sending / result) the
+/// bubble does not auto-collapse (PetModel.timerFired holds). A sent session drops out of the targets until its next
+/// event; the result line ("보냄 ✓" / why not) shows `resultSeconds`, then the normal flow resumes.
+struct PetReply: Equatable {
+    enum Phase: Equatable { case idle, input, sending, result(ok: Bool, text: String) }
+    static let defaultQuick = ["ㄱㄱ", "승인", "계속"]
+    static let maxText = 2000
+    static let resultSeconds: TimeInterval = 2.5
+
+    private(set) var targets: [PetReplyTarget] = []
+    private(set) var selectedID: String?
+    private(set) var phase: Phase = .idle
+    /// Last typed text — kept after a failed send so "…" reopens with it; cleared after a sent one.
+    var text = ""
+    /// Sent session id → its last_event_ts at send.
+    private(set) var sent: [String: Double] = [:]
+    /// The target being answered (it may leave `targets` mid-reply).
+    private(set) var pinned: PetReplyTarget?
+
+    var active: Bool { phase != .idle }
+    var current: PetReplyTarget? {
+        if active, let p = pinned { return p }
+        return targets.first { $0.id == selectedID } ?? targets.first
+    }
+    var index: Int? { current.flatMap { c in targets.firstIndex { $0.id == c.id } } }
+
+    /// Waiting, not an Orca worker, newest event first (the default pick is the most recent).
+    static func waiting(_ sessions: [PetInput.Session]) -> [PetReplyTarget] {
+        sessions.filter { $0.status == "waiting" && !$0.isWorker && !$0.id.isEmpty }
+            .sorted { $0.ts > $1.ts }
+            .map { PetReplyTarget(id: $0.id, worktree: $0.worktree, summary: $0.summary, canReply: $0.canReply, ts: $0.ts, dialog: $0.dialog) }
+    }
+
+    mutating func setTargets(_ t: [PetReplyTarget]) {
+        // A sent mark lasts while the session still shows the event we answered.
+        sent = sent.filter { id, ts in t.contains { $0.id == id && $0.ts == ts } }
+        targets = t.filter { sent[$0.id] == nil }
+        if let s = selectedID, !targets.contains(where: { $0.id == s }) { selectedID = nil }
+    }
+
+    /// Pick a session (a session message bubble names its own). No-op while sending / showing a result.
+    mutating func select(_ id: String) {
+        guard phase == .idle || phase == .input, let t = targets.first(where: { $0.id == id }) else { return }
+        selectedID = id
+        if active { pinned = t }
+    }
+
+    mutating func cycle(_ step: Int) {
+        guard targets.count > 1, phase == .idle || phase == .input, let i = index else { return }
+        let n = targets.count
+        let t = targets[((i + step) % n + n) % n]
+        selectedID = t.id
+        if active { pinned = t }
+    }
+
+    /// "…" → input mode for the current target. false when there is none or it can't be replied to.
+    mutating func openInput() -> Bool {
+        guard phase == .idle || phase == .input, let c = current, c.answerable else { return false }
+        pinned = c
+        phase = .input
+        return true
+    }
+
+    /// Esc / 닫기.
+    mutating func cancel() {
+        guard phase == .input else { return }
+        phase = .idle
+        pinned = nil
+    }
+
+    /// The input lost the keyboard (another app clicked, the pet hidden, replies switched off): close it, keep what was
+    /// typed so "…" reopens with it.
+    mutating func interrupt(keeping typed: String) {
+        guard phase == .input else { return }
+        text = typed
+        cancel()
+    }
+
+    /// A quick button or ⏎: (session id, trimmed text) to POST, or nil (empty, too long, nothing to answer, busy).
+    /// Length is counted in UTF-16 units like the daemon (JS `length`), not grapheme clusters.
+    mutating func beginSend(_ raw: String) -> (id: String, text: String)? {
+        guard phase == .idle || phase == .input, let c = current, c.answerable else { return nil }
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, t.utf16.count <= Self.maxText else { return nil }
+        pinned = c
+        phase = .sending
+        return (c.id, t)
+    }
+
+    mutating func finish(_ o: SessionSendOutcome) {
+        guard phase == .sending, let c = pinned else { return }
+        phase = .result(ok: o.ok, text: Self.resultText(o))
+        if o.ok { sent[c.id] = c.ts; text = "" }
+    }
+
+    /// After `resultSeconds`: back to the normal flow (a sent session leaves the targets).
+    mutating func endResult() {
+        guard case .result = phase else { return }
+        phase = .idle
+        pinned = nil
+        targets.removeAll { sent[$0.id] != nil }
+        if let s = selectedID, !targets.contains(where: { $0.id == s }) { selectedID = nil }
+    }
+
+    /// The result line: "보냄 ✓", or why not (409 = the terminal is gone — same words as the dashboard).
+    static func resultText(_ o: SessionSendOutcome) -> String {
+        switch o.status {
+        case 200: return "보냄 ✓"
+        case 409: return "터미널이 닫혀 있어 보낼 수 없음 — 터미널에서 직접 입력"
+        case 403: return "세션에 보내기가 꺼져 있어요 (설정 → 쓰기 액션)"
+        case 0: return o.error.map { "보내지 못함: \($0)" } ?? "데몬이 응답하지 않아요"
+        default: return "보내지 못함: \(String((o.error ?? "HTTP \(o.status)").prefix(80)))"
+        }
+    }
+}
+
+/// What the bubble draws for the reply strip (PetModel.replyStrip).
+struct PetReplyStrip: Equatable {
+    var target: PetReplyTarget
+    /// 1-based position and count when several sessions wait (the header shows ‹ n/m ›).
+    var position: Int
+    var count: Int
+    var quick: [String]
+    var phase: PetReply.Phase
+}
+
+/// Hit ids of the bubble's controls (PetModel.rowFrames keys; list rows use 0..<100).
+enum PetControl {
+    static let quickBase = 100
+    static let more = 150
+    static let prev = 160
+    static let next = 161
+    static let field = 170
+}
+
 /// Where the panel goes: the saved origin if the character is still (mostly) on a screen, else the default
 /// (bottom-right of the main screen's visible frame — Dock and menu bar excluded).
 enum PetPlacement {
@@ -216,10 +378,18 @@ final class PetModel: ObservableObject {
     /// Bubble rows in AppKit panel coordinates (row index → rect), reported by `PetView` for `PetBubbleHitView`.
     @Published var bubbleFrame: CGRect = .zero
     var rowFrames: [Int: CGRect] = [:]
+    /// The reply input's slot (PetControl.field) in AppKit panel coordinates — the controller lays its NSTextField there.
+    @Published var fieldFrame: CGRect = .zero
+
+    /// 세션에 답하기: waiting sessions + the strip's phase; quick buttons and the actions.session_send switch from GET /api/feed.
+    @Published var reply = PetReply()
+    @Published var quickReplies: [String] = PetReply.defaultQuick
+    @Published var replyOn = true
 
     static let bubbleSeconds: TimeInterval = 5.5
     static let doneSeconds: TimeInterval = 2.5
     private var hideWork: DispatchWorkItem?
+    private var resultWork: DispatchWorkItem?
 
     init(reduceMotion: Bool = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) {
         self.reduceMotion = reduceMotion
@@ -256,21 +426,75 @@ final class PetModel: ObservableObject {
     var content: PetBubbleContent? {
         if listOpen {
             let status = expression.mood == .idle ? nil : expression.status
-            return .list(status: status, items: recent, empty: status == nil && recent.isEmpty ? persona.persona.nothingNew : nil)
+            // With the reply strip the panel has room for one recent row (none while replying).
+            let items = !hasStripInList ? recent : reply.active ? [] : Array(recent.prefix(1))
+            return .list(status: status, items: items, empty: status == nil && items.isEmpty && !hasStripInList ? persona.persona.nothingNew : nil)
         }
         return current.map(PetBubbleContent.message)
     }
 
+    private var hasStripInList: Bool { replyOn && reply.current != nil }
+
+    /// The reply strip under the bubble: on the hover list whenever a session waits, on a session message bubble, and
+    /// always while replying (input / sending / result).
+    var replyStrip: PetReplyStrip? {
+        guard replyOn, let t = reply.current else { return nil }
+        let show: Bool
+        if reply.active || listOpen { show = true }
+        else if let m = current, m.kind == "session" { show = true }
+        else { show = false }
+        guard show else { return nil }
+        return PetReplyStrip(target: t, position: (reply.index ?? 0) + 1, count: max(reply.targets.count, 1), quick: quickReplies, phase: reply.phase)
+    }
+
+    /// The session a session message bubble is about (`att:session:<id>`).
+    static func sessionID(of m: PetMessage) -> String? {
+        m.kind == "session" && m.key.hasPrefix("att:session:") ? String(m.key.dropFirst("att:session:".count)) : nil
+    }
+
+    func setReplyTargets(_ t: [PetReplyTarget]) {
+        var r = reply
+        r.setTargets(t)
+        if r != reply { reply = r }
+    }
+
+    /// Mutate the reply state; leaving a held phase (back to idle) lets the bubble go on with its normal timer.
+    func updateReply(_ f: (inout PetReply) -> Void) {
+        let was = reply.active
+        var r = reply
+        f(&r)
+        reply = r
+        if case .result = r.phase { scheduleResultEnd() }
+        if was && !r.active && current != nil { schedule(1.5) }
+    }
+
+    private func scheduleResultEnd() {
+        resultWork?.cancel()
+        let w = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.updateReply { $0.endResult() }; self?.onReplyIdle?() } }
+        resultWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + PetReply.resultSeconds, execute: w)
+    }
+
+    /// The controller's hook when the strip goes back to idle after a result (closes the hover list if the mouse left).
+    var onReplyIdle: (() -> Void)?
+
     /// For snapshots: a fixed state with its bubble open, no timers.
-    func pin(_ e: PetExpression, persona p: PersonaID, message: PetMessage?, recent r: [PetMessage] = [], list: Bool = false) {
+    func pin(_ e: PetExpression, persona p: PersonaID, message: PetMessage?, recent r: [PetMessage] = [], list: Bool = false, reply rp: PetReply = PetReply()) {
         hideWork?.cancel()
-        expression = e; persona = p; current = message; queue = []; recent = r; listOpen = list; reduceMotion = true
+        expression = e; persona = p; current = message; queue = []; recent = r; listOpen = list; reduceMotion = true; reply = rp
     }
 
     private func next() {
         guard !queue.isEmpty else { current = nil; hideWork?.cancel(); return }
         current = queue.removeFirst()
+        // A session message bubble answers its own session.
+        if let m = current, let id = Self.sessionID(of: m), !reply.active { updateReply { $0.select(id) } }
         schedule(current?.kind == "done" ? Self.doneSeconds : Self.bubbleSeconds)
+    }
+
+    /// The auto-collapse timer fired: hold while the mouse is on the bubble or the reply strip is in use, else the next one.
+    func timerFired() {
+        if bubbleHovered || reply.active { schedule(1.5) } else { next() }
     }
 
     private func drop(_ key: String) {
@@ -281,10 +505,7 @@ final class PetModel: ObservableObject {
     private func schedule(_ seconds: TimeInterval) {
         hideWork?.cancel()
         let w = DispatchWorkItem { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                if self.bubbleHovered { self.schedule(1.5) } else { self.next() }
-            }
+            MainActor.assumeIsolated { self?.timerFired() }
         }
         hideWork = w
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: w)
@@ -433,7 +654,7 @@ struct PetView: View {
         VStack(alignment: .trailing, spacing: 8) {
             Spacer(minLength: 0)
             if let c = model.content {
-                PetBubble(content: c, mood: model.expression.mood, persona: p, reduceMotion: model.reduceMotion)
+                PetBubble(content: c, mood: model.expression.mood, persona: p, reduceMotion: model.reduceMotion, strip: model.replyStrip)
                     .transition(.opacity)
                     .id(bubbleID(c))
             }
@@ -453,6 +674,8 @@ struct PetView: View {
                 model.rowFrames = frames.filter { $0.key >= 0 }.mapValues(flip)
                 let b = frames[-1].map(flip) ?? .zero
                 if model.bubbleFrame != b { model.bubbleFrame = b }
+                let f = frames[PetControl.field].map(flip) ?? .zero
+                if model.fieldFrame != f { model.fieldFrame = f }
             }
         }
     }
@@ -472,6 +695,8 @@ struct PetBubble: View {
     let mood: PetMood
     let persona: Persona
     var reduceMotion: Bool = false
+    /// 세션에 답하기 strip under the content (nil = none).
+    var strip: PetReplyStrip? = nil
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
@@ -498,6 +723,10 @@ struct PetBubble: View {
                     row(icon: PetColors.moodSymbol(.idle), tint: PetColors.dim(dark), title: e, detail: "", lines: 1, dark: dark)
                 }
             }
+            if let s = strip {
+                Divider().opacity(0.5)
+                replyStrip(s, dark: dark)
+            }
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
         .fixedSize(horizontal: false, vertical: true)
@@ -513,6 +742,61 @@ struct PetBubble: View {
         // Hug the text like a chat bubble, at most the panel's width, right-aligned over the character.
         .frame(maxWidth: PetLayout.bubbleWidth, alignment: .trailing)
         .padding(.trailing, 4)
+    }
+
+    /// Header (which session, ‹ n/m › when several wait) + what it asked, then quick buttons and "…" / the input slot /
+    /// 보내는 중… / the result line. Clicks land on PetBubbleHitView, which hit-tests these frames (PetControl ids).
+    @ViewBuilder
+    private func replyStrip(_ s: PetReplyStrip, dark: Bool) -> some View {
+        let amber = PetColors.waiting(persona, dark)
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Image(systemName: "keyboard").font(.system(size: 10, weight: .semibold)).foregroundStyle(amber).frame(width: 14)
+                Text("\(s.target.worktree) 에 답하기").font(.system(size: 11, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                    .foregroundStyle(PetColors.text(dark))
+                Spacer(minLength: 4)
+                if s.count > 1 && (s.phase == .idle || s.phase == .input) {
+                    chip("‹", dark: dark).petFrame(PetControl.prev)
+                    Text("\(s.position)/\(s.count)").font(.system(size: 10)).monospacedDigit().foregroundStyle(PetColors.dim(dark))
+                    chip("›", dark: dark).petFrame(PetControl.next)
+                }
+            }
+            if s.target.dialog {
+                Text("권한·선택 대화상자 — 터미널에서 직접 선택 (Enter = 강조된 항목, Esc = 거절)").font(.system(size: 10.5)).foregroundStyle(PetColors.dim(dark)).lineLimit(2)
+            } else if !s.target.canReply {
+                Text("터미널에서 직접 입력 — Orca 터미널 기록이 없어요").font(.system(size: 10.5)).foregroundStyle(PetColors.dim(dark)).lineLimit(2)
+            } else {
+                switch s.phase {
+                case .sending:
+                    Text("보내는 중…").font(.system(size: 11)).foregroundStyle(PetColors.dim(dark))
+                case .result(let ok, let text):
+                    Text(text).font(.system(size: 11, weight: ok ? .semibold : .regular)).lineLimit(2)
+                        .foregroundStyle(ok ? PetColors.running(persona, dark) : PetColors.error(persona, dark))
+                case .idle, .input:
+                    HStack(spacing: 4) {
+                        ForEach(Array(s.quick.prefix(5).enumerated()), id: \.offset) { i, q in
+                            chip(q, dark: dark).petFrame(PetControl.quickBase + i)
+                        }
+                        if s.phase == .idle { chip("…", dark: dark).petFrame(PetControl.more) }
+                    }
+                    if s.phase == .input {
+                        // The NSTextField sits on top of this slot (DesktopPetController.layoutField).
+                        RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(amber.opacity(0.8), lineWidth: 1)
+                            .frame(height: 22).frame(maxWidth: .infinity).petFrame(PetControl.field)
+                        Text("⏎ 보내기 · esc 닫기\(s.count > 1 ? " · ⇧⇥ 다른 세션" : "")").font(.system(size: 9.5)).foregroundStyle(PetColors.dim(dark))
+                    }
+                }
+            }
+        }
+    }
+
+    private func chip(_ label: String, dark: Bool) -> some View {
+        Text(label).font(.system(size: 11, weight: .medium)).lineLimit(1)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .foregroundStyle(PetColors.text(dark))
+            .background(Capsule().fill(PetColors.dim(dark).opacity(0.18)))
+            .overlay(Capsule().strokeBorder(PetColors.dim(dark).opacity(0.35), lineWidth: 0.5))
+            .contentShape(Capsule())
     }
 
     @ViewBuilder
@@ -589,10 +873,51 @@ struct PetCharacter: View {
 
 // MARK: - Panel
 
-/// Never key / main: clicking the pet does not take focus from the app in front.
+/// Never main, and key only while the bubble's reply input is open (`allowKey`): clicking the pet does not take focus
+/// from the app in front; typing a reply needs the (non-activating) panel to be key for that moment only.
 final class PetPanel: NSPanel {
-    override var canBecomeKey: Bool { false }
+    var allowKey = false
+    override var canBecomeKey: Bool { allowKey }
     override var canBecomeMain: Bool { false }
+}
+
+/// The bubble's one-line reply input: ⏎ send, esc close, ⇧⇥ / ⇥ / ↑ ↓ other waiting session. An Enter that commits a
+/// Hangul composition is left to the input method.
+final class PetReplyField: NSTextField, NSTextFieldDelegate {
+    var onSend: (String) -> Void = { _ in }
+    var onCancel: () -> Void = {}
+    var onCycle: (Int) -> Void = { _ in }
+
+    convenience init() {
+        self.init(frame: .zero)
+        isBordered = false
+        drawsBackground = false
+        focusRingType = .none
+        font = .systemFont(ofSize: 12)
+        placeholderString = "답 입력"
+        usesSingleLineMode = true
+        cell?.wraps = false
+        cell?.isScrollable = true
+        maximumNumberOfLines = 1
+        delegate = self
+        setAccessibilityLabel("세션에 답하기 입력")
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
+        if textView.hasMarkedText() { return false }
+        switch sel {
+        case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+            onSend(stringValue); return true
+        case #selector(NSResponder.cancelOperation(_:)):
+            onCancel(); return true
+        case #selector(NSResponder.insertBacktab(_:)), #selector(NSResponder.moveUp(_:)):
+            onCycle(-1); return true
+        case #selector(NSResponder.insertTab(_:)), #selector(NSResponder.moveDown(_:)):
+            onCycle(1); return true
+        default:
+            return false
+        }
+    }
 }
 
 /// Pointer over the pet: a pointing hand (clickable), a closed hand while dragging. The panel is never key, so cursor
@@ -705,6 +1030,15 @@ final class DesktopPetController: NSObject {
         if let deep, DeepLink.isDeep(deep) { DeepLink.open(deep, web: web) } else if let web { NSWorkspace.shared.open(web) }
     }
     var now: () -> Date = Date.init
+    /// 세션에 답하기 — POST /api/send through the daemon (StateStore.sendToSession). Swapped in tests.
+    var sendAction: (_ sessionID: String, _ text: String, _ done: @escaping @MainActor (SessionSendOutcome) -> Void) -> Void = { id, text, done in
+        StateStore.sendToSession(id, text: text, port: AppConfig.port, done: done)
+    }
+    private var field: PetReplyField?
+    /// The app in front when the reply input opened (never Ned itself) — gets the keyboard back when it closes.
+    private var prevApp: NSRunningApplication?
+    /// The 0.15 s fallback had to activate Ned to get the keyboard (→ yieldActivation on close).
+    private var activatedSelf = false
 
     var isEnabled: Bool { settings.enabled }
     var isShowing: Bool { panel?.isVisible == true }
@@ -725,6 +1059,19 @@ final class DesktopPetController: NSObject {
         self.model.$bubbleFrame.sink { [weak self] f in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.bubbleHit?.frame = f } }
         }.store(in: &subs)
+        self.model.$fieldFrame.sink { [weak self] _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.layoutField() } }
+        }.store(in: &subs)
+        // Leaving input mode any way (sent, cancelled, the session vanished) takes the field and the key status away.
+        // Judged by the phase when the block runs, not the published value: a late idle must not close an input just opened.
+        self.model.$reply.sink { [weak self] _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { if let self, self.model.reply.phase != .input { self.endInput() } } }
+        }.store(in: &subs)
+        // Replies switched off (actions.session_send) while typing → close the input, keep the text.
+        self.model.$replyOn.sink { [weak self] on in
+            DispatchQueue.main.async { MainActor.assumeIsolated { if !on { self?.interruptInput() } } }
+        }.store(in: &subs)
+        self.model.onReplyIdle = { [weak self] in self?.syncList() }
     }
 
     /// Follow the store (state.json + GET /api/feed) and the daemon supervisor (health) — both already published.
@@ -744,9 +1091,13 @@ final class DesktopPetController: NSObject {
         apply(settings: store.pet)
         let input = PetInput(
             alive: s.daemonAlive || daemon.isHealthy || daemon.isBooting,
-            sessions: s.sessions.map { .init(worktree: $0.worktree, status: $0.status, isWorker: $0.is_worker) },
+            sessions: s.sessions.map { .init(worktree: $0.worktree, status: $0.status, isWorker: $0.is_worker, id: $0.id, canReply: $0.can_reply,
+                                             summary: $0.last_summary ?? $0.last_prompt ?? "", ts: $0.last_event_ts, dialog: $0.inReplyDialog) },
             openAttention: store.attentionCount)
         model.update(PetMapping.expression(input), persona: store.personaID, quiet: s.quiet, sessionOn: settings.messageOn("session"))
+        model.setReplyTargets(PetReply.waiting(input.sessions))
+        if model.quickReplies != store.quickReplies { model.quickReplies = store.quickReplies }
+        if model.replyOn != store.sessionSendOn { model.replyOn = store.sessionSendOn }
         if store.feedLoaded { ingest(store.feed, quiet: s.quiet, persona: store.persona) }
     }
 
@@ -773,6 +1124,7 @@ final class DesktopPetController: NSObject {
             place()
             panel?.orderFrontRegardless()
         } else {
+            interruptInput() // hidden mid-reply: close the input (text kept), give the keyboard back
             panel?.orderOut(nil)
         }
     }
@@ -788,17 +1140,29 @@ final class DesktopPetController: NSObject {
     func hover(character on: Bool) { overCharacter = on; syncList() }
     func hover(bubble on: Bool) { overBubble = on; model.bubbleHovered = on; syncList() }
     /// The list opens over the character and stays while the mouse moves onto it; closes 0.3 s after leaving both.
-    private func syncList() {
+    /// Never while the reply strip is in use (typing / sending / showing the result).
+    func syncList() {
         closeWork?.cancel()
         if overCharacter { model.listOpen = true; return }
-        guard model.listOpen, !overBubble else { return }
-        let w = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { guard let self, !self.overCharacter, !self.overBubble else { return }; self.model.listOpen = false } }
+        guard model.listOpen, !overBubble, !model.reply.active else { return }
+        let w = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { guard let self, !self.overCharacter, !self.overBubble, !self.model.reply.active else { return }; self.model.listOpen = false } }
         closeWork = w
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: w)
     }
 
-    /// A click on the bubble (panel coordinates): the list row under it, else the current message.
+    /// A click on the bubble (panel coordinates): a reply control, else the list row under it, else the current message.
     func clickBubble(at p: CGPoint) {
+        if let strip = model.replyStrip, let (id, _) = model.rowFrames.first(where: { $0.key >= PetControl.quickBase && $0.key != PetControl.field && $0.value.contains(p) }) {
+            switch id {
+            case PetControl.prev: model.updateReply { $0.cycle(-1) }
+            case PetControl.next: model.updateReply { $0.cycle(1) }
+            case PetControl.more: beginInput()
+            case let i where i >= PetControl.quickBase && i < PetControl.quickBase + strip.quick.count: send(strip.quick[i - PetControl.quickBase])
+            default: break
+            }
+            return
+        }
+        if model.reply.active { return } // a stray click while replying never opens / advances the message under it
         switch model.content {
         case .list(_, let items, _):
             if let (i, _) = model.rowFrames.first(where: { $0.value.contains(p) }), i < items.count { open(items[i]) }
@@ -814,6 +1178,91 @@ final class DesktopPetController: NSObject {
         let web = m.url.flatMap(URL.init(string:)).flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
         let deep = m.deep.flatMap(URL.init(string:)).flatMap { DeepLink.isDeep($0) ? $0 : nil }
         if deep == nil && web == nil { openDashboard() } else { openURLAction(deep, web) }
+    }
+
+    // MARK: 세션에 답하기
+
+    /// Quick button or ⏎: POST through the daemon; the strip shows 보내는 중… then the result for PetReply.resultSeconds.
+    func send(_ text: String) {
+        if let f = field { model.reply.text = f.stringValue }
+        var started: (id: String, text: String)?
+        model.updateReply { started = $0.beginSend(text) }
+        guard let s = started else { NSSound.beep(); return }
+        sendAction(s.id, s.text) { [weak self] outcome in
+            guard let self else { return }
+            DaemonManager.shared.note("pet reply → session \(s.id.prefix(8)): HTTP \(outcome.status)\(outcome.error.map { " \($0.prefix(120))" } ?? "")")
+            self.model.updateReply { $0.finish(outcome) }
+        }
+    }
+
+    /// "…": open the one-line input. The panel turns key for it — a non-activating panel takes the keyboard without
+    /// activating Ned; only if it still isn't key a moment later is Ned activated (cooperatively yielded back on close).
+    func beginInput() {
+        var opened = false
+        model.updateReply { opened = $0.openInput() }
+        guard opened, let panel else { return }
+        // Whoever has the keyboard now gets it back when the input closes (endInput).
+        let front = NSWorkspace.shared.frontmostApplication
+        prevApp = front?.processIdentifier == NSRunningApplication.current.processIdentifier ? nil : front
+        let f = field ?? makeField()
+        f.stringValue = model.reply.text
+        if f.superview == nil { panel.contentView?.addSubview(f) }
+        layoutField()
+        panel.allowKey = true
+        panel.makeKey()
+        panel.makeFirstResponder(f)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let panel = self.panel, self.model.reply.phase == .input, !panel.isKeyWindow else { return }
+                self.activatedSelf = true
+                NSApp.activate()
+                panel.makeKey()
+                if let f = self.field { panel.makeFirstResponder(f) }
+            }
+        }
+    }
+
+    /// The input lost the keyboard (another app clicked — `didResignKey`), the pet was hidden or replies were switched
+    /// off: close it, keeping what was typed for the next "…".
+    func interruptInput() {
+        if model.reply.phase == .input { model.updateReply { $0.interrupt(keeping: field?.stringValue ?? model.reply.text) } }
+        endInput()
+    }
+
+    /// Input closed (sent, esc, interrupted, session gone): drop the field and give the keyboard back to the app that had
+    /// it — only while Ned still holds it (the panel is key, or Ned activated itself and is still active). If the user
+    /// already clicked another app, nothing is re-activated. `resignKey()` is not called: it is only the notification hook.
+    func endInput() {
+        guard let f = field, f.superview != nil else { return }
+        if model.reply.phase == .input { model.updateReply { $0.cancel() } }
+        f.removeFromSuperview()
+        let holds = panel?.isKeyWindow == true || (activatedSelf && NSApp.isActive)
+        panel?.makeFirstResponder(nil)
+        panel?.allowKey = false
+        if holds, let prev = prevApp, prev.processIdentifier != NSRunningApplication.current.processIdentifier, !prev.isTerminated {
+            if activatedSelf { NSApp.yieldActivation(to: prev) } // macOS 14 cooperative activation
+            prev.activate(options: [])
+        }
+        prevApp = nil
+        activatedSelf = false
+        syncList() // esc with the mouse already elsewhere → the hover list closes now (still held while sending)
+    }
+
+    private func makeField() -> PetReplyField {
+        let f = PetReplyField()
+        f.onSend = { [weak self] t in self?.send(t) }
+        f.onCancel = { [weak self] in self?.model.updateReply { $0.cancel() } }
+        f.onCycle = { [weak self] step in self?.model.updateReply { $0.cycle(step) } }
+        field = f
+        return f
+    }
+
+    /// The field over its slot in the bubble (PetControl.field), inset inside the drawn border.
+    func layoutField() {
+        guard let f = field, f.superview != nil else { return }
+        let r = model.fieldFrame
+        f.isHidden = r.isEmpty
+        if !r.isEmpty { f.frame = r.insetBy(dx: 6, dy: 3) }
     }
 
     func saveOrigin() {
@@ -884,6 +1333,11 @@ final class DesktopPetController: NSObject {
         hit.setAccessibilityLabel("데스크톱 펫 — 클릭하면 대시보드")
         container.addSubview(hit)
         p.contentView = container
+        // Typing a reply and then clicking another app: the panel resigns key → close the input (text kept), so the
+        // auto-collapse timer and the hover list are never held by an input nobody is typing in.
+        observers.append(NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: p, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { if self?.model.reply.phase == .input { self?.interruptInput() } }
+        })
         return p
     }
 }

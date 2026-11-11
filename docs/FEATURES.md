@@ -12,7 +12,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - **순찰/브리핑**: "지금 점검"(r) = 소스 갱신 → 판단 → 알림. 자동 순찰 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑 `briefing_time`(실패 시 재시도).
 - **야간·유휴 감속**: 조용한 시간·유휴(`idle_schedule`)엔 자동 실행 감속·정지(`quiet_schedule.mode` normal/slow/pause), 수동은 즉시.
 - **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기 확인 카드, `actions.chat_session_create` 면 새 세션; 정리는 노트로), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글.
-- **답장 초안 ✎**: 초안 3개 → 복사/열기/보내기. Slack·메일·Jira 는 미답 질문을 "답할 것"으로 뽑아 1:1 답. 쓰기는 켠 것만(gmail_draft·session_send 기본 켬): `actions.slack_send`·`gmail_draft`·`gmail_send`·`session_send`·`jira_comment`·`jira_transition`·`github_review`·`calendar_rsvp`·`calendar_create`. Jira·GitHub·캘린더는 ⋯.
+- **답장 초안 ✎**: 초안 3개 → 복사/열기/보내기(Slack·메일·Jira 는 미답 질문별 1:1 답). 쓰기는 켠 것만(`actions.*` — gmail_draft·session_send 기본 켬, Jira·GitHub·캘린더는 ⋯). **세션에 답하기**: 대기 세션 행·펫 말풍선의 빠른 답(`dashboard.session_quick_replies`)·한 줄 입력 → Orca 터미널.
 - **확인 완료 ✓**: 접음(새 변경 시 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`)면 자동 해제.
 - **Gmail 읽음 표시**(`actions.gmail_mark_read`): 메일 ✓ = Gmail 읽음.
 - **검색**: ⌘K
@@ -102,7 +102,16 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 보여 주는 것: 인박스 오른쪽 "장비실 · 세션" 패널 — 세션별 LED 상태(실행 중/입력 대기/완료/오류/종료), 워크트리, 서브에이전트 수, 마지막 요약, Ned 대화창에서 만든 세션이면 "대화창에서 시작" 배지(상세의 "출처"도) + "순찰 기록"(최근 8회). 없으면 "출동 중인 에이전트 없음."
 - 데이터: Claude Code 훅 이벤트(`~/.ned/events/`) → `state.json` sessions. `session_stale_minutes`(기본 180) 동안 이벤트 없으면 사라짐.
 - 언제: 여러 Claude 세션 중 입력을 기다리는 것·오류 난 것을 찾을 때.
-- 버튼·설정: 세션 항목 ✎ 초안 → "세션에 보내기"(Orca 터미널로 전송, `actions.session_send` 기본 켬), "접기".
+- 버튼·설정: 세션 항목 ✎ 초안 → "세션에 보내기"(Orca 터미널로 전송, `actions.session_send` 기본 켬), "접기". 입력 대기 세션은 행 안에서 바로 답하고, 실행 중 세션은 ⋯ → "메시지 보내기"(아래 "세션에 답하기").
+
+### 세션에 답하기 — 대기 세션에 Ned 에서 바로
+- 보여 주는 것: 입력을 기다리는(waiting) 세션 행 — 인박스 장비실 · 휴대폰의 세션 서랍 · 인박스 "우선" 의 세션 상세 — 에 **빠른 버튼**(기본 `ㄱㄱ` · `승인` · `계속`) + **한 줄 입력**(⏎ 보내기, 한글 조합 중 ⏎ 는 글자 확정만, Shift+⏎ 는 아무 것도 안 함 — 한 줄). 행에는 세션이 마지막으로 남긴 것(Notification 본문·요약, 없으면 마지막 프롬프트)이 그대로 보여 무엇에 답하는지 알 수 있다. 보내는 동안 버튼·입력 비활성, 성공하면 토스트 "fb-74 에 보냄" + 행이 "보냄 — 응답 기다리는 중" 으로 바뀌고 그 세션의 다음 이벤트(보통 프롬프트 제출 → 실행 중)가 오면(최대 90초) 실제 상태로 돌아간다. 실행 중·완료 세션은 입력을 숨기고 행의 ⋯ → **"메시지 보내기"** 로 같은 입력(빠른 버튼 없음, 닫기·Esc)을 연다 — 실행 중 세션에 추가 지시.
+- **데스크톱 펫**에서도: 세션 "입력 대기" 말풍선과 마우스를 올린 목록에 답하기 줄 — 헤더 "<워크트리> 에 답하기"(여러 세션이 기다리면 ‹ n/m ›, 기본은 가장 최근에 기다리기 시작한 세션), 빠른 버튼, "…" = 한 줄 입력(⏎ 보내기 · esc 닫기 · ⇧⇥/↑↓ 다른 세션). 입력·전송·결과 중엔 말풍선이 저절로 접히지 않고, 결과 한 줄("보냄 ✓" / 실패 사유)을 2.5초 보여 준 뒤 평소 흐름으로. 입력하는 동안만 펫 패널이 키보드를 받는다(비활성 패널이라 보통 앞 앱은 그대로; 안 되면 그때만 Ned 를 활성화). 입력을 닫으면(⏎ 보냄·esc) 열 때 앞에 있던 앱으로 키보드를 돌려준다. 입력 중 다른 앱을 누르거나 펫을 숨기거나 세션 보내기를 끄면 입력은 닫히고 쓰던 글은 다음 "…" 에 남는다. 펫은 Orca 워커 세션(`is_worker`)에는 답하기 줄을 띄우지 않는다(펫 상태 색과 같은 규칙 — 대시보드 장비실은 워커 행에도 답하기가 있음).
+- 보낼 수 없을 때: 세션이 Orca 터미널에서 실행된 기록이 없으면(`can_reply` false — 훅 이벤트에 Orca pane 이 없음) 입력 대신 "터미널에서 직접 입력" 안내만. 기록은 있는데 그 터미널이 지금 닫혀 있으면 보낼 때 409 → "터미널이 닫혀 있어 보낼 수 없음 — 터미널에서 직접 입력"(입력한 글은 남음). 그 밖의 실패는 데몬이 준 사유 그대로. `actions.session_send` 를 끄면 답하기 UI 가 사라진다.
+- **권한·선택 대화상자**: 세션이 권한 프롬프트(`notification_type` permission_prompt)나 MCP 입력 대화상자(elicitation_dialog)로 기다리면 대시보드·펫 모두 빠른 버튼·입력 대신 "권한·선택 대화상자 — 터미널에서 직접 선택 (Enter = 강조된 항목, Esc = 거절)" 안내만. 그 화면에선 보낸 글자는 무시되고 Enter 가 강조된 항목(보통 "Yes")을 확정하기 때문 — "거절" 을 보내면 허용이 될 수 있다. 데몬도 이런 세션에는 `/api/send` 를 409 로 거절한다(초안 팝업·대화창 경로 포함). 숫자 키로 항목을 고르는 동작은 Claude Code 문서에 없어 "허용" 버튼도 두지 않았다.
+- 알림 중복 방지: 답을 보내 성공하면 그 세션의 지금 "입력 대기" 알림(attention)을 바로 내린다(✕ 닫기와 같은 기록) — 대시보드·Ned.app 배너·펫이 같은 알림을 다시 띄우지 않는다. 세션이 다시 물으면(새 Notification) 평소처럼 다시 뜬다.
+- 데이터: `POST /api/send {source:"session", mode:"session", ref:{session_id}, text, origin:"session"|"pet"}` → 202 + 폴링 → 세션의 Orca 터미널(훅 이벤트의 `orca_pane`/`orca_tab` → `orca terminal list` 에서 같은 pane)에 `orca terminal send --text … --enter`. 글은 2,000자까지, 앞뒤 공백·끝 줄바꿈은 지움(Enter 는 한 번). 대기 아닌 세션에도 보낼 수 있다. 모든 시도는 `~/.ned/sent-actions.log` → 설정 → 쓰기 액션 "오늘 한 액션"(출처 칩 "세션 행" / "펫").
+- 설정: 설정 → 쓰기 액션 → "세션 빠른 답" `dashboard.session_quick_replies`(쉼표 구분, 5개까지 · 버튼마다 20자까지, 비우면 버튼 없이 입력만 — 넘으면 저장 안 함/400) · "세션에 보내기" `actions.session_send`(기본 켬).
 
 ### 대화창에서 세션 만들기
 - 보여 주는 것: Ned Net "대화" 에서 일을 맡기면 Ned 가 ned-action `session_create` 로 새 에이전트 세션을 제안 → 확인 카드(대상 줄에 레포 · 워크트리 새로/기존 · 모델 opus/sonnet — 읽기 전용, 첫 프롬프트 **전문**만 편집 가능) → [실행] / [취소]. 실행 중엔 단계(워크트리 만드는 중 → 에이전트 기동 대기 → 첫 프롬프트 전송 → 제출 확인)와 경과 초, 실패하면 단계별 사유. 워크트리·터미널이 이미 생긴 뒤의 실패는 "다시 실행" 없이 끝냄(중복 생성 방지). 카드를 미리 볼 때 등록 레포·기존 워크트리·상한도 검사해 실행 전에 거절 사유를 보여 줌.
@@ -180,7 +189,8 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
   - GitHub: "GitHub 리뷰·코멘트" `actions.github_review`(⋯ → 리뷰 초안 쓰기…/바로 승인; 리뷰 코멘트·변경 요청·승인+코멘트·PR 코멘트)
   - 캘린더: "캘린더 참석 응답" `actions.calendar_rsvp` · "캘린더 일정 생성" `actions.calendar_create`
   - 대화창: "대화창에서 쓰기 허용" `actions.chat_write`(꺼짐) — 통신기 대화가 확인 카드로 쓰기를 제안(위 "대화창에서 쓰기")
-  - 아래 "오늘 한 액션" 표(소스·결과 필터, "읽기 포함", 새로고침). 소스 옆 출처 칩 = 어디서 실행했는지(카드 / 지난 N일 / 팔로업 / 대화창).
+  - "세션 빠른 답" `dashboard.session_quick_replies`(기본 ㄱㄱ, 승인, 계속) — 위 "세션에 답하기".
+  - 아래 "오늘 한 액션" 표(소스·결과 필터, "읽기 포함", 새로고침). 소스 옆 출처 칩 = 어디서 실행했는지(카드 / 지난 N일 / 팔로업 / 대화창 / 세션 행 / 펫).
 - Slack 이모지 리액션 보내기는 없음(커넥터에 도구 없음).
 
 ### Gmail 읽음 표시
@@ -263,6 +273,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
   - 상태 = 둥근 카드의 **테두리 색 + 바깥 글로우**(통신기 Ned Net 과 같은 방식): 쉼 = 중립 테두리·은은한 흰빛 글로우, 작업 중 = 페르소나 보조색(Ned 는 민트) 글로우, 확인할 것 = 페르소나 색(배지 N), 입력 기다림 = 주황·키보드 아이콘(Orca 워커 세션 제외), 오류 = 빨강 점선·더 강한 글로우, 연결 끊김 = 회색·글로우 없음(마크 흐리게). 새 소식 말풍선은 페르소나 색. 연결 끊김을 뺀 모든 상태에서 테두리와 말풍선의 글로우(테두리 뒤 반사광 정도로 좁게)가 1.6초 주기로 밝아졌다 잦아든다(숨쉬기) — 움직임은 이것과 쉴 때 아주 작은 크기 변화뿐 — 바운스·흔들림·이모지 없음, 상태 전환은 0.5초 페이드. macOS "동작 줄이기"면 글로우 고정.
   - **말풍선 = 통신기 "메시지" 탭과 같은 새 소식**: 새 항목이 오면 출처 아이콘 + 제목(+ 짧은 내용)을 채팅 말풍선으로 5.5초 띄우고 접는다. 여러 개면 차례로(최대 3개), 한 번에 3개 넘게 오면 "새 소식 N" 하나로. 이미 본 항목은 다시 안 띄우고(앱이 본 키를 기억, 처음 켤 때 있던 항목은 본 것으로), 하루 한 번 그날 처음 볼 때 페르소나 인사. 입력 기다림·확인할 것이 끝나 평소로 돌아가면 "끝", 데몬이 끊기면 "연결 끊김".
   - 마우스를 올리면 상태 한 줄 + 최근 3개 목록(없으면 페르소나의 "레이더 깨끗함" 류 한 줄). 조용한 시간(`quiet`)엔 말풍선을 저절로 띄우지 않는다(올리면 보임).
+  - **세션에 답하기**: 입력을 기다리는 세션이 있으면 세션 말풍선·올린 목록에 빠른 버튼 + "…" 한 줄 입력(목록은 최근 1개로 줄어듦) — 위 "세션에 답하기". 빠른 버튼과 켜짐 여부는 `GET /api/feed` 의 `quick_replies`·`session_send`.
 - 데이터: `GET /api/feed`(통신기 메시지와 같은 규칙 — 열린 attention·24시간 안 브리핑 UPDATE·내 답 이후 새 Slack 답글, 각 항목에 펫 종류와 앱 딥링크) + 메뉴 막대와 같은 `state.json`(세션 status·`is_worker`·열린 attention·`quiet`, 설정 저장 때 `pet` 도 비춰 둬 바로 반영). 상태 매핑·메시지 큐는 순수 함수 — `--pet-selftest`, 화면은 `--pet-snapshot <dir>`.
 - 버튼·설정: 설정 → 외형 → **데스크톱 펫** — "화면에 Ned 띄우기" `pet.enabled`(기본 끔) · "말풍선으로 알려 줄 것" 종류별 `pet.messages.greeting`(인사) · `pet.messages.session`(작업: 입력 기다림·오류·끝) · `pet.messages.slack`(멘션·DM·스레드 새 답글) · `pet.messages.mail` · `pet.messages.jira` · `pet.messages.github` · `pet.messages.sentry`(소스 → Sentry 가 꺼져 있으면 흐려짐) · `pet.messages.calendar` · `pet.messages.briefing`(아침 브리핑·순찰), 모두 기본 켬. 끈 종류는 말풍선만 안 띄우고 테두리 색·배지는 그대로, 기타 알림은 항상 표시. "위치 초기화"(Ned.app 창에서만) = 기본 위치로. 하단 "저장"으로 저장.
   - 펫에서: 클릭 = 대시보드 열기, 말풍선 클릭 = 그 항목 열기(링크 열기 설정대로 앱 딥링크 또는 웹, 링크 없으면 대시보드), 드래그 = 이동(위치는 앱이 `desktopPetOrigin` 으로 기억, 화면 밖이면 기본 위치로), 우클릭 = 대시보드 열기 · 펫 설정…(이 묶음으로) · 숨기기(`pet.enabled` 를 끄고 저장). 앱에 남는 펫 상태는 위치와 본 메시지 키뿐.
@@ -273,7 +284,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - **소스**: Gmail/Slack/Jira/GitHub/Sentry/캘린더 `sources.*`(끄면 조회·보고 안 함). Slack: 팔로업 채널 `filters.slack.watch_channels` · 트래킹 제외 채널 `filters.slack.exclude_channels`(팔로업보다 우선) · 답 필요 해제 이모지 `filters.slack.ack_reactions` · 한 번에 확인할 이모지 `filters.slack.ack_check_max`(3) · 그룹 멘션 `filters.slack.group_mentions`(유저그룹 ID·핸들). Jira: 제외 프로젝트 `filters.jira.exclude_projects`. 칩 입력: ⏎/쉼표 추가, 빈 입력 Backspace 삭제.
 - **알림**: 알림 켜기 `notifications.enabled` · 소스별 `notifications.kinds.*` · 아침 브리핑 알림 `notifications.briefing` · 소리 `notifications.sound` · 묶음 기준 `notifications.summary_threshold`(기본 3) · 조용한 시간 `quiet_hours`(기본 23:00~08:00) · 그 시간엔 보내지 않음/소리 없이 `notifications.quiet_delivery`.
 - **순찰 주기**: heartbeat 간격 `heartbeat_minutes`(10) · 신호 조회 최소 간격 `signal_check_minutes`(60) · "바뀐 게 없으면 순찰 건너뛰기" `heartbeat_skip_unchanged`(켬) · 아침 브리핑 시각 `briefing_time`(09:00) · 홈 자동 갱신 기본 주기 `agenda_refresh_minutes`(60) · 소스별 주기 Slack/메일/캘린더/Jira/GitHub `agenda_source_minutes.*`(비우면 기본) · 조용한 시간 동작 `quiet_schedule.*` · 유휴 시 동작 `idle_schedule.*`(위 "야간 모드 · 유휴 모드").
-- **쓰기 액션**: 기본 말투 `reply_tone` · 소스별 그룹 토글 `actions.*`(위 "쓰기 액션") · 답장 말투 `reply_tone_by_source.*` · 오늘 한 액션.
+- **쓰기 액션**: 기본 말투 `reply_tone` · 소스별 그룹 토글 `actions.*`(위 "쓰기 액션") · 답장 말투 `reply_tone_by_source.*` · 세션 빠른 답 `dashboard.session_quick_replies` · 오늘 한 액션.
 - **수집·보관**: 수집 이력 기록 `history.enabled`(`c-hist-on`) · 표시 구간 Slack 시간 `history.display.slack_hours`·메일 일 `history.display.mail_days` · 수집 창 Slack 전체 재검색 시간 `history.collect.slack_hours`(`c-hist-collect-slack-h`, 24) · 보관 기간 Slack/메일/Jira/GitHub/캘린더 `history.keep_days.*`(0 = 기록 안 함) · 상태 줄(소스별 건수·일수·크기, 마지막 수집·전체 재검색, 다음 수집 창 — `/api/history/status`).
 - **아카이브**: 켜기 `archive.enabled` · 볼트 경로 `archive.vault` · Ned 폴더 `archive.folder` · 담을 것 `archive.include.*` · 내 데일리 노트 embed `archive.daily_embed` · 상태·"지금 쓰기"(위 "아카이브 — Obsidian").
 - **Claude**: 모델 `claude_model`(비우면 기본) · 최대 턴 `claude_max_turns`(25) · 하루 사용 상한 `agenda_daily_budget_usd`(15, 닿으면 자동 실행과 대화가 멈춤, 버튼 실행은 계속).
@@ -313,6 +324,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `dashboard.open_links_in_app` · `dashboard.open_links_in_app_by_service.slack` · `dashboard.open_links_in_app_by_service.figma` · `dashboard.open_links_in_app_by_service.notion` | true · true · true · true | 외형 → 링크를 앱으로 열기 |
 | `dashboard.slack_team_id` | "" (`T…` 만) | 외형 → Slack 팀 ID |
 | `dashboard.slack_team_domain` | "" (= 모든 `*.slack.com`) | 외형 → Slack 워크스페이스 주소 |
+| `dashboard.session_quick_replies` | ["ㄱㄱ", "승인", "계속"] (≤5개 · 각 ≤20자, [] = 버튼 없음) | 쓰기 액션 → 세션 빠른 답 (대기 세션 행 · 펫 말풍선) |
 | `pet.enabled` | false | 외형 → 데스크톱 펫 → 화면에 Ned 띄우기 |
 | `pet.messages.greeting` · `pet.messages.session` · `pet.messages.slack` · `pet.messages.mail` · `pet.messages.jira` · `pet.messages.github` · `pet.messages.sentry` · `pet.messages.calendar` · `pet.messages.briefing` | 전부 true | 외형 → 데스크톱 펫 → 말풍선으로 알려 줄 것 |
 | `claude_model` · `claude_max_turns` · `agenda_daily_budget_usd` | null · 25 · 15 | Claude |
@@ -367,6 +379,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `c-hist-collect-slack-h` | 수집·보관 → 수집 창 Slack 전체 재검색(시간) | `history.collect.slack_hours` |
 | `c-keep-slack` · `c-keep-mail` · `c-keep-jira` · `c-keep-github` · `c-keep-calendar` | 수집·보관 → 보관 기간 | `history.keep_days.*` |
 | `c-tone` | 쓰기 액션 → 기본 말투 | `reply_tone` |
+| `c-quick-replies` | 쓰기 액션 → 세션 빠른 답 (쉼표 구분) | `dashboard.session_quick_replies` |
 | `c-model` | Claude → 모델 | `claude_model` |
 | `c-turns` | Claude → 최대 턴 | `claude_max_turns` |
 | `c-budget` | Claude → 하루 사용 상한 | `agenda_daily_budget_usd` |
@@ -381,11 +394,11 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 ## 부록 C — HTTP API (대시보드가 쓰는 로컬 API, 127.0.0.1)
 
 - 수집 이력: `/api/history`(카드 "지난 7일/30일", `source`·`days`·`q`·`channel`) · `/api/history/status`(설정 → 수집·보관 상태 줄)
-- 상태·데이터: `/api/state` · `/api/agenda` · `/api/briefings` · `/api/feed`(데스크톱 펫 메시지 — 통신기 메시지 규칙 + `pet_kind`·`deep`, `pet` 설정·`quiet`) · `/api/events` · `/api/costs` · `/api/actions`(오늘 한 액션) · `/api/search`(⌘K)
+- 상태·데이터: `/api/state`(세션마다 `can_reply` — Orca 터미널 기록이 있어 답할 수 있나, `notification_type` — 대기를 만든 알림 종류) · `/api/agenda` · `/api/briefings` · `/api/feed`(데스크톱 펫 메시지 — 통신기 메시지 규칙 + `pet_kind`·`deep`, `pet` 설정·`quiet`, 세션에 답하기 `quick_replies`·`session_send`) · `/api/events` · `/api/costs` · `/api/actions`(오늘 한 액션) · `/api/search`(⌘K)
 - 순찰·갱신: `/api/check`(지금 점검, GET 은 진행 상태) · `/api/heartbeat`(아침 브리핑 `?daily=1`) · `/api/agenda/refresh`(카드 ↻) · `/api/agenda/context`(맥락 지금 수집) · `/api/activity`(대시보드 활동 핑 — 유휴 해제)
 - 할 일·확인: `/api/todos` · `/api/todos/:id`(완료·삭제) · `/api/attention/:id/review`(확인 완료) · `/api/attention/:id/dismiss`(닫기)
 - 일정: `/api/calendar`(기간 조회) · `/api/calendar/events`(일정 만들기)
-- 초안·보내기: `/api/draft` · `/api/send`
+- 초안·보내기: `/api/draft` · `/api/send`(세션에 답하기도 — `source:"session"`, 글 ≤2,000자, 터미널 없음/닫힘·권한 대화상자 대기 409)
 - 세션 만들기: `/api/sessions/create`(대화창 확인 카드 [실행], 진행은 `/api/sessions/create/:job_id`)
 - 통신기: `/api/chat`(SSE) · `/api/chat/:id` · `/api/chat/:id/stop` · `/api/chats` · `/api/chat/actions/validate`(확인 카드 검증) · `/api/chat/:id/action`(카드 상태 저장)
 - 아카이브: `/api/archive/status`(볼트 배지·마지막 쓰기·마지막 오류) · `/api/archive/flush`(지금 쓰기) · `/api/outputs`(정리 결과물 목록) · `/api/outputs/:id`(하나, 마크다운 포함) · `/api/outputs/:id/reveal`(Finder 에서 보기)

@@ -12,6 +12,7 @@ import { init as initOpenLink, openLink } from "./features/openlink.js";
 import { init as initDrafts } from "./features/drafts.js";
 import { OB, init as initOnboarding } from "./features/onboarding.js";
 import { init as initReviewed } from "./features/reviewed.js";
+import { init as initSessReply } from "./features/sessreply.js";
 import { init as initSlackThread } from "./features/slackthread.js";
 import { init as initTodoSplit, setMeFold, isMeFolded } from "./features/todosplit.js";
 import { emit, store } from "./state.js";
@@ -181,7 +182,7 @@ window.NED = { store, api: { api, postJson }, nav, openLink };
 // Every module's listeners + one-time setup, in the order the single file ran them — listener order on document
 // matters (e.g. the error popover's Esc stopImmediatePropagation runs before the page keys in boot()).
 // initOpenLink first: its document capture click listener must run before reviewed.js's (which stops inbox-row icon clicks).
-for (const init of [initOpenLink, initChips, initPopover, initSettings, initCardLayout, initLayout, initReviewed, initDrafts, initCalendar, initCards, initHistView, initSlackThread, initAgStatus, initHome, initTodoSplit, initComms, initActivityPing, initOnboarding]) init();
+for (const init of [initOpenLink, initChips, initPopover, initSettings, initCardLayout, initLayout, initReviewed, initDrafts, initSessReply, initCalendar, initCards, initHistView, initSlackThread, initAgStatus, initHome, initTodoSplit, initComms, initActivityPing, initOnboarding]) init();
 boot();
 
 function boot() {

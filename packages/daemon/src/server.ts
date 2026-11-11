@@ -15,7 +15,7 @@ import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runCh
 import { validateChatAction } from "./chat-actions.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, normalizeUpdates, normalizePet, restoreConfigBackup, saveConfig, slackTeamDomainError, slackTeamIdError, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type NedPet, type PersonaId } from "./config.js";
+import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, normalizeUpdates, normalizePet, quickRepliesError, restoreConfigBackup, saveConfig, slackTeamDomainError, slackTeamIdError, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type NedPet, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { historyStatus, queryHistory } from "./history.js";
@@ -174,7 +174,8 @@ export function startServer(getConfig: () => NedConfig): void {
     const state = readState();
     const a = readAgenda();
     const items = buildFeed({ state, briefings: listBriefings(30), agenda: { slack: cfg.sources.slack ? a.slack : null } }, Date.now(), cfg.dashboard);
-    return c.json({ items, pet: cfg.pet, quiet: state.quiet, persona: cfg.persona });
+    // quick_replies + session_send: the pet bubble's 세션에 답하기 (same buttons as the dashboard's session rows).
+    return c.json({ items, pet: cfg.pet, quiet: state.quiet, persona: cfg.persona, quick_replies: cfg.dashboard.session_quick_replies, session_send: cfg.actions.session_send === true });
   });
   app.get("/api/config", (c) => c.json(configView(loadConfig())));
   app.put("/api/config", async (c) => {
@@ -191,6 +192,8 @@ export function startServer(getConfig: () => NedConfig): void {
     if (teamErr) return c.json({ error: teamErr, field: "dashboard.slack_team_id" }, 400);
     const domainErr = slackTeamDomainError(body.dashboard);
     if (domainErr) return c.json({ error: domainErr, field: "dashboard.slack_team_domain" }, 400);
+    const quickErr = quickRepliesError(body.dashboard);
+    if (quickErr) return c.json({ error: quickErr, field: "dashboard.session_quick_replies" }, 400);
     const merged = mergeConfigPatch(cur, body);
     const archErr = archivePatchError(cur, merged);
     if (archErr) return c.json({ error: archErr, field: "archive.vault" }, 400);

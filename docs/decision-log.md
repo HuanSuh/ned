@@ -73,3 +73,17 @@
 | 포트 | `.mcp.json` 은 7777 고정, 다른 포트는 `claude mcp add` 수동 | 문서상 플러그인 MCP 설정에서 확실히 치환되는 건 `${CLAUDE_PLUGIN_ROOT}`·`${CLAUDE_PLUGIN_DATA}`·`${CLAUDE_PROJECT_DIR}` 뿐(`${VAR:-default}` 는 `.mcp.json` 일반 설명에만 있음) — 깨지면 모두에게 깨지니 확실한 쪽. (리뷰 후 검토) `${user_config.port}` 는 MCP 설정에서 치환된다고 문서에 있어 설정 가능하지만, `userConfig` 는 플러그인 활성화 때 모든 사용자에게 입력을 묻고 Claude Code 버전 요구도 따라와 보류 — 다른 포트는 `claude mcp add`. |
 | 쓰기 범위 | `ned_mark_reviewed`(✓) 하나. 보내기·초안·세션 만들기는 후속 | ✓ 는 로컬 표시라 되돌릴 수 있고 대시보드와 같은 함수(`src/review.ts`)를 쓴다. 외부로 나가는 쓰기는 대시보드의 확인 단계·설정 토글 없이 열지 않는다. |
 | 보안 | 127.0.0.1 바인딩 + loopback 이 아닌 Host·Origin 403, 인증 없음. (리뷰 후) 가드를 `src/request-guard.ts` 공용 미들웨어로 올려 `/api/*`·`/mcp`·정적 파일 모두에 건다 | DNS rebinding 은 `/api/*`(쓰기 포함)에도 같은 위협. 대시보드·Ned.app WKWebView(Origin `http://127.0.0.1:7777`)·status.sh·curl 은 모두 loopback 이라 호환. SDK 의 `allowedOrigins` 는 deprecated 라 직접 검사. |
+
+## 2026-11-11 — 세션에 답하기 (대시보드 세션 행 · 펫 말풍선)
+
+| 질문 | 결정 | 근거 |
+| --- | --- | --- |
+| 빠른 버튼 기본값·한도 | `dashboard.session_quick_replies` = ㄱㄱ · 승인 · 계속, 5개 · 20자까지, [] 허용(입력만) | 작업 지시대로. 펫·대시보드가 같은 값(`/api/feed` `quick_replies`). |
+| 답한 뒤 알림 억제 | 전송 성공 시 그 세션의 현재 알림을 `dismissAttention` 과 같은 기록(alert_ts)으로 내림 — 새 Notification 이 오면 다시 뜸 | N초 타이머보다 정확하고 새 코드가 없다. 권한 프롬프트에 답하면 UserPromptSubmit 이 안 와서 "running 될 때까지" 규칙은 못 씀. |
+| `can_reply` | 훅 이벤트에 `orca_pane`/`orca_tab` 이 한 번이라도 있었나(2일 이벤트 기준). 지금 열려 있나는 전송 때 409 | 상태마다 `orca terminal list` 를 돌리지 않으려고. |
+| 텍스트 | session 만 2,000자, CRLF→LF, 앞뒤 공백·끝 줄바꿈 제거(Enter 는 `--enter` 한 번), 안 줄바꿈은 유지 | 끝 줄바꿈이 두 번째 Enter 가 되지 않게. 대시보드·펫 입력은 한 줄이라 안 줄바꿈은 대화창 제안에서만. |
+| 펫 포커스 | 패널은 입력 모드에서만 `allowKey` + `makeKey`(비활성 패널 → 앱 활성화 없이 키보드). 0.15초 뒤에도 key 가 아니면 그때만 `NSApp.activate`, 닫을 때 앞 앱 복귀 | 다른 앱 포커스를 불필요하게 뺏지 않기. 실기 확인은 사용자 몫(GUI 자동화 금지). |
+| 펫 클릭 처리 | 말풍선 위 히트 뷰가 컨트롤 프레임(PetControl id)으로 판정, 입력칸만 실제 NSTextField | 기존 PetBubbleHitView 구조 유지(SwiftUI 버튼은 히트 뷰에 가려짐). |
+| (리뷰) 권한 프롬프트 | permission_prompt·elicitation_dialog 대기 세션엔 답하기 UI 없이 "터미널에서 직접 선택", 데몬도 409 | Claude Code 문서(keybindings Confirmation: Enter = confirm:yes, Esc = confirm:no, ↑↓ 이동; permissions: 선택지 Yes / Yes, don't ask again / (가끔) switch to auto mode / No)에 숫자 키 선택이 없고 선택지 순서도 바뀐다 → "1"·"2" 버튼은 보류. 데몬 거절은 초안 팝업·대화창 경로까지 막으려고. |
+| (리뷰) 펫 포커스 반환 | 열 때 앞 앱 기록 → 닫을 때 Ned 가 아직 키보드를 쥐고 있으면 그 앱 activate(폴백으로 Ned 를 활성화했으면 yieldActivation 먼저). 다른 앱을 눌러 key 를 잃으면 입력을 닫고 글 보존, 재활성화 없음 | resignKey() 는 알림 메서드라 key 를 넘기지 않는다. 사용자가 고른 앱을 다시 빼앗지 않기. |
+| (리뷰) 워커 세션 | 펫은 워커 세션에 답하기 없음, 대시보드 장비실은 있음 | 펫 상태 색이 워커를 빼는 규칙과 맞춤. 대시보드에선 워커도 보이는 행이라 거기서 답하는 건 허용. |
