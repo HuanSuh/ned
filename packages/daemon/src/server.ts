@@ -15,7 +15,7 @@ import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runCh
 import { validateChatAction } from "./chat-actions.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, normalizeUpdates, normalizePet, quickRepliesError, restoreConfigBackup, saveConfig, slackTeamDomainError, slackTeamIdError, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type NedPet, type PersonaId } from "./config.js";
+import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, normalizeUpdates, normalizePet, normalizeResponsibilities, quickRepliesError, responsibilitiesError, restoreConfigBackup, saveConfig, slackTeamDomainError, slackTeamIdError, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type NedPet, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { historyStatus, queryHistory } from "./history.js";
@@ -111,6 +111,7 @@ export function mergeConfigPatch(cur: NedConfig, body: Partial<NedConfig>): NedC
     history: normalizeHistory(m.history, cur.history),
     pet: normalizePet(m.pet, cur.pet),
     updates: normalizeUpdates(m.updates, cur.updates),
+    responsibilities: normalizeResponsibilities(m.responsibilities),
   };
   // Re-normalized even without a dashboard patch: a 팔로업 channel added / removed in filters adds / drops its `watch:` card.
   merged.dashboard = normalizeDashboard(dashboard ?? {}, cur.dashboard, watchChannels(merged.filters));
@@ -194,6 +195,8 @@ export function startServer(getConfig: () => NedConfig): void {
     if (domainErr) return c.json({ error: domainErr, field: "dashboard.slack_team_domain" }, 400);
     const quickErr = quickRepliesError(body.dashboard);
     if (quickErr) return c.json({ error: quickErr, field: "dashboard.session_quick_replies" }, 400);
+    const respErr = responsibilitiesError(body.responsibilities);
+    if (respErr) return c.json({ error: respErr, field: "responsibilities" }, 400);
     const merged = mergeConfigPatch(cur, body);
     const archErr = archivePatchError(cur, merged);
     if (archErr) return c.json({ error: archErr, field: "archive.vault" }, 400);

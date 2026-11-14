@@ -41,7 +41,16 @@
 ### 이미 보낸 항목 (중복 억제용 참고; 아침 브리핑에서는 중요하면 다시 포함 가능)
 {{ALREADY_SENT}}
 
-## 출력 스키마
+{{#RESP}}### 맡긴 일 (사용자가 챙겨 달라고 맡긴 책임)
+{{RESPONSIBILITIES}}
+
+맡긴 일마다 위 업무 목록·세션에서 관련 항목을 찾아(그 책임의 "볼 곳"만, 키워드는 매칭 힌트) 오늘 아침 기준 상태를 매긴다.
+- `on_track`: 근거로 보아 순조롭다. `watch`: 지켜봐야 한다(마감 임박·답 없음·새 이슈). `blocked`: 막혔다(사용자의 결정·행동 없이는 진행이 안 됨).
+- 새로 판단할 근거가 없으면 `on_track` 으로 바꾸지 않는다: "지난 평가"가 있으면 그 id 는 생략(지난 상태 유지), 지난 평가도 관련 항목도 없을 때만 `on_track` + "아직 관련 움직임 없음".
+- `note` 는 1~2문장, 페르소나 말투. `urls` 는 근거가 된 업무 목록 링크를 **그대로**, 최대 3개.
+- `blocked` 이고 사용자가 움직여야 하면 `action_items` 에도 넣는다(제목 앞에 `[책임 제목] `).
+
+{{/RESP}}## 출력 스키마
 ```
 {
   "status": "UPDATE",
@@ -49,7 +58,8 @@
   "action_items": [ { "kind": "email|slack|jira|github|sentry|calendar|session", "title": "오늘 해야 할 일", "detail": "맥락·마감", "url": "..." } ],
   "updates":      [ { "kind": "...", "title": "어제 있었던 변화", "detail": "...", "url": "..." } ],
   "fyi":          [ { "kind": "...", "title": "참고", "url": "..." } ],
-  "sessions":     [ { "kind": "session", "title": "어제 세션 회고", "detail": "..." } ]
+  "sessions":     [ { "kind": "session", "title": "어제 세션 회고", "detail": "..." } ]{{#RESP}},
+  "responsibilities": [ { "id": "맡긴 일의 id 그대로", "status": "on_track|watch|blocked", "note": "1~2문장", "urls": ["업무 목록 링크 그대로, 최대 3개"] } ]{{/RESP}}
 }
 ```
 - `url` 은 업무 목록에 있는 링크를 그대로 쓴다.

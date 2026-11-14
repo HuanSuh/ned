@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { archiveTouch } from "./archive.js";
 import { agendaBusy, readAgenda, refreshAgenda, type Agenda } from "./agenda.js";
 import { extractJson, llmDisabled, noLlmResult, runClaude, type ClaudeRunOptions } from "./claude.js";
-import { inQuietHours, watchChannels, type NedConfig, type NotifyKind } from "./config.js";
+import { RESP_SOURCES, activeResponsibilities, inQuietHours, watchChannels, type NedConfig, type NotifyKind, type RespSource, type Responsibility } from "./config.js";
 import { personaPrompt } from "./persona.js";
 import { readRecentEvents, readUnprocessedEvents, type NedEvent } from "./events.js";
 import { notify } from "./notify.js";
@@ -12,7 +12,7 @@ import { BRIEFINGS_DIR, DISMISSED_PATH, SENT_LOG, localDay, log, readJson, write
 import { reduceSessions } from "./sessions.js";
 import { annotateChatOrigin } from "./session-create.js";
 import { THREAD_FOLLOW_HOURS, hasNewSinceMe, threadActivity, threadKeyOf } from "./slack-threads.js";
-import { briefingOk, readState, writeState, type AttentionItem, type Briefing, type BriefingSection } from "./state.js";
+import { RESP_STATUSES, briefingOk, readState, writeState, type AttentionItem, type Briefing, type BriefingSection, type RespStatus } from "./state.js";
 
 type State = ReturnType<typeof readState>;
 
@@ -40,6 +40,8 @@ interface LlmBriefing {
   updates?: BriefingSection[];
   fyi?: BriefingSection[];
   sessions?: BriefingSection[];
+  /** 맡긴 일 ratings — only asked for when an active responsibility exists (applyResponsibilityReport cleans it). */
+  responsibilities?: unknown;
 }
 
 export function sentKeys(): Set<string> {
@@ -54,7 +56,14 @@ export function markSent(keys: string[]): void {
   if (keys.length) fs.appendFileSync(SENT_LOG, keys.join("\n") + "\n");
 }
 
-export const keyOf = (s: BriefingSection) => (s.url || s.title || "").trim().toLowerCase();
+/** The digest's "[이미 알림] " tag in front of a url (agendaDigest markSent) — a model may copy it along with the link. */
+export const SENT_TAG = "[이미 알림]";
+/** Already-sent entries kept as 맡긴 일 evidence, per capped list (after the not-yet-sent ones). */
+export const SENT_EVIDENCE_MAX = 5;
+/** A url without a copied-in "[이미 알림]" tag (and surrounding spaces). */
+export const stripSentTag = (url: string): string => url.replace(/^\s*\[이미 알림\]\s*/, "").trim();
+
+export const keyOf = (s: BriefingSection) => (s.url ? stripSentTag(s.url) : s.title || "").trim().toLowerCase();
 
 /**
  * Followed Slack threads where someone replied after my last message → action items, once per (thread, last_reply_ts):
@@ -95,7 +104,9 @@ function soonEvents(a: Agenda, now: number) {
 export function heartbeatWatchKey(cfg: NedConfig, a: Agenda = readAgenda(), now = Date.now()): string {
   const cal = cfg.sources.calendar ? soonEvents(a, now).map((e) => e.id).sort() : [];
   const th = cfg.sources.slack ? threadAttention(a, sentKeys(), now).keys.sort() : [];
-  return JSON.stringify({ cal, th });
+  // 맡긴 일 added / edited / ended → judge again even if the lists didn't move. Absent when none (key as before).
+  const resp = activeResponsibilities(cfg, new Date(now));
+  return JSON.stringify(resp.length ? { cal, th, resp } : { cal, th });
 }
 
 function summarizeEvents(events: NedEvent[]): string {
@@ -162,14 +173,32 @@ const clip = (s: string | undefined | null, n: number) => {
 /**
  * agenda.json → the {{AGENDA}} block: compact text lists the model judges from (no connector calls).
  * Heartbeat drops entries whose url was already sent (sent.log) so they can't come back; the daily briefing keeps them.
+ * `markSent` (an active 맡긴 일 exists): already-sent entries stay, tagged "[이미 알림]", so a responsibility's evidence
+ * doesn't vanish once it was raised (off → the text is exactly as before). `links` collects the url field of every entry
+ * actually printed — the only links a 맡긴 일 rating may cite.
  */
-export function agendaDigest(cfg: NedConfig, a: Agenda, opts: { daily: boolean; sent: Set<string>; now?: number }): string {
+export function agendaDigest(cfg: NedConfig, a: Agenda, opts: { daily: boolean; sent: Set<string>; now?: number; markSent?: boolean; links?: Set<string> }): string {
   const now = opts.now ?? Date.now();
   let skipped = 0;
+  const isSent = (url: string | undefined) => !opts.daily && !!url && opts.sent.has(url.trim().toLowerCase());
   const keep = (url: string | undefined) => {
-    if (opts.daily || !url || !opts.sent.has(url.trim().toLowerCase())) return true;
+    if (!isSent(url) || opts.markSent) return true;
     skipped++;
     return false;
+  };
+  /** An entry's url as printed (+ the "[이미 알림]" tag under markSent), recorded in `links`. */
+  /**
+   * A capped list: up to `n` not-yet-sent entries first, then (markSent only) up to SENT_EVIDENCE_MAX already-sent ones,
+   * so 맡긴 일 evidence never takes a new entry's slot. markSent off → exactly as before (drop sent, then cut).
+   */
+  const capped = <T extends { url?: string }>(xs: readonly T[], n: number): T[] => {
+    const kept = xs.filter((x) => keep(x.url));
+    if (!opts.markSent) return kept.slice(0, n);
+    return [...kept.filter((x) => !isSent(x.url)).slice(0, n), ...kept.filter((x) => isSent(x.url)).slice(0, SENT_EVIDENCE_MAX)];
+  };
+  const u = (url: string | undefined) => {
+    if (url && opts.links) opts.links.add(url.trim());
+    return `${opts.markSent && isSent(url) ? `${SENT_TAG} ` : ""}${url}`;
   };
   const out: string[] = [];
   if (!a.updated_at) out.push("(agenda 아직 없음 — 세션·Sentry 만으로 판단)");
@@ -185,11 +214,12 @@ export function agendaDigest(cfg: NedConfig, a: Agenda, opts: { daily: boolean; 
     const rsvp = a.calendar.filter((e) => e.rsvp === "needsAction" && Date.parse(e.start) > now && !soon.includes(e)).sort((x, y) => Date.parse(x.start) - Date.parse(y.start));
     out.push(`\n#### 캘린더 — ${opts.daily ? "오늘 일정" : "앞으로 2시간"}`);
     if (!soon.length && !allDay.length) out.push("(없음)");
-    for (const e of allDay) out.push(`- [종일] ${e.title}${e.rsvp === "needsAction" ? " · RSVP 안 함" : ""} ${e.url}`);
-    for (const e of soon) out.push(`- ${when(e.start)}–${hm(Date.parse(e.end))} ${e.title}${e.location ? ` @${clip(e.location, 40)}` : ""}${e.meet_url ? ` meet ${e.meet_url}` : ""} · 참석 ${e.attendees}명${e.rsvp === "needsAction" ? " · RSVP 안 함" : ""} ${e.url}`);
+    for (const e of allDay) out.push(`- [종일] ${e.title}${e.rsvp === "needsAction" ? " · RSVP 안 함" : ""} ${u(e.url)}`);
+    for (const e of soon) out.push(`- ${when(e.start)}–${hm(Date.parse(e.end))} ${e.title}${e.location ? ` @${clip(e.location, 40)}` : ""}${e.meet_url ? ` meet ${e.meet_url}` : ""} · 참석 ${e.attendees}명${e.rsvp === "needsAction" ? " · RSVP 안 함" : ""} ${u(e.url)}`);
     if (rsvp.length) {
       out.push("응답 안 한 초대:");
-      for (const e of rsvp.slice(0, 8)) if (keep(e.url)) out.push(`- ${when(e.start)} ${e.title} ${e.url}`);
+      // off: the old order (cut to 8, then drop sent) so the text stays byte-identical
+      for (const e of opts.markSent ? capped(rsvp, 8) : rsvp.slice(0, 8).filter((x) => keep(x.url))) out.push(`- ${when(e.start)} ${e.title} ${u(e.url)}`);
     }
   }
   if (cfg.sources.slack) {
@@ -200,18 +230,18 @@ export function agendaDigest(cfg: NedConfig, a: Agenda, opts: { daily: boolean; 
       if (s.summary) out.push(`요약: ${s.summary}`);
       const items = s.items.filter((x) => keep(x.url));
       out.push(items.length ? "답 필요:" : "답 필요: (없음)");
-      for (const x of items) out.push(`- [${x.reason}] ${x.channel} ${x.from}${x.count && x.count > 1 ? ` (+${x.count - 1})` : ""}: ${clip(x.text, 160)} (${when(x.ts)}) ${x.url}`);
+      for (const x of items) out.push(`- [${x.reason}] ${x.channel} ${x.from}${x.count && x.count > 1 ? ` (+${x.count - 1})` : ""}: ${clip(x.text, 160)} (${when(x.ts)}) ${u(x.url)}`);
       const seen = new Set(s.items.map((x) => x.url));
-      const rest = s.all.filter((x) => !x.answered && !seen.has(x.url) && keep(x.url)).slice(0, 8);
+      const rest = capped(s.all.filter((x) => !x.answered && !seen.has(x.url)), 8);
       if (rest.length) {
         out.push("그 밖에 답 안 한 멘션·DM:");
-        for (const x of rest) out.push(`- [${x.reason}] ${x.channel} ${x.from}: ${clip(x.text, 120)} (${when(x.ts)}) ${x.url}`);
+        for (const x of rest) out.push(`- [${x.reason}] ${x.channel} ${x.from}: ${clip(x.text, 120)} (${when(x.ts)}) ${u(x.url)}`);
       }
       for (const w of s.watch) {
         const hs = w.highlights.filter((h) => keep(h.url));
         if (!w.summary && !hs.length) continue;
         out.push(`팔로업 채널 ${w.channel}: ${clip(w.summary, 240) || "(요약 없음)"}`);
-        for (const h of hs) out.push(`  - ${h.needs_me ? "[나 필요] " : ""}${h.from}: ${clip(h.text, 160)} — ${clip(h.reason, 80)} (${when(h.ts)}) ${h.url}`);
+        for (const h of hs) out.push(`  - ${h.needs_me ? "[나 필요] " : ""}${h.from}: ${clip(h.text, 160)} — ${clip(h.reason, 80)} (${when(h.ts)}) ${u(h.url)}`);
       }
     }
   }
@@ -223,20 +253,20 @@ export function agendaDigest(cfg: NedConfig, a: Agenda, opts: { daily: boolean; 
       out.push(`안 읽은 메일(최근 2일): ${m.unread}${m.unread_capped ? "+" : ""}통${m.summary ? ` · 요약: ${m.summary}` : ""}`);
       const items = m.items.filter((x) => keep(x.url));
       out.push(items.length ? "내 행동 필요:" : "내 행동 필요: (없음)");
-      for (const x of items) out.push(`- [${x.reason}] ${x.from} — ${clip(x.subject, 100)} · ${clip(x.why, 80)} (${when(x.received)}) ${x.url}`);
+      for (const x of items) out.push(`- [${x.reason}] ${x.from} — ${clip(x.subject, 100)} · ${clip(x.why, 80)} (${when(x.received)}) ${u(x.url)}`);
     }
   }
   if (cfg.sources.jira) {
     out.push("\n#### Jira (나에게 할당, 열린 것)");
-    const js = a.jira.filter((x) => keep(x.url));
+    const js = capped(a.jira, 20);
     if (!js.length) out.push("(없음)");
-    for (const x of js.slice(0, 20)) out.push(`- ${x.key} [${x.status}${x.priority ? `/${x.priority}` : ""}] ${clip(x.title, 100)}${x.due ? ` · 마감 ${x.due}` : ""} · 갱신 ${when(x.updated)} ${x.url}`);
+    for (const x of js) out.push(`- ${x.key} [${x.status}${x.priority ? `/${x.priority}` : ""}] ${clip(x.title, 100)}${x.due ? ` · 마감 ${x.due}` : ""} · 갱신 ${when(x.updated)} ${u(x.url)}`);
   }
   if (cfg.sources.github) {
     out.push("\n#### GitHub PR");
-    const gs = a.github.filter((x) => keep(x.url));
+    const gs = capped(a.github, 15);
     if (!gs.length) out.push("(없음)");
-    for (const x of gs.slice(0, 15)) out.push(`- [${x.reason}] ${x.repo}#${x.number} ${clip(x.title, 100)} · ${x.author} · 갱신 ${when(x.updated)} ${x.url}`);
+    for (const x of gs) out.push(`- [${x.reason}] ${x.repo}#${x.number} ${clip(x.title, 100)} · ${x.author} · 갱신 ${when(x.updated)} ${u(x.url)}`);
   }
   if (skipped) out.push(`\n(이미 알린 항목 ${skipped}건은 뺐다)`);
   return out.join("\n");
@@ -251,23 +281,119 @@ function filtersLine(cfg: NedConfig): string {
   return parts.join("\n") || "(없음)";
 }
 
-/** Render briefing.md / heartbeat.md with live inputs. Pure apart from reading the template, agenda.json and the sent log. */
-export function buildHeartbeatPrompt(cfg: NedConfig, daily: boolean, state: State, events: NedEvent[], agenda: Agenda = readAgenda()): string {
-  const template = fs.readFileSync(path.join(PROMPTS_DIR, daily ? "briefing.md" : "heartbeat.md"), "utf8");
+// ---------- 맡긴 일 (config.responsibilities → prompt section, answer → state.json) ----------
+
+const RESP_SOURCE_KO: Record<RespSource, string> = { slack: "Slack", mail: "메일", jira: "Jira", github: "GitHub", calendar: "캘린더", sessions: "세션" };
+/** Responsibility source → the config.sources switch that feeds it (sessions: always there). */
+const RESP_SOURCE_ON: Record<RespSource, (cfg: NedConfig) => boolean> = {
+  slack: (c) => c.sources.slack, mail: (c) => c.sources.gmail, jira: (c) => c.sources.jira, github: (c) => c.sources.github, calendar: (c) => c.sources.calendar, sessions: () => true,
+};
+const RESP_STATUS_KO: Record<RespStatus, string> = { on_track: "on_track", watch: "watch", blocked: "blocked" };
+
+/** {{RESPONSIBILITIES}}: one block per active responsibility (id, title, until, goal, where to look, keywords, last rating). */
+export function responsibilitiesPrompt(cfg: NedConfig, list: Responsibility[], prev: State["responsibilities"] = {}, now = Date.now()): string {
+  return list
+    .map((r) => {
+      const want = r.sources?.length ? r.sources : [...RESP_SOURCES];
+      const on = want.filter((s) => RESP_SOURCE_ON[s](cfg));
+      const lines = [`- id \`${r.id}\` · **${r.title}**${r.until ? ` (~${r.until}까지)` : ""}`];
+      lines.push(`  - 챙길 것: ${r.goal || "(설명 없음 — 제목으로 판단)"}`);
+      lines.push(`  - 볼 곳: ${on.length ? on.map((s) => RESP_SOURCE_KO[s]).join(", ") : "(켜진 소스 없음 — 세션·이벤트만)"}`);
+      if (r.keywords?.length) lines.push(`  - 키워드: ${r.keywords.join(", ")}`);
+      const p = prev?.[r.id];
+      if (p) lines.push(`  - 지난 평가: ${RESP_STATUS_KO[p.status]} — ${clip(p.note, 160)} (${Math.max(0, Math.round((now - p.updated_at) / 60_000))}분 전)`);
+      return lines.join("\n");
+    })
+    .join("\n");
+}
+
+/** Ratings only for ids still in config (a deleted responsibility's old rating must not come back with a re-created id). */
+export function pruneResponsibilityRatings(prev: State["responsibilities"], known: readonly string[]): NonNullable<State["responsibilities"]> {
+  const keep = new Set(known);
+  return Object.fromEntries(Object.entries(prev ?? {}).filter(([id]) => keep.has(id)));
+}
+
+/**
+ * The model's `responsibilities` answer over the previous state: entries for an unknown / inactive id, a bad status or a
+ * repeated id are dropped; note → one line ≤ 300; urls → only ones in `allowed` (the url fields of the 업무 목록 entries the
+ * model was shown; exact, else case-insensitive → the allowed spelling), deduped, ≤ 3. Responsibilities missing from the
+ * answer keep their previous rating (and updated_at); ratings for ids no longer in config are dropped (`known`).
+ */
+export function applyResponsibilityReport(
+  prev: State["responsibilities"],
+  report: unknown,
+  active: readonly Responsibility[],
+  allowed: ReadonlySet<string>,
+  now: number,
+  known: readonly string[] = active.map((r) => r.id),
+): NonNullable<State["responsibilities"]> {
+  const out = pruneResponsibilityRatings(prev, known);
+  const ids = new Set(active.map((r) => r.id));
+  const lower = new Map([...allowed].map((u) => [u.toLowerCase(), u]));
+  const seen = new Set<string>();
+  for (const x of Array.isArray(report) ? report : []) {
+    if (!x || typeof x !== "object") continue;
+    const { id, status, note, urls } = x as Record<string, unknown>;
+    if (typeof id !== "string" || !ids.has(id) || seen.has(id)) continue;
+    if (!RESP_STATUSES.includes(status as RespStatus)) continue;
+    seen.add(id);
+    const links: string[] = [];
+    for (const u of Array.isArray(urls) ? urls : []) {
+      if (typeof u !== "string") continue;
+      const t = stripSentTag(u);
+      const hit = allowed.has(t) ? t : lower.get(t.toLowerCase());
+      if (hit && !links.includes(hit)) links.push(hit);
+      if (links.length >= 3) break;
+    }
+    out[id] = { status: status as RespStatus, note: clip(typeof note === "string" ? note : "", 300), urls: links, updated_at: now };
+  }
+  return out;
+}
+
+/** `{{#RESP}}…{{/RESP}}` blocks: kept (markers removed) when `on`, else cut out whole — the template then reads as before. */
+export const respBlocks = (template: string, on: boolean) => template.replace(/\{\{#RESP\}\}([\s\S]*?)\{\{\/RESP\}\}/g, (_m, inner: string) => (on ? inner : ""));
+
+export interface HeartbeatPrompt {
+  prompt: string;
+  /** The 맡긴 일 rated in this prompt (decided once here; the answer is stored against the same list). */
+  active: Responsibility[];
+  /** url fields of the 업무 목록 entries printed in {{AGENDA}} — what a rating may cite. */
+  links: Set<string>;
+}
+
+/**
+ * Render briefing.md / heartbeat.md with live inputs. Pure apart from reading the template, agenda.json and the sent log.
+ * `template` / `now`: tests (render a fixed template text at a fixed time).
+ */
+export function renderHeartbeatPrompt(cfg: NedConfig, daily: boolean, state: State, events: NedEvent[], agenda: Agenda = readAgenda(), o: { template?: string; now?: Date } = {}): HeartbeatPrompt {
+  const now = o.now ?? new Date();
+  const active = activeResponsibilities(cfg, now);
+  const on = active.length > 0;
+  // No active 맡긴 일 → the blocks vanish and the prompt is exactly what it was before the feature (same cost).
+  const template = respBlocks(o.template ?? fs.readFileSync(path.join(PROMPTS_DIR, daily ? "briefing.md" : "heartbeat.md"), "utf8"), on);
   const sent = sentKeys();
+  const links = new Set<string>();
   const workers = new Set(state.sessions.filter(isWorker).map((s) => s.id));
   const sessions = state.sessions.filter((s) => !workers.has(s.id));
   // Function replacers: inputs may contain "$&"-style sequences that a string replacement would expand.
-  return template
-    .replace("{{NOW}}", () => new Date().toLocaleString("ko-KR"))
+  const prompt = template
+    .replace("{{RESPONSIBILITIES}}", () => responsibilitiesPrompt(cfg, active, state.responsibilities, now.getTime()))
+    .replace("{{NOW}}", () => now.toLocaleString("ko-KR"))
     .replace("{{SOURCES}}", () => Object.entries(cfg.sources).filter(([, v]) => v).map(([k]) => k).join(", "))
     .replace("{{PERSONA}}", () => personaPrompt(cfg.persona))
     .replace("{{FILTERS}}", () => filtersLine(cfg))
     .replace("{{SENTRY}}", () => (cfg.sources.sentry ? "켜짐 — 아래 체크리스트대로 직접 조회" : "꺼짐 — 조회하지 않는다 (도구도 없음)"))
-    .replace("{{AGENDA}}", () => agendaDigest(cfg, agenda, { daily, sent }))
+    // 맡긴 일 on: already-sent entries stay (tagged) so a raised blocker keeps its evidence on the next patrol.
+    .replace("{{AGENDA}}", () => agendaDigest(cfg, agenda, on ? { daily, sent, markSent: true, links } : { daily, sent }))
     .replace("{{SESSIONS}}", () => (sessions.length ? sessions.map((s) => `- [${s.status}] ${s.worktree} — ${s.last_summary ?? s.last_prompt ?? ""}`).join("\n") : "(활성 세션 없음)"))
     .replace("{{EVENTS}}", () => summarizeEvents(events.filter((e) => !e.session_id || !workers.has(e.session_id))))
     .replace("{{ALREADY_SENT}}", () => [...sent].slice(-60).join("\n") || "(없음)");
+  return { prompt, active, links };
+}
+
+/** renderHeartbeatPrompt's text only (`ned prompt heartbeat|briefing`, tests). */
+export function buildHeartbeatPrompt(cfg: NedConfig, daily: boolean, state: State, events: NedEvent[], agenda: Agenda = readAgenda()): string {
+  return renderHeartbeatPrompt(cfg, daily, state, events, agenda).prompt;
 }
 
 // ---------- check progress (POST /api/check, GET /api/check) ----------
@@ -348,12 +474,16 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
   const t0 = Date.now();
   let res;
   let refreshed = "";
+  // 맡긴 일 rated in the prompt + the 업무 목록 links the model saw (the only ones a rating may cite) — reused when storing.
+  let resp: Pick<HeartbeatPrompt, "active" | "links"> = { active: [], links: new Set() };
   try {
     const ag = await ensureAgenda(cfg, opts.agenda ?? "stale", !!opts.daily);
     refreshed = ag.refreshed;
     setPhase("judge", !!opts.daily);
     // State again: the agenda wait may have taken a minute and sessions moved on.
-    const prompt = buildHeartbeatPrompt(cfg, !!opts.daily, readState(), events, ag.agenda);
+    const rendered = renderHeartbeatPrompt(cfg, !!opts.daily, readState(), events, ag.agenda);
+    const prompt = rendered.prompt;
+    resp = rendered;
     if (llmDisabled()) {
       log(`heartbeat: NED_NO_LLM=1 — skipping claude, recording ${process.env.NED_NO_LLM_RESULT ? "NED_NO_LLM_RESULT" : "NED_OK"} (agenda ${refreshed}, prompt ${prompt.length} chars)`);
       const delay = Number(process.env.NED_NO_LLM_DELAY_MS) || 0; // lets tests see the "judge" step
@@ -371,15 +501,17 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
   const id = new Date().toISOString().replace(/[:.]/g, "-");
 
   const parsed = res.ok ? extractJson<LlmBriefing>(res.text) : null;
+  // A link copied with the digest's "[이미 알림]" tag → the bare link (dedupe keys, attention links).
+  const untag = (xs: BriefingSection[] | undefined) => (xs ?? []).map((x) => (x && typeof x.url === "string" ? { ...x, url: stripSentTag(x.url) } : x));
   const briefing: Briefing = {
     id,
     ts: now,
     type: opts.daily ? "daily" : "heartbeat",
     status: parsed?.status === "UPDATE" ? "UPDATE" : "NED_OK",
     headline: parsed?.headline,
-    action_items: parsed?.action_items ?? [],
-    updates: parsed?.updates ?? [],
-    fyi: parsed?.fyi ?? [],
+    action_items: untag(parsed?.action_items),
+    updates: untag(parsed?.updates),
+    fyi: untag(parsed?.fyi),
     sessions: parsed?.sessions ?? [],
     cost_usd: res.cost_usd,
     raw: res.ok && parsed ? undefined : res.text.slice(0, 4000),
@@ -419,6 +551,14 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
   next.last_heartbeat_at = now;
   next.last_briefing = { id, ts: now, type: briefing.type, status: briefing.status, headline: briefing.headline, ok: briefing.ok };
   if (briefing.type === "daily" && briefing.ok) next.daily_failed_at = null; // a good morning briefing clears the 실패 line
+  // 맡긴 일: stored whatever the status (NED_OK included) — silence applies to banners / action_items only. Every run drops
+  // ratings of responsibilities no longer in config, even when the model sent none or none is configured.
+  const known = cfg.responsibilities.map((r) => r.id);
+  if (briefing.ok && parsed && resp.active.length && parsed.responsibilities !== undefined) {
+    next.responsibilities = applyResponsibilityReport(next.responsibilities, parsed.responsibilities, resp.active, resp.links, Date.now(), known);
+  } else if (next.responsibilities) {
+    next.responsibilities = pruneResponsibilityRatings(next.responsibilities, known);
+  }
   if (briefing.status === "UPDATE") {
     const items: AttentionItem[] = briefing.action_items.map((a, i) => ({
       id: `${id}:${i}`,
