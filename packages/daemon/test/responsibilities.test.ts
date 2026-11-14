@@ -3,12 +3,13 @@
  * as before), the answer parser (unknown id / status / url dropped, missing ones keep their rating) and the end-to-end
  * heartbeat that stores ratings in state.json even on NED_OK.
  */
+import crypto from "node:crypto";
 import fs from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import YAML from "yaml";
-import type { Agenda } from "../src/agenda.js";
+import { readAgenda, type Agenda } from "../src/agenda.js";
 import { DEFAULT_CONFIG, activeResponsibilities, loadConfig, normalizeResponsibilities, normalizeUntil, responsibilitiesError, type NedConfig, type Responsibility } from "../src/config.js";
-import { applyResponsibilityReport, buildHeartbeatPrompt, heartbeat, heartbeatWatchKey, promptUrls } from "../src/heartbeat.js";
+import { applyResponsibilityReport, buildHeartbeatPrompt, heartbeat, heartbeatWatchKey, markSent, pruneResponsibilityRatings, renderHeartbeatPrompt, respBlocks, sentKeys } from "../src/heartbeat.js";
 import { AGENDA_PATH, CONFIG_PATH, SENT_LOG, STATE_PATH, localDay, writeJsonAtomic } from "../src/paths.js";
 import { mergeConfigPatch } from "../src/server.js";
 import { readState } from "../src/state.js";
@@ -106,20 +107,50 @@ const AGENDA: Agenda = {
 
 describe("heartbeat prompt — 맡긴 일 section", () => {
   beforeEach(() => fs.rmSync(SENT_LOG, { force: true }));
-  const original = () => fs.readFileSync(new URL("../../../prompts/heartbeat.md", import.meta.url), "utf8");
+  const template = (f: string) => fs.readFileSync(new URL(`../../../prompts/${f}.md`, import.meta.url), "utf8");
+  /** sha256 of the pre-feature templates (dev a95eaf5: `git show dev:prompts/<f>.md | shasum -a 256`). */
+  const PRE_FEATURE = { heartbeat: "df42588e72ff70ff3e35c2525deee6b20b4dd4907972a32cbbe83f7efb624872", briefing: "a4efcadbc98f99e7b88f087ff54a3bd419a936c4316b0196fcb282bfdf9cb032" };
+  const sha = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
 
-  it("no active responsibility → no section, no schema field, no leftover markers", () => {
-    for (const list of [[], [R({ enabled: false })], [R({ until: yesterday() })]]) {
-      const p = buildHeartbeatPrompt(cfgWith(list), false, emptyState(), [], AGENDA);
-      expect(p).not.toContain("맡긴 일");
-      expect(p).not.toContain("responsibilities");
-      expect(p).not.toMatch(/\{\{[#/]?[A-Z_]+\}\}/);
+  it("no active responsibility → the prompt is byte-for-byte the pre-feature one (heartbeat and briefing)", () => {
+    markSent(["https://acme.atlassian.net/browse/rel-9"]); // a sent row is still dropped (and counted) as before
+    const at = new Date("2026-11-14T10:00:00");
+    for (const f of ["heartbeat", "briefing"] as const) {
+      const pre = respBlocks(template(f), false);
+      expect(sha(pre)).toBe(PRE_FEATURE[f]); // the template minus its blocks IS the pre-feature file
+      for (const list of [[], [R({ enabled: false })], [R({ until: yesterday() })]]) {
+        const cfg = cfgWith(list);
+        const now = renderHeartbeatPrompt(cfg, f === "briefing", emptyState(), [], AGENDA, { now: at });
+        const before = renderHeartbeatPrompt(cfg, f === "briefing", emptyState(), [], AGENDA, { now: at, template: pre });
+        expect(now.prompt).toBe(before.prompt);
+        expect(now.prompt).not.toContain("이미 알림]");
+        expect(now.prompt).not.toMatch(/\{\{[#/]?[A-Z_]+\}\}/);
+        expect(now.active).toEqual([]);
+      }
     }
-    // The template minus its blocks is the pre-feature template: same prompt, same cost.
-    const stripped = original().replace(/\{\{#RESP\}\}[\s\S]*?\{\{\/RESP\}\}/g, "");
-    expect(stripped).not.toContain("RESP");
-    expect(stripped).toContain("{{ALREADY_SENT}}\n\n## 출력 스키마");
-    expect(stripped).toContain('"detail": "무엇을 했고 다음 결정은 무엇인지" } ]\n}');
+    expect(buildHeartbeatPrompt(cfgWith([]), false, emptyState(), [], AGENDA)).toContain("(이미 알린 항목 1건은 뺐다)");
+  });
+
+  it("briefing gets the same 맡긴 일 section when one is active", () => {
+    const p = buildHeartbeatPrompt(cfgWith([R()]), true, emptyState(), [], AGENDA);
+    expect(p).toContain("### 맡긴 일");
+    expect(p).toContain("id `rel-05-ab12`");
+    expect(p).toContain('"responsibilities": [');
+  });
+
+  it("active → already-sent rows stay, tagged [이미 알림], and their links are citable", () => {
+    markSent(["https://acme.atlassian.net/browse/rel-9"]);
+    const r = renderHeartbeatPrompt(cfgWith([R()]), false, emptyState(), [], AGENDA);
+    expect(r.prompt).toContain("[이미 알림] https://acme.atlassian.net/browse/REL-9");
+    expect(r.prompt).not.toContain("이미 알린 항목 1건은 뺐다");
+    expect([...r.links].sort()).toEqual(["https://acme.atlassian.net/browse/REL-9", "https://github.com/acme/app/pull/42"]);
+    expect(r.active.map((x) => x.id)).toEqual(["rel-05-ab12"]);
+  });
+
+  it("links come from the entries' url fields (a url with parentheses stays whole)", () => {
+    const odd = "https://wiki.example/Foo_(bar)";
+    const a = { ...AGENDA, github: [{ ...(AGENDA.github[0] as object), url: odd }] } as unknown as Agenda;
+    expect(renderHeartbeatPrompt(cfgWith([R()]), false, emptyState(), [], a).links.has(odd)).toBe(true);
   });
 
   it("active ones → section with id, title, goal, until, sources (only switched-on) and keywords, plus the schema field", () => {
@@ -183,8 +214,9 @@ describe("applyResponsibilityReport", () => {
     expect(applyResponsibilityReport({}, [{ id: "c", status: "watch", note: "n" }], active, allowed, 5, ["a", "b", "c"])).toEqual({});
   });
 
-  it("promptUrls picks links out of digest lines (no trailing punctuation)", () => {
-    expect([...promptUrls("- REL-9 [x] t https://a.example/b?c=1 (11/14 10:00) https://b.example/x.\n meet https://meet.example/abc ·")]).toEqual(["https://a.example/b?c=1", "https://b.example/x", "https://meet.example/abc"]);
+  it("pruneResponsibilityRatings keeps only ids still in config", () => {
+    expect(pruneResponsibilityRatings(prev, ["b"])).toEqual({ b: prev.b });
+    expect(pruneResponsibilityRatings(undefined, ["b"])).toEqual({});
   });
 });
 
@@ -233,5 +265,46 @@ describe("heartbeat stores 맡긴 일 ratings (NED_NO_LLM, temp NED_HOME)", () =
     process.env.NED_NO_LLM_RESULT = "not json at all";
     await heartbeat(loadConfig(), { force: true, agenda: "skip" });
     expect(readState().responsibilities?.rel.status).toBe("watch");
+  });
+
+  it("a raised blocker keeps its evidence: round 2 still shows REL-9 (tagged) and may cite it; no repeat action item", async () => {
+    const REL9 = "https://acme.atlassian.net/browse/REL-9";
+    process.env.NED_NO_LLM_RESULT = JSON.stringify({
+      status: "UPDATE", headline: "h",
+      action_items: [{ kind: "jira", title: "[0.5 릴리스] REL-9 빌드 고치기", url: REL9 }],
+      responsibilities: [{ id: "rel", status: "blocked", note: "REL-9 빌드가 깨졌어.", urls: [REL9] }],
+    });
+    const b1 = (await heartbeat(loadConfig(), { force: true, agenda: "skip" }))!;
+    expect(b1.action_items.map((x) => x.url)).toEqual([REL9]);
+    expect(sentKeys().has(REL9.toLowerCase())).toBe(true);
+
+    // What round 2's model sees: the sent row is still listed (tagged) and its link is citable.
+    const seen = renderHeartbeatPrompt(loadConfig(), false, readState(), [], readAgenda());
+    expect(seen.prompt).toContain(`[이미 알림] ${REL9}`);
+    expect(seen.prompt).toContain("지난 평가: blocked — REL-9 빌드가 깨졌어.");
+    expect(seen.links.has(REL9)).toBe(true);
+
+    process.env.NED_NO_LLM_RESULT = JSON.stringify({
+      status: "UPDATE", headline: "h",
+      action_items: [{ kind: "jira", title: "[0.5 릴리스] REL-9 빌드 고치기", url: REL9 }],
+      responsibilities: [{ id: "rel", status: "blocked", note: "여전히 깨져 있어.", urls: [`[이미 알림] ${REL9}`, REL9] }],
+    });
+    const b2 = (await heartbeat(loadConfig(), { force: true, agenda: "skip" }))!;
+    expect(b2.action_items).toEqual([]); // already sent → not raised again
+    expect(b2.status).toBe("NED_OK");
+    expect(readState().responsibilities!.rel).toMatchObject({ status: "blocked", note: "여전히 깨져 있어.", urls: [REL9] });
+    expect(readState().attention.filter((a) => a.url === REL9)).toHaveLength(1);
+  });
+
+  it("every run drops ratings of responsibilities removed from config (even with no ratings in the answer, or none configured)", async () => {
+    process.env.NED_NO_LLM_RESULT = JSON.stringify({ status: "NED_OK", responsibilities: [{ id: "rel", status: "watch", note: "n", urls: [] }, { id: "cust", status: "watch", note: "n", urls: [] }] });
+    await heartbeat(loadConfig(), { force: true, agenda: "skip" });
+    fs.writeFileSync(CONFIG_PATH, YAML.stringify({ notify: "off", quiet_hours: null, sources: { ...DEFAULT_CONFIG.sources, sentry: false }, responsibilities: [{ id: "rel", title: "0.5 릴리스", enabled: false }] }));
+    delete process.env.NED_NO_LLM_RESULT; // plain NED_OK, no field
+    await heartbeat(loadConfig(), { force: true, agenda: "skip" });
+    expect(Object.keys(readState().responsibilities!)).toEqual(["rel"]); // kept (still in config, just off)
+    fs.writeFileSync(CONFIG_PATH, YAML.stringify({ notify: "off", quiet_hours: null, sources: { ...DEFAULT_CONFIG.sources, sentry: false } }));
+    await heartbeat(loadConfig(), { force: true, agenda: "skip" });
+    expect(readState().responsibilities).toEqual({});
   });
 });

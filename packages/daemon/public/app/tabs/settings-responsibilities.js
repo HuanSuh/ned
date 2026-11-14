@@ -10,6 +10,7 @@ export const RESP_SRC = [["slack", "Slack"], ["mail", "메일"], ["jira", "Jira"
 export const RESP_TITLE_LEN = 60;
 export const RESP_GOAL_LEN = 300;
 export const RESP_KEYWORDS_MAX = 10;
+export const RESP_KEYWORD_LEN = 40;
 
 const pad = (n) => String(n).padStart(2, "0");
 export const todayYmd = (now = new Date()) => `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
@@ -48,7 +49,7 @@ export function respListHtml(list, now = new Date()) {
 function readRow(el) {
   const f = (k) => el.querySelector(`[data-rf="${k}"]`);
   const src = [...el.querySelectorAll("[data-rsrc]")].filter((c) => c.checked).map((c) => c.dataset.rsrc);
-  const kw = [...new Set(f("keywords").value.split(",").map((k) => k.replace(/\s+/g, " ").trim()).filter(Boolean))];
+  const kw = [...new Set(f("keywords").value.split(",").map((k) => k.replace(/\s+/g, " ").trim().slice(0, RESP_KEYWORD_LEN)).filter(Boolean))]; // = server's 40-char cut
   const until = f("until").value;
   return {
     ...(el.dataset.rid ? { id: el.dataset.rid } : {}),
@@ -99,7 +100,7 @@ const SECTION = `<section class="card ssec" id="s-resp" aria-labelledby="s-resp-
   <div class="bd">
     <p class="sdesc" id="s-resp-d">챙겨 달라고 맡긴 책임(최대 ${RESP_MAX}개). 순찰이 업무 목록에서 관련 항목을 찾아 책임마다 순조·주의·막힘을 매기고 홈 위 "맡긴 일" 띠에 보여 줘. 막혀서 내가 움직여야 하면 할 일에도 올려. 따로 Claude 를 부르지 않아 — 순찰 한 번에 같이 봐.</p>
     <div class="resp" id="c-resp" role="list" aria-label="맡긴 일 목록"></div>
-    <span class="hint">볼 곳을 다 켜 두면(또는 다 끄면) 전부 봐. 키워드는 쉼표로 — 업무 목록 항목을 고르는 힌트. 언제까지가 지나면 순찰에서 빠지고 "끝남"으로 남아(지우지 않음).</span>
+    <span class="hint">볼 곳을 다 켜 두면(또는 다 끄면) 전부 봐. 키워드는 쉼표로(최대 ${RESP_KEYWORDS_MAX}개, 하나에 ${RESP_KEYWORD_LEN}자까지) — 업무 목록 항목을 고르는 힌트. 언제까지가 지나면 순찰에서 빠지고 "끝남"으로 남아(지우지 않음).</span>
     <span class="hint" id="c-resp-msg" role="status" style="color:var(--red)"></span>
   </div>
 </section>`;

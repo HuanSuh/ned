@@ -104,8 +104,13 @@ $0.36 · 1턴 · 46초 — 이전(커넥터 직접 조회) $2.09–2.34 · 12–
 안 지난 책임(`activeResponsibilities`)이 있으면 heartbeat.md 의 `{{#RESP}}…{{/RESP}}` 블록이 살아나 "맡긴 일" 입력 절(`{{RESPONSIBILITIES}}`:
 id·제목·until·챙길 것·켜진 볼 곳·키워드·지난 평가)과 출력 필드 `responsibilities: [{id, status: on_track|watch|blocked, note, urls≤3}]` 이 붙는다.
 없으면 블록이 통째로 빠져 프롬프트가 기능 이전과 글자 하나 다르지 않다(테스트로 고정). 답은 `applyResponsibilityReport` 가 정리 —
-모르는·꺼진 id, 잘못된 status, 중복 id 는 버리고, urls 는 그 회차 `{{AGENDA}}` 다이제스트에 있던 링크만(`promptUrls`, 대소문자 무시 → 원래 표기),
-답에 없는 책임은 이전 평가·`updated_at` 유지, config 에서 지운 id 의 평가는 정리 → `state.json` `responsibilities.<id> = {status, note, urls, updated_at}`.
+모르는·꺼진 id, 잘못된 status, 중복 id 는 버리고, urls 는 그 회차 `{{AGENDA}}` 에 실제로 찍힌 항목의 url 필드만(`agendaDigest` `links`, 대소문자 무시 → 원래 표기),
+답에 없는 책임은 이전 평가·`updated_at` 유지 → `state.json` `responsibilities.<id> = {status, note, urls, updated_at}`(updated_at = 답을 받은 시각).
+활성 책임 판정은 `renderHeartbeatPrompt` 에서 한 번 하고 저장도 같은 목록으로. config 에서 지운 id 의 평가는 매 회차(답에 필드가 없어도, 책임이 0개여도) 정리(`pruneResponsibilityRatings`).
+활성 책임이 있으면 heartbeat 다이제스트가 `sent.log` 에 있는 항목을 빼지 않고 url 앞에 `[이미 알림]` 을 붙여 남긴다(`markSent`) — blocked 를
+action_items 로 올린 뒤에도 근거가 다음 순찰에 보이게. 프롬프트는 그 항목을 action_items 등에 다시 넣지 않게 하고(데몬의 sent 필터도 그대로),
+새 근거가 없으면 on_track 으로 바꾸지 말고 그 id 를 생략(= 지난 상태 유지)하게 한다. 아침 브리핑(`briefing.md`)도 같은 `{{#RESP}}` 절로 평가를 갱신한다.
+책임이 없을 때 두 템플릿은 블록을 뺀 결과가 기능 이전 파일과 바이트가 같다(테스트가 sha256 으로 고정).
 `status: NED_OK` 여도 저장(침묵 규칙은 알림·action_items 만), 답이 JSON 이 아니면 손대지 않음. blocked 이고 사용자가 움직여야 하면 프롬프트가
 `action_items` 에도 `[책임 제목] …` 으로 넣게 한다 — 새 attention/pet/notify kind 없음. 활성 책임 목록은 `heartbeatWatchKey` 에도 들어가
 추가·수정·만료가 무변경 skip 을 깬다. config.yaml 을 손으로 고쳐 id 가 없으면 제목 해시로 안정적인 id 를 주고(읽을 때마다 같음),

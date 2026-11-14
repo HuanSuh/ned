@@ -76,6 +76,13 @@ describe("respBandHtml (pure)", () => {
     expect(row("e").querySelector(".rbn")!.textContent).toBe("<script>"); // escaped
     expect(row("e").querySelector("b.rbn b")).toBeNull();
   });
+
+  it("link numbers count only the links shown", () => {
+    const html = (urls: string[]) => band.respBandHtml([{ id: "a", title: "t", enabled: true }], { a: { status: "watch", note: "", urls, updated_at: now } }, now);
+    const labels = (h: string) => { document.body.innerHTML = h; return [...document.querySelectorAll(".rbl")].map((x) => x.textContent); };
+    expect(labels(html(["javascript:alert(1)", "https://a.example", "https://b.example"]))).toEqual(["↗1", "↗2"]);
+    expect(labels(html(["javascript:alert(1)", "https://a.example"]))).toEqual(["↗"]);
+  });
 });
 
 const res = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
@@ -174,6 +181,12 @@ describe("설정 → 맡긴 일", () => {
     const sent = puts[0].responsibilities as Array<Record<string, unknown>>;
     expect(sent.map((r) => r.id)).toEqual(["rel-05-ab12", "new-2"]);
     expect(sent[0]).toEqual({ id: "rel-05-ab12", title: "0.5 릴리스 막히는 것", goal: "릴리스를 막는 이슈", sources: ["jira", "github"], keywords: ["0.5"], enabled: false });
+  });
+
+  it("keywords are cut at 40 chars each, like the daemon", () => {
+    typeIn(field(0, "keywords"), `${"가".repeat(50)}, 짧은 것`);
+    expect(resp.readResponsibilities()![0].keywords).toEqual(["가".repeat(40), "짧은 것"]);
+    settings.renderConfig();
   });
 
   it("home band follows S.config × S.state and disappears when nothing is on", async () => {

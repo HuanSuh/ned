@@ -19,7 +19,8 @@ export function respBandHtml(responsibilities, ratings, now = Date.now()) {
     const st = ratings?.[r.id];
     const [led, label] = ended ? ["", "끝남"] : st && RESP_STATUS[st.status] ? RESP_STATUS[st.status] : ["", "평가 전"];
     const note = ended ? `${r.until} 까지였어 — 순찰에서 뺐어.` : st ? st.note || "" : "다음 순찰 때 살펴볼게.";
-    const links = !ended && st ? (st.urls || []).map(safeUrl).filter(Boolean).slice(0, 3).map((u, i) => ext(u, `↗${st.urls.length > 1 ? i + 1 : ""}`, "rbl")).join("") : "";
+    const ok = !ended && st ? (st.urls || []).map(safeUrl).filter(Boolean).slice(0, 3) : [];
+    const links = ok.map((u, i) => ext(u, `↗${ok.length > 1 ? i + 1 : ""}`, "rbl")).join(""); // numbered over the links shown
     const when = !ended && st?.updated_at ? `<span class="rbt" title="${esc(mdhm(st.updated_at))} 순찰">${esc(rel(st.updated_at))}</span>` : "";
     return `<div class="rbi${ended ? " ended" : ""}" data-resp="${esc(r.id)}" data-status="${esc(ended ? "ended" : st?.status || "none")}" role="listitem">`
       + `<span class="led ${led}" title="${esc(label)}" aria-label="${esc(label)}"></span><b class="rbn" title="${esc(r.goal || r.title)}">${esc(r.title)}</b>`
