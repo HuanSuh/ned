@@ -19,6 +19,8 @@ with steps to reproduce, impact, and the version you tested (`version` in `.clau
 범위 안 / In scope:
 - 로컬 데몬 — `127.0.0.1` 의 대시보드·`/api/*`·`/mcp` (예: DNS rebinding·다른 출처에서의 호출, 쓰기 액션 게이트 우회)
   / the local daemon on `127.0.0.1`: dashboard, `/api/*`, `/mcp` (e.g. DNS rebinding, cross-origin calls, bypassing write-action gates)
+- 다른 사이트·같은 Mac 의 다른 포트 페이지가 브라우저로 일으키는 부수효과 있는 요청(예: `<img>` 로 비용이 드는 GET 반복 호출)
+  / side-effecting requests a page on another site or another local port triggers through the browser (e.g. costly GETs via `<img>`)
 - Ned.app (메뉴 막대 앱, WKWebView 브리지) / Ned.app (menu bar app, WKWebView bridges)
 - 설치·업데이트 스크립트 (`scripts/*.sh`, `/ned:install`, 자동 업데이트) / install and update scripts
 

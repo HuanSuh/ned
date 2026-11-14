@@ -117,6 +117,16 @@ describe("MCP over Streamable HTTP (/mcp)", () => {
     expect((await fetch(`http://127.0.0.1:${PORT}/api/state`)).status).toBe(200);
   });
 
+  it("Sec-Fetch-Site cross-site / same-site → 403 (/api and /mcp, JSON-RPC shape on /mcp); same-origin / none → 200", async () => {
+    for (const site of ["cross-site", "same-site"]) {
+      expect((await fetch(`http://127.0.0.1:${PORT}/api/update-check`, { headers: { "sec-fetch-site": site } })).status, site).toBe(403);
+      const r = await post({ "sec-fetch-site": site });
+      expect(r.status).toBe(403);
+      expect(await r.json()).toMatchObject({ jsonrpc: "2.0", id: null, error: { code: -32000, message: `Forbidden: Sec-Fetch-Site not allowed: ${site}` } });
+    }
+    for (const site of ["same-origin", "none"]) expect((await fetch(`http://127.0.0.1:${PORT}/api/state`, { headers: { "sec-fetch-site": site } })).status, site).toBe(200);
+  });
+
   it("/mcp 403 keeps the JSON-RPC error shape (other-port Origin and Host)", async () => {
     const other = PORT === 3000 ? 3001 : 3000;
     const r = await post({ origin: `http://127.0.0.1:${other}` });

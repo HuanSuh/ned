@@ -7,7 +7,9 @@
  * 규칙(port = 데몬이 실제로 listen 하는 포트):
  * - Host 가 있으면 loopback 호스트(127.0.0.1·localhost·[::1]) + `:port` 만 허용. 포트 생략은 거부(데몬은 80 이 아님).
  * - Origin 이 있으면 `http(s)://{127.0.0.1|localhost|[::1]}:port` 만 허용(`null`·다른 스킴·다른 포트 거부).
- * - 둘 다 없으면 허용(CLI·테스트의 Request 객체).
+ * - `Sec-Fetch-Site` 가 있으면 `same-origin`·`none` 만 허용 — 브라우저의 다른 사이트·다른 포트(same-site) 페이지가 Origin 없이
+ *   보내는 no-cors GET(<img src>) 도 403.
+ * - 이 헤더들이 없으면 허용(CLI·URLSession·MCP 클라이언트·테스트의 Request 객체).
  * 대시보드·Ned.app WKWebView(Origin http://127.0.0.1:<port>)·Ned.app URLSession·status.sh(curl)·MCP 클라이언트는
  * 모두 http://127.0.0.1:<port> 로 붙으므로 Host 가 `127.0.0.1:<port>`.
  */
@@ -34,6 +36,11 @@ export function requestGuard(headers: { get(name: string): string | null }, port
     const p = u.port ? Number(u.port) : u.protocol === "https:" ? 443 : 80;
     if (p !== port) return `Origin port not allowed: ${origin.slice(0, 80)}`;
   }
+  // A browser marks every request with Sec-Fetch-Site. A no-cors GET from another page (<img src=…/api/calendar>) carries
+  // no Origin, but it is cross-site / same-site (another 127.0.0.1 port is same-site) — refused, so it cannot trigger
+  // costly GETs (claude -p, ?refresh=1). Only the dashboard itself (same-origin) and a typed URL / app-opened page (none) pass.
+  const site = headers.get("sec-fetch-site");
+  if (site != null && site !== "same-origin" && site !== "none") return `Sec-Fetch-Site not allowed: ${site.slice(0, 40)}`;
   return null;
 }
 

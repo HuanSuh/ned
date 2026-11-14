@@ -250,7 +250,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
   | `ned_mark_reviewed` | **유일한 쓰기** — `review_key` 로 확인 완료 ✓ / 해제(`reviewed:false`). `/api/attention/:id/review` 와 같은 검증(잘못된 키 400, 없는 attention 404)·부수효과(Slack 스레드 읽음 기준, `actions.gmail_mark_read` 면 Gmail 읽음) | `review_key`, `reviewed?`(true) |
 
   결과: 요약 한 줄 + JSON(텍스트 블록 두 개). 목록은 limit, 문자열은 잘라서(제목 200자·본문 300~400자) 한 번에 토큰이 폭주하지 않게. 리소스: `ned://briefing/latest`(최신 브리핑 JSON), `ned://features`(이 문서 요약).
-- 보안: 데몬은 `127.0.0.1` 에만 열린다. DNS rebinding·같은 Mac 의 다른 포트 웹페이지 방지로 Host 가 loopback(127.0.0.1·localhost·[::1]) + 데몬 포트가 아니거나(포트 생략도 거부), Origin 헤더가 있는데 `http(s)://loopback:데몬 포트` 가 아니면 403(로그 `request-guard: refused`). 둘 다 없으면(CLI) 허용. 인증은 없다 — `/api`·`/mcp`(그리고 대시보드 정적 파일) 모두 같은 가드(`src/request-guard.ts`). 쓰기는 ✓ 하나뿐(메일 ✓ 는 `actions.gmail_mark_read` 면 Gmail 읽음 처리도 하므로 `openWorldHint: true`).
+- 보안: 데몬은 `127.0.0.1` 에만 열린다. DNS rebinding·같은 Mac 의 다른 포트 웹페이지 방지로 Host 가 loopback(127.0.0.1·localhost·[::1]) + 데몬 포트가 아니거나(포트 생략도 거부), Origin 헤더가 있는데 `http(s)://loopback:데몬 포트` 가 아니면 403, 브라우저의 `Sec-Fetch-Site` 가 `same-origin`·`none` 이 아니면(다른 사이트·다른 포트 페이지의 `<img>` GET 등) 403(로그 `request-guard: refused`). 이 헤더들이 없으면(CLI) 허용. 인증은 없다 — `/api`·`/mcp`(그리고 대시보드 정적 파일) 모두 같은 가드(`src/request-guard.ts`). 쓰기는 ✓ 하나뿐(메일 ✓ 는 `actions.gmail_mark_read` 면 Gmail 읽음 처리도 하므로 `openWorldHint: true`).
 - 설치·확인: 플러그인 `.mcp.json` = `{"mcpServers":{"ned":{"type":"http","url":"http://127.0.0.1:7777/mcp"}}}` — 포트 7777 고정. `port` 를 바꿨다면 `claude mcp add --transport http ned <데몬 주소>/mcp` 로 직접 등록하고 `/mcp` 에서 플러그인 쪽 `ned` 를 끈다. `/ned:status` 의 "MCP" 줄이 `/mcp` 응답 여부(초기화 요청 1회)를 보여 주고, 이 세션에 로드됐는지는 `/mcp` 로 본다. Ned.app(데몬)이 꺼져 있으면 Claude Code 가 연결을 몇 번 재시도한 뒤 `/mcp`·`claude mcp list` 에 연결 실패(✘ Failed to connect)로 표시하고 도구가 없다 — 데몬을 켠 뒤 `/mcp` 에서 다시 연결.
 - 후속(이번에 없음): 보내기(`/api/send`)·초안·세션 만들기 같은 쓰기 도구, 서버→클라이언트 알림(SSE), 다른 포트 자동 반영.
 
@@ -406,4 +406,4 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 업데이트: `/api/update-check`(`{current, latest, source, update_available, checked_at, steps, error?, status}`, 10분 캐시, `?refresh=1` 은 새로 + 기록) · `/api/update/status`(자동 업데이트 상태: 설정·마지막/다음 확인·마지막 설치 시도) · `/api/update/install`(지금 업데이트, 202 시작 / 409 이유)
 - 설정: `/api/config`(GET/PUT — 바뀐 키만, 충돌 시 409) · `/api/config/backups` · `/api/config/restore`(이전 설정으로 되돌리기)
 - MCP: `/mcp`(POST — MCP Streamable HTTP, stateless·JSON 응답, 도구 `ned_attention` 외 5개. GET/DELETE 405 — 위 "MCP 서버")
-- 공통: 모든 라우트(`/api/*`·`/mcp`·정적 파일)에서 Host·Origin 이 `loopback:데몬 포트` 가 아니면 403(DNS rebinding·다른 포트 로컬 페이지 방지, Host 포트 생략도 거부)
+- 공통: 모든 라우트(`/api/*`·`/mcp`·정적 파일)에서 Host·Origin 이 `loopback:데몬 포트` 가 아니거나 `Sec-Fetch-Site` 가 `same-origin`·`none` 이 아니면 403(DNS rebinding·다른 사이트·다른 포트 로컬 페이지 방지, Host 포트 생략도 거부)

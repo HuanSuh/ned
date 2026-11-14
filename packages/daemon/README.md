@@ -44,7 +44,7 @@ node dist/cli.js setup-check [--json] # 시작하기 점검 1회(아래 "시작�
 
 Ned.app 메뉴 "업데이트 확인"과 설정 → 앱의 같은 버튼이 `GET /api/update-check` 를 부른다. 설치하지는 않는다(설치는 Claude Code 흐름).
 - 현재 버전: `$NED_RUNTIME_DIR`(없으면 `$NED_HOME/runtime`)`/.claude-plugin/plugin.json` — `/ned:install` 이 빌드하는 곳. 런타임이 없는 개발 체크아웃이면 데몬이 도는 체크아웃(`REPO_ROOT`)의 것.
-- 최신 버전: (a) `https://raw.githubusercontent.com/<owner>/<repo>/main/.claude-plugin/plugin.json`(공개 레포 — Node `fetch`, 5초 타임아웃, gh 불필요; 슬러그는 plugin.json `repository`/`homepage` 에서) →
+- 최신 버전: (a) `https://raw.githubusercontent.com/<owner>/<repo>/main/.claude-plugin/plugin.json`(공개 레포 — Node `fetch`, 5초 타임아웃, 64KiB 상한(`fetchCapped`: Content-Length 초과면 거절, 본문은 스트림으로 64KiB 까지만), gh 불필요; 슬러그는 plugin.json `repository`/`homepage` 에서) →
   실패하면 (b) `gh api -H "Accept: application/vnd.github.raw+json" repos/<owner>/<repo>/contents/.claude-plugin/plugin.json?ref=main`(사용자 gh 로그인) →
   실패하면 (c) `$CLAUDE_CONFIG_DIR`(없으면 `~/.claude`)`/plugins/marketplaces/<marketplace.json name>/.claude-plugin/plugin.json`. 셋 다 안 되면 `error` 에 각 사유, (b)·(c) 로 폴백했으면 앞선 사유는 `note`.
 - 비교는 semver(프리릴리스 < 정식). 결과 10분 캐시(동시 요청은 한 번만), `?refresh=1` 은 새로. 자동 업데이트(`self-update.ts`)도 같은 결과를 쓴다. 테스트는 `setUpdateDeps({readFile, fetchText, gh})` 로 파일·네트워크·gh 를 바꾼다(실제 네트워크 없음).
@@ -261,7 +261,7 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 
 ### HTTP API
 
-모든 라우트(`/api/*`·`/mcp`·정적 파일)는 `src/request-guard.ts` 를 먼저 거친다 — Host·Origin 이 loopback + 데몬 포트가 아니면 403(DNS rebinding·다른 포트 로컬 페이지 방지, Host 포트 생략도 거부, Origin·Host 가 없으면 허용).
+모든 라우트(`/api/*`·`/mcp`·정적 파일)는 `src/request-guard.ts` 를 먼저 거친다 — Host·Origin 이 loopback + 데몬 포트가 아니거나 `Sec-Fetch-Site` 가 `same-origin`·`none` 이 아니면 403(DNS rebinding·다른 사이트·다른 포트 로컬 페이지 방지 — Origin 없는 `<img>` GET 포함, Host 포트 생략도 거부, 이 헤더들이 없으면 허용).
 
 | Method | Path | 설명 |
 |---|---|---|
@@ -566,7 +566,8 @@ detail `이력 · M/D · …`, `tab: home` / `anchor: card:<slack|mail|jira|gh|c
 - 트랜스포트: `@modelcontextprotocol/sdk` 의 `WebStandardStreamableHTTPServerTransport` — 웹 표준 Request/Response 라 hono 의 `c.req.raw` 를 그대로 넘긴다.
   `sessionIdGenerator: undefined`(stateless) + `enableJsonResponse: true`. 요청마다 `buildMcpServer()` 로 McpServer·트랜스포트를 새로 만들고 응답 뒤 닫는다
   (SDK 예제 `simpleStatelessStreamableHttp.ts` 와 같은 방식). `GET`/`DELETE /mcp` → 405 `Allow: POST`.
-- 로컬 전용: `127.0.0.1` 바인딩에 더해 서버 전체 가드 `src/request-guard.ts`(`app.use("*", requestGuardMiddleware(port))` — `/api/*`·`/mcp`·정적 파일 모두, port = 실제 listen 포트) — Host 가 loopback(127.0.0.1·localhost·[::1]) + `:port` 가 아니거나(포트 생략 거부), Origin 이 있는데 `http(s)://loopback:port` 가 아니면 403
+- 로컬 전용: `127.0.0.1` 바인딩에 더해 서버 전체 가드 `src/request-guard.ts`(`app.use("*", requestGuardMiddleware(port))` — `/api/*`·`/mcp`·정적 파일 모두, port = 실제 listen 포트) — Host 가 loopback(127.0.0.1·localhost·[::1]) + `:port` 가 아니거나(포트 생략 거부), Origin 이 있는데 `http(s)://loopback:port` 가 아니면 403,
+  `Sec-Fetch-Site` 가 있는데 `same-origin`·`none` 이 아니면 403(Origin 이 없는 no-cors GET — `<img src=…/api/calendar>` 같은 비용 드는 GET 반복 — 차단; 다른 포트 127.0.0.1 은 브라우저 기준 `same-site`)
   (DNS rebinding·같은 Mac 의 다른 포트 로컬 페이지(개발 서버 등) 방지; SDK 의 `allowedOrigins`·`allowedHosts` 옵션은 deprecated 라 "외부 미들웨어" 권고대로 직접). Origin 없음(CLI 클라이언트)은 허용. 인증 없음.
 - 도구: 순수 핸들러 `toolAttention`·`toolSessions`·`toolBriefing`·`toolHistory`·`toolFeed`(입력 + `ToolCtx` = config·state·agenda·reviewed·briefings·now) →
   `{summary, data, error?}`. `mcp.ts` 가 매 호출 `readToolCtx()` 로 디스크에서 새로 읽고, 결과를 텍스트 블록 두 개(요약 한 줄, JSON)로 싼다. `error` 면 `isError: true`.

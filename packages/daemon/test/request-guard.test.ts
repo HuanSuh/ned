@@ -26,6 +26,14 @@ describe("requestGuard", () => {
     expect(requestGuard(h({ host: "127.0.0.1:80", origin: "http://127.0.0.1" }), 80)).toBeNull();
     expect(requestGuard(h({ origin: "https://localhost" }), 443)).toBeNull();
   });
+  it("Sec-Fetch-Site: same-origin / none / absent pass; cross-site / same-site / anything else → 403 (no-cors <img> GETs carry no Origin)", () => {
+    const host = `127.0.0.1:${PORT}`;
+    for (const site of ["same-origin", "none"]) expect(requestGuard(h({ host, "sec-fetch-site": site }), PORT), site).toBeNull();
+    expect(requestGuard(h({ host, origin: `http://127.0.0.1:${PORT}`, "sec-fetch-site": "same-origin" }), PORT)).toBeNull();
+    expect(requestGuard(h({ host }), PORT)).toBeNull();
+    // another 127.0.0.1 port is "same-site" to the browser — must be refused too
+    for (const site of ["cross-site", "same-site", "bogus", ""]) expect(requestGuard(h({ host, "sec-fetch-site": site }), PORT), site).toMatch(/Sec-Fetch-Site not allowed/);
+  });
   it("refuses a non-loopback Host or Origin, a null Origin and a non-http scheme", () => {
     expect(requestGuard(h({ host: `attacker.example:${PORT}` }), PORT)).toMatch(/Host not allowed/);
     expect(requestGuard(h({ host: "127.0.0.1.nip.io" }), PORT)).toMatch(/Host not allowed/);
