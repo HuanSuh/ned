@@ -4,7 +4,7 @@ import path from "node:path";
 import YAML from "yaml";
 import { LINK_SERVICES, SLACK_TEAM_ID_RE, normalizeSlackTeamDomain, normalizeSlackTeamId, type LinkService } from "./links.js";
 import type { NotifyMode } from "./notify.js";
-import { CONFIG_PATH } from "./paths.js";
+import { CONFIG_PATH, localDay } from "./paths.js";
 
 export interface NedConfig {
   /** Minutes between heartbeats. */
@@ -82,6 +82,107 @@ export interface NedConfig {
   pet: NedPet;
   /** 자동 업데이트 (src/self-update.ts): periodic update check + opt-in self-install. 설정 → 앱 → 업데이트. */
   updates: NedUpdates;
+  /** 맡긴 일 (≤5): the patrol rates each active one (on_track / watch / blocked) into state.json `responsibilities`. 설정 → 맡긴 일. */
+  responsibilities: Responsibility[];
+}
+
+// ---------- 맡긴 일 (responsibilities) ----------
+/** Where a responsibility looks: agenda sources + the agent-session list. Omitted / empty = all of them. */
+export const RESP_SOURCES = ["slack", "mail", "jira", "github", "calendar", "sessions"] as const;
+export type RespSource = (typeof RESP_SOURCES)[number];
+export interface Responsibility {
+  /** Stable key (state.json, the model's answer): `[a-z0-9-]`, ≤ 48. Generated (slug of the title + short random) when missing. */
+  id: string;
+  /** ≤ 60 chars, one line. A responsibility without a title is dropped. */
+  title: string;
+  /** What to look after, in plain words (≤ 300 chars). */
+  goal: string;
+  sources?: RespSource[];
+  /** Hints for matching agenda rows (≤ 10, each ≤ 40 chars). */
+  keywords?: string[];
+  /** Last day (local, inclusive) it is patrolled; after that it shows as 끝남 and is left out (never deleted). */
+  until?: string;
+  enabled: boolean;
+}
+export const RESPONSIBILITIES_MAX = 5;
+export const RESP_TITLE_LEN = 60;
+export const RESP_GOAL_LEN = 300;
+export const RESP_KEYWORDS_MAX = 10;
+export const RESP_KEYWORD_LEN = 40;
+const RESP_ID_RE = /^[a-z0-9][a-z0-9-]{0,47}$/;
+const oneLine = (v: unknown, n: number) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, n) : "");
+
+/** "YYYY-MM-DD" that is a real calendar date, else null. */
+export function normalizeUntil(v: unknown): string | null {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v.trim())) return null;
+  const s = v.trim();
+  const [y, m, d] = s.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d ? s : null;
+}
+
+/**
+ * A fresh id: ASCII slug of the title (≤ 24, "r" when it has none) + "-" + 4 base36 chars — random, or with `stable` a
+ * hash of the title (loadConfig: a hand-written entry without an id must get the same id on every read, or its state.json
+ * evaluation would be orphaned each time).
+ */
+export function responsibilityId(title: string, taken: ReadonlySet<string> = new Set(), stable = false): string {
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24).replace(/-+$/, "") || "r";
+  let h = 0x811c9dc5;
+  for (const ch of title) h = Math.imul(h ^ ch.codePointAt(0)!, 0x01000193) >>> 0;
+  for (let i = 0; ; i++) {
+    const tail = stable ? ((h + i * 7919) % 36 ** 4).toString(36).padStart(4, "0") : Math.random().toString(36).slice(2, 6).padEnd(4, "0");
+    const id = `${slug}-${tail}`;
+    if (!taken.has(id)) return id;
+  }
+}
+
+/**
+ * config.responsibilities → clean list: non-objects and title-less entries dropped; title one line ≤ 60, goal ≤ 300
+ * (whitespace collapsed); sources only known ones (none left → omitted = all); keywords one line, ≤ 40 chars, deduped,
+ * ≤ 10 (none → omitted); until a real "YYYY-MM-DD" else omitted; enabled boolean (default true); ids kept when valid and
+ * unique, else generated (`stableIds`: from the title — see responsibilityId). At most 5 (the first ones). Not an array → [].
+ */
+export function normalizeResponsibilities(raw: unknown, { stableIds = false }: { stableIds?: boolean } = {}): Responsibility[] {
+  if (!Array.isArray(raw)) return [];
+  const out: Responsibility[] = [];
+  const taken = new Set<string>();
+  for (const x of raw) {
+    if (out.length >= RESPONSIBILITIES_MAX) break;
+    if (!x || typeof x !== "object" || Array.isArray(x)) continue;
+    const r = x as Record<string, unknown>;
+    const title = oneLine(r.title, RESP_TITLE_LEN);
+    if (!title) continue;
+    const ownId = typeof r.id === "string" ? r.id.trim() : "";
+    const id = RESP_ID_RE.test(ownId) && !taken.has(ownId) ? ownId : responsibilityId(title, taken, stableIds);
+    taken.add(id);
+    const item: Responsibility = { id, title, goal: oneLine(r.goal, RESP_GOAL_LEN), enabled: typeof r.enabled === "boolean" ? r.enabled : true };
+    const sources = Array.isArray(r.sources) ? RESP_SOURCES.filter((s) => (r.sources as unknown[]).includes(s)) : [];
+    if (sources.length) item.sources = sources;
+    const kwList = typeof r.keywords === "string" ? r.keywords.split(",") : Array.isArray(r.keywords) ? r.keywords : [];
+    const keywords = uniq(kwList.map((k) => oneLine(k, RESP_KEYWORD_LEN)).filter(Boolean)).slice(0, RESP_KEYWORDS_MAX);
+    if (keywords.length) item.keywords = keywords;
+    const until = normalizeUntil(r.until);
+    if (until) item.until = until;
+    out.push(item);
+  }
+  return out;
+}
+
+/** PUT /api/config: responsibilities that would be silently cut (not a list / > 5 / a title missing) → the error, else null. */
+export function responsibilitiesError(v: unknown): string | null {
+  if (v === undefined) return null;
+  if (!Array.isArray(v)) return "맡긴 일은 목록이어야 해";
+  if (v.length > RESPONSIBILITIES_MAX) return `맡긴 일은 ${RESPONSIBILITIES_MAX}개까지야`;
+  if (v.some((x) => !x || typeof x !== "object" || !oneLine((x as { title?: unknown }).title, RESP_TITLE_LEN))) return "맡긴 일마다 제목이 필요해";
+  return null;
+}
+
+/** Past its `until` (local day, inclusive)? */
+export const responsibilityEnded = (r: Pick<Responsibility, "until">, now = new Date()): boolean => !!r.until && r.until < localDay(now);
+/** What the patrol rates: enabled and not past `until`. */
+export function activeResponsibilities(cfg: Pick<NedConfig, "responsibilities">, now = new Date()): Responsibility[] {
+  return (cfg.responsibilities ?? []).filter((r) => r.enabled !== false && !responsibilityEnded(r, now));
 }
 
 /** The pet's message toggles (GET /api/feed items carry one as `pet_kind`; src/feed.ts PET_KIND_OF). greeting is the app's own. */
@@ -723,6 +824,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   history: DEFAULT_HISTORY,
   pet: DEFAULT_PET,
   updates: DEFAULT_UPDATES,
+  responsibilities: [],
 };
 
 /** A finite number within [min, max] (truncated when `int`), else `fallback`. */
@@ -758,6 +860,7 @@ export function loadConfig(): NedConfig {
       history: normalizeHistory(parsed.history),
       pet: normalizePet(parsed.pet),
       updates: normalizeUpdates(parsed.updates),
+      responsibilities: normalizeResponsibilities(parsed.responsibilities, { stableIds: true }),
       dashboard: normalizeDashboard(parsed.dashboard, DEFAULT_DASHBOARD, watchChannels(filters)),
       agenda_source_minutes: normalizeAgendaSourceMinutes(parsed.agenda_source_minutes),
       quiet_schedule: normalizeQuietSchedule(parsed.quiet_schedule),

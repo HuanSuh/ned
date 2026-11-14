@@ -16,7 +16,7 @@
 - 사용 가능 소스: {{SOURCES}}
 - 트래킹 제외: {{FILTERS}}
 - 이미 알려준 항목(아래 "이미 보낸 항목")은 다시 넣지 않는다.
-- **할 말이 없으면 침묵한다**: `{"status":"NED_OK"}` 만 출력.
+- **할 말이 없으면 침묵한다**: `{"status":"NED_OK"}` 만 출력.{{#RESP}} 단 아래 "맡긴 일" 평가(`responsibilities`)는 침묵 규칙과 상관없이 늘 낸다.{{/RESP}}
 - 출력은 **JSON 하나만**. 설명 문장, 마크다운, 코드펜스 없이.
 
 ## 판단 기준
@@ -42,7 +42,17 @@
 ### 이미 보낸 항목 (제목 또는 URL)
 {{ALREADY_SENT}}
 
-## 출력 스키마
+{{#RESP}}### 맡긴 일 (사용자가 챙겨 달라고 맡긴 책임)
+{{RESPONSIBILITIES}}
+
+맡긴 일마다 위 업무 목록·세션에서 관련 항목을 찾아(그 책임의 "볼 곳"만, 키워드는 매칭 힌트) 상태를 매긴다.
+- `on_track`: 순조롭다, 또는 관련 움직임이 없다. `watch`: 지켜봐야 한다(마감 임박·답 없음·새 이슈). `blocked`: 막혔다(사용자의 결정·행동 없이는 진행이 안 됨).
+- `note` 는 1~2문장, 페르소나 말투. 무엇 때문에 그 상태인지 구체적으로.
+- `urls` 는 근거가 된 업무 목록 링크를 **그대로**, 최대 3개. 업무 목록에 없는 링크는 쓰지 않는다. "이미 보낸 항목" 규칙은 여기엔 적용하지 않는다.
+- `blocked` 이고 사용자가 움직여야 하면 그 일을 `action_items` 에도 넣는다(제목 앞에 `[책임 제목] `). 이미 보낸 항목이면 넣지 않는다.
+- `status` 가 `NED_OK` 여도 `responsibilities` 는 맡긴 일마다 하나씩 낸다. 침묵 규칙은 알림·`action_items` 에만 적용된다.
+
+{{/RESP}}## 출력 스키마
 ```
 {
   "status": "NED_OK" | "UPDATE",
@@ -50,10 +60,11 @@
   "action_items": [ { "kind": "session|email|slack|jira|github|sentry|calendar", "title": "내가 해야 할 일 한 줄", "detail": "맥락 1~2문장", "url": "링크(있으면)" } ],
   "updates":      [ { "kind": "...", "title": "알아두면 좋은 변화", "detail": "...", "url": "..." } ],
   "fyi":          [ { "kind": "...", "title": "참고", "url": "..." } ],
-  "sessions":     [ { "kind": "session", "title": "워크트리: 상태 한 줄", "detail": "무엇을 했고 다음 결정은 무엇인지" } ]
+  "sessions":     [ { "kind": "session", "title": "워크트리: 상태 한 줄", "detail": "무엇을 했고 다음 결정은 무엇인지" } ]{{#RESP}},
+  "responsibilities": [ { "id": "맡긴 일의 id 그대로", "status": "on_track|watch|blocked", "note": "1~2문장", "urls": ["업무 목록 링크 그대로, 최대 3개"] } ]{{/RESP}}
 }
 ```
 - `url` 은 업무 목록에 있는 링크를 **그대로** 쓴다(중복 억제 키).
 - `action_items` 는 **내가 움직여야 하는 것만**. 최대 5개. 사소한 것은 `fyi`.
 - 각 항목의 `title` 은 한국어, 구체적으로 (누가·무엇을·언제까지).
-- 새로 보고할 것이 하나도 없으면 반드시 `{"status":"NED_OK"}`.
+- 새로 보고할 것이 하나도 없으면 반드시 `{"status":"NED_OK"}`.{{#RESP}} 맡긴 일이 있으면 그때도 `{"status":"NED_OK","responsibilities":[…]}` 처럼 평가는 붙인다.{{/RESP}}

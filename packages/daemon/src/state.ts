@@ -64,6 +64,20 @@ export interface NedState {
   attention_open_count: number;
   /** A newer Ned plugin version found by the update check (src/self-update.ts); `notified` = announced once already. */
   update_available?: UpdateBadge | null;
+  /** 맡긴 일: the patrol's latest rating per config.responsibilities id (heartbeat.ts applyResponsibilityReport). */
+  responsibilities?: Record<string, ResponsibilityStatus>;
+}
+
+export const RESP_STATUSES = ["on_track", "watch", "blocked"] as const;
+export type RespStatus = (typeof RESP_STATUSES)[number];
+export interface ResponsibilityStatus {
+  status: RespStatus;
+  /** 1–2 sentences in the persona's voice. */
+  note: string;
+  /** ≤ 3 links, each one the model saw in the patrol's 업무 목록. */
+  urls: string[];
+  /** When the patrol last rated it (ms). */
+  updated_at: number;
 }
 
 /** 자동 업데이트 bookkeeping (src/self-update.ts writes it, scripts/self-update.sh records the install result). */

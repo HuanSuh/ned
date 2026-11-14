@@ -100,6 +100,17 @@ heartbeat.ts 가 침묵(null, `signalDue`·세션 알림 없음)으로 끝난 �
 $0.36 · 1턴 · 46초 — 이전(커넥터 직접 조회) $2.09–2.34 · 12–15턴 · 107초–7분.
 로그 한 줄에 `agenda reused (Nm old)` / `refreshed in Ns, $x` / `joined running refresh`, `judge Ns`, `total Ns` 가 찍힌다.
 
+**맡긴 일** (`config.responsibilities`, `src/config.ts` `normalizeResponsibilities` · `src/heartbeat.ts`): 켜져 있고 `until`(로컬 날짜, 그날 포함)이
+안 지난 책임(`activeResponsibilities`)이 있으면 heartbeat.md 의 `{{#RESP}}…{{/RESP}}` 블록이 살아나 "맡긴 일" 입력 절(`{{RESPONSIBILITIES}}`:
+id·제목·until·챙길 것·켜진 볼 곳·키워드·지난 평가)과 출력 필드 `responsibilities: [{id, status: on_track|watch|blocked, note, urls≤3}]` 이 붙는다.
+없으면 블록이 통째로 빠져 프롬프트가 기능 이전과 글자 하나 다르지 않다(테스트로 고정). 답은 `applyResponsibilityReport` 가 정리 —
+모르는·꺼진 id, 잘못된 status, 중복 id 는 버리고, urls 는 그 회차 `{{AGENDA}}` 다이제스트에 있던 링크만(`promptUrls`, 대소문자 무시 → 원래 표기),
+답에 없는 책임은 이전 평가·`updated_at` 유지, config 에서 지운 id 의 평가는 정리 → `state.json` `responsibilities.<id> = {status, note, urls, updated_at}`.
+`status: NED_OK` 여도 저장(침묵 규칙은 알림·action_items 만), 답이 JSON 이 아니면 손대지 않음. blocked 이고 사용자가 움직여야 하면 프롬프트가
+`action_items` 에도 `[책임 제목] …` 으로 넣게 한다 — 새 attention/pet/notify kind 없음. 활성 책임 목록은 `heartbeatWatchKey` 에도 들어가
+추가·수정·만료가 무변경 skip 을 깬다. config.yaml 을 손으로 고쳐 id 가 없으면 제목 해시로 안정적인 id 를 주고(읽을 때마다 같음),
+`PUT /api/config` 로 새로 들어온 행은 slug+난수 id. 6개 이상·목록 아님·제목 없는 행은 400 `{field: "responsibilities"}`.
+
 **지금 점검** (`POST /api/check`): agenda 1단계를 **항상** 새로 돌린 뒤 heartbeat(강제). 동시에 여러 번 불러도 한 번만 돈다.
 `GET /api/check` → `{running, phase: "agenda"|"judge"|null, daily, started_at, phase_started_at}` — 스케줄된 heartbeat·아침 브리핑도 같은 상태를 낸다.
 `POST /api/heartbeat` 는 호환용으로 남는다(agenda 는 오래됐을 때만 갱신).
@@ -636,7 +647,8 @@ detail `이력 · M/D · …`, `tab: home` / `anchor: card:<slack|mail|jira|gh|c
                          agenda_daily_budget_usd=15 (2단계 일일 예산), agenda_light_model="sonnet" (agenda 전 호출 모델, null = claude_model),
                          history.{enabled=true, display.{slack_hours=24, mail_days=3}, collect.{slack_hours=24}, keep_days.{slack=30, mail=30, jira=90, github=90, calendar=90}} (수집 이력)
                          pet.{enabled=false, messages.{greeting,session,slack,mail,jira,github,sentry,calendar,briefing}=true} (데스크톱 펫 — Ned.app 이 state.json `pet` 미러와 GET /api/feed 로 읽음; 설정 저장마다 state.json 에 비춤)
-  state.json             menu bar / 대시보드가 읽는 단일 뷰 (sessions, attention, last_briefing, daily_failed_at, quiet, persona·notifications·pet 미러 …)
+                         responsibilities=[] (맡긴 일 ≤5: {id, title≤60, goal≤300, sources?, keywords?≤10, until?, enabled} — 아래 "맡긴 일")
+  state.json             menu bar / 대시보드가 읽는 단일 뷰 (sessions, attention, last_briefing, daily_failed_at, quiet, persona·notifications·pet 미러, responsibilities 평가 …)
   cursor.json            heartbeat 가 처리한 마지막 이벤트 ts
   onboarding.json        시작하기 창 닫음 {dismissed_at} (POST /api/setup/dismiss)
   events/YYYY-MM-DD.jsonl  훅(packages/hook/ned-hook.sh)이 append 하는 이벤트. 로컬 날짜 기준

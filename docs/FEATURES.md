@@ -10,6 +10,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - **인박스**: 우선·기타·기록(브리핑) 3탭 + "장비실"(세션 상태).
 - **타임라인**: 이벤트·브리핑 시간순
 - **순찰/브리핑**: "지금 점검"(r) = 소스 갱신 → 판단 → 알림. 자동 순찰 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑 `briefing_time`(실패 시 재시도).
+- **맡긴 일**(`responsibilities`, ≤5, 설정 → 맡긴 일): 책임마다 순찰이 순조·주의·막힘 + 한 줄 평가 → 홈 위 띠. 막혀서 내 몫이면 할 일에도.
 - **야간·유휴 감속**: 조용한 시간·유휴(`idle_schedule`)엔 자동 실행 감속·정지(`quiet_schedule.mode` normal/slow/pause), 수동은 즉시.
 - **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기 확인 카드, `actions.chat_session_create` 면 새 세션; 정리는 노트로), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글.
 - **답장 초안 ✎**: 초안 3개 → 복사/열기/보내기(Slack·메일·Jira 는 미답 질문별 1:1 답). 쓰기는 켠 것만(`actions.*` — gmail_draft·session_send 기본 켬, Jira·GitHub·캘린더는 ⋯). **세션에 답하기**: 대기 세션 행·펫 말풍선의 빠른 답(`dashboard.session_quick_replies`)·한 줄 입력 → Orca 터미널.
@@ -133,6 +134,12 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 무변경 건너뛰기(`heartbeat_skip_unchanged`, 기본 켬): 지난번 판단한 순찰 뒤로 소스 목록(서명)·2시간 안 일정·팔로우 스레드의 새 답글·세션 알림(응답 완료/오류/입력 대기)이 하나도 안 바뀌었으면 자동 순찰은 Claude 를 부르지 않고 다음 주기로 넘김(로그 `heartbeat: skipped — unchanged`). Sentry 가 켜져 있으면 3시간마다 한 번은 실제로 돔. 아침 브리핑·지금 점검·`/api/heartbeat` 는 늘 실행.
 - 언제: 방금 들어온 것까지 반영해 판단받고 싶을 때 "지금 점검".
 - 버튼·키·설정: 헤더 "지금 점검"(r, 데이터 갱신 중 → 판단 중, 1~2분), "아침 브리핑". 설정 → 순찰 주기. 하루 상한(`agenda_daily_budget_usd`) 도달 시 자동 실행만 멈춤.
+
+### 맡긴 일 — 책임 단위로 순찰
+- 보여 주는 것: 홈 인사 줄 아래 얇은 **"맡긴 일" 띠** — 켜 둔 책임마다 상태 점(초록 순조 `on_track` · 주황 주의 `watch` · 빨강 테두리 막힘 `blocked`, 회색 = 아직 평가 전) · 제목 · 순찰의 한 줄 평가(페르소나 말투) · 근거 링크(↗, 최대 3개 — 업무 목록에 있던 링크만, 앱 딥링크 규칙 그대로) · 평가 시각. 언제까지(`until`)가 지난 책임은 흐리게 "끝남". 켜 둔 책임이 없으면 띠가 없다(그리드 패널 아님).
+- 데이터: 원본은 `config.yaml` `responsibilities`(최대 5개) — 항목마다 `responsibilities.title`(≤60자) · `responsibilities.goal`(챙길 것, ≤300자) · `responsibilities.sources`(볼 곳 slack/mail/jira/github/calendar/sessions, 생략 = 전부) · `responsibilities.keywords`(≤10, 업무 목록 매칭 힌트) · `responsibilities.until`(YYYY-MM-DD, 그날까지) · `responsibilities.enabled` · id(자동). 순찰(heartbeat)이 켜진·안 끝난 책임을 프롬프트의 "맡긴 일" 절로 받아 같은 호출 안에서 평가(Claude 를 따로 부르지 않음 — 책임이 없으면 프롬프트·비용이 전과 같음). 결과는 `state.json` `responsibilities.<id> = {status, note, urls, updated_at}`(`GET /api/state`) — 이상 무(NED_OK)여도 저장, 답에서 빠진 책임은 이전 평가 유지, 모르는 id·잘못된 상태·업무 목록에 없는 링크는 버림. 막혀서 사용자가 움직여야 하면 기존 할 일(액션 아이템)에도 `[책임 제목] …` 으로 올라감 — 새 알림 종류는 없음. 책임을 추가·수정하면 무변경 건너뛰기(`heartbeat_skip_unchanged`)도 다음 순찰을 돌린다.
+- 언제: "이번 주 0.5 릴리스 막히는 것 챙기기", "고객 A 문의 후속" 처럼 소스를 가로지르는 일을 Ned 에게 맡길 때. 대화창에서 책임을 만드는 기능은 없음 — 설정에서.
+- 버튼·키·설정: 설정 → 맡긴 일 — 목록, "＋ 맡긴 일 추가"(`c-resp-add`, 5개면 비활성), 행마다 켜기 · 제목 · 챙길 것 · 볼 곳 체크(다 켜거나 다 끄면 전부) · 키워드(쉼표) · 언제까지 · 삭제. 저장은 하단 "저장"(`PUT /api/config`, 제목 없는 행이 있으면 저장 안 함).
 
 ### 수집 이력 · 수집/표시 구간
 - 보여 주는 것: 데몬이 소스 목록을 가져올 때마다 항목을 `~/.ned/history/<소스>.json` 에 key 기준으로 기록(같은 항목은 갱신) — Slack(permalink)·메일(스레드 id)·Jira(이슈 키)·GitHub(PR url)·캘린더(이벤트 id). 항목마다 처음 본 때·마지막 본 때와 상태(Slack 답함·해제 이모지·답 필요, 메일 안 읽음·행동 필요, Jira/GitHub 목록에 있음 `open` — 빠지면 false·다시 보이면 true, 캘린더 RSVP).
@@ -279,9 +286,10 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
   - 펫에서: 클릭 = 대시보드 열기, 말풍선 클릭 = 그 항목 열기(링크 열기 설정대로 앱 딥링크 또는 웹, 링크 없으면 대시보드), 드래그 = 이동(위치는 앱이 `desktopPetOrigin` 으로 기억, 화면 밖이면 기본 위치로), 우클릭 = 대시보드 열기 · 펫 설정…(이 묶음으로) · 숨기기(`pet.enabled` 를 끄고 저장). 앱에 남는 펫 상태는 위치와 본 메시지 키뿐.
 
 ### 설정 탭
-상단 바로가기: 외형 · 소스 · 알림 · 순찰 주기 · 수집·보관 · 쓰기 액션 · 아카이브 · Claude · 앱. "시작하기"(위 "시작하기") · "다시 불러오기", 하단 "● 저장 안 된 변경" + "저장".
+상단 바로가기: 외형 · 소스 · 맡긴 일 · 알림 · 순찰 주기 · 수집·보관 · 쓰기 액션 · 아카이브 · Claude · 앱. "시작하기"(위 "시작하기") · "다시 불러오기", 하단 "● 저장 안 된 변경" + "저장".
 - **외형**: 테마 🖥️시스템/☀️라이트/🌙다크 `dashboard.theme`(바로 미리보기, 저장해야 유지) · 홈 카드 배치 ↑/↓·1열/2열 `dashboard.card_order`/`dashboard.card_span` · "홈 배치 잠금" `dashboard.locked` · "팔로업 채널을 별도 카드로" `dashboard.watch_cards` · "배치 초기화" · 링크 열기 "링크를 앱으로 열기" `dashboard.open_links_in_app` + Slack/Figma/Notion 체크(`dashboard.open_links_in_app_by_service.*`, 끄면 흐려짐) · "Slack 팀 ID" `dashboard.slack_team_id` · "Slack 워크스페이스 주소" `dashboard.slack_team_domain`(위 "링크 열기 — 앱 딥링크") · 데스크톱 펫 `pet.enabled` + 말풍선 종류 `pet.messages.*` + 위치 초기화(위 "데스크톱 펫").
 - **소스**: Gmail/Slack/Jira/GitHub/Sentry/캘린더 `sources.*`(끄면 조회·보고 안 함). Slack: 팔로업 채널 `filters.slack.watch_channels` · 트래킹 제외 채널 `filters.slack.exclude_channels`(팔로업보다 우선) · 답 필요 해제 이모지 `filters.slack.ack_reactions` · 한 번에 확인할 이모지 `filters.slack.ack_check_max`(3) · 그룹 멘션 `filters.slack.group_mentions`(유저그룹 ID·핸들). Jira: 제외 프로젝트 `filters.jira.exclude_projects`. 칩 입력: ⏎/쉼표 추가, 빈 입력 Backspace 삭제.
+- **맡긴 일**: 책임 목록(최대 5) `responsibilities` — 추가 · 켜기 · 제목 · 챙길 것 · 볼 곳 · 키워드 · 언제까지 · 삭제(위 "맡긴 일 — 책임 단위로 순찰").
 - **알림**: 알림 켜기 `notifications.enabled` · 소스별 `notifications.kinds.*` · 아침 브리핑 알림 `notifications.briefing` · 소리 `notifications.sound` · 묶음 기준 `notifications.summary_threshold`(기본 3) · 조용한 시간 `quiet_hours`(기본 23:00~08:00) · 그 시간엔 보내지 않음/소리 없이 `notifications.quiet_delivery`.
 - **순찰 주기**: heartbeat 간격 `heartbeat_minutes`(10) · 신호 조회 최소 간격 `signal_check_minutes`(60) · "바뀐 게 없으면 순찰 건너뛰기" `heartbeat_skip_unchanged`(켬) · 아침 브리핑 시각 `briefing_time`(09:00) · 홈 자동 갱신 기본 주기 `agenda_refresh_minutes`(60) · 소스별 주기 Slack/메일/캘린더/Jira/GitHub `agenda_source_minutes.*`(비우면 기본) · 조용한 시간 동작 `quiet_schedule.*` · 유휴 시 동작 `idle_schedule.*`(위 "야간 모드 · 유휴 모드").
 - **쓰기 액션**: 기본 말투 `reply_tone` · 소스별 그룹 토글 `actions.*`(위 "쓰기 액션") · 답장 말투 `reply_tone_by_source.*` · 세션 빠른 답 `dashboard.session_quick_replies` · 오늘 한 액션.
@@ -316,6 +324,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `filters.slack.ack_check_max` | 3 (1~8) | 소스 → Slack → 한 번에 확인할 이모지 |
 | `filters.slack.group_mentions` | [] (최대 8) | 소스 → Slack → 그룹 멘션 |
 | `filters.jira.exclude_projects` | [] | 소스 → Jira → 제외 프로젝트 |
+| `responsibilities` (항목: `id` · `title` · `goal` · `sources` · `keywords` · `until` · `enabled`) | [] (최대 5) | 맡긴 일 |
 | `notifications.enabled` · `notifications.briefing` · `notifications.sound` · `notifications.summary_threshold` · `notifications.quiet_delivery` | true · true · true · 3 · skip | 알림 |
 | `notifications.kinds.session` · `notifications.kinds.email` · `notifications.kinds.slack` · `notifications.kinds.jira` · `notifications.kinds.github` · `notifications.kinds.sentry` · `notifications.kinds.calendar` | 전부 true | 알림 → 소스별 |
 | `actions.slack_send` · `actions.gmail_draft` · `actions.gmail_send` · `actions.gmail_mark_read` · `actions.session_send` · `actions.jira_comment` · `actions.jira_transition` · `actions.github_review` · `actions.calendar_rsvp` · `actions.calendar_create` · `actions.chat_write` · `actions.chat_session_create` | gmail_draft·session_send 만 true | 쓰기 액션 → 허용할 동작 |
@@ -362,6 +371,8 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `c-ackmax` | 소스 → Slack → 한 번에 확인할 이모지 | `filters.slack.ack_check_max` |
 | `x-group-in` | 소스 → Slack → 그룹 멘션 | `filters.slack.group_mentions` |
 | `x-jira-in` | 소스 → Jira → 제외 프로젝트 | `filters.jira.exclude_projects` |
+| `c-resp-add` | 맡긴 일 → ＋ 맡긴 일 추가 (`settings-responsibilities.js` 가 그림) | `responsibilities` |
+| 행마다 `data-rf` | 맡긴 일 → 켜기 · 제목 · 챙길 것 · 볼 곳 · 키워드 · 언제까지 | `responsibilities.enabled` · `responsibilities.title` · `responsibilities.goal` · `responsibilities.sources` · `responsibilities.keywords` · `responsibilities.until` |
 | `n-on` | 알림 → 알림 켜기 | `notifications.enabled` |
 | `n-kinds` | 알림 → 소스별 | `notifications.kinds.*` |
 | `n-brief` | 알림 → 아침 브리핑 알림 | `notifications.briefing` |

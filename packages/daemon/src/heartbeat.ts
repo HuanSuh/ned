@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { archiveTouch } from "./archive.js";
 import { agendaBusy, readAgenda, refreshAgenda, type Agenda } from "./agenda.js";
 import { extractJson, llmDisabled, noLlmResult, runClaude, type ClaudeRunOptions } from "./claude.js";
-import { inQuietHours, watchChannels, type NedConfig, type NotifyKind } from "./config.js";
+import { RESP_SOURCES, activeResponsibilities, inQuietHours, watchChannels, type NedConfig, type NotifyKind, type RespSource, type Responsibility } from "./config.js";
 import { personaPrompt } from "./persona.js";
 import { readRecentEvents, readUnprocessedEvents, type NedEvent } from "./events.js";
 import { notify } from "./notify.js";
@@ -12,7 +12,7 @@ import { BRIEFINGS_DIR, DISMISSED_PATH, SENT_LOG, localDay, log, readJson, write
 import { reduceSessions } from "./sessions.js";
 import { annotateChatOrigin } from "./session-create.js";
 import { THREAD_FOLLOW_HOURS, hasNewSinceMe, threadActivity, threadKeyOf } from "./slack-threads.js";
-import { briefingOk, readState, writeState, type AttentionItem, type Briefing, type BriefingSection } from "./state.js";
+import { RESP_STATUSES, briefingOk, readState, writeState, type AttentionItem, type Briefing, type BriefingSection, type RespStatus } from "./state.js";
 
 type State = ReturnType<typeof readState>;
 
@@ -40,6 +40,8 @@ interface LlmBriefing {
   updates?: BriefingSection[];
   fyi?: BriefingSection[];
   sessions?: BriefingSection[];
+  /** 맡긴 일 ratings — only asked for when an active responsibility exists (applyResponsibilityReport cleans it). */
+  responsibilities?: unknown;
 }
 
 export function sentKeys(): Set<string> {
@@ -95,7 +97,9 @@ function soonEvents(a: Agenda, now: number) {
 export function heartbeatWatchKey(cfg: NedConfig, a: Agenda = readAgenda(), now = Date.now()): string {
   const cal = cfg.sources.calendar ? soonEvents(a, now).map((e) => e.id).sort() : [];
   const th = cfg.sources.slack ? threadAttention(a, sentKeys(), now).keys.sort() : [];
-  return JSON.stringify({ cal, th });
+  // 맡긴 일 added / edited / ended → judge again even if the lists didn't move. Absent when none (key as before).
+  const resp = activeResponsibilities(cfg, new Date(now));
+  return JSON.stringify(resp.length ? { cal, th, resp } : { cal, th });
 }
 
 function summarizeEvents(events: NedEvent[]): string {
@@ -251,14 +255,89 @@ function filtersLine(cfg: NedConfig): string {
   return parts.join("\n") || "(없음)";
 }
 
+// ---------- 맡긴 일 (config.responsibilities → prompt section, answer → state.json) ----------
+
+const RESP_SOURCE_KO: Record<RespSource, string> = { slack: "Slack", mail: "메일", jira: "Jira", github: "GitHub", calendar: "캘린더", sessions: "세션" };
+/** Responsibility source → the config.sources switch that feeds it (sessions: always there). */
+const RESP_SOURCE_ON: Record<RespSource, (cfg: NedConfig) => boolean> = {
+  slack: (c) => c.sources.slack, mail: (c) => c.sources.gmail, jira: (c) => c.sources.jira, github: (c) => c.sources.github, calendar: (c) => c.sources.calendar, sessions: () => true,
+};
+const RESP_STATUS_KO: Record<RespStatus, string> = { on_track: "on_track", watch: "watch", blocked: "blocked" };
+
+/** {{RESPONSIBILITIES}}: one block per active responsibility (id, title, until, goal, where to look, keywords, last rating). */
+export function responsibilitiesPrompt(cfg: NedConfig, list: Responsibility[], prev: State["responsibilities"] = {}, now = Date.now()): string {
+  return list
+    .map((r) => {
+      const want = r.sources?.length ? r.sources : [...RESP_SOURCES];
+      const on = want.filter((s) => RESP_SOURCE_ON[s](cfg));
+      const lines = [`- id \`${r.id}\` · **${r.title}**${r.until ? ` (~${r.until}까지)` : ""}`];
+      lines.push(`  - 챙길 것: ${r.goal || "(설명 없음 — 제목으로 판단)"}`);
+      lines.push(`  - 볼 곳: ${on.length ? on.map((s) => RESP_SOURCE_KO[s]).join(", ") : "(켜진 소스 없음 — 세션·이벤트만)"}`);
+      if (r.keywords?.length) lines.push(`  - 키워드: ${r.keywords.join(", ")}`);
+      const p = prev?.[r.id];
+      if (p) lines.push(`  - 지난 평가: ${RESP_STATUS_KO[p.status]} — ${clip(p.note, 160)} (${Math.max(0, Math.round((now - p.updated_at) / 60_000))}분 전)`);
+      return lines.join("\n");
+    })
+    .join("\n");
+}
+
+/** Every http(s) link in `text` (the 업무 목록 digest): what the model was shown, so the only links a rating may cite. */
+export function promptUrls(text: string): Set<string> {
+  return new Set([...text.matchAll(/https?:\/\/[^\s<>"'`)\]]+/g)].map((m) => m[0].replace(/[.,;:]+$/, "")));
+}
+
+/**
+ * The model's `responsibilities` answer over the previous state: entries for an unknown / inactive id, a bad status or a
+ * repeated id are dropped; note → one line ≤ 300; urls → only ones in `allowed` (exact, else case-insensitive → the
+ * allowed spelling), deduped, ≤ 3. Responsibilities missing from the answer keep their previous rating (and updated_at);
+ * ratings for ids no longer in config are dropped (`known`).
+ */
+export function applyResponsibilityReport(
+  prev: State["responsibilities"],
+  report: unknown,
+  active: readonly Responsibility[],
+  allowed: ReadonlySet<string>,
+  now: number,
+  known: readonly string[] = active.map((r) => r.id),
+): NonNullable<State["responsibilities"]> {
+  const keep = new Set(known);
+  const out: NonNullable<State["responsibilities"]> = Object.fromEntries(Object.entries(prev ?? {}).filter(([id]) => keep.has(id)));
+  const ids = new Set(active.map((r) => r.id));
+  const lower = new Map([...allowed].map((u) => [u.toLowerCase(), u]));
+  const seen = new Set<string>();
+  for (const x of Array.isArray(report) ? report : []) {
+    if (!x || typeof x !== "object") continue;
+    const { id, status, note, urls } = x as Record<string, unknown>;
+    if (typeof id !== "string" || !ids.has(id) || seen.has(id)) continue;
+    if (!RESP_STATUSES.includes(status as RespStatus)) continue;
+    seen.add(id);
+    const links: string[] = [];
+    for (const u of Array.isArray(urls) ? urls : []) {
+      if (typeof u !== "string") continue;
+      const t = u.trim();
+      const hit = allowed.has(t) ? t : lower.get(t.toLowerCase());
+      if (hit && !links.includes(hit)) links.push(hit);
+      if (links.length >= 3) break;
+    }
+    out[id] = { status: status as RespStatus, note: clip(typeof note === "string" ? note : "", 300), urls: links, updated_at: now };
+  }
+  return out;
+}
+
+/** `{{#RESP}}…{{/RESP}}` blocks: kept (markers removed) when `on`, else cut out whole — the template then reads as before. */
+const respBlocks = (template: string, on: boolean) => template.replace(/\{\{#RESP\}\}([\s\S]*?)\{\{\/RESP\}\}/g, (_m, inner: string) => (on ? inner : ""));
+
 /** Render briefing.md / heartbeat.md with live inputs. Pure apart from reading the template, agenda.json and the sent log. */
 export function buildHeartbeatPrompt(cfg: NedConfig, daily: boolean, state: State, events: NedEvent[], agenda: Agenda = readAgenda()): string {
-  const template = fs.readFileSync(path.join(PROMPTS_DIR, daily ? "briefing.md" : "heartbeat.md"), "utf8");
+  const resp = activeResponsibilities(cfg);
+  // No active 맡긴 일 → the blocks vanish and the prompt is exactly what it was before the feature (same cost).
+  const template = respBlocks(fs.readFileSync(path.join(PROMPTS_DIR, daily ? "briefing.md" : "heartbeat.md"), "utf8"), resp.length > 0);
   const sent = sentKeys();
   const workers = new Set(state.sessions.filter(isWorker).map((s) => s.id));
   const sessions = state.sessions.filter((s) => !workers.has(s.id));
   // Function replacers: inputs may contain "$&"-style sequences that a string replacement would expand.
   return template
+    .replace("{{RESPONSIBILITIES}}", () => responsibilitiesPrompt(cfg, resp, state.responsibilities))
     .replace("{{NOW}}", () => new Date().toLocaleString("ko-KR"))
     .replace("{{SOURCES}}", () => Object.entries(cfg.sources).filter(([, v]) => v).map(([k]) => k).join(", "))
     .replace("{{PERSONA}}", () => personaPrompt(cfg.persona))
@@ -348,12 +427,14 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
   const t0 = Date.now();
   let res;
   let refreshed = "";
+  let agendaLinks = new Set<string>(); // links in the 업무 목록 the model saw — the only ones a 맡긴 일 rating may cite
   try {
     const ag = await ensureAgenda(cfg, opts.agenda ?? "stale", !!opts.daily);
     refreshed = ag.refreshed;
     setPhase("judge", !!opts.daily);
     // State again: the agenda wait may have taken a minute and sessions moved on.
     const prompt = buildHeartbeatPrompt(cfg, !!opts.daily, readState(), events, ag.agenda);
+    if (activeResponsibilities(cfg).length) agendaLinks = promptUrls(agendaDigest(cfg, ag.agenda, { daily: !!opts.daily, sent: sentKeys() }));
     if (llmDisabled()) {
       log(`heartbeat: NED_NO_LLM=1 — skipping claude, recording ${process.env.NED_NO_LLM_RESULT ? "NED_NO_LLM_RESULT" : "NED_OK"} (agenda ${refreshed}, prompt ${prompt.length} chars)`);
       const delay = Number(process.env.NED_NO_LLM_DELAY_MS) || 0; // lets tests see the "judge" step
@@ -419,6 +500,11 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
   next.last_heartbeat_at = now;
   next.last_briefing = { id, ts: now, type: briefing.type, status: briefing.status, headline: briefing.headline, ok: briefing.ok };
   if (briefing.type === "daily" && briefing.ok) next.daily_failed_at = null; // a good morning briefing clears the 실패 line
+  // 맡긴 일: stored whatever the status (NED_OK included) — silence applies to banners / action_items only.
+  const active = activeResponsibilities(cfg, new Date(now));
+  if (briefing.ok && parsed && active.length && parsed.responsibilities !== undefined) {
+    next.responsibilities = applyResponsibilityReport(next.responsibilities, parsed.responsibilities, active, agendaLinks, now, cfg.responsibilities.map((r) => r.id));
+  }
   if (briefing.status === "UPDATE") {
     const items: AttentionItem[] = briefing.action_items.map((a, i) => ({
       id: `${id}:${i}`,
