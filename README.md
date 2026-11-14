@@ -9,7 +9,6 @@ Ned — the guy in the monitor. Claude Code 세션 이벤트와 업무 신호(Sl
 ## 설치 (Claude Code 플러그인)
 
 필요한 것: macOS 14+, node 22+, pnpm(`npm i -g pnpm`), Xcode 명령줄 도구(`xcode-select --install`), claude CLI.
-레포가 비공개인 동안은 GitHub 자격 증명(`gh auth login`)도 필요하다 — 공개되면 불필요.
 
 Claude Code 에서:
 
@@ -72,6 +71,7 @@ bash scripts/uninstall.sh
 개발: `pnpm test`, `pnpm -s build`. 작업 규칙은 [`CLAUDE.md`](CLAUDE.md).
 
 라이선스: [MIT](LICENSE). [Privacy](#privacy)
+보안 취약점 제보: [`SECURITY.md`](SECURITY.md) (GitHub "Report a vulnerability")
 
 ## Privacy
 
