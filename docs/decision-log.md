@@ -87,3 +87,13 @@
 | (리뷰) 권한 프롬프트 | permission_prompt·elicitation_dialog 대기 세션엔 답하기 UI 없이 "터미널에서 직접 선택", 데몬도 409 | Claude Code 문서(keybindings Confirmation: Enter = confirm:yes, Esc = confirm:no, ↑↓ 이동; permissions: 선택지 Yes / Yes, don't ask again / (가끔) switch to auto mode / No)에 숫자 키 선택이 없고 선택지 순서도 바뀐다 → "1"·"2" 버튼은 보류. 데몬 거절은 초안 팝업·대화창 경로까지 막으려고. |
 | (리뷰) 펫 포커스 반환 | 열 때 앞 앱 기록 → 닫을 때 Ned 가 아직 키보드를 쥐고 있으면 그 앱 activate(폴백으로 Ned 를 활성화했으면 yieldActivation 먼저). 다른 앱을 눌러 key 를 잃으면 입력을 닫고 글 보존, 재활성화 없음 | resignKey() 는 알림 메서드라 key 를 넘기지 않는다. 사용자가 고른 앱을 다시 빼앗지 않기. |
 | (리뷰) 워커 세션 | 펫은 워커 세션에 답하기 없음, 대시보드 장비실은 있음 | 펫 상태 색이 워커를 빼는 규칙과 맞춤. 대시보드에선 워커도 보이는 행이라 거기서 답하는 건 허용. |
+
+## 2026-11-14 — WU-05 맡긴 일 (상세: 로컬 `.omc/wu/WU-05/decisions.md`)
+
+| 질문 | 결정 | 근거 |
+| --- | --- | --- |
+| 원본 | `config.yaml responsibilities`(≤5) | 설정 원본 하나. |
+| 평가 방식 | 기존 순찰·브리핑 출력에 선택 필드 `responsibilities`, 책임이 없으면 프롬프트 바이트 동일 | 별도 LLM 호출 없이 비용 유지. |
+| 알림 | 새 kind 없음, 막힘은 `action_items` 로 | 펫·알림·피드 kind 목록 유지. |
+| 표시 | 홈 위 얇은 띠(책임 있을 때만) | 그리드 레이아웃 마이그레이션 회피. |
+| (리뷰) 근거 없을 때 | 순조가 아니라 지난 상태 유지(id 생략), 이미 알린 근거는 `[이미 알림]` 으로 남김(목록당 5, 새 항목 자리 안 먹음) | 막힘이 다음 순찰에 순조로 덮이던 문제. |
