@@ -108,7 +108,9 @@ id·제목·until·챙길 것·켜진 볼 곳·키워드·지난 평가)과 출�
 답에 없는 책임은 이전 평가·`updated_at` 유지 → `state.json` `responsibilities.<id> = {status, note, urls, updated_at}`(updated_at = 답을 받은 시각).
 활성 책임 판정은 `renderHeartbeatPrompt` 에서 한 번 하고 저장도 같은 목록으로. config 에서 지운 id 의 평가는 매 회차(답에 필드가 없어도, 책임이 0개여도) 정리(`pruneResponsibilityRatings`).
 활성 책임이 있으면 heartbeat 다이제스트가 `sent.log` 에 있는 항목을 빼지 않고 url 앞에 `[이미 알림]` 을 붙여 남긴다(`markSent`) — blocked 를
-action_items 로 올린 뒤에도 근거가 다음 순찰에 보이게. 프롬프트는 그 항목을 action_items 등에 다시 넣지 않게 하고(데몬의 sent 필터도 그대로),
+action_items 로 올린 뒤에도 근거가 다음 순찰에 보이게. 상한이 있는 목록(Jira 20 · GitHub 15 · Slack 그 밖 8 · 응답 안 한 초대 8)은
+안 알린 항목으로 상한을 먼저 채우고 `[이미 알림]` 항목은 그 뒤에 목록당 `SENT_EVIDENCE_MAX`(5)까지 — 근거가 새 항목 자리를 먹지 않는다.
+모델이 url 에 `[이미 알림] ` 을 붙인 채 복사해도 `stripSentTag` 가 벗긴다(briefing 항목 url·`keyOf` 중복 키·평가 urls). 프롬프트는 그 항목을 action_items 등에 다시 넣지 않게 하고(데몬의 sent 필터도 그대로),
 새 근거가 없으면 on_track 으로 바꾸지 말고 그 id 를 생략(= 지난 상태 유지)하게 한다. 아침 브리핑(`briefing.md`)도 같은 `{{#RESP}}` 절로 평가를 갱신한다.
 책임이 없을 때 두 템플릿은 블록을 뺀 결과가 기능 이전 파일과 바이트가 같다(테스트가 sha256 으로 고정).
 `status: NED_OK` 여도 저장(침묵 규칙은 알림·action_items 만), 답이 JSON 이 아니면 손대지 않음. blocked 이고 사용자가 움직여야 하면 프롬프트가

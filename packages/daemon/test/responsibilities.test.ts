@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import YAML from "yaml";
 import { readAgenda, type Agenda } from "../src/agenda.js";
 import { DEFAULT_CONFIG, activeResponsibilities, loadConfig, normalizeResponsibilities, normalizeUntil, responsibilitiesError, type NedConfig, type Responsibility } from "../src/config.js";
-import { applyResponsibilityReport, buildHeartbeatPrompt, heartbeat, heartbeatWatchKey, markSent, pruneResponsibilityRatings, renderHeartbeatPrompt, respBlocks, sentKeys } from "../src/heartbeat.js";
+import { applyResponsibilityReport, buildHeartbeatPrompt, heartbeat, heartbeatWatchKey, keyOf, markSent, pruneResponsibilityRatings, renderHeartbeatPrompt, respBlocks, sentKeys } from "../src/heartbeat.js";
 import { AGENDA_PATH, CONFIG_PATH, SENT_LOG, STATE_PATH, localDay, writeJsonAtomic } from "../src/paths.js";
 import { mergeConfigPatch } from "../src/server.js";
 import { readState } from "../src/state.js";
@@ -147,6 +147,31 @@ describe("heartbeat prompt — 맡긴 일 section", () => {
     expect(r.active.map((x) => x.id)).toEqual(["rel-05-ab12"]);
   });
 
+  it("capped lists: not-yet-sent entries fill the cap first, [이미 알림] evidence comes after (≤ 5)", () => {
+    const issue = (i: number) => ({ key: `J-${i}`, title: `이슈 ${i}`, status: "To Do", priority: null, due: null, updated: "어제", url: `https://acme.atlassian.net/browse/J-${i}` });
+    const a = { ...AGENDA, github: [], jira: Array.from({ length: 21 }, (_, i) => issue(i + 1)) } as unknown as Agenda;
+    markSent(Array.from({ length: 20 }, (_, i) => `https://acme.atlassian.net/browse/j-${i + 1}`));
+    const on = renderHeartbeatPrompt(cfgWith([R()]), false, emptyState(), [], a);
+    expect(on.prompt).toContain("- J-21 [To Do] 이슈 21 · 갱신 어제 https://acme.atlassian.net/browse/J-21");
+    const tagged = on.prompt.split("\n").filter((l) => l.includes("[이미 알림] https://acme.atlassian.net/browse/J-"));
+    expect(tagged).toHaveLength(5);
+    expect(on.links.has("https://acme.atlassian.net/browse/J-21")).toBe(true);
+    // off: as before — sent dropped, the 21st shown, the rest counted
+    const off = buildHeartbeatPrompt(cfgWith([]), false, emptyState(), [], a);
+    expect(off).toContain("- J-21 [To Do] 이슈 21 · 갱신 어제 https://acme.atlassian.net/browse/J-21");
+    expect(off).not.toContain("이미 알림]");
+    expect(off).toContain("(이미 알린 항목 20건은 뺐다)");
+  });
+
+  it("no responsibility → digest lines are the pre-feature text (golden)", () => {
+    const a = { ...AGENDA, jira: [{ ...(AGENDA.jira[0] as object), updated: "어제" }] } as unknown as Agenda;
+    markSent(["https://github.com/acme/app/pull/42"]);
+    const lines = buildHeartbeatPrompt(cfgWith([]), false, emptyState(), [], a).split("\n");
+    expect(lines).toContain("#### Jira (나에게 할당, 열린 것)");
+    expect(lines).toContain("- REL-9 [In Progress/High] 0.5 빌드 실패 · 갱신 어제 https://acme.atlassian.net/browse/REL-9");
+    expect(lines.slice(lines.indexOf("#### GitHub PR"), lines.indexOf("#### GitHub PR") + 4)).toEqual(["#### GitHub PR", "(없음)", "", "(이미 알린 항목 1건은 뺐다)"]);
+  });
+
   it("links come from the entries' url fields (a url with parentheses stays whole)", () => {
     const odd = "https://wiki.example/Foo_(bar)";
     const a = { ...AGENDA, github: [{ ...(AGENDA.github[0] as object), url: odd }] } as unknown as Agenda;
@@ -212,6 +237,13 @@ describe("applyResponsibilityReport", () => {
 
   it("an inactive (ended / off) id is not rated even if the model answers it", () => {
     expect(applyResponsibilityReport({}, [{ id: "c", status: "watch", note: "n" }], active, allowed, 5, ["a", "b", "c"])).toEqual({});
+  });
+
+  it("a url copied with its [이미 알림] tag is read as the bare link (rating urls and the dedupe key)", () => {
+    const out = applyResponsibilityReport({}, [{ id: "a", status: "blocked", note: "n", urls: ["[이미 알림] https://acme.atlassian.net/browse/REL-9"] }], active, allowed, 1);
+    expect(out.a.urls).toEqual(["https://acme.atlassian.net/browse/REL-9"]);
+    expect(keyOf({ title: "t", url: "[이미 알림]  HTTPS://X/Y " })).toBe("https://x/y");
+    expect(keyOf({ title: "t", url: "https://x/y" })).toBe("https://x/y");
   });
 
   it("pruneResponsibilityRatings keeps only ids still in config", () => {

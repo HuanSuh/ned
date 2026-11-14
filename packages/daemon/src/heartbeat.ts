@@ -56,7 +56,14 @@ export function markSent(keys: string[]): void {
   if (keys.length) fs.appendFileSync(SENT_LOG, keys.join("\n") + "\n");
 }
 
-export const keyOf = (s: BriefingSection) => (s.url || s.title || "").trim().toLowerCase();
+/** The digest's "[이미 알림] " tag in front of a url (agendaDigest markSent) — a model may copy it along with the link. */
+export const SENT_TAG = "[이미 알림]";
+/** Already-sent entries kept as 맡긴 일 evidence, per capped list (after the not-yet-sent ones). */
+export const SENT_EVIDENCE_MAX = 5;
+/** A url without a copied-in "[이미 알림]" tag (and surrounding spaces). */
+export const stripSentTag = (url: string): string => url.replace(/^\s*\[이미 알림\]\s*/, "").trim();
+
+export const keyOf = (s: BriefingSection) => (s.url ? stripSentTag(s.url) : s.title || "").trim().toLowerCase();
 
 /**
  * Followed Slack threads where someone replied after my last message → action items, once per (thread, last_reply_ts):
@@ -180,9 +187,18 @@ export function agendaDigest(cfg: NedConfig, a: Agenda, opts: { daily: boolean; 
     return false;
   };
   /** An entry's url as printed (+ the "[이미 알림]" tag under markSent), recorded in `links`. */
+  /**
+   * A capped list: up to `n` not-yet-sent entries first, then (markSent only) up to SENT_EVIDENCE_MAX already-sent ones,
+   * so 맡긴 일 evidence never takes a new entry's slot. markSent off → exactly as before (drop sent, then cut).
+   */
+  const capped = <T extends { url?: string }>(xs: readonly T[], n: number): T[] => {
+    const kept = xs.filter((x) => keep(x.url));
+    if (!opts.markSent) return kept.slice(0, n);
+    return [...kept.filter((x) => !isSent(x.url)).slice(0, n), ...kept.filter((x) => isSent(x.url)).slice(0, SENT_EVIDENCE_MAX)];
+  };
   const u = (url: string | undefined) => {
     if (url && opts.links) opts.links.add(url.trim());
-    return `${opts.markSent && isSent(url) ? "[이미 알림] " : ""}${url}`;
+    return `${opts.markSent && isSent(url) ? `${SENT_TAG} ` : ""}${url}`;
   };
   const out: string[] = [];
   if (!a.updated_at) out.push("(agenda 아직 없음 — 세션·Sentry 만으로 판단)");
@@ -202,7 +218,8 @@ export function agendaDigest(cfg: NedConfig, a: Agenda, opts: { daily: boolean; 
     for (const e of soon) out.push(`- ${when(e.start)}–${hm(Date.parse(e.end))} ${e.title}${e.location ? ` @${clip(e.location, 40)}` : ""}${e.meet_url ? ` meet ${e.meet_url}` : ""} · 참석 ${e.attendees}명${e.rsvp === "needsAction" ? " · RSVP 안 함" : ""} ${u(e.url)}`);
     if (rsvp.length) {
       out.push("응답 안 한 초대:");
-      for (const e of rsvp.slice(0, 8)) if (keep(e.url)) out.push(`- ${when(e.start)} ${e.title} ${u(e.url)}`);
+      // off: the old order (cut to 8, then drop sent) so the text stays byte-identical
+      for (const e of opts.markSent ? capped(rsvp, 8) : rsvp.slice(0, 8).filter((x) => keep(x.url))) out.push(`- ${when(e.start)} ${e.title} ${u(e.url)}`);
     }
   }
   if (cfg.sources.slack) {
@@ -215,7 +232,7 @@ export function agendaDigest(cfg: NedConfig, a: Agenda, opts: { daily: boolean; 
       out.push(items.length ? "답 필요:" : "답 필요: (없음)");
       for (const x of items) out.push(`- [${x.reason}] ${x.channel} ${x.from}${x.count && x.count > 1 ? ` (+${x.count - 1})` : ""}: ${clip(x.text, 160)} (${when(x.ts)}) ${u(x.url)}`);
       const seen = new Set(s.items.map((x) => x.url));
-      const rest = s.all.filter((x) => !x.answered && !seen.has(x.url) && keep(x.url)).slice(0, 8);
+      const rest = capped(s.all.filter((x) => !x.answered && !seen.has(x.url)), 8);
       if (rest.length) {
         out.push("그 밖에 답 안 한 멘션·DM:");
         for (const x of rest) out.push(`- [${x.reason}] ${x.channel} ${x.from}: ${clip(x.text, 120)} (${when(x.ts)}) ${u(x.url)}`);
@@ -241,15 +258,15 @@ export function agendaDigest(cfg: NedConfig, a: Agenda, opts: { daily: boolean; 
   }
   if (cfg.sources.jira) {
     out.push("\n#### Jira (나에게 할당, 열린 것)");
-    const js = a.jira.filter((x) => keep(x.url));
+    const js = capped(a.jira, 20);
     if (!js.length) out.push("(없음)");
-    for (const x of js.slice(0, 20)) out.push(`- ${x.key} [${x.status}${x.priority ? `/${x.priority}` : ""}] ${clip(x.title, 100)}${x.due ? ` · 마감 ${x.due}` : ""} · 갱신 ${when(x.updated)} ${u(x.url)}`);
+    for (const x of js) out.push(`- ${x.key} [${x.status}${x.priority ? `/${x.priority}` : ""}] ${clip(x.title, 100)}${x.due ? ` · 마감 ${x.due}` : ""} · 갱신 ${when(x.updated)} ${u(x.url)}`);
   }
   if (cfg.sources.github) {
     out.push("\n#### GitHub PR");
-    const gs = a.github.filter((x) => keep(x.url));
+    const gs = capped(a.github, 15);
     if (!gs.length) out.push("(없음)");
-    for (const x of gs.slice(0, 15)) out.push(`- [${x.reason}] ${x.repo}#${x.number} ${clip(x.title, 100)} · ${x.author} · 갱신 ${when(x.updated)} ${u(x.url)}`);
+    for (const x of gs) out.push(`- [${x.reason}] ${x.repo}#${x.number} ${clip(x.title, 100)} · ${x.author} · 갱신 ${when(x.updated)} ${u(x.url)}`);
   }
   if (skipped) out.push(`\n(이미 알린 항목 ${skipped}건은 뺐다)`);
   return out.join("\n");
@@ -323,7 +340,7 @@ export function applyResponsibilityReport(
     const links: string[] = [];
     for (const u of Array.isArray(urls) ? urls : []) {
       if (typeof u !== "string") continue;
-      const t = u.trim();
+      const t = stripSentTag(u);
       const hit = allowed.has(t) ? t : lower.get(t.toLowerCase());
       if (hit && !links.includes(hit)) links.push(hit);
       if (links.length >= 3) break;
@@ -484,15 +501,17 @@ export async function heartbeat(cfg: NedConfig, opts: HeartbeatOptions = {}): Pr
   const id = new Date().toISOString().replace(/[:.]/g, "-");
 
   const parsed = res.ok ? extractJson<LlmBriefing>(res.text) : null;
+  // A link copied with the digest's "[이미 알림]" tag → the bare link (dedupe keys, attention links).
+  const untag = (xs: BriefingSection[] | undefined) => (xs ?? []).map((x) => (x && typeof x.url === "string" ? { ...x, url: stripSentTag(x.url) } : x));
   const briefing: Briefing = {
     id,
     ts: now,
     type: opts.daily ? "daily" : "heartbeat",
     status: parsed?.status === "UPDATE" ? "UPDATE" : "NED_OK",
     headline: parsed?.headline,
-    action_items: parsed?.action_items ?? [],
-    updates: parsed?.updates ?? [],
-    fyi: parsed?.fyi ?? [],
+    action_items: untag(parsed?.action_items),
+    updates: untag(parsed?.updates),
+    fyi: untag(parsed?.fyi),
     sessions: parsed?.sessions ?? [],
     cost_usd: res.cost_usd,
     raw: res.ok && parsed ? undefined : res.text.slice(0, 4000),
