@@ -9,9 +9,10 @@ import { SENT_ACTIONS_LOG, performSend, readActionLog, type SendRequest } from "
 import { DEFAULT_ACTIONS, DEFAULT_CONFIG, normalizeActions, normalizeInternalDomains, normalizeSendRules, sendRulesError, type NedConfig, type SendRule } from "../src/config.js";
 import { EVENTS_DIR, localDay } from "../src/paths.js";
 import { parseAddress } from "../src/address.js";
+import { sessionCreateRequest } from "../src/session-create.js";
 import { CONFIRM_TTL_MS, _resetSpentTokens, checkConfirmToken, guardSend, issueConfirmToken, needConfirmSummary, spendConfirmToken } from "../src/send-guard.js";
 import { _setSendReviewer, buildReviewPrompt, maskSecrets, parseReview, reviewInput, wantsReview, type SendReviewer } from "../src/send-review.js";
-import { _setSlackDirectory, buildSlackDirectory, isExternal, matchSendRule, sendTargetOf, targetMatches } from "../src/send-rules.js";
+import { _setMailDirectory, _setSlackDirectory, buildMailDirectory, buildSlackDirectory, isExternal, matchSendRule, sendTargetOf, targetMatches } from "../src/send-rules.js";
 
 const ALL_ON = { ...DEFAULT_ACTIONS, slack_send: true, gmail_send: true, jira_comment: true, github_review: true, calendar_create: true, calendar_rsvp: true, session_send: true };
 const cfgWith = (rules: SendRule[], over: Partial<NedConfig["actions"]> = {}): NedConfig => ({ ...DEFAULT_CONFIG, actions: { ...ALL_ON, rules, ...over } });
@@ -30,11 +31,13 @@ beforeEach(() => {
   fs.rmSync(SENT_ACTIONS_LOG, { force: true });
   _setSendReviewer();
   _setSlackDirectory(DIR);
+  _setMailDirectory(() => new Map());
   _resetSpentTokens();
 });
 afterEach(() => {
   _setSendReviewer();
   _setSlackDirectory();
+  _setMailDirectory();
 });
 
 describe("config: actions.rules / internal_domains / review", () => {
@@ -128,7 +131,21 @@ describe("rule matching", () => {
     const rule = cfgWith([{ source: "mail", target: "@partner.io", effect: "block" }]);
     expect(matchSendRule(mail("x"), rule, sendTargetOf(mail("x"), { reply_to: "kim@partner.io" }))?.index).toBe(0);
     expect(matchSendRule(mail("x"), rule, sendTargetOf(mail("x"), { reply_to: "kim@acme.com" }))).toBeNull();
-    expect(matchSendRule(mail("kim@partner.io"), rule)).toBeNull(); // no draft → no recipient → a target rule can't match
+    // no draft, nothing in the agenda → recipient unknown → block / confirm target rules match (fail closed); allow doesn't
+    expect(matchSendRule(mail("kim@partner.io"), rule)?.index).toBe(0);
+    expect(matchSendRule(mail("x"), cfgWith([{ source: "mail", target: "@partner.io", effect: "confirm" }]))?.index).toBe(0);
+    expect(matchSendRule(mail("x"), cfgWith([{ source: "mail", target: "@acme.com", effect: "allow" }]))).toBeNull();
+    // unreadable reply_to counts as unknown too
+    expect(matchSendRule(mail("x"), rule, sendTargetOf(mail("x"), { reply_to: "kim@acme.com%partner.io" }))?.index).toBe(0);
+  });
+
+  it("mail without a draft (Ned Net card: message_id only) → the reply_to Ned's agenda collected for that message", () => {
+    _setMailDirectory(() => buildMailDirectory({ items: [{ id: "t-1", subject: "견적", context: { message_id: "m1", reply_to: "\"김\" <kim@partner.io>" } }, { id: "t-2", context: { message_id: "m2", reply_to: "lee@acme.com" } }] }));
+    expect(sendTargetOf(mail("x")).names).toEqual(["kim@partner.io"]); // mail() carries message_id m1
+    expect(sendTargetOf({ source: "email", mode: "send", text: "hi", ref: { thread_id: "t-2" } }).names).toEqual(["lee@acme.com"]);
+    const rule = cfgWith([{ source: "mail", target: "@partner.io", effect: "block" }]);
+    expect(matchSendRule(mail("x"), rule)?.index).toBe(0);
+    expect(matchSendRule({ source: "email", mode: "send", text: "hi", ref: { message_id: "m2" } }, rule)).toBeNull();
   });
 
   it("targetMatches is linear: a pathological pattern on a long value ends at once", () => {
@@ -179,9 +196,26 @@ describe("rule matching", () => {
     const cal = (att: string[]) => isExternal(sendTargetOf(calendar(att)), "calendar", ["acme.com"]);
     expect(cal(["a@acme.com", "b@corp.acme.com"])).toBe(false);
     expect(cal(["a@acme.com", "b@partner.io"])).toBe(true); // one outsider makes it external
-    expect(cal([])).toBe(true);
+    expect(cal([])).toBe(false); // a private event (no attendees) is not external
     // an external rule therefore holds an unknown-recipient mail
     expect(matchSendRule(mail("x"), cfgWith([{ source: "mail", external: true, effect: "block" }], { internal_domains: ["acme.com"] }))).not.toBeNull();
+  });
+
+  it("calendar: external:true neither blocks a private event (no attendees) nor any RSVP (not judged)", () => {
+    const cfg = cfgWith([{ source: "calendar", external: true, effect: "block", note: "외부 일정" }], { internal_domains: ["acme.com"] });
+    expect(matchSendRule(calendar([]), cfg)).toBeNull();
+    expect(matchSendRule(calendar(["x@partner.io"]), cfg)).not.toBeNull();
+    const rsvp: SendRequest = { source: "calendar", mode: "rsvp", text: "", ref: { event_id: "ev123", response: "accepted" } };
+    expect(isExternal(sendTargetOf(rsvp), "calendar", ["acme.com"])).toBeNull();
+    expect(matchSendRule(rsvp, cfg)).toBeNull();
+    expect(matchSendRule(rsvp, cfgWith([{ source: "calendar", effect: "confirm" }]))).not.toBeNull(); // source-wide rules still apply
+  });
+
+  it("slack DM / group DM: every person Ned saw there is a target name, whatever ref.title says", () => {
+    _setSlackDirectory(() => buildSlackDirectory({ dms: [{ channel: "DM", channel_id: "D0DM", root_from: "이영희" }, { channel: "그룹 DM", channel_id: "G0GRP", root_from: "박", url: "https://acme.slack.com/archives/G0GRP/p1700000000000300", from: "최" }] }));
+    expect(sendTargetOf(slack({ ref: { channel: "D0DM", title: "DM · 아무개" } })).names).toEqual(["d0dm", "이영희"]);
+    expect(sendTargetOf(slack({ ref: { channel: "G0GRP" } })).names.sort()).toEqual(["g0grp", "박", "최"].sort());
+    expect(matchSendRule(slack({ ref: { channel: "D0DM" } }), cfgWith([{ source: "slack", target: "이영희", effect: "block" }]))).not.toBeNull();
   });
 
   it("first match wins (top-down); '*' source; no target = every target; read-only modes never ruled", () => {
@@ -253,6 +287,15 @@ describe("confirm token", () => {
     const c = issueConfirmToken(calendar(["a@acme.com"]), now).token;
     expect(checkConfirmToken(c, calendar(["a@acme.com"]), now)).toBe("ok");
     expect(checkConfirmToken(c, calendar(["a@acme.com", "x@partner.io"]), now)).toBe("mismatch");
+  });
+
+  it("session create: the token is bound to the model and the whole worktree (mode + name), not just the prompt", () => {
+    const input = { repo: "/repos/alpha", worktree: { mode: "new" as const, name: "hotfix-login" }, model: "sonnet" as const, prompt: "고쳐줘" };
+    const { token } = issueConfirmToken(sessionCreateRequest(input));
+    expect(checkConfirmToken(token, sessionCreateRequest(input))).toBe("ok");
+    expect(checkConfirmToken(token, sessionCreateRequest({ ...input, model: "opus" }))).toBe("mismatch");
+    expect(checkConfirmToken(token, sessionCreateRequest({ ...input, worktree: { mode: "existing", name: "hotfix-login" } }))).toBe("mismatch");
+    expect(checkConfirmToken(token, sessionCreateRequest({ ...input, worktree: { mode: "new", name: "x/hotfix-login" } }))).toBe("mismatch");
   });
 
   it("one-time: once a send started with it, the same token is 'spent'", () => {

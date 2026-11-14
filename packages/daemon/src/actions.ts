@@ -58,6 +58,10 @@ export interface ActionRef extends DraftRef {
   /** jira transition */
   transition_id?: string;
   transition_name?: string;
+  /** session create only (never parsed from a body): what the confirm token is bound to besides the prompt. */
+  model?: string;
+  /** session create only: `<new|existing>:<name as given>`. */
+  worktree?: string;
 }
 const ACTION_REF_FIELDS = [...REF_FIELDS, "event_id", "calendar_id", "response", "transition_id", "transition_name"] as const;
 

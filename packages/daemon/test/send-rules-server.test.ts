@@ -208,6 +208,15 @@ describe("POST /api/calendar/events and PUT /api/config", () => {
     expect(second.status).toBe(202);
   });
 
+  it("calendar create: external:true block lets a private event (no attendees) through, holds one with an outsider", async () => {
+    writeConfig({ internal_domains: ["acme.com"], rules: [{ source: "calendar", external: true, effect: "block", note: "외부 일정" }] });
+    const base = { title: "집중 시간", date: "2026-11-21", start_time: "09:00", end_time: "11:00" };
+    expect((await post("/api/calendar/events", base)).status).toBe(202);
+    const out = await post("/api/calendar/events", { ...base, title: "킥오프", attendees: ["x@partner.io"] });
+    expect(out.status).toBe(403);
+    expect(out.data.error).toContain("외부 일정");
+  });
+
   it("PUT /api/config: bad actions.rules → 400; good ones saved normalized", async () => {
     writeConfig({});
     const cur = await (await request("/api/config")).json();

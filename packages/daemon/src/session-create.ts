@@ -489,12 +489,16 @@ export async function runSessionCreate(input: SessionCreateInput, repo: OrcaRepo
 
 export type SessionCreateOutcome = { kind: "refused"; result: SendResult } | { kind: "need_confirm"; need: NeedConfirm } | { kind: "job"; job: SendJob; reused: boolean };
 
-/** The first prompt as a send for 보내기 규칙 (source session, target = the worktree name; never reviewed). */
+/**
+ * The first prompt as a send for 보내기 규칙 (source session, target = the worktree name; never reviewed). The ref also
+ * carries the model and the whole worktree (mode + name as given), so the confirm token is bound to them: changing
+ * either after confirming asks again.
+ */
 export const sessionCreateRequest = (input: SessionCreateInput): SendRequest => ({
   source: "session",
   mode: "create",
   text: input.prompt,
-  ref: { repo: input.repo, title: path.basename(input.worktree.name) },
+  ref: { repo: input.repo, title: path.basename(input.worktree.name), model: input.model, worktree: `${input.worktree.mode}:${input.worktree.name}` },
   ...(input.confirm_token ? { confirm_token: input.confirm_token } : {}),
 });
 

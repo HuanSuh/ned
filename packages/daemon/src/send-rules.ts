@@ -6,14 +6,17 @@
  * - slack: the channel id (permalink / ref.channel / draft meta). A channel name or a person's name counts only when
  *   Ned's own Slack data (agenda: items · all · watch · threads · DMs) ties it to that channel id — so a rule written
  *   with a name may not match a channel Ned has not seen; `block` is safest written with the channel id.
- * - mail: the draft's reply_to (draft meta — the address the reply goes to). No draft / no reply_to → no recipient.
+ * - mail: the draft's reply_to (draft meta — the address the reply goes to); no draft → the reply_to Ned's agenda
+ *   collected for that message_id / thread. Still unknown → a mail `target` rule that blocks / confirms counts as
+ *   matching (fail closed); an allow rule does not.
  * - jira: the project key (ABC of ABC-123) · github: `owner/repo` · calendar `create`: the attendees
  *   (calendar `rsvp` carries no attendees — only source-wide rules apply to it) · session: the worktree name.
  * Target compare: case-insensitive, `*` wildcard only (linear glob, no regex), `#` ignored, `@domain` = any address there.
  *
  * external (mail / calendar only), fail closed: every recipient is parsed as a whole (address.ts — angle brackets,
- * one `@`, IDNA-normalized domain). An unreadable recipient, or no recipient at all, counts as external; one
- * external recipient makes the send external. Empty internal_domains → external rules match nothing. Slack / Jira /
+ * one `@`, IDNA-normalized domain). An unreadable recipient counts as external; one external recipient makes the send
+ * external. No recipient: mail → external (unknown); a calendar event created without attendees → not external;
+ * calendar rsvp → not judged (only source-wide rules apply). Empty internal_domains → external rules match nothing. Slack / Jira /
  * GitHub / sessions have no address: external rules never match them.
  * Read-only or label-only modes (jira `transitions`, mail `mark_read`) are not sends: no rule applies to them.
  */
@@ -34,8 +37,14 @@ export function ruleSourceOf(source: SendRequest["source"]): Exclude<RuleSource,
 export interface SendTarget {
   /** Strings a rule `target` is compared with (lower-case, `#` stripped). */
   names: string[];
-  /** mail / calendar: each recipient as given → its parsed address (null = unreadable). [] = recipients unknown. */
+  /** mail / calendar: each recipient as given → its parsed address (null = unreadable). */
   recipients: { raw: string; addr: string | null }[];
+  /**
+   * What no recipient means for `external`: mail → "unknown" (judged external — fail closed); calendar create with no
+   * attendees → "nobody" (a private event: not external); calendar rsvp → "unjudged" (no attendee data: external rules
+   * don't match). Absent for sources without addresses.
+   */
+  empty?: "unknown" | "nobody" | "unjudged";
   /** One line for people / the review prompt: "#general · 김철수", "a@x.com", "ABC-12", … */
   label: string;
 }
@@ -70,7 +79,7 @@ export function buildSlackDirectory(slack: unknown): Map<string, SlackDirEntry> 
     const o = node as Record<string, unknown>;
     const ch = typeof o.channel === "string" ? o.channel : channel;
     const id = typeof o.channel_id === "string" && /^[A-Z0-9]+$/.test(o.channel_id) ? o.channel_id : typeof o.url === "string" ? SLACK_ID_IN_URL.exec(o.url)?.[1] : undefined;
-    if (id) add(id, ch, typeof o.from === "string" ? o.from : typeof o.root_from === "string" ? o.root_from : undefined);
+    if (id) for (const who of [o.from, o.root_from]) add(id, ch, typeof who === "string" ? who : undefined);
     for (const v of Object.values(o)) if (v && typeof v === "object") walk(v, ch, depth + 1);
   };
   walk(slack, undefined, 0);
@@ -93,6 +102,40 @@ export function _setSlackDirectory(fn?: () => Map<string, SlackDirEntry>): void 
       return new Map();
     }
   });
+}
+
+// ---------------------------------------------------------------- mail: message / thread id → reply_to Ned collected
+/** message_id / thread id → reply_to from the agenda's mail block (objects carrying message_id + reply_to; their item id). */
+export function buildMailDirectory(mail: unknown): Map<string, string> {
+  const dir = new Map<string, string>();
+  const walk = (node: unknown, itemId: string | undefined, depth: number) => {
+    if (!node || typeof node !== "object" || depth > 6) return;
+    if (Array.isArray(node)) {
+      for (const x of node) walk(x, undefined, depth + 1);
+      return;
+    }
+    const o = node as Record<string, unknown>;
+    const id = typeof o.id === "string" ? o.id : itemId;
+    if (typeof o.reply_to === "string" && o.reply_to.trim()) {
+      if (typeof o.message_id === "string" && o.message_id) dir.set(o.message_id, o.reply_to);
+      if (id && !dir.has(id)) dir.set(id, o.reply_to);
+    }
+    for (const v of Object.values(o)) if (v && typeof v === "object") walk(v, id, depth + 1);
+  };
+  walk(mail, undefined, 0);
+  return dir;
+}
+const agendaMailDir = () => {
+  try {
+    return buildMailDirectory(readAgenda().mail);
+  } catch {
+    return new Map<string, string>();
+  }
+};
+let mailDirFn: () => Map<string, string> = agendaMailDir;
+/** Tests: swap the mail directory (undefined → the agenda again). */
+export function _setMailDirectory(fn?: () => Map<string, string>): void {
+  mailDirFn = fn ?? agendaMailDir;
 }
 
 /** The worktree name of a session (its newest hook event), else the ref title the dashboard sent. */
@@ -118,15 +161,22 @@ export function sendTargetOf(req: SendRequest, meta?: DraftMeta): SendTarget {
       if (!id) return { names: [], recipients: [], label: "" };
       const known = slackDirFn().get(id);
       const names = [id.toLowerCase(), ...(known?.names ?? [])];
-      // The person in ref.title ("<#channel | DM> · <name>") counts only when Ned has seen them in that channel.
+      // A DM / group DM (D… / G…): every person Ned saw in it, whatever ref.title says. A channel: the person in
+      // ref.title ("<#channel> · <name>") only when Ned has seen them post there.
       const who = (ref.title ?? "").split(" · ")[1]?.trim().toLowerCase();
-      if (who && known?.people.has(who)) names.push(who);
+      if (/^[DG]/.test(id)) names.push(...(known?.people ?? []));
+      else if (who && known?.people.has(who)) names.push(who);
       const shown = [...(known?.names ?? [])][0];
       return { names: [...new Set(names)], recipients: [], label: [shown ? `#${shown}` : id, who && known?.people.has(who) ? who : ""].filter(Boolean).join(" · ") };
     }
     case "email": {
-      const recipients = recipientsOf([m.reply_to]);
-      return { names: recipients.flatMap((r) => (r.addr ? [r.addr] : [])), recipients, label: recipients.map((r) => r.addr ?? r.raw).join(", ") || "(받는 이 미상)" };
+      // The draft's reply_to; no draft (e.g. a Ned Net card with only message_id) → what Ned's agenda collected for it.
+      const viaAgenda = () => {
+        const dir = mailDirFn();
+        return [ref.message_id, ref.thread_id].map((k) => (k ? dir.get(k) : undefined)).find(Boolean);
+      };
+      const recipients = recipientsOf([m.reply_to || viaAgenda()]);
+      return { names: recipients.flatMap((r) => (r.addr ? [r.addr] : [])), recipients, empty: "unknown", label: recipients.map((r) => r.addr ?? r.raw).join(", ") || "(받는 이 미상)" };
     }
     case "jira": {
       const key = jiraTarget(ref).key ?? m.issue_key;
@@ -142,7 +192,7 @@ export function sendTargetOf(req: SendRequest, meta?: DraftMeta): SendTarget {
     case "calendar": {
       const recipients = recipientsOf(req.event?.attendees ?? []);
       const names = recipients.flatMap((r) => (r.addr ? [r.addr] : []));
-      return { names, recipients, label: req.event ? `${req.event.title}${names.length ? ` · ${names.join(", ")}` : ""}` : (ref.title ?? ref.event_id ?? "") };
+      return { names, recipients, empty: req.mode === "create" ? "nobody" : "unjudged", label: req.event ? `${req.event.title}${names.length ? ` · ${names.join(", ")}` : ""}` : (ref.title ?? ref.event_id ?? "") };
     }
     case "session": {
       const wt = sessionWorktree(ref.session_id, ref.title);
@@ -175,14 +225,15 @@ export function targetMatches(pattern: string, value: string): boolean {
 const internal = (addr: string, domains: string[]) => domains.some((d) => domainOf(addr) === d || domainOf(addr).endsWith(`.${d}`));
 
 /**
- * external (mail / calendar), fail closed: true when any recipient is outside internal_domains, unreadable, or there
- * is no recipient to judge; false only when every recipient is a readable internal address. null = not judged
- * (another source, or internal_domains empty) → an external rule does not match.
+ * external (mail / calendar), fail closed: true when any recipient is outside internal_domains or unreadable; false
+ * only when every recipient is a readable internal address. No recipient: mail → true (unknown), calendar create →
+ * false (no attendees = a private event), calendar rsvp → null. null = not judged (another source, internal_domains
+ * empty, rsvp) → an external rule does not match.
  */
 export function isExternal(target: SendTarget, source: Exclude<RuleSource, "*">, domains: string[]): boolean | null {
   if (source !== "mail" && source !== "calendar") return null;
   if (!domains.length) return null;
-  if (!target.recipients.length) return true;
+  if (!target.recipients.length) return target.empty === "nobody" ? false : target.empty === "unjudged" ? null : true;
   return target.recipients.some((r) => !r.addr || !internal(r.addr, domains));
 }
 
@@ -202,7 +253,11 @@ export function matchSendRule(req: SendRequest, cfg: Pick<NedConfig, "actions">,
   for (let index = 0; index < rules.length; index++) {
     const rule = rules[index];
     if (rule.source !== "*" && rule.source !== src) continue;
-    if (rule.target && !tgt().names.some((n) => targetMatches(rule.target!, n))) continue;
+    if (rule.target && !tgt().names.some((n) => targetMatches(rule.target!, n))) {
+      // Mail with no known recipient: a block / confirm target rule counts as matching (fail closed); allow never does.
+      const unknownMail = src === "mail" && !tgt().recipients.some((r) => r.addr) && rule.effect !== "allow";
+      if (!unknownMail) continue;
+    }
     if (typeof rule.external === "boolean") {
       const ext = isExternal(tgt(), src, cfg.actions.internal_domains ?? []);
       if (ext === null || ext !== rule.external) continue;

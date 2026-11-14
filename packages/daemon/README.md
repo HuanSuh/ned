@@ -449,11 +449,14 @@ Agenda 응답 형태:
    **로컬 보안 경계가 아니다**: 409 가 토큰을 요청한 쪽에 주므로 이 Mac 의 다른 프로그램(에이전트 포함)은 두 번 요청해 통과할 수 있다. `confirm` 은 대시보드에서의
    실수 방지, 확실한 차단은 `block`(403, 토큰 없음). 대시보드 전용 토큰은 백로그.
 - 대상(실제 수신처를 정하는 값만 — 클라이언트의 `ref.title` 같은 표시 문자열은 보지 않음): slack = 채널 ID + Ned 의 agenda Slack 블록(items·all·watch·threads·dms)이
-  그 ID 에 묶어 둔 채널 이름·작성자 이름(`buildSlackDirectory`; 모르는 채널은 ID 만 — 이름 규칙 불일치), mail = 초안 `meta.reply_to` 만(초안 없음 → 받는 이 미상),
-  jira = 프로젝트 키, github = `owner/repo`, calendar = `event.attendees`(rsvp 는 참석자 없음 → 소스 단위 규칙만), session = 세션 이벤트의 워크트리 이름(없으면 `ref.title`;
-  `/api/sessions/create` 는 `worktree.name` — 스위치 확인 뒤 block 403 / confirm 409 + 토큰, 대화 카드가 재전송). 대소문자 무시, `*` 만 — 선형 glob(`*` 연속은 하나로, RegExp 없음).
+  그 ID 에 묶어 둔 채널 이름·작성자 이름(`buildSlackDirectory`; 모르는 채널은 ID 만 — 이름 규칙 불일치; D/G 로 시작하는 DM·그룹 DM 은 거기서 본 사람 모두),
+  mail = 초안 `meta.reply_to`, 초안 없으면 agenda 메일 블록이 그 `ref.message_id`/`ref.thread_id` 에 모아 둔 `reply_to`(`buildMailDirectory`) — 그래도 미상(또는 못 읽음)이면
+  대상 있는 mail 규칙 중 block·confirm 은 일치로 본다(fail closed, allow 는 불일치),
+  jira = 프로젝트 키, github = `owner/repo`, calendar = `event.attendees`(rsvp 는 참석자 정보 없음 → 대상·외부 규칙 불일치, 소스 단위 규칙만), session = 세션 이벤트의 워크트리 이름(없으면 `ref.title`;
+  `/api/sessions/create` 는 `worktree.name` — 스위치 확인 뒤 block 403 / confirm 409 + 토큰, 대화 카드가 재전송; 토큰은 프롬프트·repo·model·worktree 모드+이름 전체에 묶임). 대소문자 무시, `*` 만 — 선형 glob(`*` 연속은 하나로, RegExp 없음).
 - 외부(`external`, 메일·캘린더만, fail closed): 받는 이마다 `src/address.ts parseAddress` — `"이름" <주소>` 의 꺾쇠 안, `@` 정확히 하나, 로컬 파트 ASCII,
-  도메인 `url.domainToASCII`(punycode; 비ASCII 인데 punycode 라벨 없이 ASCII 로 바뀌는 전각 흉내는 거부). 못 읽는 주소·받는 이 없음 → 외부, 한 명이라도 외부 → 외부.
+  도메인 `url.domainToASCII`(punycode; 비ASCII 인데 punycode 라벨 없이 ASCII 로 바뀌는 전각 흉내는 거부). 못 읽는 주소 → 외부, 한 명이라도 외부 → 외부. 받는 이 0명: 메일 → 외부(미상),
+  참석자 없는 새 일정 → 외부 아님(false), rsvp → 판정 안 함(null — external 규칙 불일치).
   `internal_domains` 가 비었으면 외부 규칙은 아무것도 맞추지 않음. 새 일정 참석자도 `parseAddress` 결과로만 보낸다(`calendar-create.ts`).
   jira `transitions`·email `mark_read` 는 규칙·검토 대상 아님. 검토 이슈 `detail` 은 비밀값 모양을 `[가림]` 으로 바꾼 뒤 응답·로그에 쓴다.
 - 검토(`warn`): `claude -p` 도구 없음·1턴·`isolated`·effort low·`draft_fast_model`·20초(비용 job `action`), 프롬프트 `prompts/send-review.md`,
