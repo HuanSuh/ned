@@ -186,7 +186,7 @@ Click the menu bar item → a ~248 pt popover (`MenuView`, fed by `MenuContent`)
 - **대시보드 열기** · **설정…** (dashboard window → settings tab, scrolled to 앱 — `DashboardWindowController.show(section:)`
   runs the dashboard's `nedOpenSettings('s-app')`, after the load if the boot screen is still up) · **업데이트 확인** · **종료**.
 - **업데이트 확인** (`UpdateChecker`): `GET /api/update-check?refresh=1` (daemon `src/update-check.ts`: installed runtime
-  version vs GitHub main via `gh`, else the local marketplace clone) → an alert: `최신 버전 (X.Y.Z)`, or
+  version vs GitHub main via raw.githubusercontent.com, else `gh`, else the local marketplace clone) → an alert: `최신 버전 (X.Y.Z)`, or
   `X → Y 업데이트 있음` + the Claude Code steps (`/plugin update ned` → `/reload-plugins` → `/ned:install`) and
   **명령 복사**, or `업데이트 확인 실패` + why. The app never installs anything itself. One `update check: …` log line.
 

@@ -44,9 +44,10 @@ node dist/cli.js setup-check [--json] # 시작하기 점검 1회(아래 "시작�
 
 Ned.app 메뉴 "업데이트 확인"과 설정 → 앱의 같은 버튼이 `GET /api/update-check` 를 부른다. 설치하지는 않는다(설치는 Claude Code 흐름).
 - 현재 버전: `$NED_RUNTIME_DIR`(없으면 `$NED_HOME/runtime`)`/.claude-plugin/plugin.json` — `/ned:install` 이 빌드하는 곳. 런타임이 없는 개발 체크아웃이면 데몬이 도는 체크아웃(`REPO_ROOT`)의 것.
-- 최신 버전: (a) `gh api -H "Accept: application/vnd.github.raw+json" repos/<owner>/<repo>/contents/.claude-plugin/plugin.json?ref=main`(비공개 레포 → `gh auth login` 필요; 슬러그는 plugin.json `repository`/`homepage` 에서) →
-  실패하면 (b) `$CLAUDE_CONFIG_DIR`(없으면 `~/.claude`)`/plugins/marketplaces/<marketplace.json name>/.claude-plugin/plugin.json`. 둘 다 안 되면 `error` 에 둘의 사유.
-- 비교는 semver(프리릴리스 < 정식). 결과 10분 캐시(동시 요청은 한 번만), `?refresh=1` 은 새로. 테스트는 `setUpdateDeps({readFile, gh})` 로 파일·gh 를 바꾼다.
+- 최신 버전: (a) `https://raw.githubusercontent.com/<owner>/<repo>/main/.claude-plugin/plugin.json`(공개 레포 — Node `fetch`, 5초 타임아웃, gh 불필요; 슬러그는 plugin.json `repository`/`homepage` 에서) →
+  실패하면 (b) `gh api -H "Accept: application/vnd.github.raw+json" repos/<owner>/<repo>/contents/.claude-plugin/plugin.json?ref=main`(사용자 gh 로그인) →
+  실패하면 (c) `$CLAUDE_CONFIG_DIR`(없으면 `~/.claude`)`/plugins/marketplaces/<marketplace.json name>/.claude-plugin/plugin.json`. 셋 다 안 되면 `error` 에 각 사유, (b)·(c) 로 폴백했으면 앞선 사유는 `note`.
+- 비교는 semver(프리릴리스 < 정식). 결과 10분 캐시(동시 요청은 한 번만), `?refresh=1` 은 새로. 자동 업데이트(`self-update.ts`)도 같은 결과를 쓴다. 테스트는 `setUpdateDeps({readFile, fetchText, gh})` 로 파일·네트워크·gh 를 바꾼다(실제 네트워크 없음).
 
 ### 자동 업데이트 (`src/self-update.ts`, `scripts/self-update.sh`)
 
@@ -301,7 +302,7 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 | POST | `/api/setup/dismiss` | `{dismissed?: boolean}`(기본 true) → `{onboarding: {dismissed_at}}` — 시작하기 창이 저절로 뜨지 않게. `~/.ned/onboarding.json`(config.yaml 아님), false 면 지움 |
 | GET | `/api/update/status` | 자동 업데이트 상태 `{auto: config.updates, last_check_at, next_check_at, attempt: {at, result, from, to, log, fail_line} \| null, running, quiet_now, update_available}` — 확인을 돌리지 않음 |
 | POST | `/api/update/install` | 지금 업데이트: 새로 확인 → 새 버전이면 self-update.sh 시작 → 202 `{started, reason, check, status}`, 아니면 409(`reason`: 새 버전 없음 / 이미 업데이트 중) |
-| GET | `/api/update-check?refresh=1` | 업데이트 확인(위 "업데이트 확인") `{current, latest, source: github\|marketplace\|null, update_available, checked_at, repo, steps: ["/plugin update ned", "/reload-plugins", "/ned:install"], error?, note?}` — `note` = 마켓플레이스로 폴백했을 때 gh 가 안 된 이유. 10분 캐시, `refresh=1` 은 새로 |
+| GET | `/api/update-check?refresh=1` | 업데이트 확인(위 "업데이트 확인") `{current, latest, source: raw\|github\|marketplace\|null, update_available, checked_at, repo, steps: ["/plugin update ned", "/reload-plugins", "/ned:install"], error?, note?}` — `note` = gh·마켓플레이스로 폴백했을 때 앞선 소스(raw, gh)가 안 된 이유. 10분 캐시, `refresh=1` 은 새로 |
 | POST | `/api/archive/flush` | 오늘(+대기 중인 날) 리포트를 지금 씀 → `{ ok, written: [day], error?, status }` · 409 아카이브 꺼짐 · 500 쓰기 실패(`status.last_error`) |
 | GET | `/api/outputs?limit=50` | 정리 결과물 목록(최신순, `markdown` 뺌) `[{ id, ts, kind, title, sources, chat_id?, message_ts?, vault_rel?, vault_path?, obsidian_url?, vault_error? }]` |
 | GET | `/api/outputs/:id` | 결과물 하나(`markdown` 포함). 404 |

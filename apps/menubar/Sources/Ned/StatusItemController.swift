@@ -285,7 +285,7 @@ final class UpdateChecker: ObservableObject {
     static func message(_ r: Result?, failure: String?) -> (title: String, info: String, copy: String?) {
         guard let r else { return ("업데이트 확인 실패", failure ?? "데몬이 응답하지 않아요 — 메뉴의 상태 줄을 확인하세요.", nil) }
         guard let latest = r.latest else { return ("업데이트 확인 실패", r.error ?? "최신 버전을 읽지 못했어요.", nil) }
-        let from = r.source == "marketplace" ? "\n(마켓플레이스 사본 기준 — gh 로 GitHub 을 읽지 못함)" : ""
+        let from = r.source == "marketplace" ? "\n(마켓플레이스 사본 기준 — GitHub 을 읽지 못함)" : ""
         if r.update_available {
             let steps = r.steps ?? []
             return ("\(r.current ?? "?") → \(latest) 업데이트 있음",
