@@ -11,6 +11,7 @@ import { renderWatchCards } from "../features/watchcards.js";
 import { V, greet, say } from "../features/personas.js";
 import { autoSchedChip } from "../features/autosched.js";
 import { dailyFailedLine } from "../features/dailyfail.js";
+import { init as initRespBand, renderRespBand } from "../features/respband.js";
 import { isOpenSrc, openAtt, revAt, revCls, srcCheck, srcKey, withFold } from "../features/reviewed.js";
 import { loadAgenda, loadState, loadTodos, renderAll, renderHeader } from "../main.js";
 import { S, ui } from "../state.js";
@@ -214,6 +215,7 @@ export function renderHome() {
   $("ag-meta").innerHTML = ag === null ? errBadge("agenda-conn", { where: "agenda 연결", message: "GET /api/agenda 가 실패했어. daemon 이 꺼졌거나 이 버전에 agenda API 가 없어.", retry: () => loadAgenda() })
     : ag ? [schedChip(), ag.updated_at ? `<span title="${esc(mdhm(ag.updated_at))}">일정 갱신 ${esc(rel(ag.updated_at))}</span>` : "", costHtml(ag),
       ag.error ? errBadge("agenda", { where: "일정·이슈 갱신 (agenda 잡)", message: ag.error, at: ag.updated_at || Date.now(), retry: () => refreshAgenda() }) : ""].filter(Boolean).join(" · ") : "";
+  renderRespBand(); // 맡긴 일 띠 (책임이 있을 때만)
   renderAgenda();
   renderTodoGroups();
   renderAgStatus();
@@ -285,6 +287,7 @@ export const homeCard = $("todo-card");
 export function init() {
   // Merged into the header '지금 점검' (POST /api/check = agenda refresh → judge). refreshAgenda() stays for ⚠ retries.
   $("ag-refresh").style.display = "none";
+  initRespBand();
   $("ag-refresh").addEventListener("click", refreshAgenda);
   $("tadd").addEventListener("submit", (e) => {
     e.preventDefault();

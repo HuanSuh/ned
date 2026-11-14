@@ -12,6 +12,7 @@ import { initArchive, readArchive, renderArchive } from "./settings-archive.js";
 import { initHistorySettings, readHistorySettings, renderHistorySettings } from "./settings-history.js";
 import { initLinkPrefs, linkPrefsError, readLinkPrefs, renderLinkPrefs } from "./settings-links.js";
 import { initPet, readPet, renderPet, syncPet } from "./settings-pet.js";
+import { initResponsibilities, readResponsibilities, renderResponsibilities, responsibilitiesMsg } from "./settings-responsibilities.js";
 import { persona } from "../features/personas.js";
 import { applyTheme, normTheme, syncTheme, themeHtml } from "../features/theme.js";
 import { loadAgenda } from "../main.js";
@@ -221,6 +222,7 @@ export function renderConfig(c = S.config, { preview = false } = {}) {
   const keys = Object.keys(c.sources || {});
   $("c-sources").innerHTML = keys.length ? keys.map((k) => `<label><input type="checkbox" data-src="${esc(k)}" ${c.sources[k] ? "checked" : ""}>${esc(SOURCE_LABEL[k] || k)}</label>`).join("") : `<span class="hint">소스 없음</span>`;
   syncSourceGroups(); syncWriteActions(); syncPet();
+  renderResponsibilities(c); // 맡긴 일
   $("c-model").value = c.claude_model ?? "";
   $("c-turns").value = c.claude_max_turns ?? "";
   $("c-budget").value = c.agenda_daily_budget_usd ?? "";
@@ -276,6 +278,7 @@ export function readBody() {
     ...(readUpdates() ? { updates: readUpdates() } : {}), // 앱 → 업데이트
     history: readHistorySettings(),
     pet: readPet(),
+    ...(readResponsibilities() ? { responsibilities: readResponsibilities() } : {}), // 맡긴 일
   };
 }
 
@@ -375,6 +378,8 @@ export function init() {
     if (linkErr) { msg.className = "msg err"; msg.textContent = `저장 안 함: ${linkErr.msg}`; $(linkErr.id).focus(); return; }
     const quickErr = patch.dashboard?.session_quick_replies ? quickRepliesMsg(patch.dashboard.session_quick_replies) : null;
     if (quickErr) { msg.className = "msg err"; msg.textContent = `저장 안 함: ${quickErr}`; $("c-quick-replies").focus(); return; }
+    const respErr = responsibilitiesMsg(patch.responsibilities);
+    if (respErr) { msg.className = "msg err"; msg.textContent = `저장 안 함: ${respErr}`; $("c-resp")?.querySelector('[data-rf="title"]:placeholder-shown')?.focus(); return; }
     btn.disabled = true; msg.className = "msg"; msg.textContent = "저장 중…";
     try {
       // Only the changed keys (sub-key level), plus the version this form was rendered from: a save made elsewhere since → 409.
@@ -401,6 +406,7 @@ export function init() {
   initLinkPrefs();
   $("c-quick-replies").addEventListener("input", syncQuickReplies);
   initPet();
+  initResponsibilities(); // 맡긴 일: its own section after 소스 + nav link
 }
 
 // ---------- 새 버전 감지: daemon build changed since page load → 저장 잠금 (build.js shows the reload banner) ----------

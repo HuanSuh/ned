@@ -75,6 +75,10 @@ function settingsInputs(): string[] {
   const acts = read("public/app/tabs/settings-actions.js");
   for (const m of acts.matchAll(/keys:\s*\[([^\]]*)\]/g)) for (const k of m[1].matchAll(/"([a-z_]+)"/g)) ids.add(`actions.${k[1]}`);
   for (const m of view.matchAll(/data-act="([a-z_]+)"/g)) ids.add(`actions.${m[1]}`);
+  // 설정 → 맡긴 일 is rendered from settings-responsibilities.js: its controls' ids + each row field (data-rf) → responsibilities.<field>
+  const resp = read("public/app/tabs/settings-responsibilities.js");
+  for (const m of resp.matchAll(/<(?:input|button|select|textarea)\b[^>]*\bid="(c-[a-z-]+)"/g)) ids.add(m[1]);
+  for (const m of resp.matchAll(/data-rf="([a-z_]+)"/g)) ids.add(`responsibilities.${m[1]}`);
   return [...ids];
 }
 
