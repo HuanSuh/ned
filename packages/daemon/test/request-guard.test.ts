@@ -34,6 +34,24 @@ describe("requestGuard", () => {
     // another 127.0.0.1 port is "same-site" to the browser — must be refused too
     for (const site of ["cross-site", "same-site", "bogus", ""]) expect(requestGuard(h({ host, "sec-fetch-site": site }), PORT), site).toMatch(/Sec-Fetch-Site not allowed/);
   });
+  it("a cross-site top-level page navigation (dashboard link in Slack / Notion) passes; /api and /mcp, no-cors, POST do not", () => {
+    const host = `127.0.0.1:${PORT}`;
+    const nav = { host, "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" };
+    for (const path of ["/", "/index.html", "/proposals/x.html"]) for (const method of ["GET", "HEAD"]) expect(requestGuard(h(nav), PORT, { method, path }), `${method} ${path}`).toBeNull();
+    expect(requestGuard(h({ ...nav, "sec-fetch-site": "same-site" }), PORT, { method: "GET", path: "/" })).toBeNull();
+    for (const path of ["/api/update-check", "/api", "/mcp", "/API/state", "//api/state", "/%61pi/state", "/%2Fapi/state", "/%zz"]) expect(requestGuard(h(nav), PORT, { method: "GET", path }), path).toMatch(/Sec-Fetch-Site not allowed/);
+    // <img src=…/> : no-cors, dest image
+    expect(requestGuard(h({ host, "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" }), PORT, { method: "GET", path: "/" })).toMatch(/Sec-Fetch-Site not allowed/);
+    // navigate into an iframe (dest iframe) is not a top-level page load
+    expect(requestGuard(h({ ...nav, "sec-fetch-dest": "iframe" }), PORT, { method: "GET", path: "/" })).toMatch(/Sec-Fetch-Site not allowed/);
+    // a form POST navigation: not exempt, and the Origin rule applies first
+    expect(requestGuard(h(nav), PORT, { method: "POST", path: "/" })).toMatch(/Sec-Fetch-Site not allowed/);
+    expect(requestGuard(h({ ...nav, origin: "https://evil.example" }), PORT, { method: "POST", path: "/" })).toMatch(/Origin not allowed/);
+    // Host / Origin still checked first on a navigation
+    expect(requestGuard(h({ ...nav, host: "localhost:3000" }), PORT, { method: "GET", path: "/" })).toMatch(/Host port not allowed/);
+    // no request info → never exempt
+    expect(requestGuard(h(nav), PORT)).toMatch(/Sec-Fetch-Site not allowed/);
+  });
   it("refuses a non-loopback Host or Origin, a null Origin and a non-http scheme", () => {
     expect(requestGuard(h({ host: `attacker.example:${PORT}` }), PORT)).toMatch(/Host not allowed/);
     expect(requestGuard(h({ host: "127.0.0.1.nip.io" }), PORT)).toMatch(/Host not allowed/);

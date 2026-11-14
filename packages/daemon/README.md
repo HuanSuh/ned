@@ -261,7 +261,7 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 
 ### HTTP API
 
-모든 라우트(`/api/*`·`/mcp`·정적 파일)는 `src/request-guard.ts` 를 먼저 거친다 — Host·Origin 이 loopback + 데몬 포트가 아니거나 `Sec-Fetch-Site` 가 `same-origin`·`none` 이 아니면 403(DNS rebinding·다른 사이트·다른 포트 로컬 페이지 방지 — Origin 없는 `<img>` GET 포함, Host 포트 생략도 거부, 이 헤더들이 없으면 허용).
+모든 라우트(`/api/*`·`/mcp`·정적 파일)는 `src/request-guard.ts` 를 먼저 거친다 — Host·Origin 이 loopback + 데몬 포트가 아니거나 `Sec-Fetch-Site` 가 `same-origin`·`none` 이 아니면 403(DNS rebinding·다른 사이트·다른 포트 로컬 페이지 방지 — Origin 없는 `<img>` GET 포함, Host 포트 생략도 거부, 이 헤더들이 없으면 허용). 다른 사이트에 걸린 대시보드 링크(최상위 GET navigate·document)는 `/api`·`/mcp` 밖이면 허용.
 
 | Method | Path | 설명 |
 |---|---|---|
@@ -567,7 +567,8 @@ detail `이력 · M/D · …`, `tab: home` / `anchor: card:<slack|mail|jira|gh|c
   `sessionIdGenerator: undefined`(stateless) + `enableJsonResponse: true`. 요청마다 `buildMcpServer()` 로 McpServer·트랜스포트를 새로 만들고 응답 뒤 닫는다
   (SDK 예제 `simpleStatelessStreamableHttp.ts` 와 같은 방식). `GET`/`DELETE /mcp` → 405 `Allow: POST`.
 - 로컬 전용: `127.0.0.1` 바인딩에 더해 서버 전체 가드 `src/request-guard.ts`(`app.use("*", requestGuardMiddleware(port))` — `/api/*`·`/mcp`·정적 파일 모두, port = 실제 listen 포트) — Host 가 loopback(127.0.0.1·localhost·[::1]) + `:port` 가 아니거나(포트 생략 거부), Origin 이 있는데 `http(s)://loopback:port` 가 아니면 403,
-  `Sec-Fetch-Site` 가 있는데 `same-origin`·`none` 이 아니면 403(Origin 이 없는 no-cors GET — `<img src=…/api/calendar>` 같은 비용 드는 GET 반복 — 차단; 다른 포트 127.0.0.1 은 브라우저 기준 `same-site`)
+  `Sec-Fetch-Site` 가 있는데 `same-origin`·`none` 이 아니면 403(Origin 이 없는 no-cors GET — `<img src=…/api/calendar>` 같은 비용 드는 GET 반복 — 차단; 다른 포트 127.0.0.1 은 브라우저 기준 `same-site`).
+  예외: GET/HEAD + `Sec-Fetch-Mode: navigate` + `Sec-Fetch-Dest: document` 이고 경로가 `/api`·`/mcp` 가 아니면(다른 사이트에 걸린 대시보드 링크 클릭 — 정적 페이지, 부수효과 없음) Sec-Fetch-Site 와 무관하게 허용. Host·Origin 규칙이 먼저.
   (DNS rebinding·같은 Mac 의 다른 포트 로컬 페이지(개발 서버 등) 방지; SDK 의 `allowedOrigins`·`allowedHosts` 옵션은 deprecated 라 "외부 미들웨어" 권고대로 직접). Origin 없음(CLI 클라이언트)은 허용. 인증 없음.
 - 도구: 순수 핸들러 `toolAttention`·`toolSessions`·`toolBriefing`·`toolHistory`·`toolFeed`(입력 + `ToolCtx` = config·state·agenda·reviewed·briefings·now) →
   `{summary, data, error?}`. `mcp.ts` 가 매 호출 `readToolCtx()` 로 디스크에서 새로 읽고, 결과를 텍스트 블록 두 개(요약 한 줄, JSON)로 싼다. `error` 면 `isError: true`.

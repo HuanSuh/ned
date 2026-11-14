@@ -81,9 +81,11 @@ describe("MCP over Streamable HTTP (/mcp)", () => {
   });
 
   // fetch won't let us set Host — a raw HTTP/1.1 request.
-  const rawRequest = (method: string, p: string, host: string, body = "") => new Promise<string>((resolve, reject) => {
+  // (also: fetch overwrites Sec-Fetch-Mode, so browser-navigation headers go through here too)
+  const rawRequest = (method: string, p: string, host: string, body = "", extra: Record<string, string> = {}) => new Promise<string>((resolve, reject) => {
     const s = net.connect(PORT, "127.0.0.1", () => {
-      s.write(`${method} ${p} HTTP/1.1\r\nHost: ${host}\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
+      const ex = Object.entries(extra).map(([k, v]) => `${k}: ${v}\r\n`).join("");
+      s.write(`${method} ${p} HTTP/1.1\r\nHost: ${host}\r\n${ex}Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
     });
     let out = "";
     s.on("data", (d) => (out += d)).on("end", () => resolve(out)).on("error", reject);
@@ -125,6 +127,17 @@ describe("MCP over Streamable HTTP (/mcp)", () => {
       expect(await r.json()).toMatchObject({ jsonrpc: "2.0", id: null, error: { code: -32000, message: `Forbidden: Sec-Fetch-Site not allowed: ${site}` } });
     }
     for (const site of ["same-origin", "none"]) expect((await fetch(`http://127.0.0.1:${PORT}/api/state`, { headers: { "sec-fetch-site": site } })).status, site).toBe(200);
+  });
+
+  it("cross-site top-level navigation: GET / (dashboard) → 200; GET /api/update-check → 403; cross-site <img> GET / → 403", async () => {
+    const nav = { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" };
+    const host = `127.0.0.1:${PORT}`;
+    expect(await rawRequest("GET", "/", host, "", nav)).toMatch(/^HTTP\/1\.1 200/);
+    expect(await rawRequest("GET", "/api/update-check", host, "", nav)).toMatch(/^HTTP\/1\.1 403/);
+    expect(await rawRequest("GET", "/", host, "", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" })).toMatch(/^HTTP\/1\.1 403/);
+    const mcp = await rawRequest("POST", "/mcp", host, JSON.stringify(INIT), nav);
+    expect(mcp).toMatch(/^HTTP\/1\.1 403/);
+    expect(mcp).toMatch(/"jsonrpc":"2\.0".*"code":-32000/);
   });
 
   it("/mcp 403 keeps the JSON-RPC error shape (other-port Origin and Host)", async () => {
