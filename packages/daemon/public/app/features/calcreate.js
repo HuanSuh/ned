@@ -169,8 +169,10 @@ async function create(body) {
     return;
   }
   dropPending(key);
+  if (r.cancelled) { if (wasOpen) renderCreate(); rerender(); return; } // 보내기 확인 단계에서 [취소] — 만들지 않음, 팝업은 그대로
   const dry = String(d.action || "").startsWith("dry_run:");
   const msg = dry ? `dry-run — 실제로 만들지 않았어 (${d.detail || "NED_NO_LLM"}).`
+    : r.status === 403 && /보내기 규칙/.test(String(d.detail || "")) ? String(d.detail)
     : r.status === 403 ? `'${ACTION_KO[GATE]}' 은 설정에서 꺼져 있어 (daemon 이 거절함, HTTP 403).`
     : r.status === 400 ? `입력이 잘못됐어: ${d.error || d.detail || "HTTP 400"}`
     : r.unknown ? `${LABEL} 결과 확인 못 함: ${d.error || "알 수 없음"}`

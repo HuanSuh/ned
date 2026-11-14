@@ -517,7 +517,84 @@ export interface NedActions {
   chat_write: boolean;
   /** Ned 대화창이 제안한 새 에이전트 세션(Orca 워크트리 + claude + 첫 프롬프트)을 확인 후 시작 (POST /api/sessions/create). Default off. */
   chat_session_create: boolean;
+  /**
+   * 보내기 규칙 (≤ SEND_RULES_MAX, top-down, first match wins): per target allow / confirm (the server holds the send
+   * until the user confirms — 409 + confirm_token) / block (403). A switch above that is off still refuses first.
+   * See src/send-rules.ts.
+   */
+  rules: SendRule[];
+  /** Company mail domains (lower-case, no "@"): a recipient address outside them is "external". [] → external rules match nothing. */
+  internal_domains: string[];
+  /** 보내기 전 자동 검토: "warn" runs a 1-turn no-tool claude over the draft just before sending; issues → the same confirm step. */
+  review: SendReviewMode;
 }
+
+/** The on/off switches of config.actions (everything but rules / internal_domains / review). */
+export type ActionSwitch = Exclude<keyof NedActions, "rules" | "internal_domains" | "review">;
+
+// ---------- 보내기 규칙 (actions.rules / internal_domains / review) ----------
+export const RULE_SOURCES = ["slack", "mail", "jira", "github", "calendar", "session", "*"] as const;
+export type RuleSource = (typeof RULE_SOURCES)[number];
+export const RULE_EFFECTS = ["allow", "confirm", "block"] as const;
+export type RuleEffect = (typeof RULE_EFFECTS)[number];
+export interface SendRule {
+  source: RuleSource;
+  /** Case-insensitive, `*` wildcard only. Absent = every target of `source`. */
+  target?: string;
+  /** true = only recipients outside internal_domains; false = only inside. Absent = either. */
+  external?: boolean;
+  effect: RuleEffect;
+  /** Shown to the user as the reason (block → the 403 message, confirm → the confirm step). */
+  note?: string;
+}
+export const SEND_RULES_MAX = 30;
+export const RULE_NOTE_MAX = 120;
+export const RULE_TARGET_MAX = 200;
+export const INTERNAL_DOMAINS_MAX = 20;
+export const SEND_REVIEW_MODES = ["off", "warn"] as const;
+export type SendReviewMode = (typeof SEND_REVIEW_MODES)[number];
+
+/** One rule, or null when it is not a usable rule (unknown source / effect). Text fields are trimmed and cut. */
+export function normalizeSendRule(raw: unknown): SendRule | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const source = String(r.source ?? "").trim().toLowerCase() as RuleSource;
+  const effect = String(r.effect ?? "").trim().toLowerCase() as RuleEffect;
+  if (!RULE_SOURCES.includes(source) || !RULE_EFFECTS.includes(effect)) return null;
+  const target = typeof r.target === "string" ? r.target.replace(/\s+/g, " ").trim().slice(0, RULE_TARGET_MAX) : "";
+  const note = typeof r.note === "string" ? r.note.replace(/\s+/g, " ").trim().slice(0, RULE_NOTE_MAX) : "";
+  return { source, ...(target ? { target } : {}), ...(typeof r.external === "boolean" ? { external: r.external } : {}), effect, ...(note ? { note } : {}) };
+}
+
+/** actions.rules → usable rules in order, at most SEND_RULES_MAX (junk entries dropped). */
+export function normalizeSendRules(raw: unknown): SendRule[] {
+  return Array.isArray(raw) ? raw.map(normalizeSendRule).filter((r): r is SendRule => !!r).slice(0, SEND_RULES_MAX) : [];
+}
+
+/** PUT /api/config: actions.rules that would be silently changed (not a list / > 30 / a bad entry) → the error, else null. */
+export function sendRulesError(actions: unknown): string | null {
+  const v = actions && typeof actions === "object" ? (actions as { rules?: unknown }).rules : undefined;
+  if (v === undefined) return null;
+  if (!Array.isArray(v)) return "보내기 규칙(actions.rules)은 목록이어야 해";
+  if (v.length > SEND_RULES_MAX) return `보내기 규칙은 ${SEND_RULES_MAX}개까지야`;
+  const i = v.findIndex((r) => !normalizeSendRule(r));
+  if (i >= 0) return `보내기 규칙 ${i + 1}: source 는 ${RULE_SOURCES.join(" | ")}, effect 는 ${RULE_EFFECTS.join(" | ")} 중 하나여야 해`;
+  const long = v.findIndex((r) => typeof (r as SendRule).note === "string" && (r as SendRule).note!.trim().length > RULE_NOTE_MAX);
+  if (long >= 0) return `보내기 규칙 ${long + 1}: 메모는 ${RULE_NOTE_MAX}자까지야`;
+  return null;
+}
+
+/** "@Acme.com, corp.acme.com" / ["acme.com"] → ["acme.com", "corp.acme.com"] (lower, "@" dropped, junk out, deduped, ≤ 20). */
+export function normalizeInternalDomains(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(",") : [];
+  const out = list
+    .map((d) => (typeof d === "string" ? d.trim().toLowerCase().replace(/^@+/, "") : ""))
+    .filter((d) => /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(d));
+  return [...new Set(out)].slice(0, INTERNAL_DOMAINS_MAX);
+}
+
+export const normalizeSendReview = (v: unknown, fallback: SendReviewMode = "off"): SendReviewMode => (SEND_REVIEW_MODES.includes(v as SendReviewMode) ? (v as SendReviewMode) : fallback);
+
 export const DEFAULT_ACTIONS: NedActions = {
   slack_send: false,
   gmail_draft: true,
@@ -531,14 +608,24 @@ export const DEFAULT_ACTIONS: NedActions = {
   calendar_create: false,
   chat_write: false,
   chat_session_create: false,
+  rules: [],
+  internal_domains: [],
+  review: "off",
 };
 export const DEFAULT_REPLY_TONE = "간결하고 정중한 존댓말, 핵심 먼저";
 
-/** Merge a (partial) actions patch over `base`; only real booleans are taken. */
+export const ACTION_SWITCHES = (Object.keys(DEFAULT_ACTIONS) as (keyof NedActions)[]).filter((k): k is ActionSwitch => typeof DEFAULT_ACTIONS[k] === "boolean");
+
+/** Merge a (partial) actions patch over `base`: switches take real booleans only; rules / internal_domains / review are normalized (absent → base). */
 export function normalizeActions(raw: unknown, base: NedActions = DEFAULT_ACTIONS): NedActions {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  const pick = (k: keyof NedActions) => (typeof r[k] === "boolean" ? (r[k] as boolean) : base[k]);
-  return Object.fromEntries((Object.keys(DEFAULT_ACTIONS) as (keyof NedActions)[]).map((k) => [k, pick(k)])) as unknown as NedActions;
+  const switches = Object.fromEntries(ACTION_SWITCHES.map((k) => [k, typeof r[k] === "boolean" ? (r[k] as boolean) : base[k]])) as Record<ActionSwitch, boolean>;
+  return {
+    ...switches,
+    rules: "rules" in r ? normalizeSendRules(r.rules) : normalizeSendRules(base.rules),
+    internal_domains: "internal_domains" in r ? normalizeInternalDomains(r.internal_domains) : normalizeInternalDomains(base.internal_domains),
+    review: normalizeSendReview(r.review, normalizeSendReview(base.review)),
+  };
 }
 
 /** A non-empty string (trimmed, max 200 chars), else `fallback`. */

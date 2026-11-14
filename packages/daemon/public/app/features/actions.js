@@ -3,6 +3,7 @@
  * more in the menu before sending. Rows rendered by other modules get the ⋯ button injected (see `inject`), so home.js /
  * calendar.js don't need to know about it; they can call `axBtn(kind, item)` directly instead. */
 import { sendAndWait } from "./sendjob.js";
+import { ruleBlockMsg } from "./sendconfirm.js";
 import { ACTION_KO, actionsOn, openDraft } from "./drafts.js";
 import { axBtn } from "./draftref.js";
 import { S } from "../state.js";
@@ -112,13 +113,15 @@ export async function pick(id) {
   if (it.sub === "transitions") { if (!AX.transitions) loadTransitions(); return; }
   if (it.confirm && AX.confirm !== it.id) { AX.confirm = it.id; renderMenu(); place(); pop.querySelector("[data-axgo]")?.focus(); return; }
   const r = await send(it);
+  if (r.cancelled) { if (AX.open) { AX.error = "취소 — 보내지 않았어"; renderMenu(); place(); } return; } // 보내기 확인 단계에서 [취소]
   if (!AX.open) { // menu closed while the job ran — still say how it ended
     if (r.ok && r.data?.ok !== false) toast(`${it.label} 완료 — ${r.data?.detail || ""}`, 6000);
     else toast(`${it.label} ${r.unknown ? "결과 확인 못 함" : "실패"} — ${errSummary(r.data?.detail || r.data?.error || `HTTP ${r.status || "network"}`)}`, 9000);
     return;
   }
   if (r.ok && r.data?.ok !== false) { toast(r.data?.detail || `${it.label} 완료.`, 5000); closeMenu(); return; }
-  AX.error = r.status === 403 ? `'${ACTION_KO[it.gate]}' 은 설정에서 꺼져 있어 (daemon 이 거절함, HTTP 403).`
+  AX.error = ruleBlockMsg(r) ? ruleBlockMsg(r)
+    : r.status === 403 ? `'${ACTION_KO[it.gate]}' 은 설정에서 꺼져 있어 (daemon 이 거절함, HTTP 403).`
     : String(r.data?.action || "").startsWith("dry_run:") ? `dry-run — 실행하지 않았어 (${r.data.detail}).`
     : r.status === 409 && r.data?.already_sent ? `이미 했어 — ${r.data.detail}`
     : `${it.label} ${r.unknown ? "결과 확인 못 함" : "실패"}: ${errSummary(r.data?.detail || r.data?.error || `HTTP ${r.status || "network"}`)}`;

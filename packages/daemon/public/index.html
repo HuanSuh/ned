@@ -331,6 +331,8 @@
                 <div class="f full"><label for="c-tone">기본 말투</label><input type="text" id="c-tone" placeholder="예: 간결하고 정중하게, 존댓말, 이모지 없이" maxlength="200" style="max-width:460px" aria-describedby="c-tone-h"><span class="hint" id="c-tone-h">답장 초안의 말투. Slack · Gmail · 세션 그룹의 '답장 말투'를 비워 두면 이걸 써.</span></div>
                 <div class="f full"><span class="lab" id="wa-lab">허용할 동작 (소스별)</span>
                   <div class="wagroups" id="wa-groups" role="group" aria-labelledby="wa-lab"></div></div>
+                <div class="f full"><span class="lab" id="sr-lab">보내기 규칙</span><span class="hint">대상별로 허용 · 확인 후 · 금지. 위에서부터 처음 맞는 규칙 하나만 적용하고, 위 스위치가 꺼진 동작은 규칙과 상관없이 막혀. '확인 후'·자동 검토 이슈는 보내기 전에 사유를 보여 주고 [그래도 보내기]를 눌러야 보내.</span>
+                  <div class="sendrules" id="c-sendrules" role="group" aria-labelledby="sr-lab"></div></div>
                 <div class="f full"><label for="c-quick-replies">세션 빠른 답</label><input type="text" id="c-quick-replies" placeholder="ㄱㄱ, 승인, 계속" spellcheck="false" style="max-width:460px" aria-describedby="c-quick-replies-h"><span class="hint" id="c-quick-replies-h">입력을 기다리는 세션 행(인박스 세션 목록 · 상세)과 데스크톱 펫 말풍선의 빠른 버튼. 쉼표로 구분, 5개까지 · 버튼마다 20자까지. 비우면 버튼 없이 입력만.</span><span class="hint" id="c-quick-replies-msg" role="status"></span></div>
               </div>
             </div>

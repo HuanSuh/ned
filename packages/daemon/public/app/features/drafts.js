@@ -5,6 +5,7 @@ import { asksHtml, editMentions, mentionIds, shownText, toggleMentions } from ".
 import { clean, parseDraftAttr } from "./draftref.js";
 import { SRC_KEY_RE, reviewAttention, reviewSource } from "./reviewed.js";
 import { resumePending, sendAndWait } from "./sendjob.js";
+import { ruleBlockMsg } from "./sendconfirm.js";
 import { renderHeader } from "../main.js";
 import { S } from "../state.js";
 import { select } from "../tabs/inbox.js";
@@ -151,9 +152,10 @@ const ago = (iso) => { const m = Math.round((Date.now() - Date.parse(iso)) / 600
 function sendOutcome(label, r) {
   if (r.ok && r.data?.ok !== false) return { ok: true, msg: r.data?.detail || `${label} 완료.` };
   if (r.status === 409 && r.data?.already_sent) return { ok: true, msg: `이미 보냈어 (${ago(r.data.sent_at)})${r.data.link ? ` — ${r.data.link}` : ""}` };
-  const msg = r.status === 403 ? `'${label}' 은 설정에서 꺼져 있어 (daemon 이 거절함, HTTP 403).`
+  if (r.cancelled) return { ok: false, cancelled: true, msg: "취소 — 보내지 않았어" }; // 보내기 확인 단계에서 [취소]
+  const msg = ruleBlockMsg(r) || (r.status === 403 ? `'${label}' 은 설정에서 꺼져 있어 (daemon 이 거절함, HTTP 403).`
     : r.unknown ? `${label} 결과 확인 못 함: ${r.data?.error || "알 수 없음"}`
-    : `${label} 실패: ${r.data?.detail || r.data?.error || `HTTP ${r.status || "network"}`}`;
+    : `${label} 실패: ${r.data?.detail || r.data?.error || `HTTP ${r.status || "network"}`}`);
   return { ok: false, msg };
 }
 /**
@@ -174,6 +176,7 @@ export async function runAction(key) {
   });
   d.sending = null;
   const o = sendOutcome(a.label, r);
+  if (o.cancelled) { if (DR === d && d.open) renderDraft(); return; } // nothing was sent — the draft stays as it was
   if (DR !== d || !d.open) { toast(o.ok ? `${a.label} 완료 — ${o.msg}` : o.msg, o.ok ? 6000 : 9000); return; } // popup closed meanwhile
   if (o.ok) { toast(o.msg, 5000); closeDraft(); return; }
   d.error = o.msg;

@@ -60,5 +60,6 @@ export async function onMailReviewed(key: string, cfg: NedConfig, run?: Paramete
   const st = run ? await startSendJob(req, cfg, run) : await startSendJob(req, cfg);
   if (st.kind === "already_sent") return { skipped: "already", detail: st.sent.detail };
   if (st.kind === "sync") return st.result.ok ? {} : { skipped: "invalid", detail: st.result.detail };
+  if (st.kind === "need_confirm") return { skipped: "invalid", detail: st.need.reasons.join(" · ") }; // mark_read is not a send: rules never hold it (send-rules.ts UNRULED_MODES)
   return { job_id: st.job.id, started_at: new Date(st.job.started_at).toISOString() };
 }

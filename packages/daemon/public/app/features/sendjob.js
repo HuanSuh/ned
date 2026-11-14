@@ -3,6 +3,7 @@
  * request open. Pending jobs sit in localStorage so a reload still learns the outcome (and never re-sends). */
 import { api, postJson } from "../api.js";
 import { lsGet, lsSet } from "../util.js";
+import { askSendConfirm, needsConfirm } from "./sendconfirm.js";
 
 const POLL_MS = 2000;
 export const MAX_WAIT_MS = 4 * 60_000;
@@ -62,9 +63,17 @@ async function poll(p, onTick, deadline) {
  * /api/calendar/events with `opts.match` = {source, mode, ref} for the action-log fallback.
  * `opts.maxWaitMs`: a longer job (세션 만들기 — worktree + agent boot, a few minutes) than the 4-min default.
  */
-export async function sendAndWait(body, { onTick, label, endpoint = "/api/send", match, maxWaitMs } = {}) {
+export async function sendAndWait(body, { onTick, label, endpoint = "/api/send", match, maxWaitMs, confirm = askSendConfirm, confirmHost } = {}) {
   // A POST that never got an answer is safe to retry: the daemon joins a running job / answers 409 for a sent draft.
-  const r = await postJson(endpoint, body).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
+  const post = (b) => postJson(endpoint, b).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
+  let r = await post(body);
+  // 409 need_confirm (보내기 규칙 confirm / 자동 검토 이슈): the shared confirm step (sendconfirm.js). [그래도 보내기] → the
+  // same body + confirm_token; [취소] → nothing is sent ({cancelled: true}). A stale token (5 min / changed body) asks again.
+  for (let i = 0; i < 3 && needsConfirm(r); i++) {
+    const go = await confirm(r.data, confirmHost);
+    if (!go) return { ok: false, status: 409, cancelled: true, data: { ...r.data, error: "취소 — 보내지 않았어" } };
+    r = await post({ ...body, confirm_token: r.data.confirm_token });
+  }
   if (r.status !== 202 || !r.data?.job_id) return r;
   const m = match || body;
   const p = { job_id: r.data.job_id, started_at: r.data.started_at || new Date().toISOString(), label, endpoint, source: m.source, mode: m.mode, draft_id: m.draft_id, ref: m.ref, text: (m.text || "").trim(), ...(maxWaitMs ? { max_wait_ms: maxWaitMs } : {}) };

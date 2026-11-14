@@ -6,7 +6,7 @@ import { diffConfig, isEmptyPatch, mergePatch } from "../features/config-diff.js
 import { readCardLayout, renderCardLayout } from "../features/cardlayout.js";
 import { ACTION_DEFAULTS, ACTION_KO } from "../features/drafts.js";
 import { originChip } from "../features/draftref.js";
-import { parseQuickReplies, quickRepliesMsg, readToneBySource, syncWriteActionGroups, writeActionsHtml } from "./settings-actions.js";
+import { parseQuickReplies, quickRepliesMsg, readSendRules, readToneBySource, SEND_RULES_CSS, sendRulesClick, sendRulesHtml, sendRulesMsg, syncSendRules, syncWriteActionGroups, writeActionsHtml } from "./settings-actions.js";
 import { initAppSettings, readUpdates, renderUpdates } from "./settings-app.js";
 import { initArchive, readArchive, renderArchive } from "./settings-archive.js";
 import { initHistorySettings, readHistorySettings, renderHistorySettings } from "./settings-history.js";
@@ -137,6 +137,15 @@ export const readNotifications = () => ({
 // 소스별 그룹 + 소스별 답장 말투: settings-actions.js (#wa-groups).
 export function renderWriteActions(c) {
   $("wa-groups").innerHTML = writeActionsHtml(c, ACTION_DEFAULTS, ACTION_KO); // dims from c.sources; re-synced once 소스 toggles render
+  const sr = $("c-sendrules"); // 보내기 규칙 · 회사 도메인 · 자동 검토
+  if (sr) { sr.innerHTML = sendRulesHtml(c); syncSendRules(sr); }
+}
+/** 보내기 규칙 editor: 추가 / ↑ / ↓ / 삭제 redraw the list; edits re-tint rows. Every edit bubbles to #cfg (dirty mark). */
+function initSendRules() {
+  const sr = $("c-sendrules"); if (!sr) return;
+  const st = document.createElement("style"); st.textContent = SEND_RULES_CSS; document.head.appendChild(st);
+  sr.addEventListener("click", (e) => { if (sendRulesClick(sr, e.target)) { e.preventDefault(); sr.dispatchEvent(new Event("input", { bubbles: true })); } });
+  sr.addEventListener("change", () => syncSendRules(sr));
 }
 export const syncWriteActions = () => syncWriteActionGroups($("wa-groups"), (k) => srcToggle(k)?.checked !== false);
 
@@ -144,8 +153,9 @@ export const syncWriteActions = () => syncWriteActionGroups($("wa-groups"), (k) 
  *  (status spans), and an unscoped querySelector picked one of those first → "Slack 소스가 꺼져 있어" while it was on. */
 const srcToggle = (key) => document.querySelector(`#c-sources input[data-src="${key}"]`);
 const SRC_KO = { slack: "Slack", email: "메일", session: "세션", jira: "Jira", github: "GitHub", calendar: "캘린더", todo: "할 일" };
-const OUTCOME_KO = { ok: ["성공", "ok"], refused: ["거절(꺼짐)", ""], dry_run: ["dry-run", ""], failed: ["실패", "today"] };
-export const outcomeOf = (e) => (e.ok ? "ok" : e.action === "refused" ? "refused" : String(e.action || "").startsWith("dry_run:") ? "dry_run" : "failed");
+const OUTCOME_KO = { ok: ["성공", "ok"], refused: ["거절(꺼짐·규칙)", ""], held: ["확인 대기", ""], dry_run: ["dry-run", ""], failed: ["실패", "today"] };
+/** = src/actions.ts entryOutcome. held = 보내기 규칙 confirm / 자동 검토 이슈로 확인을 기다림 (409 need_confirm). */
+export const outcomeOf = (e) => (e.ok ? "ok" : e.action === "refused" ? "refused" : e.action === "need_confirm" ? "held" : String(e.action || "").startsWith("dry_run:") ? "dry_run" : "failed");
 export const AL = { list: null, error: "", source: "", result: "", reads: false };
 const localYmd = (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 export async function loadActionLog() {
@@ -268,7 +278,7 @@ export function readBody() {
     filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack], ack_check_max: $("c-ackmax").value === "" ? null : Number($("c-ackmax").value), group_mentions: [...excl.group] }, jira: { exclude_projects: [...excl.jira] } },
     dashboard: { ...readCardLayout(), theme: readTheme(), ...readLinkPrefs(), session_quick_replies: parseQuickReplies($("c-quick-replies").value) },
     notifications: readNotifications(),
-    actions: Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])),
+    actions: { ...Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])), ...(readSendRules($("c-sendrules")) || {}) },
     reply_tone: $("c-tone").value.trim(),
     reply_tone_by_source: readToneBySource($("wa-groups")),
     claude_model: $("c-model").value.trim() || null,
@@ -380,6 +390,8 @@ export function init() {
     if (quickErr) { msg.className = "msg err"; msg.textContent = `저장 안 함: ${quickErr}`; $("c-quick-replies").focus(); return; }
     const respErr = responsibilitiesMsg(patch.responsibilities);
     if (respErr) { msg.className = "msg err"; msg.textContent = `저장 안 함: ${respErr}`; $("c-resp")?.querySelector('[data-rf="title"]:placeholder-shown')?.focus(); return; }
+    const rulesErr = sendRulesMsg(patch.actions);
+    if (rulesErr) { msg.className = "msg err"; msg.textContent = `저장 안 함: ${rulesErr}`; $("c-sr-domains")?.focus(); return; }
     btn.disabled = true; msg.className = "msg"; msg.textContent = "저장 중…";
     try {
       // Only the changed keys (sub-key level), plus the version this form was rendered from: a save made elsewhere since → 409.
@@ -407,6 +419,7 @@ export function init() {
   $("c-quick-replies").addEventListener("input", syncQuickReplies);
   initPet();
   initResponsibilities(); // 맡긴 일: its own section after 소스 + nav link
+  initSendRules(); // 쓰기 액션 → 보내기 규칙
 }
 
 // ---------- 새 버전 감지: daemon build changed since page load → 저장 잠금 (build.js shows the reload banner) ----------
