@@ -97,3 +97,13 @@
 | 알림 | 새 kind 없음, 막힘은 `action_items` 로 | 펫·알림·피드 kind 목록 유지. |
 | 표시 | 홈 위 얇은 띠(책임 있을 때만) | 그리드 레이아웃 마이그레이션 회피. |
 | (리뷰) 근거 없을 때 | 순조가 아니라 지난 상태 유지(id 생략), 이미 알린 근거는 `[이미 알림]` 으로 남김(목록당 5, 새 항목 자리 안 먹음) | 막힘이 다음 순찰에 순조로 덮이던 문제. |
+
+## 2026-11-14 — WU-04 공개 레포 정리 (상세: 로컬 `.omc/wu/WU-04/decisions.md`)
+
+| 질문 | 결정 | 근거 |
+| --- | --- | --- |
+| Origin/Host | loopback + 데몬이 실제 listen 하는 포트만, 포트 없는 Host 거부 | 같은 Mac 의 다른 포트 로컬 페이지가 API 를 부르는 경로 차단. |
+| (리뷰) 비용 있는 GET | `Sec-Fetch-Site` 가 있으면 same-origin·none 만(헤더 없는 curl·URLSession·MCP 는 허용) | `<img src>` 같은 no-cors GET 은 Origin 이 없어 `/api/calendar`(LLM 비용) 등을 부를 수 있었다. 다른 포트 127.0.0.1 은 same-site 라 거부. |
+| 외부 링크로 대시보드 열기 | GET/HEAD + navigate + document 이고 `/api`·`/mcp` 밖이면 허용 | 정적 페이지는 부수효과 없음, Slack·Notion 링크로 대시보드를 못 여는 회귀 방지. |
+| 업데이트 확인 | raw.githubusercontent → gh → 로컬 클론, 응답 64KiB 상한 | 레포 public, gh 로그인 없는 사용자. raw 내용은 버전 비교에만 쓰고 설치는 마켓플레이스 경로. |
+| 취약점 제보 | GitHub Private vulnerability reporting(켜 둠), `SECURITY.md` | 공개 이슈로 취약점이 드러나지 않게. |
