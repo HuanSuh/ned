@@ -309,7 +309,7 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 | POST | `/api/chat/:id/stop` | 진행 중인 턴에 SIGTERM (없으면 404). 지금까지 흐른 텍스트가 `stopped: true` 로 저장됨 |
 | POST | `/api/chat/actions/validate` | 확인 카드 검증 `{ block: <ned-action JSON>, text?: 고친 텍스트 }` → 200 `{ ok, kind, endpoint: /api/send\|/api/calendar/events\|/api/todos, payload (origin "chat"), label, summary, target_label, text, text_optional, lookup? }` · 400 형식 · 403 `actions.chat_write`/해당 스위치 꺼짐 · 409 대상이 최근 agenda/state 에 없음. 실행은 안 함 (`src/chat-actions.ts`) |
 | POST | `/api/chat/:id/action` | 카드 상태 저장 `{ ts (ned 메시지), state: running\|executed\|failed\|cancelled, text?, result? }` → 메시지의 `action`. (없음\|failed)→running\|cancelled, running→나머지; executed·cancelled 는 최종(409) |
-| POST | `/api/send` | 초안 보내기 — `config.actions` 로 켠 것만. 꺼져 있으면 403 |
+| POST | `/api/send` | 초안 보내기 — `config.actions` 로 켠 것만. 꺼져 있으면 403, 금지 규칙 403, 확인 규칙·검토 이슈 409 `need_confirm`(+`confirm_token` 재전송) — 아래 "보내기 규칙" |
 | GET | `/api/actions` | `sent-actions.log` 최근 50건 (최신 먼저) |
 | POST | `/api/sessions/create` | 대화창에서 세션 만들기 (`actions.chat_session_create`, 기본 off) `{repo, worktree:{mode:"new"\|"existing", name}, model:"opus"\|"sonnet"(기본 opus), prompt}`. 400 입력/미등록 레포/없는 기존 워크트리, 403 꺼짐, 409 대화창 출처로 살아 있는 세션 2개(상한), 202 `{job_id}` — 아래 "세션 만들기" |
 | GET | `/api/sessions/create/:job_id` | 세션 만들기 작업 `{state, stage, elapsed_ms, result?{ok, detail, session:{worktree_path, handle, stage}}}` (`stage`: worktree_create\|agent_launch → agent_boot → prompt_send → submit_confirm) |
@@ -434,8 +434,36 @@ Agenda 응답 형태:
 - **origin** (선택): `card` | `history` | `watch` | `chat` (`src/origin.ts` `parseOrigin`, 그 밖의 값은 무시). 초안 로그 줄에만 쓰이고,
   대시보드는 같은 값을 `POST /api/send` 에도 실어 액션 로그에 남긴다.
 
-**보내기** `POST /api/send` `{ draft_id?, source, ref, text, mode, origin? }` → `200 { ok, action, detail, logged_at }`,
-그 외 `{ ok:false, action, detail, logged_at, error }` + 400(잘못된 요청·주소 없음) / 403(꺼짐) / 409(세션 터미널 없음) / 502(실패·검증 안 됨).
+**보내기** `POST /api/send` `{ draft_id?, source, ref, text, mode, origin?, confirm_token? }` → `200 { ok, action, detail, logged_at }`,
+그 외 `{ ok:false, action, detail, logged_at, error }` + 400(잘못된 요청·주소 없음) / 403(꺼짐·금지 규칙) / 409(세션 터미널 없음 · 확인 필요) / 502(실패·검증 안 됨).
+
+**보내기 규칙 · 자동 검토** (`src/send-rules.ts` · `src/send-review.ts` · `src/send-guard.ts`, 체크 순서는 `send-jobs.ts startSendJob`):
+1. 스위치(`config.actions.<동작>`)가 꺼져 있으면 403 — 규칙보다 먼저(지금과 같음).
+2. `config.actions.rules`(최대 30, 위에서부터 첫 일치) 중 `block` → 403, `detail` = "보내기 규칙이 막음 — 규칙 N (…): <note>". 로그 `action: "refused"` + `rule`.
+3. 진행 중인 같은 요청 합류 / 10분 안 성공 409 `already_sent` (기존).
+4. `confirm` 규칙이거나 `actions.review: "warn"` 의 검토가 이슈를 찾으면 보내지 않고 409
+   `{ need_confirm: true, reasons: ["규칙 N (…): note"], review?: {status, issues:[{kind, detail}], note?}, confirm_token, expires_at, token_problem? }`.
+   클라이언트가 같은 본문 + `confirm_token` 으로 다시 보내면 실행. 토큰 = 데몬 실행마다 새 비밀로 만든 HMAC(요청 내용 해시 — source·mode·draft_id·ref·text·event,
+   origin 제외 — + 만료), 5분, 1회용(잡을 시작하면 서명을 spent 로 기록, 만료 때 정리). 본문·대상이 바뀌면 `mismatch`, 지나면 `expired`, 재사용은 `spent` 로
+   다시 409. 유효한 토큰이면 검토를 다시 돌리지 않는다. 로그 `action: "need_confirm"`.
+   `performSend` 도 `confirm` 규칙인데 `guard.confirmed` 가 없으면 409 — 어떤 경로도 확인 단계를 건너뛰지 못한다.
+   **로컬 보안 경계가 아니다**: 409 가 토큰을 요청한 쪽에 주므로 이 Mac 의 다른 프로그램(에이전트 포함)은 두 번 요청해 통과할 수 있다. `confirm` 은 대시보드에서의
+   실수 방지, 확실한 차단은 `block`(403, 토큰 없음). 대시보드 전용 토큰은 백로그.
+- 대상(실제 수신처를 정하는 값만 — 클라이언트의 `ref.title` 같은 표시 문자열은 보지 않음): slack = 채널 ID + Ned 의 agenda Slack 블록(items·all·watch·threads·dms)이
+  그 ID 에 묶어 둔 채널 이름·작성자 이름(`buildSlackDirectory`; 모르는 채널은 ID 만 — 이름 규칙 불일치; D/G 로 시작하는 DM·그룹 DM 은 거기서 본 사람 모두),
+  mail = 초안 `meta.reply_to`, 초안 없으면 agenda 메일 블록이 그 `ref.message_id`/`ref.thread_id` 에 모아 둔 `reply_to`(`buildMailDirectory`) — 그래도 미상(또는 못 읽음)이면
+  대상 있는 mail 규칙 중 block·confirm 은 일치로 본다(fail closed, allow 는 불일치),
+  jira = 프로젝트 키, github = `owner/repo`, calendar = `event.attendees`(rsvp 는 참석자 정보 없음 → 대상·외부 규칙 불일치, 소스 단위 규칙만), session = 세션 이벤트의 워크트리 이름(없으면 `ref.title`;
+  `/api/sessions/create` 는 `worktree.name` — 스위치 확인 뒤 block 403 / confirm 409 + 토큰, 대화 카드가 재전송; 토큰은 프롬프트·repo·model·worktree 모드+이름 전체에 묶임). 대소문자 무시, `*` 만 — 선형 glob(`*` 연속은 하나로, RegExp 없음).
+- 외부(`external`, 메일·캘린더만, fail closed): 받는 이마다 `src/address.ts parseAddress` — `"이름" <주소>` 의 꺾쇠 안, `@` 정확히 하나, 로컬 파트 ASCII,
+  도메인 `url.domainToASCII`(punycode; 비ASCII 인데 punycode 라벨 없이 ASCII 로 바뀌는 전각 흉내는 거부). 못 읽는 주소 → 외부, 한 명이라도 외부 → 외부. 받는 이 0명: 메일 → 외부(미상),
+  참석자 없는 새 일정 → 외부 아님(false), rsvp → 판정 안 함(null — external 규칙 불일치).
+  `internal_domains` 가 비었으면 외부 규칙은 아무것도 맞추지 않음. 새 일정 참석자도 `parseAddress` 결과로만 보낸다(`calendar-create.ts`).
+  jira `transitions`·email `mark_read` 는 규칙·검토 대상 아님. 검토 이슈 `detail` 은 비밀값 모양을 `[가림]` 으로 바꾼 뒤 응답·로그에 쓴다.
+- 검토(`warn`): `claude -p` 도구 없음·1턴·`isolated`·effort low·`draft_fast_model`·20초(비용 job `action`), 프롬프트 `prompts/send-review.md`,
+  답 `{ok, issues}`(kind = recipient·secret·commitment·tone·other, ≤6개). 시간 초과·실패 → 그대로 보내고 결과 `detail` 끝에 " · 검토 못 함: …".
+  session 소스·본문 없는 동작(승인 등)은 검토하지 않음. `NED_NO_LLM=1` 은 claude 대신 비밀값 모양만 보는 `(stub)` 검토기, 테스트는 `_setSendReviewer(fn, deadlineMs)`.
+- `/api/calendar/events` 도 같은 흐름(본문에 `confirm_token`).
 
 | source | mode | 스위치 (`config.actions`, 기본) | 동작 |
 |---|---|---|---|
@@ -456,7 +484,8 @@ Agenda 응답 형태:
 - email 은 `message_id` 가 필요하다(ref 또는 `draft_id` 의 meta). 없으면 400 — 보내기 단계에서는 읽기 도구를 허용하지 않는다.
 - 텍스트는 JSON 문자열로 프롬프트에 넣고 "글자 하나 바꾸지 말고 그대로, 도구 한 번만" 지시. 최대 4000자.
 - 모든 시도(거절·실패·dry-run 포함)는 `~/.ned/sent-actions.log` 에 JSONL 한 줄:
-  `{ts, source, mode, action, ref, draft_id, text(앞 120자), ok, result, claude_args?, origin?}` — `claude_args` 는 실제 spawn 한 argv.
+  `{ts, source, mode, action, ref, draft_id, text(앞 120자), ok, result, claude_args?, origin?, rule?, review?, confirmed?}` — `claude_args` 는 실제 spawn 한 argv,
+  `rule` = 맞은 보내기 규칙 `{index, effect, note?}`, `review` = 자동 검토 결과, `confirmed` = 확인 토큰으로 보낸 것. `action: "need_confirm"` = 확인 대기(결과 필터 `held`).
   `origin` = 어디서 실행했는지: `card`(홈 카드 행 ✎·⋯) · `history`(카드의 "지난 N일" 이력 행) · `watch`(팔로업 카드 행·최근 대화·요약 줄) ·
   `chat`(Ned Net 확인 카드). 없으면(예전 줄·다른 클라이언트) 그대로 둔다. 게이트는 `chat` 에만 추가(`actions.chat_write`) — `/api/todos` 도
   `origin: "chat"` 일 때만 대화창 경로(그 밖의 origin 은 일반 추가). `GET /api/actions` 는 줄을 그대로 돌려주고 설정 → 오늘 한 액션이 출처 칩으로 보여 준다.
@@ -651,6 +680,7 @@ detail `이력 · M/D · …`, `tab: home` / `anchor: card:<slack|mail|jira|gh|c
                          port, claude_model, claude_max_turns, session_stale_minutes, agenda_refresh_minutes, notify,
                          actions.{slack_send=false, gmail_draft=true, gmail_send=false, session_send=true,
                                   jira_comment=false, jira_transition=false, github_review=false, calendar_rsvp=false} (POST /api/send 허용),
+                         actions.rules=[] (보내기 규칙 {source, target?, external?, effect: allow|confirm|block, note?}, ≤30), actions.internal_domains=[], actions.review="off" (off|warn),
                          reply_tone (답장 초안 말투, 기본 "간결하고 정중한 존댓말, 핵심 먼저"), reply_tone_by_source ({slack,email,session}: 소스별 말투, null = reply_tone),
                          draft_context_max_age_minutes=180 (agenda 맥락 → fast 초안), draft_fast_model="sonnet", drafts_pregenerate=false,
                          agenda_all_limit=20 (mail/slack all[] 상한), agenda_context_batch=5 (2단계 배치 크기),

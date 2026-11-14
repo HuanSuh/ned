@@ -3,7 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { archiveTouch } from "./archive.js";
 import { buildClaudeArgs, extractJson, llmDisabled, runClaude, type ClaudeRunOptions } from "./claude.js";
-import type { NedConfig } from "./config.js";
+import type { ActionSwitch, NedConfig } from "./config.js";
+import type { SendGuard } from "./send-guard.js";
+import { matchSendRule, ruleReason } from "./send-rules.js";
 import { invalidateCalendarRanges } from "./calendar.js";
 import { buildCalendarCreate, eventKey, type CalendarEventInput, type CreatedEvent } from "./calendar-create.js";
 import type { ActionOrigin } from "./origin.js";
@@ -56,6 +58,10 @@ export interface ActionRef extends DraftRef {
   /** jira transition */
   transition_id?: string;
   transition_name?: string;
+  /** session create only (never parsed from a body): what the confirm token is bound to besides the prompt. */
+  model?: string;
+  /** session create only: `<new|existing>:<name as given>`. */
+  worktree?: string;
 }
 const ACTION_REF_FIELDS = [...REF_FIELDS, "event_id", "calendar_id", "response", "transition_id", "transition_name"] as const;
 
@@ -69,6 +75,10 @@ export interface SendRequest {
   event?: CalendarEventInput;
   /** "chat" = run from a Ned Net 확인 카드 (needs config.actions.chat_write too); card / history / watch = which dashboard list; absent = older clients. */
   origin?: ActionOrigin;
+  /** The token from a 409 need_confirm, sent back after the user confirmed (send-guard.ts). */
+  confirm_token?: string;
+  /** Set by the daemon (send-jobs.ts → guardSend), never parsed from a body: the rule / review / confirmation behind this send. */
+  guard?: SendGuard;
 }
 
 export { ACTION_ORIGINS, parseOrigin, type ActionOrigin } from "./origin.js";
@@ -114,6 +124,12 @@ export interface ActionLogEntry {
   origin?: ActionOrigin;
   /** session `create` (대화창에서 세션 만들기): what was started — see session-create.ts. */
   session_create?: { repo: string; worktree_mode: string; worktree_name: string; model: string; worktree_path?: string; handle?: string; stage?: string };
+  /** 보내기 규칙 that matched (0-based index into config.actions.rules). */
+  rule?: SendGuard["rule"];
+  /** 보내기 전 자동 검토 result (issues, or why it could not run). */
+  review?: SendGuard["review"];
+  /** Sent after the user confirmed a 409 need_confirm (valid confirm_token). */
+  confirmed?: boolean;
 }
 
 const MAX_TEXT = 4000;
@@ -147,13 +163,13 @@ export interface ActionLogFilter {
   /** Only entries on/after this local date (YYYY-MM-DD) — "today" in the dashboard. */
   since?: string;
   source?: string;
-  /** ok | refused | failed | dry_run */
+  /** ok | refused | held | failed | dry_run */
   result?: string;
 }
 
-/** Outcome bucket for one log line (the dashboard's result filter). */
-export function entryOutcome(e: Pick<ActionLogEntry, "ok" | "action">): "ok" | "refused" | "dry_run" | "failed" {
-  return e.ok ? "ok" : e.action === "refused" ? "refused" : e.action.startsWith("dry_run:") ? "dry_run" : "failed";
+/** Outcome bucket for one log line (the dashboard's result filter). held = waiting for the user's confirm (409 need_confirm). */
+export function entryOutcome(e: Pick<ActionLogEntry, "ok" | "action">): "ok" | "refused" | "held" | "dry_run" | "failed" {
+  return e.ok ? "ok" : e.action === "refused" ? "refused" : e.action === "need_confirm" ? "held" : e.action.startsWith("dry_run:") ? "dry_run" : "failed";
 }
 
 /** Log entries matching `f`, newest first, at most `limit` (scans the whole file — it is small, one line per click). */
@@ -202,11 +218,17 @@ export function parseSendRequest(body: Record<string, unknown>): SendRequest | s
     if (typeof v === "string" && v.trim()) ref[k] = v.trim().slice(0, 500);
   }
   const origin = parseOrigin(body.origin);
-  return { source, mode, text, ref, draft_id: typeof body.draft_id === "string" ? body.draft_id.slice(0, 40) : undefined, ...(origin ? { origin } : {}) };
+  const tok = parseConfirmToken(body);
+  return { source, mode, text, ref, draft_id: typeof body.draft_id === "string" ? body.draft_id.slice(0, 40) : undefined, ...(origin ? { origin } : {}), ...(tok ? { confirm_token: tok } : {}) };
+}
+
+/** body.confirm_token when it is a plausible token string (checked for real in send-guard.ts). */
+export function parseConfirmToken(body: Record<string, unknown>): string | undefined {
+  return typeof body.confirm_token === "string" && body.confirm_token.length <= 200 ? body.confirm_token : undefined;
 }
 
 /** Which config.actions switch gates this (source, mode). */
-export function gateKey(req: Pick<SendRequest, "source" | "mode">): keyof NedConfig["actions"] {
+export function gateKey(req: Pick<SendRequest, "source" | "mode">): ActionSwitch {
   switch (req.source) {
     case "slack":
       return "slack_send";
@@ -223,7 +245,7 @@ export function gateKey(req: Pick<SendRequest, "source" | "mode">): keyof NedCon
   }
 }
 /** The switch that refuses `req` (its own gate, then chat_write for origin "chat"), or on:true. */
-export function gate(req: Pick<SendRequest, "source" | "mode" | "origin">, cfg: NedConfig): { key: keyof NedConfig["actions"]; on: boolean } {
+export function gate(req: Pick<SendRequest, "source" | "mode" | "origin">, cfg: NedConfig): { key: ActionSwitch; on: boolean } {
   const key = gateKey(req);
   if (cfg.actions[key] !== true) return { key, on: false };
   if (req.origin === "chat" && cfg.actions.chat_write !== true) return { key: "chat_write", on: false };
@@ -610,7 +632,14 @@ export async function performSend(req: SendRequest, cfg: NedConfig): Promise<Sen
   const logged_at = new Date().toISOString();
   const entry: ActionLogEntry = { ts: logged_at, source: req.source, mode: req.mode, action: "", ref: req.ref, draft_id: req.draft_id, text: req.text.slice(0, 120), ok: false, result: "", ...(req.origin ? { origin: req.origin } : {}) };
   if (req.event) entry.event_key = eventKey(req.event);
-  const finish = (status: SendResult["status"], ok: boolean, action: string, detail: string, event?: CreatedEvent): SendResult => {
+  const gd = req.guard;
+  if (gd?.rule) entry.rule = gd.rule;
+  if (gd?.review) entry.review = gd.review;
+  if (gd?.confirmed) entry.confirmed = true;
+  // 검토 못 함 (timeout / failure): the send goes on, and says so.
+  const reviewNote = gd?.review?.status === "failed" && gd.review.note ? ` · ${gd.review.note}` : "";
+  const finish = (status: SendResult["status"], ok: boolean, action: string, detail0: string, event?: CreatedEvent): SendResult => {
+    const detail = action === "refused" || action === "need_confirm" ? detail0 : `${detail0}${reviewNote}`;
     appendActionLog({ ...entry, action, ok, result: detail, ...(event ? { event } : {}) });
     log(`send: ${req.source}/${req.mode} ${action} → ${ok ? "ok" : action.startsWith("dry_run:") ? "dry-run" : `FAIL(${status})`} ${detail.slice(0, 160)}`);
     return { ok, action, detail, logged_at, status, ...(event ? { event } : {}) };
@@ -618,6 +647,12 @@ export async function performSend(req: SendRequest, cfg: NedConfig): Promise<Sen
 
   const g = gate(req, cfg);
   if (!g.on) return finish(403, false, "refused", `config.actions.${g.key} is off — turn it on in settings to allow this`);
+  // 보내기 규칙 (the switch above comes first). block → 403 with the rule's note; confirm → only after the user confirmed
+  // (send-jobs.ts runs guardSend and sets guard.confirmed) — no caller can skip the confirm step.
+  const rm = matchSendRule(req, cfg);
+  if (rm) entry.rule = { index: rm.index, effect: rm.rule.effect, ...(rm.rule.note ? { note: rm.rule.note } : {}) };
+  if (rm?.rule.effect === "block") return finish(403, false, "refused", `보내기 규칙이 막음 — ${ruleReason(rm)}`);
+  if (rm?.rule.effect === "confirm" && !gd?.confirmed) return finish(409, false, "need_confirm", `확인 필요 — ${ruleReason(rm)} (사용자 확인 없이 보내지 않음)`);
 
   if (req.source === "session") {
     const r = await sendToSession(req);

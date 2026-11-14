@@ -79,6 +79,12 @@ function settingsInputs(): string[] {
   const resp = read("public/app/tabs/settings-responsibilities.js");
   for (const m of resp.matchAll(/<(?:input|button|select|textarea)\b[^>]*\bid="(c-[a-z-]+)"/g)) ids.add(m[1]);
   for (const m of resp.matchAll(/data-rf="([a-z_]+)"/g)) ids.add(`responsibilities.${m[1]}`);
+  // 쓰기 액션 → 보내기 규칙 is rendered from settings-actions.js (sendRulesHtml): its inputs and control groups by id
+  for (const m of acts.matchAll(/<(input|select|textarea|div)\b[^>]*>/g)) {
+    const id = /\bid="(c-[a-z-]+)"/.exec(m[0])?.[1];
+    if (!id || (m[1] === "div" && !/\brole="(group|radiogroup|list)"/.test(m[0]))) continue;
+    ids.add(id);
+  }
   return [...ids];
 }
 

@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
 import { archiveFlushNow, archiveStatus } from "./archive.js";
-import { appendActionLog, parseOrigin, parseSendRequest, readActionLog, type SendRequest } from "./actions.js";
+import { appendActionLog, parseConfirmToken, parseOrigin, parseSendRequest, readActionLog, type SendRequest } from "./actions.js";
 import { parseCalendarCreate } from "./calendar-create.js";
 import { getSendJob, linkOf, startSendJob, viewJob } from "./send-jobs.js";
 import { knownRepoPaths, parseSessionCreate, sessionCreateDeps, startSessionCreate, validateSessionCreate } from "./session-create.js";
@@ -15,7 +15,7 @@ import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runCh
 import { validateChatAction } from "./chat-actions.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, normalizeUpdates, normalizePet, normalizeResponsibilities, quickRepliesError, responsibilitiesError, restoreConfigBackup, saveConfig, slackTeamDomainError, slackTeamIdError, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type NedPet, type PersonaId } from "./config.js";
+import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, normalizeUpdates, normalizePet, normalizeResponsibilities, quickRepliesError, responsibilitiesError, restoreConfigBackup, sendRulesError, saveConfig, slackTeamDomainError, slackTeamIdError, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type NedPet, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { historyStatus, queryHistory } from "./history.js";
@@ -198,6 +198,8 @@ export function startServer(getConfig: () => NedConfig): void {
     if (quickErr) return c.json({ error: quickErr, field: "dashboard.session_quick_replies" }, 400);
     const respErr = responsibilitiesError(body.responsibilities);
     if (respErr) return c.json({ error: respErr, field: "responsibilities" }, 400);
+    const rulesErr = sendRulesError(body.actions);
+    if (rulesErr) return c.json({ error: rulesErr, field: "actions.rules" }, 400);
     const merged = mergeConfigPatch(cur, body);
     const archErr = archivePatchError(cur, merged);
     if (archErr) return c.json({ error: archErr, field: "archive.vault" }, 400);
@@ -384,6 +386,9 @@ export function startServer(getConfig: () => NedConfig): void {
       const { at, detail, job_id } = st.sent;
       return c.json({ ok: false, already_sent: true, sent_at: at, detail, link: linkOf(detail), job_id, error: `이미 전송됨 (${at})` }, 409);
     }
+    // 보내기 규칙 confirm / 자동 검토 이슈: not sent. The client shows reasons + review issues and, if the user goes ahead,
+    // posts the same body + confirm_token (5 min, bound to this exact request — send-guard.ts).
+    if (st.kind === "need_confirm") return c.json({ ok: false, need_confirm: true, ...st.need, error: "보내기 전에 확인이 필요해" }, 409);
     return c.json({ ok: true, job_id: st.job.id, reused: st.reused, started_at: new Date(st.job.started_at).toISOString() }, 202);
   };
   const jobView = (c: Context) => {
@@ -404,7 +409,8 @@ export function startServer(getConfig: () => NedConfig): void {
     const ev = parseCalendarCreate(body);
     if (typeof ev === "string") return c.json({ ok: false, error: ev }, 400);
     const origin = parseOrigin(body.origin);
-    return startJob(c, { source: "calendar", mode: "create", text: "", ref: { title: ev.title, calendar_id: ev.calendar_id }, event: ev, ...(origin ? { origin } : {}) });
+    const tok = parseConfirmToken(body);
+    return startJob(c, { source: "calendar", mode: "create", text: "", ref: { title: ev.title, calendar_id: ev.calendar_id }, event: ev, ...(origin ? { origin } : {}), ...(tok ? { confirm_token: tok } : {}) });
   });
   app.get("/api/calendar/events/:job_id", jobView);
   app.get("/api/actions", (c) => c.json(readActionLog(50)));
@@ -414,6 +420,7 @@ export function startServer(getConfig: () => NedConfig): void {
     const input = parseSessionCreate(await readBody(c));
     if (typeof input === "string") return c.json({ ok: false, error: input }, 400);
     const st = await startSessionCreate(input, loadConfig(), readState().sessions ?? []);
+    if (st.kind === "need_confirm") return c.json({ ok: false, need_confirm: true, ...st.need, error: "세션을 만들기 전에 확인이 필요해" }, 409);
     if (st.kind === "refused") {
       const { status, ...out } = st.result;
       return c.json({ ...out, error: out.detail }, status);

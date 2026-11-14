@@ -42,7 +42,9 @@ export function sentPending(x, now = Date.now()) {
 
 /** 실패 결과 → 토스트 문구. 409(터미널 없음/닫힘)는 고정 안내, 그 밖엔 데몬이 준 사유 그대로. */
 export function failText(r) {
+  if (r.cancelled) return "취소 — 보내지 않았어"; // 보내기 확인 단계(보내기 규칙 confirm)에서 [취소]
   if (r.status === 409) return CLOSED_MSG;
+  if (r.status === 403 && /보내기 규칙/.test(String(r.data?.detail || ""))) return String(r.data.detail);
   if (r.status === 403) return "세션에 보내기가 꺼져 있어 — 설정 → 쓰기 액션에서 켜 줘";
   const why = r.data?.error || r.data?.detail || (r.status ? `HTTP ${r.status}` : "연결 실패");
   return `보내지 못했어: ${String(why).slice(0, 200)}`;

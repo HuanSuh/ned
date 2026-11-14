@@ -23,6 +23,8 @@ import { appendActionLog, orca as realOrca, type ActionLogEntry, type OrcaExec, 
 import type { NedConfig } from "./config.js";
 import { NED_HOME, log, readJson, writeJsonAtomic } from "./paths.js";
 import { runningJobs, startTaskJob, type SendJob } from "./send-jobs.js";
+import { checkConfirmToken, issueConfirmToken, needConfirmSummary, spendConfirmToken, type NeedConfirm } from "./send-guard.js";
+import { matchSendRule, ruleReason } from "./send-rules.js";
 import type { SessionView } from "./sessions.js";
 
 export const CHAT_SESSIONS_PATH = path.join(NED_HOME, "chat-sessions.json");
@@ -46,6 +48,8 @@ export interface SessionCreateInput {
   prompt: string;
   /** "chat" = Ned Net 확인 카드에서 실행 → actions.chat_write 도 켜져 있어야 한다(다른 대화창 쓰기와 같은 규칙). */
   origin?: "chat";
+  /** From a 409 need_confirm (session 보내기 규칙 `confirm`), sent back after the user confirmed — send-guard.ts. */
+  confirm_token?: string;
 }
 
 /** One session started from the chat (chat-sessions.json). */
@@ -122,7 +126,8 @@ export function parseSessionCreate(body: Record<string, unknown>): SessionCreate
   if (!prompt) return "prompt required (첫 프롬프트 전문)";
   const full = ensurePlanFirst(prompt);
   if (full.length > MAX_PROMPT) return `prompt longer than ${MAX_PROMPT} chars`;
-  return { repo, worktree: { mode, name }, model: model as SessionModel, prompt: full, ...(body.origin === "chat" ? { origin: "chat" as const } : {}) };
+  const tok = typeof body.confirm_token === "string" && body.confirm_token.length <= 200 ? body.confirm_token : undefined;
+  return { repo, worktree: { mode, name }, model: model as SessionModel, prompt: full, ...(body.origin === "chat" ? { origin: "chat" as const } : {}), ...(tok ? { confirm_token: tok } : {}) };
 }
 
 /** The `ref` of this request's sent-actions.log line (also what the card matches after a reload / restart). */
@@ -482,7 +487,20 @@ export async function runSessionCreate(input: SessionCreateInput, repo: OrcaRepo
   return finish(200, true, "session_create", "done", `started ${where} · ${input.model}${active ? "" : " (turn_started)"}`);
 }
 
-export type SessionCreateOutcome = { kind: "refused"; result: SendResult } | { kind: "job"; job: SendJob; reused: boolean };
+export type SessionCreateOutcome = { kind: "refused"; result: SendResult } | { kind: "need_confirm"; need: NeedConfirm } | { kind: "job"; job: SendJob; reused: boolean };
+
+/**
+ * The first prompt as a send for 보내기 규칙 (source session, target = the worktree name; never reviewed). The ref also
+ * carries the model and the whole worktree (mode + name as given), so the confirm token is bound to them: changing
+ * either after confirming asks again.
+ */
+export const sessionCreateRequest = (input: SessionCreateInput): SendRequest => ({
+  source: "session",
+  mode: "create",
+  text: input.prompt,
+  ref: { repo: input.repo, title: path.basename(input.worktree.name), model: input.model, worktree: `${input.worktree.mode}:${input.worktree.name}` },
+  ...(input.confirm_token ? { confirm_token: input.confirm_token } : {}),
+});
 
 /** POST /api/sessions/create: validate synchronously (refusals logged), then start (or join) the job. */
 /**
@@ -505,6 +523,29 @@ async function startSessionCreateLocked(input: SessionCreateInput, cfg: NedConfi
   const key = `${JOB_PREFIX}${norm(input.repo)}|${input.worktree.mode}|${input.worktree.name}`;
   const joined = runningJobs(key).find((j) => j.key === key);
   if (joined) return { kind: "job", job: joined, reused: true };
+  // 보내기 규칙 on the first prompt (session rules, target = worktree name): block → 403; confirm → 409 + token first.
+  // The switches come first (validateSessionCreate refuses them with their own message): rules only when they are on.
+  const switchesOn = cfg.actions.chat_session_create === true && (input.origin !== "chat" || cfg.actions.chat_write === true);
+  const rreq = sessionCreateRequest(input);
+  const rm = switchesOn ? matchSendRule(rreq, cfg) : null;
+  const rule = rm ? { index: rm.index, effect: rm.rule.effect, ...(rm.rule.note ? { note: rm.rule.note } : {}) } : undefined;
+  let confirmed = false;
+  if (rm?.rule.effect === "block") {
+    const detail = `보내기 규칙이 막음 — ${ruleReason(rm)}`;
+    appendActionLog({ ...logEntry(input, "refused", false, detail, { stage: "rules" }), rule });
+    log(`session_create: refused by rule ${rm.index + 1}`);
+    return { kind: "refused", result: { ok: false, action: "refused", detail, logged_at: new Date().toISOString(), status: 403, session: { stage: "rules" } } };
+  }
+  if (rm?.rule.effect === "confirm") {
+    const tok = checkConfirmToken(input.confirm_token, rreq);
+    if (tok !== "ok") {
+      const t = issueConfirmToken(rreq);
+      const need: NeedConfirm = { reasons: [ruleReason(rm)], confirm_token: t.token, expires_at: new Date(t.expires).toISOString(), ...(tok !== "missing" ? { token_problem: tok } : {}) };
+      appendActionLog({ ...logEntry(input, "need_confirm", false, needConfirmSummary(need), { stage: "rules" }), rule });
+      return { kind: "need_confirm", need };
+    }
+    confirmed = true;
+  }
   const v = await validateSessionCreate(input, cfg, deps, sessions);
   if (!v.ok) {
     const logged_at = new Date().toISOString();
@@ -513,6 +554,7 @@ async function startSessionCreateLocked(input: SessionCreateInput, cfg: NedConfi
     return { kind: "refused", result: { ok: false, action: v.action, detail: v.detail, logged_at, status: v.status, session: { stage: "validate" } } };
   }
   const req: SendRequest = { source: "session", mode: "create", text: input.prompt, ref: { repo: input.repo, title: input.worktree.name } };
+  if (confirmed) spendConfirmToken(input.confirm_token); // one confirm = one session
   const { job, reused } = startTaskJob(key, req, (j) => runSessionCreate(input, v.repo, v.existing, deps, j));
   return { kind: "job", job, reused };
 }

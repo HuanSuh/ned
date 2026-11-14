@@ -6,23 +6,22 @@
 ## 요약
 
 Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub·Sentry)를 모으는 로컬 대시보드(탭: 홈·인박스·타임라인·설정). 전역 키: h 홈, i 인박스, r 지금 점검, ⌘K·/ 검색, ⌘J 통신기.
-- **홈**: 일정(일/주, ＋·드래그로 만들기, ⋯ 응답), 할 일(NED 액션·개인, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, 이력 7/30일, ↻ 소스별 갱신), 팔로업 카드(멘션 없는 채널 요약).
-- **인박스**: 우선·기타·기록(브리핑) 3탭 + "장비실"(세션 상태).
-- **타임라인**: 이벤트·브리핑 시간순
-- **순찰/브리핑**: "지금 점검"(r) = 소스 갱신 → 판단 → 알림. 자동 순찰 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑 `briefing_time`(실패 시 재시도).
+- **홈**: 일정(일/주, ＋·드래그로 만들기, ⋯ 응답), 할 일(NED 액션·개인, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, 이력, ↻ 갱신), 팔로업 카드(멘션 없는 채널 요약).
+- **인박스**: 우선·기타·기록(브리핑) 3탭 + "장비실"(세션 상태). **타임라인**: 시간순.
+- **순찰/브리핑**: "지금 점검"(r) = 소스 갱신 → 판단 → 알림. 자동 순찰 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑 `briefing_time`.
 - **맡긴 일**(`responsibilities`, ≤5, 설정 → 맡긴 일): 책임마다 순찰이 순조·주의·막힘 + 한 줄 평가 → 홈 위 띠. 막혀서 내 몫이면 할 일에도.
 - **야간·유휴 감속**: 조용한 시간·유휴(`idle_schedule`)엔 자동 실행 감속·정지(`quiet_schedule.mode` normal/slow/pause), 수동은 즉시.
 - **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기 확인 카드, `actions.chat_session_create` 면 새 세션; 정리는 노트로), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글.
 - **답장 초안 ✎**: 초안 3개 → 복사/열기/보내기(Slack·메일·Jira 는 미답 질문별 1:1 답). 쓰기는 켠 것만(`actions.*` — gmail_draft·session_send 기본 켬, Jira·GitHub·캘린더는 ⋯). **세션에 답하기**: 대기 세션 행·펫 말풍선의 빠른 답(`dashboard.session_quick_replies`)·한 줄 입력 → Orca 터미널.
 - **확인 완료 ✓**: 접음(새 변경 시 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`)면 자동 해제.
 - **Gmail 읽음 표시**(`actions.gmail_mark_read`): 메일 ✓ = Gmail 읽음.
-- **검색**: ⌘K
+- **보내기 규칙**(`actions.rules`): 대상별 허용·확인 후·금지(첫 일치). 보내기 전 자동 검토 `actions.review`.
 - **아카이브(Obsidian)**: 볼트 `archive.vault` + `archive.enabled` → 매일 `<archive.folder>/Daily/…/날짜.md`, `archive.daily_embed`.
 - **수집 이력**: 소스별 보관(`history.keep_days.*`), 증분 수집(Slack 재검색 창 `history.collect.slack_hours`), 표시 구간(`history.display.*`).
-- **링크 열기**: Slack·Figma·Notion 링크는 앱으로(`dashboard.open_links_in_app`, Slack 은 팀 ID `dashboard.slack_team_id`).
+- **링크 열기**: Slack·Figma·Notion 링크는 앱으로(`dashboard.open_links_in_app`, 팀 ID `dashboard.slack_team_id`).
 - **설치**: 플러그인 `ned@ned`→`/ned:install`(업데이트 `/plugin update ned`→`/reload-plugins`→`/ned:install`), MCP `/mcp`(도구 `ned_attention` 등).
 - **Ned.app 메뉴**: 상태·대시보드·설정·업데이트·종료. 앱 설정·`updates.*`: 설정 → 앱.
-- **시작하기**: 커넥터·Slack 팀 ID·자동 실행·코드 서명 점검.
+- **시작하기**: 커넥터·자동 실행·서명 점검.
 - **데스크톱 펫**(외형 `pet.enabled`, 끔): 늘 떠 있는 Ned, 테두리 색 = 상태, 새 소식 말풍선(`pet.messages.*`).
 - **설정**(하단 "저장"): 외형(테마 `dashboard.theme`, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`, 링크 열기) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(위 순찰·감속 키, `signal_check_minutes`, `agenda_refresh_minutes`, `agenda_source_minutes.*`) · 쓰기 액션(`actions.*`, 말투 `reply_tone`·`reply_tone_by_source.*`, 오늘 한 액션) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(`claude_model`, `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd`).
 
@@ -200,6 +199,21 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
   - 아래 "오늘 한 액션" 표(소스·결과 필터, "읽기 포함", 새로고침). 소스 옆 출처 칩 = 어디서 실행했는지(카드 / 지난 N일 / 팔로업 / 대화창 / 세션 행 / 펫).
 - Slack 이모지 리액션 보내기는 없음(커넥터에 도구 없음).
 
+### 보내기 규칙 · 보내기 전 자동 검토
+- 보여 주는 것: 보내기를 누르면, 규칙이 '확인 후'이거나 자동 검토가 이슈를 찾았을 때 그 자리(초안·새 일정 팝업 안, 그 밖엔 화면 아래)에 **보내기 확인** — 규칙 사유·검토 이슈(받는 이·비밀 노출·약속·날짜·어조·기타) + [그래도 보내기] [취소]. '금지' 규칙이면 보내지 않고 규칙 메모를 보여 줌. Ned 는 여전히 사람이 누르지 않으면 보내지 않는다 — 규칙은 그 위에 얹는 대상별 제한.
+- 규칙(`actions.rules`, 최대 30, 위에서부터 **처음 맞는 하나**만): 소스(Slack·메일·Jira·GitHub·캘린더·세션·모든 소스) + 대상(비우면 전부) + 외부·내부 + 효과(허용 / 확인 후 / 금지) + 메모(120자, 확인·금지 때 보여 줌).
+  - 대상 비교(대소문자 무시, `*` 와일드카드만 — 정규식 없음): Slack = 채널 ID, 그리고 Ned 가 모은 Slack 목록(업무 목록·팔로업·스레드·DM)이 그 ID 와 묶어 둔 채널 이름(`#` 무시)·사람 이름만(DM·그룹 DM 은 Ned 가 거기서 본 사람 모두), 메일 = 받는 주소(초안의 reply_to, 초안 없으면 Ned 가 모은 그 메일의 reply_to) 또는 `@도메인`, Jira = 프로젝트 키(ABC-12 의 ABC), GitHub = `owner/repo`, 캘린더 = 참석자 주소·`@도메인`(일정 만들기), 세션 = 워크트리 이름(대화창 세션 만들기의 첫 프롬프트도 — 새 워크트리 이름).
+  - 대상은 실제로 어디로 가는지를 정하는 값에서만 읽는다(화면이 보낸 제목·표시 문자열은 안 봄). 그래서 Ned 가 본 적 없는 Slack 채널은 이름 규칙에 안 맞는다 — **막기(금지)는 채널 ID 로 쓰는 게 확실**. 메일 받는 이를 끝내 모르면 대상이 있는 메일 규칙 중 금지·확인 후는 맞는 것으로 본다(허용은 안 맞음).
+  - 캘린더 참석 응답(RSVP)은 참석자 정보가 없어 대상·외부 규칙이 맞지 않음 — 소스 단위 규칙(대상·외부 비움)만 적용. 참석자 없는 새 일정은 외부가 아니다.
+  - 외부 = 받는 주소의 도메인이 회사 도메인(`actions.internal_domains`, 하위 도메인 포함) 밖. 받는 이마다 주소 전체를 읽고(표시 이름 `"이름" <주소>` 허용, `@` 하나, 국제 도메인은 punycode 로 정규화) 못 읽는 주소(전각·비ASCII 흉내·`%`·`@` 두 개 등)와 받는 이를 모르는 메일은 **외부로 본다**(fail closed). 한 명이라도 외부면 외부. 회사 도메인이 비어 있으면 외부·내부 규칙은 아무것도 맞추지 않음. 주소가 있는 메일·캘린더만 판정 — Slack·Jira·GitHub·세션은 외부·내부 규칙이 적용되지 않음. 새 일정 참석자도 이 정규화된 주소로만 보낸다.
+  - 위 "허용할 동작" 스위치가 꺼진 동작은 규칙과 상관없이 먼저 거절(지금과 같음). Jira 전환 목록 읽기·Gmail 읽음 표시는 보내는 게 아니라 규칙·검토 대상이 아님.
+- 자동 검토(`actions.review`: `off` 기본 / `warn`): 보내기 직전 Claude 를 도구 없이 1번(`draft_fast_model`, effort low, 20초 이내) — 받는 이·채널이 맥락과 맞는지, 토큰·비밀번호·내부 URL, 날짜·약속, 어조. 이슈가 있으면 위 보내기 확인에 보여 줌(막지는 않음). 시간 초과·실패면 결과에 "검토 못 함" 메모를 달고 그대로 보냄. 세션 답하기는 검토 안 함. 확인하고 보낸 요청은 다시 검토하지 않음. 프롬프트 `prompts/send-review.md`. `NED_NO_LLM=1` 이면 Claude 대신 비밀값 모양만 보는 오프라인 검사("(stub)" 표시).
+- 서버가 강제: `/api/send`(초안 보내기·⋯ 메뉴·대화창 확인 카드·세션 답하기)와 `/api/calendar/events` 는 확인이 필요하면 보내지 않고 409 `{need_confirm, reasons, review, confirm_token, expires_at}` 로 답한다. 확인 후 같은 요청 + `confirm_token` 을 다시 보내야 실행 — 토큰은 그 요청 내용(대상·본문)에 묶이고 5분 유효, 한 번만 쓸 수 있음(본문·대상이 바뀌거나 만료·재사용이면 다시 확인). 금지 규칙은 403(사유 = 규칙 메모). 대화창 세션 만들기(`/api/sessions/create`)도 세션 규칙을 거친다(금지 403, 확인 후 409 → 확인 카드에서 확인).
+- **보안 경계가 아님**: '확인 후'는 대시보드에서의 실수를 막는 장치이고, 이 Mac 의 다른 프로그램(에이전트 포함)을 막지는 않는다 — 409 가 토큰을 요청한 쪽에 주므로 로컬 프로그램은 스스로 확인할 수 있다. 확실히 막으려면 '금지'. 검토 이슈 설명 속 비밀값 모양 문자열은 기록 전에 가린다.
+- 기록: 확인 대기(`need_confirm`)·금지·확인 후 보냄 모두 `~/.ned/sent-actions.log`(맞은 규칙 `rule`, 검토 결과 `review`, `confirmed`). "오늘 한 액션" 결과 필터에 "확인 대기".
+- 설정(설정 → 쓰기 액션 → 보내기 규칙 `c-sendrules`): 규칙 목록 `c-sr-list`(↑ ↓ 로 순서, 삭제, ＋ 규칙 추가), 회사 도메인 `c-sr-domains`(쉼표), 보내기 전 자동 검토 `c-sr-review`(끔 / 경고).
+- MCP·데스크톱 펫에는 새 보내기 경로가 없다. 펫의 빠른 답은 세션 답하기와 같은 `/api/send` 라 규칙이 그대로 걸린다 — 펫엔 확인 단계가 없어, 세션에 '확인 후' 규칙이 걸리면 보내지 않고 말풍선에 "대시보드에서 확인이 필요해"(그 세션엔 대시보드에서 답하면 확인 후 보낼 수 있다). '금지'는 말풍선에 규칙 메모.
+
 ### Gmail 읽음 표시
 - 보여 주는 것: 메일 항목 ✓(확인 완료) 때 Gmail 에서도 그 스레드의 안 읽음 표시를 지움.
 - 데이터: 백그라운드 작업(`src/mail-read.ts`), 같은 스레드 10분 내 중복·하루 상한 도달 시 생략. 실패해도 확인 완료는 유지, ✓ 취소해도 안 읽음으로 되돌리지 않음.
@@ -328,6 +342,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `notifications.enabled` · `notifications.briefing` · `notifications.sound` · `notifications.summary_threshold` · `notifications.quiet_delivery` | true · true · true · 3 · skip | 알림 |
 | `notifications.kinds.session` · `notifications.kinds.email` · `notifications.kinds.slack` · `notifications.kinds.jira` · `notifications.kinds.github` · `notifications.kinds.sentry` · `notifications.kinds.calendar` | 전부 true | 알림 → 소스별 |
 | `actions.slack_send` · `actions.gmail_draft` · `actions.gmail_send` · `actions.gmail_mark_read` · `actions.session_send` · `actions.jira_comment` · `actions.jira_transition` · `actions.github_review` · `actions.calendar_rsvp` · `actions.calendar_create` · `actions.chat_write` · `actions.chat_session_create` | gmail_draft·session_send 만 true | 쓰기 액션 → 허용할 동작 |
+| `actions.rules` (항목: `source` slack·mail·jira·github·calendar·session·* · `target` · `external` · `effect` allow·confirm·block · `note`) · `actions.internal_domains` · `actions.review` (off·warn) | [] (최대 30) · [] · off | 쓰기 액션 → 보내기 규칙 |
 | `reply_tone` · `reply_tone_by_source.slack` · `reply_tone_by_source.email` · `reply_tone_by_source.session` | "간결하고 정중한 존댓말, 핵심 먼저" · null | 쓰기 액션 → 기본 말투 / 답장 말투 |
 | `dashboard.theme` · `dashboard.card_order` · `dashboard.card_span` · `dashboard.locked` · `dashboard.watch_cards` · `dashboard.layout` | system · slack,mail,jira,github · — · false · true · null | 외형 (layout 은 홈 드래그 배치) |
 | `dashboard.open_links_in_app` · `dashboard.open_links_in_app_by_service.slack` · `dashboard.open_links_in_app_by_service.figma` · `dashboard.open_links_in_app_by_service.notion` | true · true · true · true | 외형 → 링크를 앱으로 열기 |
@@ -401,6 +416,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `c-arch-embed` | 아카이브 → 내 데일리 노트 embed | `archive.daily_embed` |
 
 쓰기 액션 토글은 `data-act="<키>"` → `actions.<키>` (부록 A).
+보내기 규칙(`c-sendrules`, `settings-actions.js` 가 그림): 규칙 줄 → `actions.rules`, `c-sr-domains` → `actions.internal_domains`, `c-sr-review` → `actions.review`.
 
 ## 부록 C — HTTP API (대시보드가 쓰는 로컬 API, 127.0.0.1)
 
@@ -409,7 +425,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 순찰·갱신: `/api/check`(지금 점검, GET 은 진행 상태) · `/api/heartbeat`(아침 브리핑 `?daily=1`) · `/api/agenda/refresh`(카드 ↻) · `/api/agenda/context`(맥락 지금 수집) · `/api/activity`(대시보드 활동 핑 — 유휴 해제)
 - 할 일·확인: `/api/todos` · `/api/todos/:id`(완료·삭제) · `/api/attention/:id/review`(확인 완료) · `/api/attention/:id/dismiss`(닫기)
 - 일정: `/api/calendar`(기간 조회) · `/api/calendar/events`(일정 만들기)
-- 초안·보내기: `/api/draft` · `/api/send`(세션에 답하기도 — `source:"session"`, 글 ≤2,000자, 터미널 없음/닫힘·권한 대화상자 대기 409)
+- 초안·보내기: `/api/draft` · `/api/send`(세션에 답하기도 — `source:"session"`, 글 ≤2,000자, 터미널 없음/닫힘·권한 대화상자 대기 409; 보내기 규칙 확인·검토 이슈 409 `need_confirm` → 같은 본문 + `confirm_token` 으로 재전송, 금지 규칙 403 — 위 "보내기 규칙")
 - 세션 만들기: `/api/sessions/create`(대화창 확인 카드 [실행], 진행은 `/api/sessions/create/:job_id`)
 - 통신기: `/api/chat`(SSE) · `/api/chat/:id` · `/api/chat/:id/stop` · `/api/chats` · `/api/chat/actions/validate`(확인 카드 검증) · `/api/chat/:id/action`(카드 상태 저장)
 - 아카이브: `/api/archive/status`(볼트 배지·마지막 쓰기·마지막 오류) · `/api/archive/flush`(지금 쓰기) · `/api/outputs`(정리 결과물 목록) · `/api/outputs/:id`(하나, 마크다운 포함) · `/api/outputs/:id/reveal`(Finder 에서 보기)

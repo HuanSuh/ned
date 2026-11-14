@@ -12,6 +12,7 @@ import { eventKey } from "./calendar-create.js";
 import { appendActionLog, gate, performSend, readActionLog, type SendRequest, type SendResult } from "./actions.js";
 import type { NedConfig } from "./config.js";
 import { log } from "./paths.js";
+import { blockingRule, guardSend, needConfirmSummary, spendConfirmToken, type NeedConfirm } from "./send-guard.js";
 
 export type SendJobState = "running" | "done";
 
@@ -113,20 +114,36 @@ export function linkOf(detail: string): string | undefined {
 export type StartOutcome =
   | { kind: "sync"; result: SendResult }
   | { kind: "already_sent"; sent: { at: string; detail: string; job_id?: string } }
+  | { kind: "need_confirm"; need: NeedConfirm }
   | { kind: "job"; job: SendJob; reused: boolean };
 
 /**
- * Start (or join) the job for `req`. A switched-off action is refused synchronously (instant, logged by performSend)
- * so the popup can say so without polling. `run` is injectable for tests.
+ * Start (or join) the job for `req`. A switched-off action or a `block` rule is refused synchronously (instant, logged
+ * by performSend) so the popup can say so without polling. Then a running twin is joined / a recent send answers
+ * already_sent, and only then the confirm step (send-guard.ts): a `confirm` rule or review issues without a valid
+ * confirm_token → need_confirm (logged; the route answers 409). `run` is injectable for tests.
  */
 export async function startSendJob(req: SendRequest, cfg: NedConfig, run: typeof performSend = performSend): Promise<StartOutcome> {
   prune();
-  if (!gate(req, cfg).on) return { kind: "sync", result: await run(req, cfg) };
+  if (!gate(req, cfg).on || blockingRule(req, cfg)) return { kind: "sync", result: await run(req, cfg) };
   const key = sendKey(req);
   const live = [...jobs.values()].find((j) => j.state === "running" && j.key === key);
   if (live) return { kind: "job", job: live, reused: true };
   const sent = findRecentSent(req);
   if (sent) return { kind: "already_sent", sent };
+
+  const decision = await guardSend(req, cfg);
+  if (decision.kind === "confirm") {
+    const { need, guard } = decision;
+    appendActionLog({ ts: new Date().toISOString(), source: req.source, mode: req.mode, action: "need_confirm", ref: req.ref, draft_id: req.draft_id, text: req.text.slice(0, 120), ok: false, result: needConfirmSummary(need), ...(req.origin ? { origin: req.origin } : {}), ...(guard.rule ? { rule: guard.rule } : {}), ...(guard.review ? { review: guard.review } : {}) });
+    log(`send: ${req.source}/${req.mode} held for confirm — ${needConfirmSummary(need).slice(0, 200)}`);
+    return { kind: "need_confirm", need };
+  }
+  // The review may have taken a while: a twin started meanwhile is joined rather than sent twice.
+  const twin = [...jobs.values()].find((j) => j.state === "running" && j.key === key);
+  if (twin) return { kind: "job", job: twin, reused: true };
+  req = { ...req, guard: decision.guard };
+  if (decision.guard.confirmed) spendConfirmToken(req.confirm_token); // one confirm = one send
 
   const job: SendJob = { id: randomUUID(), key, req, state: "running", started_at: Date.now() };
   jobs.set(job.id, job);

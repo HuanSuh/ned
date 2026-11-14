@@ -192,6 +192,8 @@ struct FeedResponse: Decodable {
 struct SessionSendOutcome: Equatable, Sendable {
     var status: Int
     var error: String?
+    /// 409 `need_confirm`: a 보내기 규칙 asks for the dashboard's confirm step (the pet has none).
+    var needConfirm = false
     var ok: Bool { status == 200 }
 }
 
@@ -473,7 +475,7 @@ final class StateStore: ObservableObject {
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             let j = obj(data)
             if code == 202, let id = j?["job_id"] as? String { return poll(id, deadline: Date().addingTimeInterval(20)) }
-            finish(SessionSendOutcome(status: code, error: (j?["error"] as? String) ?? err?.localizedDescription))
+            finish(SessionSendOutcome(status: code, error: (j?["error"] as? String) ?? err?.localizedDescription, needConfirm: j?["need_confirm"] as? Bool ?? false))
         }.resume()
     }
 
