@@ -230,10 +230,31 @@ describe("HTTP", () => {
     const rt = uc.runtimeDir();
     uc.setUpdateDeps({
       readFile: (p) => (p === path.join(rt, ".claude-plugin", "plugin.json") ? JSON.stringify({ name: "ned", version: "0.3.0", repository: "https://github.com/HuanSuh/ned" }) : null),
+      fetchText: async () => ({ status: 0, text: "", err: "offline" }),
       gh: async () => ({ code: 0, out: JSON.stringify({ version: "0.3.0" }), err: "", missing: false }),
     });
   });
   afterEach(() => uc.setUpdateDeps(null));
+
+  it("auto-update uses the raw.githubusercontent.com result as is: updateTick → recordCheck → install of the raw version", async () => {
+    const rt = uc.runtimeDir();
+    uc.setUpdateDeps({
+      readFile: (p) => (p === path.join(rt, ".claude-plugin", "plugin.json") ? JSON.stringify({ name: "ned", version: "0.3.0", repository: "https://github.com/HuanSuh/ned" }) : null),
+      fetchText: async (url) => ({ status: url === "https://raw.githubusercontent.com/HuanSuh/ned/main/.claude-plugin/plugin.json" ? 200 : 404, text: JSON.stringify({ version: "0.5.0" }) }),
+      gh: async () => { throw new Error("gh must not run when raw answers"); },
+    });
+    const started: (string | null)[] = [];
+    const did = await su.updateTick(cfg({ auto_install: true }), { quiet: true, idle: false, now: T0 }, {
+      check: (refresh) => uc.updateCheck({ refresh }), // the real check (deps injected above), as tickDeps() wires it
+      notify: () => {},
+      start: (c) => { started.push(c.latest); return { started: true, reason: "ok" }; },
+      locked: () => false,
+      sessions: () => [],
+    });
+    expect(did[0]).toBe("check: 0.3.0 / 0.5.0");
+    expect(fileState().available).toMatchObject({ current: "0.3.0", latest: "0.5.0" });
+    expect(started).toEqual(["0.5.0"]);
+  });
   const req = (p: string, init?: RequestInit) => Promise.resolve(captured.fetch!(new Request(`http://ned.test${p}`, init)));
 
   it("GET /api/update-check?refresh=1 records the check and returns status (config.updates, next check)", async () => {

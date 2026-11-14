@@ -3,8 +3,11 @@
  *
  * current = `<runtime>/.claude-plugin/plugin.json` (`NED_RUNTIME_DIR`, else `$NED_HOME/runtime` — where /ned:install
  * builds; a dev checkout without a runtime falls back to the checkout the daemon runs from).
- * latest  = (a) `gh api repos/<owner>/<repo>/contents/.claude-plugin/plugin.json?ref=main` (private repo → needs gh login),
- *           else (b) the local marketplace clone `~/.claude/plugins/marketplaces/<marketplace>/.claude-plugin/plugin.json`.
+ * latest  = (a) `https://raw.githubusercontent.com/<owner>/<repo>/main/.claude-plugin/plugin.json` (public repo — plain
+ *               fetch, no gh / login, 5 s timeout),
+ *           else (b) `gh api repos/<owner>/<repo>/contents/.claude-plugin/plugin.json?ref=main` (the user's gh login —
+ *               e.g. raw.githubusercontent.com blocked by a proxy, or a private fork),
+ *           else (c) the local marketplace clone `~/.claude/plugins/marketplaces/<marketplace>/.claude-plugin/plugin.json`.
  * The repo slug comes from plugin.json `repository` / `homepage`, the marketplace name from marketplace.json `name`.
  * Nothing is installed here — installing is the Claude Code flow (/plugin update → /reload-plugins → /ned:install).
  */
@@ -19,7 +22,7 @@ export interface UpdateCheck {
   current: string | null;
   latest: string | null;
   /** Where `latest` came from (null = nowhere). */
-  source: "github" | "marketplace" | null;
+  source: "raw" | "github" | "marketplace" | null;
   update_available: boolean;
   checked_at: number;
   /** "owner/repo" read from plugin.json, when found. */
@@ -28,13 +31,17 @@ export interface UpdateCheck {
   steps: string[];
   /** Set when either side could not be read: why. */
   error?: string;
-  /** Latest came from the marketplace fallback: why gh did not answer. */
+  /** Latest came from a fallback (gh / marketplace): why the earlier ones did not answer. */
   note?: string;
 }
+
+export const RAW_TIMEOUT_MS = 5_000;
 
 export interface UpdateDeps {
   /** File text, or null when missing / unreadable. */
   readFile: (p: string) => string | null;
+  /** GET a URL (raw.githubusercontent.com). `status` 0 + `err` = network error / timeout. */
+  fetchText: (url: string, timeoutMs: number) => Promise<{ status: number; text: string; err?: string }>;
   /** Run gh; `missing` = gh not installed. */
   gh: (args: string[]) => Promise<{ code: number; out: string; err: string; missing: boolean }>;
 }
@@ -111,9 +118,20 @@ export async function runUpdateCheck(d: UpdateDeps, env: NodeJS.ProcessEnv = pro
   const latestErrs: string[] = [];
 
   let latest: string | null = null, source: UpdateCheck["source"] = null;
-  // (a) GitHub main via gh (private repo → the user's gh login).
-  if (!repo) latestErrs.push("gh: plugin.json 에 GitHub 레포 주소가 없음");
-  else {
+  if (!repo) latestErrs.push("GitHub: plugin.json 에 GitHub 레포 주소가 없음");
+  // (a) GitHub main as a plain file (public repo — no gh needed).
+  if (repo) {
+    const url = `https://raw.githubusercontent.com/${repo}/main/.claude-plugin/plugin.json`;
+    const r = await d.fetchText(url, RAW_TIMEOUT_MS).catch((e: unknown) => ({ status: 0, text: "", err: String((e as Error)?.message ?? e) }));
+    if (r.status !== 200) latestErrs.push(`raw: ${r.status ? `HTTP ${r.status}` : (r.err || "network error").slice(0, 200)}`);
+    else {
+      latest = versionOf(parseJson(r.text));
+      if (latest) source = "raw";
+      else latestErrs.push("raw: 응답에 version 이 없음");
+    }
+  }
+  // (b) GitHub main via gh (the user's gh login).
+  if (repo && !latest) {
     const r = await d.gh(["api", "-H", "Accept: application/vnd.github.raw+json", `repos/${repo}/contents/.claude-plugin/plugin.json?ref=main`]);
     if (r.missing) latestErrs.push("gh: 설치 안 됨 (brew install gh)");
     else if (r.code !== 0) {
@@ -125,7 +143,7 @@ export async function runUpdateCheck(d: UpdateDeps, env: NodeJS.ProcessEnv = pro
       else latestErrs.push("gh: 응답에 version 이 없음");
     }
   }
-  // (b) the marketplace clone Claude Code keeps (fresh after /plugin marketplace update).
+  // (c) the marketplace clone Claude Code keeps (fresh after /plugin marketplace update).
   if (!latest) {
     if (!marketName) latestErrs.push("마켓플레이스: 이름을 모름");
     else {
@@ -144,13 +162,46 @@ export async function runUpdateCheck(d: UpdateDeps, env: NodeJS.ProcessEnv = pro
   }
   const out: UpdateCheck = { current, latest, source, update_available, checked_at: Date.now(), repo, steps };
   if (errors.length) out.error = errors.join(" · ");
-  // gh failed but the marketplace answered: keep why, for the tooltip (not an error).
-  if (source === "marketplace" && latestErrs.length) out.note = latestErrs.join(" · ");
+  // raw (and gh) failed but a fallback answered: keep why, for the tooltip (not an error).
+  if ((source === "github" || source === "marketplace") && latestErrs.length) out.note = latestErrs.join(" · ");
   return out;
+}
+
+/** plugin.json is ~1 KiB — a raw answer larger than this is refused (Content-Length) or cut off while reading (no buffering). */
+export const RAW_MAX_BYTES = 64 * 1024;
+
+/**
+ * GET `url` with a timeout, reading at most `max` bytes: a Content-Length over `max` is refused before the body is read,
+ * and the body stream is cancelled as soon as it passes `max` (status 0 + err either way). Non-200 bodies are not read.
+ */
+export async function fetchCapped(url: string, timeoutMs: number, fetchImpl: typeof fetch = fetch, max = RAW_MAX_BYTES): Promise<{ status: number; text: string; err?: string }> {
+  const tooLarge = (n: number | string) => ({ status: 0, text: "", err: `응답이 너무 큼 (${n} bytes > ${max})` });
+  try {
+    const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs), redirect: "follow", headers: { "cache-control": "no-cache" } });
+    if (res.status !== 200) { await res.body?.cancel().catch(() => {}); return { status: res.status, text: "" }; }
+    const cl = Number(res.headers.get("content-length"));
+    if (Number.isFinite(cl) && cl > max) { await res.body?.cancel().catch(() => {}); return tooLarge(cl); }
+    if (!res.body) return { status: 200, text: "" };
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > max) { await reader.cancel().catch(() => {}); return tooLarge(`${total}+`); }
+      chunks.push(value);
+    }
+    return { status: 200, text: new TextDecoder().decode(Buffer.concat(chunks)) };
+  } catch (e) {
+    const err = e as Error;
+    return { status: 0, text: "", err: err?.name === "TimeoutError" ? `timeout ${timeoutMs / 1000}s` : String(err?.message ?? e) };
+  }
 }
 
 const defaultDeps = (): UpdateDeps => ({
   readFile: (p) => { try { return fs.readFileSync(p, "utf8"); } catch { return null; } },
+  fetchText: (url, timeoutMs) => fetchCapped(url, timeoutMs),
   gh: (args) => new Promise((resolve) => {
     execFile("gh", args, { timeout: 15_000, maxBuffer: 1 << 20 }, (e, stdout, stderr) => {
       const ex = e as (NodeJS.ErrnoException & { code?: unknown }) | null;
@@ -160,7 +211,7 @@ const defaultDeps = (): UpdateDeps => ({
 });
 
 let depsOverride: Partial<UpdateDeps> | null = null;
-/** Tests: swap file reads / gh (null = real ones). Also drops the cache. */
+/** Tests: swap file reads / fetch / gh (null = real ones). Also drops the cache. */
 export function setUpdateDeps(d: Partial<UpdateDeps> | null): void { depsOverride = d; cache = null; }
 
 export const UPDATE_CACHE_MS = 10 * 60_000;

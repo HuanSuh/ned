@@ -81,9 +81,11 @@ describe("MCP over Streamable HTTP (/mcp)", () => {
   });
 
   // fetch won't let us set Host — a raw HTTP/1.1 request.
-  const rawRequest = (method: string, p: string, host: string, body = "") => new Promise<string>((resolve, reject) => {
+  // (also: fetch overwrites Sec-Fetch-Mode, so browser-navigation headers go through here too)
+  const rawRequest = (method: string, p: string, host: string, body = "", extra: Record<string, string> = {}) => new Promise<string>((resolve, reject) => {
     const s = net.connect(PORT, "127.0.0.1", () => {
-      s.write(`${method} ${p} HTTP/1.1\r\nHost: ${host}\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
+      const ex = Object.entries(extra).map(([k, v]) => `${k}: ${v}\r\n`).join("");
+      s.write(`${method} ${p} HTTP/1.1\r\nHost: ${host}\r\n${ex}Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
     });
     let out = "";
     s.on("data", (d) => (out += d)).on("end", () => resolve(out)).on("error", reject);
@@ -104,6 +106,50 @@ describe("MCP over Streamable HTTP (/mcp)", () => {
     expect((await fetch(`http://127.0.0.1:${PORT}/api/state`, { headers: { origin: "http://evil.example" } })).status).toBe(403);
     // Ned.app's WKWebView / the dashboard page: Origin http://127.0.0.1:<port>
     expect((await fetch(`http://127.0.0.1:${PORT}/api/state`, { headers: { origin: `http://127.0.0.1:${PORT}` } })).status).toBe(200);
+  });
+
+  it("a loopback page / Host on another local port is refused; a Host without a port too", async () => {
+    const other = PORT === 3000 ? 3001 : 3000;
+    expect((await fetch(`http://127.0.0.1:${PORT}/api/state`, { headers: { origin: `http://127.0.0.1:${other}` } })).status).toBe(403);
+    expect((await fetch(`http://127.0.0.1:${PORT}/api/state`, { headers: { origin: `http://localhost:${other}` } })).status).toBe(403);
+    expect(await rawRequest("GET", "/api/state", `localhost:${other}`)).toMatch(/^HTTP\/1\.1 403/);
+    expect(await rawRequest("GET", "/api/state", "127.0.0.1")).toMatch(/^HTTP\/1\.1 403/);
+    expect(await rawRequest("GET", "/", "localhost")).toMatch(/^HTTP\/1\.1 403/);
+    // no Origin (fetch from Node sets Host 127.0.0.1:<port>) → allowed
+    expect((await fetch(`http://127.0.0.1:${PORT}/api/state`)).status).toBe(200);
+  });
+
+  it("Sec-Fetch-Site cross-site / same-site → 403 (/api and /mcp, JSON-RPC shape on /mcp); same-origin / none → 200", async () => {
+    for (const site of ["cross-site", "same-site"]) {
+      expect((await fetch(`http://127.0.0.1:${PORT}/api/update-check`, { headers: { "sec-fetch-site": site } })).status, site).toBe(403);
+      const r = await post({ "sec-fetch-site": site });
+      expect(r.status).toBe(403);
+      expect(await r.json()).toMatchObject({ jsonrpc: "2.0", id: null, error: { code: -32000, message: `Forbidden: Sec-Fetch-Site not allowed: ${site}` } });
+    }
+    for (const site of ["same-origin", "none"]) expect((await fetch(`http://127.0.0.1:${PORT}/api/state`, { headers: { "sec-fetch-site": site } })).status, site).toBe(200);
+  });
+
+  it("cross-site top-level navigation: GET / (dashboard) → 200; GET /api/update-check → 403; cross-site <img> GET / → 403", async () => {
+    const nav = { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" };
+    const host = `127.0.0.1:${PORT}`;
+    expect(await rawRequest("GET", "/", host, "", nav)).toMatch(/^HTTP\/1\.1 200/);
+    expect(await rawRequest("GET", "/api/update-check", host, "", nav)).toMatch(/^HTTP\/1\.1 403/);
+    expect(await rawRequest("GET", "/", host, "", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" })).toMatch(/^HTTP\/1\.1 403/);
+    const mcp = await rawRequest("POST", "/mcp", host, JSON.stringify(INIT), nav);
+    expect(mcp).toMatch(/^HTTP\/1\.1 403/);
+    expect(mcp).toMatch(/"jsonrpc":"2\.0".*"code":-32000/);
+  });
+
+  it("/mcp 403 keeps the JSON-RPC error shape (other-port Origin and Host)", async () => {
+    const other = PORT === 3000 ? 3001 : 3000;
+    const r = await post({ origin: `http://127.0.0.1:${other}` });
+    expect(r.status).toBe(403);
+    const j = await r.json();
+    expect(j).toMatchObject({ jsonrpc: "2.0", id: null, error: { code: -32000 } });
+    expect(j.error.message).toMatch(/^Forbidden: Origin port not allowed/);
+    const raw = await rawRequest("POST", "/mcp", `127.0.0.1:${other}`,JSON.stringify(INIT));
+    expect(raw).toMatch(/^HTTP\/1\.1 403/);
+    expect(raw).toMatch(/"jsonrpc":"2\.0".*"code":-32000/);
   });
 
   it("GET / DELETE → 405 (stateless: POST only)", async () => {

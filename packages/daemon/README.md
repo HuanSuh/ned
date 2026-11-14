@@ -44,9 +44,10 @@ node dist/cli.js setup-check [--json] # 시작하기 점검 1회(아래 "시작�
 
 Ned.app 메뉴 "업데이트 확인"과 설정 → 앱의 같은 버튼이 `GET /api/update-check` 를 부른다. 설치하지는 않는다(설치는 Claude Code 흐름).
 - 현재 버전: `$NED_RUNTIME_DIR`(없으면 `$NED_HOME/runtime`)`/.claude-plugin/plugin.json` — `/ned:install` 이 빌드하는 곳. 런타임이 없는 개발 체크아웃이면 데몬이 도는 체크아웃(`REPO_ROOT`)의 것.
-- 최신 버전: (a) `gh api -H "Accept: application/vnd.github.raw+json" repos/<owner>/<repo>/contents/.claude-plugin/plugin.json?ref=main`(비공개 레포 → `gh auth login` 필요; 슬러그는 plugin.json `repository`/`homepage` 에서) →
-  실패하면 (b) `$CLAUDE_CONFIG_DIR`(없으면 `~/.claude`)`/plugins/marketplaces/<marketplace.json name>/.claude-plugin/plugin.json`. 둘 다 안 되면 `error` 에 둘의 사유.
-- 비교는 semver(프리릴리스 < 정식). 결과 10분 캐시(동시 요청은 한 번만), `?refresh=1` 은 새로. 테스트는 `setUpdateDeps({readFile, gh})` 로 파일·gh 를 바꾼다.
+- 최신 버전: (a) `https://raw.githubusercontent.com/<owner>/<repo>/main/.claude-plugin/plugin.json`(공개 레포 — Node `fetch`, 5초 타임아웃, 64KiB 상한(`fetchCapped`: Content-Length 초과면 거절, 본문은 스트림으로 64KiB 까지만), gh 불필요; 슬러그는 plugin.json `repository`/`homepage` 에서) →
+  실패하면 (b) `gh api -H "Accept: application/vnd.github.raw+json" repos/<owner>/<repo>/contents/.claude-plugin/plugin.json?ref=main`(사용자 gh 로그인) →
+  실패하면 (c) `$CLAUDE_CONFIG_DIR`(없으면 `~/.claude`)`/plugins/marketplaces/<marketplace.json name>/.claude-plugin/plugin.json`. 셋 다 안 되면 `error` 에 각 사유, (b)·(c) 로 폴백했으면 앞선 사유는 `note`.
+- 비교는 semver(프리릴리스 < 정식). 결과 10분 캐시(동시 요청은 한 번만), `?refresh=1` 은 새로. 자동 업데이트(`self-update.ts`)도 같은 결과를 쓴다. 테스트는 `setUpdateDeps({readFile, fetchText, gh})` 로 파일·네트워크·gh 를 바꾼다(실제 네트워크 없음).
 
 ### 자동 업데이트 (`src/self-update.ts`, `scripts/self-update.sh`)
 
@@ -278,7 +279,7 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 
 ### HTTP API
 
-모든 라우트(`/api/*`·`/mcp`·정적 파일)는 `src/request-guard.ts` 를 먼저 거친다 — loopback 이 아닌 Host·Origin 은 403(DNS rebinding 방지, Origin·Host 가 없으면 허용).
+모든 라우트(`/api/*`·`/mcp`·정적 파일)는 `src/request-guard.ts` 를 먼저 거친다 — Host·Origin 이 loopback + 데몬 포트가 아니거나 `Sec-Fetch-Site` 가 `same-origin`·`none` 이 아니면 403(DNS rebinding·다른 사이트·다른 포트 로컬 페이지 방지 — Origin 없는 `<img>` GET 포함, Host 포트 생략도 거부, 이 헤더들이 없으면 허용). 다른 사이트에 걸린 대시보드 링크(최상위 GET navigate·document)는 `/api`·`/mcp` 밖이면 허용.
 
 | Method | Path | 설명 |
 |---|---|---|
@@ -287,7 +288,7 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 | GET | `/api/briefings?limit=30` | 브리핑 히스토리 (최신 먼저) |
 | GET | `/api/feed` | 데스크톱 펫(Ned.app) 메시지 피드 `{items, pet, quiet, persona, quick_replies, session_send}` — `src/feed.ts`. `quick_replies` = `dashboard.session_quick_replies`, `session_send` = `actions.session_send`(펫 말풍선의 세션에 답하기). 통신기 메시지 탭(`chat-core.js buildFeed`)과 같은 입력·규칙(열린 attention, 24h 안 UPDATE 브리핑 headline, 내 답 이후 새 답글이 있는 Slack 스레드 — 소스 slack 이 꺼지면 빠짐, 같은 url 은 한 번), 최신순. 각 항목 `key`·`kind`·`title`·`detail`·`url`·`ts` + `pet_kind`(`pet.messages` 토글: email→mail, thread→slack, other→null=항상) + `deep`(링크 열기 규칙의 앱 딥링크). 브라우저 전용 chatNotes 는 없음. `test/feed-shared.test.ts` 가 같은 fixture 로 buildFeed 와 key·kind 순서를 비교 |
 | GET / PUT | `/api/config` | `config.yaml` 조회 / 부분 갱신 |
-| POST | `/mcp` | MCP Streamable HTTP(stateless·JSON 응답) — 도구 `ned_attention` 외 5개. GET/DELETE 405, loopback 아닌 Host·Origin 403. 아래 "MCP 서버" |
+| POST | `/mcp` | MCP Streamable HTTP(stateless·JSON 응답) — 도구 `ned_attention` 외 5개. GET/DELETE 405, loopback:데몬 포트가 아닌 Host·Origin 403(JSON-RPC 오류 모양). 아래 "MCP 서버" |
 | POST | `/api/heartbeat?daily=1` | heartbeat 강제 실행 (agenda 는 오래됐을 때만 갱신 — 호환용) |
 | POST | `/api/check?daily=1` | 대시보드 '지금 점검': agenda 1단계 새로 고침 → heartbeat. 결과 브리핑(또는 `{status:"skipped"}`) 반환, 동시 호출은 한 실행을 공유 |
 | GET | `/api/check` | 진행 중인 점검 단계 `{running, phase: "agenda"\|"judge"\|null, daily, started_at, phase_started_at}` |
@@ -319,7 +320,7 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 | POST | `/api/setup/dismiss` | `{dismissed?: boolean}`(기본 true) → `{onboarding: {dismissed_at}}` — 시작하기 창이 저절로 뜨지 않게. `~/.ned/onboarding.json`(config.yaml 아님), false 면 지움 |
 | GET | `/api/update/status` | 자동 업데이트 상태 `{auto: config.updates, last_check_at, next_check_at, attempt: {at, result, from, to, log, fail_line} \| null, running, quiet_now, update_available}` — 확인을 돌리지 않음 |
 | POST | `/api/update/install` | 지금 업데이트: 새로 확인 → 새 버전이면 self-update.sh 시작 → 202 `{started, reason, check, status}`, 아니면 409(`reason`: 새 버전 없음 / 이미 업데이트 중) |
-| GET | `/api/update-check?refresh=1` | 업데이트 확인(위 "업데이트 확인") `{current, latest, source: github\|marketplace\|null, update_available, checked_at, repo, steps: ["/plugin update ned", "/reload-plugins", "/ned:install"], error?, note?}` — `note` = 마켓플레이스로 폴백했을 때 gh 가 안 된 이유. 10분 캐시, `refresh=1` 은 새로 |
+| GET | `/api/update-check?refresh=1` | 업데이트 확인(위 "업데이트 확인") `{current, latest, source: raw\|github\|marketplace\|null, update_available, checked_at, repo, steps: ["/plugin update ned", "/reload-plugins", "/ned:install"], error?, note?}` — `note` = gh·마켓플레이스로 폴백했을 때 앞선 소스(raw, gh)가 안 된 이유. 10분 캐시, `refresh=1` 은 새로 |
 | POST | `/api/archive/flush` | 오늘(+대기 중인 날) 리포트를 지금 씀 → `{ ok, written: [day], error?, status }` · 409 아카이브 꺼짐 · 500 쓰기 실패(`status.last_error`) |
 | GET | `/api/outputs?limit=50` | 정리 결과물 목록(최신순, `markdown` 뺌) `[{ id, ts, kind, title, sources, chat_id?, message_ts?, vault_rel?, vault_path?, obsidian_url?, vault_error? }]` |
 | GET | `/api/outputs/:id` | 결과물 하나(`markdown` 포함). 404 |
@@ -583,8 +584,10 @@ detail `이력 · M/D · …`, `tab: home` / `anchor: card:<slack|mail|jira|gh|c
 - 트랜스포트: `@modelcontextprotocol/sdk` 의 `WebStandardStreamableHTTPServerTransport` — 웹 표준 Request/Response 라 hono 의 `c.req.raw` 를 그대로 넘긴다.
   `sessionIdGenerator: undefined`(stateless) + `enableJsonResponse: true`. 요청마다 `buildMcpServer()` 로 McpServer·트랜스포트를 새로 만들고 응답 뒤 닫는다
   (SDK 예제 `simpleStatelessStreamableHttp.ts` 와 같은 방식). `GET`/`DELETE /mcp` → 405 `Allow: POST`.
-- 로컬 전용: `127.0.0.1` 바인딩에 더해 서버 전체 가드 `src/request-guard.ts`(`app.use("*")` — `/api/*`·`/mcp`·정적 파일 모두) — Host 가 loopback(127.0.0.1·localhost·[::1], 포트 무관)이 아니거나, Origin 이 있는데 `http(s)://` loopback 이 아니면 403
-  (DNS rebinding 방지; SDK 의 `allowedOrigins`·`allowedHosts` 옵션은 deprecated 라 "외부 미들웨어" 권고대로 직접). Origin 없음(CLI 클라이언트)은 허용. 인증 없음.
+- 로컬 전용: `127.0.0.1` 바인딩에 더해 서버 전체 가드 `src/request-guard.ts`(`app.use("*", requestGuardMiddleware(port))` — `/api/*`·`/mcp`·정적 파일 모두, port = 실제 listen 포트) — Host 가 loopback(127.0.0.1·localhost·[::1]) + `:port` 가 아니거나(포트 생략 거부), Origin 이 있는데 `http(s)://loopback:port` 가 아니면 403,
+  `Sec-Fetch-Site` 가 있는데 `same-origin`·`none` 이 아니면 403(Origin 이 없는 no-cors GET — `<img src=…/api/calendar>` 같은 비용 드는 GET 반복 — 차단; 다른 포트 127.0.0.1 은 브라우저 기준 `same-site`).
+  예외: GET/HEAD + `Sec-Fetch-Mode: navigate` + `Sec-Fetch-Dest: document` 이고 경로가 `/api`·`/mcp` 가 아니면(다른 사이트에 걸린 대시보드 링크 클릭 — 정적 페이지, 부수효과 없음) Sec-Fetch-Site 와 무관하게 허용. Host·Origin 규칙이 먼저.
+  (DNS rebinding·같은 Mac 의 다른 포트 로컬 페이지(개발 서버 등) 방지; SDK 의 `allowedOrigins`·`allowedHosts` 옵션은 deprecated 라 "외부 미들웨어" 권고대로 직접). Origin 없음(CLI 클라이언트)은 허용. 인증 없음.
 - 도구: 순수 핸들러 `toolAttention`·`toolSessions`·`toolBriefing`·`toolHistory`·`toolFeed`(입력 + `ToolCtx` = config·state·agenda·reviewed·briefings·now) →
   `{summary, data, error?}`. `mcp.ts` 가 매 호출 `readToolCtx()` 로 디스크에서 새로 읽고, 결과를 텍스트 블록 두 개(요약 한 줄, JSON)로 싼다. `error` 면 `isError: true`.
   입력 스키마는 zod(raw shape) — 범위 밖 값은 SDK 가 isError 결과로 돌려준다. 읽기 도구는 `readOnlyHint: true`.

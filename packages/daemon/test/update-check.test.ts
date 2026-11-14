@@ -30,14 +30,20 @@ const RUNTIME_PLUGIN = path.join(RUNTIME, ".claude-plugin", "plugin.json");
 const RUNTIME_MARKET = path.join(RUNTIME, ".claude-plugin", "marketplace.json");
 const MARKET_PLUGIN = path.join(CLAUDE, "plugins", "marketplaces", "ned", ".claude-plugin", "plugin.json");
 
-/** Files keyed by absolute path; gh answers with `gh`. Records every gh call. */
-function deps(files: Record<string, string>, gh: Deps["gh"] = async () => ({ code: 0, out: manifest("0.3.0"), err: "", missing: false })) {
+/** raw.githubusercontent.com unreachable (the default here, so the gh / marketplace cases below stay as they were). */
+const RAW_DOWN: Deps["fetchText"] = async () => ({ status: 0, text: "", err: "getaddrinfo ENOTFOUND raw.githubusercontent.com" });
+const RAW_URL = "https://raw.githubusercontent.com/HuanSuh/ned/main/.claude-plugin/plugin.json";
+
+/** Files keyed by absolute path; gh answers with `gh`, raw with `raw`. Records every gh / fetch call. */
+function deps(files: Record<string, string>, gh: Deps["gh"] = async () => ({ code: 0, out: manifest("0.3.0"), err: "", missing: false }), raw: Deps["fetchText"] = RAW_DOWN) {
   const calls: string[][] = [];
+  const fetches: { url: string; timeoutMs: number }[] = [];
   const d: Deps = {
     readFile: (p) => files[p] ?? null,
+    fetchText: async (url, timeoutMs) => { fetches.push({ url, timeoutMs }); return raw(url, timeoutMs); },
     gh: async (args) => { calls.push(args); return gh(args); },
   };
-  return { d, calls };
+  return { d, calls, fetches };
 }
 const installed = (v = "0.2.0") => ({ [RUNTIME_PLUGIN]: manifest(v), [RUNTIME_MARKET]: JSON.stringify({ name: "ned" }) });
 
@@ -72,14 +78,49 @@ describe("repoSlug (pure)", () => {
 });
 
 describe("runUpdateCheck", () => {
-  it("gh answers → source github, update available, repo slug from plugin.json in the gh path", async () => {
+  it("raw.githubusercontent.com answers → source raw, gh never called, 5 s timeout, no note", async () => {
+    const { d, calls, fetches } = deps(installed("0.2.0"), undefined, async () => ({ status: 200, text: manifest("0.4.0") }));
+    const r = await uc.runUpdateCheck(d, ENV);
+    expect(r).toMatchObject({ current: "0.2.0", latest: "0.4.0", source: "raw", update_available: true, repo: "HuanSuh/ned" });
+    expect(r.error).toBeUndefined();
+    expect(r.note).toBeUndefined();
+    expect(fetches).toEqual([{ url: RAW_URL, timeoutMs: 5_000 }]);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("raw fails (HTTP 404 / no version / throws) → gh, raw's reason kept as a note", async () => {
+    for (const raw of [
+      async () => ({ status: 404, text: "" }),
+      async () => ({ status: 200, text: "<html>captive portal</html>" }),
+      async () => { throw new Error("boom"); },
+    ] as Deps["fetchText"][]) {
+      const { d, calls } = deps(installed("0.2.0"), undefined, raw);
+      const r = await uc.runUpdateCheck(d, ENV);
+      expect(r).toMatchObject({ latest: "0.3.0", source: "github", update_available: true });
+      expect(r.error).toBeUndefined();
+      expect(r.note).toMatch(/^raw: /);
+      expect(calls).toHaveLength(1);
+    }
+  });
+
+  it("raw down → gh answers → source github, update available, repo slug from plugin.json in the gh path", async () => {
     const { d, calls } = deps(installed("0.2.0"));
     const r = await uc.runUpdateCheck(d, ENV);
     expect(r).toMatchObject({ current: "0.2.0", latest: "0.3.0", source: "github", update_available: true, repo: "HuanSuh/ned" });
     expect(r.error).toBeUndefined();
+    expect(r.note).toContain("ENOTFOUND");
     expect(r.steps).toEqual(["/plugin update ned", "/reload-plugins", "/ned:install"]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain("repos/HuanSuh/ned/contents/.claude-plugin/plugin.json?ref=main");
+  });
+
+  it("raw and gh both fail → local marketplace clone, both reasons in the note", async () => {
+    const { d } = deps({ ...installed("0.2.0"), [MARKET_PLUGIN]: manifest("0.2.5") },
+      async () => ({ code: 1, out: "", err: "", missing: true }), async () => ({ status: 0, text: "", err: "timeout 5s" }));
+    const r = await uc.runUpdateCheck(d, ENV);
+    expect(r).toMatchObject({ latest: "0.2.5", source: "marketplace", update_available: true });
+    expect(r.error).toBeUndefined();
+    expect(r.note).toBe("raw: timeout 5s · gh: 설치 안 됨 (brew install gh)");
   });
 
   it("same version → no update", async () => {
@@ -110,6 +151,7 @@ describe("runUpdateCheck", () => {
     const { d } = deps(installed(), async () => ({ code: 4, out: "", err: "To get started with GitHub CLI, please run:  gh auth login", missing: false }));
     const r = await uc.runUpdateCheck(d, ENV);
     expect(r).toMatchObject({ current: "0.2.0", latest: null, source: null, update_available: false });
+    expect(r.error).toContain("raw:");
     expect(r.error).toContain("gh:");
     expect(r.error).toContain("마켓플레이스:");
     expect(r.error).toContain(MARKET_PLUGIN);
@@ -151,23 +193,67 @@ describe("runUpdateCheck", () => {
   });
 });
 
+describe("fetchCapped (the real raw fetch, fetch injected)", () => {
+  const MAX = uc.RAW_MAX_BYTES;
+  /** A streaming body of `n` bytes in 8 KiB chunks; `pulled` counts what the reader actually took. */
+  const stream = (n: number) => {
+    const s = { pulled: 0, cancelled: false };
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (s.pulled >= n) return c.close();
+        const k = Math.min(8192, n - s.pulled);
+        s.pulled += k;
+        c.enqueue(new Uint8Array(k).fill(0x20));
+      },
+      cancel() { s.cancelled = true; },
+    }, { highWaterMark: 0 });
+    return { s, body };
+  };
+  const fake = (res: Response) => (async () => res) as unknown as typeof fetch;
+
+  it("a small 200 body → its text", async () => {
+    expect(await uc.fetchCapped("u", 5000, fake(new Response(manifest("0.9.0"))))).toEqual({ status: 200, text: manifest("0.9.0") });
+  });
+  it("Content-Length over 64 KiB → refused without reading the body", async () => {
+    const { s, body } = stream(MAX + 1);
+    const r = await uc.fetchCapped("u", 5000, fake(new Response(body, { headers: { "content-length": String(MAX + 1) } })));
+    expect(r).toMatchObject({ status: 0, text: "" });
+    expect(r.err).toContain("너무 큼");
+    expect(s.pulled).toBe(0);
+  });
+  it("no Content-Length, endless body → stops reading just past 64 KiB and cancels the stream", async () => {
+    const { s, body } = stream(10 * MAX);
+    const r = await uc.fetchCapped("u", 5000, fake(new Response(body)));
+    expect(r).toMatchObject({ status: 0, text: "" });
+    expect(r.err).toContain("너무 큼");
+    expect(s.pulled).toBeLessThanOrEqual(MAX + 8192);
+    expect(s.cancelled).toBe(true);
+  });
+  it("non-200 → status only, body not read", async () => {
+    const { s, body } = stream(1000);
+    expect(await uc.fetchCapped("u", 5000, fake(new Response(body, { status: 404 })))).toEqual({ status: 404, text: "" });
+    expect(s.pulled).toBe(0);
+  });
+});
+
 describe("GET /api/update-check (cache)", () => {
   beforeAll(() => { startServer(() => loadConfig()); });
-  let ghCalls = 0;
+  let ghCalls = 0; // counts raw fetches (the first source) — gh must not be reached
   let version = "0.3.0";
   beforeEach(() => {
     ghCalls = 0; version = "0.3.0";
     const rt = uc.runtimeDir();
     uc.setUpdateDeps({
       readFile: (p) => (p === path.join(rt, ".claude-plugin", "plugin.json") ? manifest("0.2.0") : null),
-      gh: async () => { ghCalls++; return { code: 0, out: manifest(version), err: "", missing: false }; },
+      fetchText: async () => { ghCalls++; return { status: 200, text: manifest(version) }; },
+      gh: async () => { throw new Error("gh must not run when raw answers"); },
     });
   });
   afterEach(() => uc.setUpdateDeps(null));
 
   it("answers the check, then serves the cache for 10 minutes; ?refresh=1 looks again", async () => {
     const r1 = await (await request("/api/update-check")).json();
-    expect(r1).toMatchObject({ current: "0.2.0", latest: "0.3.0", source: "github", update_available: true });
+    expect(r1).toMatchObject({ current: "0.2.0", latest: "0.3.0", source: "raw", update_available: true });
     version = "0.4.0";
     const r2 = await (await request("/api/update-check")).json();
     expect(r2.latest).toBe("0.3.0");

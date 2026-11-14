@@ -17,7 +17,7 @@ const CASES: [string, string | null][] = [
   // Slack
   ["https://acme.slack.com/archives/C0123ABCD/p1794193614524359", `slack://channel?team=${T}&id=C0123ABCD&message=1794193614.524359`],
   ["https://acme.slack.com/archives/C0123ABCD/p1794193614524359?thread_ts=1794193470.379259&cid=C0123ABCD", `slack://channel?team=${T}&id=C0123ABCD&message=1794193614.524359&thread_ts=1794193470.379259`],
-  ["https://acme.slack.com/archives/D087RE55D25/p1794193614524359", `slack://channel?team=${T}&id=D087RE55D25&message=1794193614.524359`],
+  ["https://acme.slack.com/archives/D0TESTDM001/p1794193614524359", `slack://channel?team=${T}&id=D0TESTDM001&message=1794193614.524359`],
   ["https://acme.slack.com/archives/G01PRIVATE/p1794193614524359", `slack://channel?team=${T}&id=G01PRIVATE&message=1794193614.524359`],
   ["https://acme.enterprise.slack.com/archives/C0123ABCD/p1794193614524359", `slack://channel?team=${T}&id=C0123ABCD&message=1794193614.524359`],
   ["https://acme.slack.com/archives/C0123ABCD", `slack://channel?team=${T}&id=C0123ABCD`],

@@ -53,14 +53,14 @@ describe.each(SIDES)("%s: key", (_name, m) => {
 
   it("old `@…` marks fold into the base key, largest mark wins; others untouched", () => {
     const folded = m.foldReviewMarks({
-      "slack:D087RE55D25:1794193614.524359@1794193470.379259": 100,
-      "slack:D087RE55D25:1794193614.524359@1794193999.000001": 300,
-      "slack:D087RE55D25:1794193614.524359": 200,
+      "slack:D0TESTDM001:1794193614.524359@1794193470.379259": 100,
+      "slack:D0TESTDM001:1794193614.524359@1794193999.000001": 300,
+      "slack:D0TESTDM001:1794193614.524359": 200,
       "slack:https://x.slack.com/odd@x": 5, // odd-permalink key (not channel:ts) → kept as is
       "mail:th1": 7,
       "session:a@b": 9,
     });
-    expect(folded).toEqual({ "slack:D087RE55D25:1794193614.524359": 300, "slack:https://x.slack.com/odd@x": 5, "mail:th1": 7, "session:a@b": 9 });
+    expect(folded).toEqual({ "slack:D0TESTDM001:1794193614.524359": 300, "slack:https://x.slack.com/odd@x": 5, "mail:th1": 7, "session:a@b": 9 });
   });
 });
 
