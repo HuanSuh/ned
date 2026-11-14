@@ -91,7 +91,7 @@ export const RULE_EXT = [["", "상대 상관없음"], ["true", "외부 상대만
 export const RULES_MAX = 30, RULE_NOTE_LEN = 120, RULE_TARGET_LEN = 200;
 /** What `target` is compared with, per source (send-rules.ts). */
 export const RULE_TARGET_HINT = {
-  "*": "대상 (비우면 전부)", slack: "#채널 · 채널 ID · 사람 이름", mail: "받는 주소 · @도메인", jira: "프로젝트 키 (예: ABC)",
+  "*": "대상 (비우면 전부)", slack: "채널 ID (확실) · #채널 · 사람 이름", mail: "받는 주소 · @도메인", jira: "프로젝트 키 (예: ABC)",
   github: "owner/repo", calendar: "참석자 주소 · @도메인", session: "워크트리 이름",
 };
 const opts = (list, cur) => list.map(([v, l]) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(l)}</option>`).join("");

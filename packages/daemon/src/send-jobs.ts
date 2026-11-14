@@ -12,7 +12,7 @@ import { eventKey } from "./calendar-create.js";
 import { appendActionLog, gate, performSend, readActionLog, type SendRequest, type SendResult } from "./actions.js";
 import type { NedConfig } from "./config.js";
 import { log } from "./paths.js";
-import { blockingRule, guardSend, needConfirmSummary, type NeedConfirm } from "./send-guard.js";
+import { blockingRule, guardSend, needConfirmSummary, spendConfirmToken, type NeedConfirm } from "./send-guard.js";
 
 export type SendJobState = "running" | "done";
 
@@ -143,6 +143,7 @@ export async function startSendJob(req: SendRequest, cfg: NedConfig, run: typeof
   const twin = [...jobs.values()].find((j) => j.state === "running" && j.key === key);
   if (twin) return { kind: "job", job: twin, reused: true };
   req = { ...req, guard: decision.guard };
+  if (decision.guard.confirmed) spendConfirmToken(req.confirm_token); // one confirm = one send
 
   const job: SendJob = { id: randomUUID(), key, req, state: "running", started_at: Date.now() };
   jobs.set(job.id, job);

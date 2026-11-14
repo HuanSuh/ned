@@ -443,12 +443,19 @@ Agenda 응답 형태:
 4. `confirm` 규칙이거나 `actions.review: "warn"` 의 검토가 이슈를 찾으면 보내지 않고 409
    `{ need_confirm: true, reasons: ["규칙 N (…): note"], review?: {status, issues:[{kind, detail}], note?}, confirm_token, expires_at, token_problem? }`.
    클라이언트가 같은 본문 + `confirm_token` 으로 다시 보내면 실행. 토큰 = 데몬 실행마다 새 비밀로 만든 HMAC(요청 내용 해시 — source·mode·draft_id·ref·text·event,
-   origin 제외 — + 만료), 5분. 본문·대상이 바뀌면 `mismatch`, 지나면 `expired` 로 다시 409. 유효한 토큰이면 검토를 다시 돌리지 않는다. 로그 `action: "need_confirm"`.
+   origin 제외 — + 만료), 5분, 1회용(잡을 시작하면 서명을 spent 로 기록, 만료 때 정리). 본문·대상이 바뀌면 `mismatch`, 지나면 `expired`, 재사용은 `spent` 로
+   다시 409. 유효한 토큰이면 검토를 다시 돌리지 않는다. 로그 `action: "need_confirm"`.
    `performSend` 도 `confirm` 규칙인데 `guard.confirmed` 가 없으면 409 — 어떤 경로도 확인 단계를 건너뛰지 못한다.
-- 대상: slack = 채널 이름(`ref.title` 의 `#…`, `#` 무시)·채널 ID·사람 이름, mail = `draft meta.reply_to`(없으면 `ref.title` 의 주소)·`@도메인`,
-  jira = 프로젝트 키, github = `owner/repo`, calendar = `event.attendees`(rsvp 는 주소 없음), session = 세션 이벤트의 워크트리 이름(없으면 `ref.title`).
-  대소문자 무시, `*` 만(정규식 없음). `external: true/false` = 받는 주소가 `actions.internal_domains`(하위 도메인 포함) 밖/안 — 메일·캘린더만,
-  도메인이 비었거나 주소가 없으면 맞추지 않음. jira `transitions`·email `mark_read` 는 규칙·검토 대상 아님.
+   **로컬 보안 경계가 아니다**: 409 가 토큰을 요청한 쪽에 주므로 이 Mac 의 다른 프로그램(에이전트 포함)은 두 번 요청해 통과할 수 있다. `confirm` 은 대시보드에서의
+   실수 방지, 확실한 차단은 `block`(403, 토큰 없음). 대시보드 전용 토큰은 백로그.
+- 대상(실제 수신처를 정하는 값만 — 클라이언트의 `ref.title` 같은 표시 문자열은 보지 않음): slack = 채널 ID + Ned 의 agenda Slack 블록(items·all·watch·threads·dms)이
+  그 ID 에 묶어 둔 채널 이름·작성자 이름(`buildSlackDirectory`; 모르는 채널은 ID 만 — 이름 규칙 불일치), mail = 초안 `meta.reply_to` 만(초안 없음 → 받는 이 미상),
+  jira = 프로젝트 키, github = `owner/repo`, calendar = `event.attendees`(rsvp 는 참석자 없음 → 소스 단위 규칙만), session = 세션 이벤트의 워크트리 이름(없으면 `ref.title`;
+  `/api/sessions/create` 는 `worktree.name` — 스위치 확인 뒤 block 403 / confirm 409 + 토큰, 대화 카드가 재전송). 대소문자 무시, `*` 만 — 선형 glob(`*` 연속은 하나로, RegExp 없음).
+- 외부(`external`, 메일·캘린더만, fail closed): 받는 이마다 `src/address.ts parseAddress` — `"이름" <주소>` 의 꺾쇠 안, `@` 정확히 하나, 로컬 파트 ASCII,
+  도메인 `url.domainToASCII`(punycode; 비ASCII 인데 punycode 라벨 없이 ASCII 로 바뀌는 전각 흉내는 거부). 못 읽는 주소·받는 이 없음 → 외부, 한 명이라도 외부 → 외부.
+  `internal_domains` 가 비었으면 외부 규칙은 아무것도 맞추지 않음. 새 일정 참석자도 `parseAddress` 결과로만 보낸다(`calendar-create.ts`).
+  jira `transitions`·email `mark_read` 는 규칙·검토 대상 아님. 검토 이슈 `detail` 은 비밀값 모양을 `[가림]` 으로 바꾼 뒤 응답·로그에 쓴다.
 - 검토(`warn`): `claude -p` 도구 없음·1턴·`isolated`·effort low·`draft_fast_model`·20초(비용 job `action`), 프롬프트 `prompts/send-review.md`,
   답 `{ok, issues}`(kind = recipient·secret·commitment·tone·other, ≤6개). 시간 초과·실패 → 그대로 보내고 결과 `detail` 끝에 " · 검토 못 함: …".
   session 소스·본문 없는 동작(승인 등)은 검토하지 않음. `NED_NO_LLM=1` 은 claude 대신 비밀값 모양만 보는 `(stub)` 검토기, 테스트는 `_setSendReviewer(fn, deadlineMs)`.

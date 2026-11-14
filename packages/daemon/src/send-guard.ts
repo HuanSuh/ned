@@ -3,7 +3,12 @@
  * a `confirm` rule (send-rules.ts) or review issues (send-review.ts) → 409 {need_confirm, reasons, review, confirm_token}.
  * The client shows them, and on [그래도 보내기] posts the same request + confirm_token. The token is an HMAC (per daemon
  * run) over the request content (source, mode, draft, ref, text, event) and its expiry — 5 minutes, and a changed text /
- * target is a different request, so it asks again. A valid token skips the review (the user already saw it).
+ * target is a different request, so it asks again. A token starts one send job only (then "spent" — reuse asks again).
+ * A valid token skips the review (the user already saw it).
+ *
+ * Not a security boundary against local processes: the 409 hands the token to whoever asked, so any program on this
+ * Mac that can reach 127.0.0.1 (an agent included) can confirm its own request. `confirm` guards against mistakes made
+ * in the dashboard; `block` (403, no token) is the hard stop. A dashboard-only token is backlog.
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { NedConfig, RuleEffect } from "./config.js";
@@ -27,8 +32,8 @@ export interface NeedConfirm {
   review?: ReviewOutcome;
   confirm_token: string;
   expires_at: string;
-  /** The request carried a token that no longer fits (expired / the text or target changed). */
-  token_problem?: "expired" | "mismatch" | "invalid";
+  /** The request carried a token that no longer fits (expired / the text or target changed / already used). */
+  token_problem?: "expired" | "mismatch" | "invalid" | "spent";
 }
 
 export type GuardDecision = { kind: "go"; guard: SendGuard } | { kind: "confirm"; need: NeedConfirm; guard: SendGuard };
@@ -47,7 +52,13 @@ export function issueConfirmToken(req: SendRequest, now = Date.now()): { token: 
   return { token: `${exp.toString(36)}.${sign(requestDigest(req), exp)}`, expires: exp };
 }
 
-export function checkConfirmToken(token: string | undefined, req: SendRequest, now = Date.now()): "ok" | "missing" | "expired" | "mismatch" | "invalid" {
+/** Tokens already used for a send (signature → expiry): one confirm = one send. Pruned once expired. */
+const spent = new Map<string, number>();
+function pruneSpent(now: number): void {
+  for (const [sig, exp] of spent) if (exp < now) spent.delete(sig);
+}
+
+export function checkConfirmToken(token: string | undefined, req: SendRequest, now = Date.now()): "ok" | "missing" | "expired" | "mismatch" | "invalid" | "spent" {
   if (!token) return "missing";
   const m = /^([0-9a-z]{1,12})\.([\w-]{20,100})$/.exec(token);
   if (!m) return "invalid";
@@ -55,7 +66,22 @@ export function checkConfirmToken(token: string | undefined, req: SendRequest, n
   const want = Buffer.from(sign(requestDigest(req), exp));
   const got = Buffer.from(m[2]);
   if (want.length !== got.length || !timingSafeEqual(want, got)) return "mismatch";
-  return now > exp ? "expired" : "ok";
+  if (now > exp) return "expired";
+  pruneSpent(now);
+  return spent.has(m[2]) ? "spent" : "ok";
+}
+
+/** A send job was started with this (valid) token: it cannot confirm another one. */
+export function spendConfirmToken(token: string | undefined, now = Date.now()): void {
+  const m = token ? /^([0-9a-z]{1,12})\.([\w-]{20,100})$/.exec(token) : null;
+  if (!m) return;
+  pruneSpent(now);
+  spent.set(m[2], parseInt(m[1], 36));
+}
+
+/** Test helper: forget spent tokens. */
+export function _resetSpentTokens(): void {
+  spent.clear();
 }
 
 const ruleInfo = (m: RuleMatch | null): SendGuard["rule"] => (m ? { index: m.index, effect: m.rule.effect, ...(m.rule.note ? { note: m.rule.note } : {}) } : undefined);
@@ -85,6 +111,6 @@ export async function guardSend(req: SendRequest, cfg: NedConfig, now = Date.now
 /** One line for the action log: the reasons and review issues. */
 export function needConfirmSummary(n: Pick<NeedConfirm, "reasons" | "review" | "token_problem">): string {
   const parts = [...n.reasons, ...(n.review?.issues ?? []).map((i) => `검토(${i.kind}): ${i.detail}`)];
-  if (n.token_problem) parts.push(`확인 토큰 ${n.token_problem === "expired" ? "만료" : n.token_problem === "mismatch" ? "불일치(요청이 바뀜)" : "형식 오류"} — 다시 확인`);
+  if (n.token_problem) parts.push(`확인 토큰 ${n.token_problem === "expired" ? "만료" : n.token_problem === "mismatch" ? "불일치(요청이 바뀜)" : n.token_problem === "spent" ? "이미 사용됨" : "형식 오류"} — 다시 확인`);
   return `확인 필요 — ${parts.join(" · ")}`.slice(0, 600);
 }

@@ -419,6 +419,7 @@ export function startServer(getConfig: () => NedConfig): void {
     const input = parseSessionCreate(await readBody(c));
     if (typeof input === "string") return c.json({ ok: false, error: input }, 400);
     const st = await startSessionCreate(input, loadConfig(), readState().sessions ?? []);
+    if (st.kind === "need_confirm") return c.json({ ok: false, need_confirm: true, ...st.need, error: "세션을 만들기 전에 확인이 필요해" }, 409);
     if (st.kind === "refused") {
       const { status, ...out } = st.result;
       return c.json({ ...out, error: out.detail }, status);

@@ -278,15 +278,26 @@ struct PetReply: Equatable {
         if let s = selectedID, !targets.contains(where: { $0.id == s }) { selectedID = nil }
     }
 
-    /// The result line: "보냄 ✓", or why not (409 = the terminal is gone — same words as the dashboard).
+    /// The result line: "보냄 ✓", or why not (409 = the terminal is gone — same words as the dashboard; 409 need_confirm =
+    /// a 보내기 규칙 wants the dashboard's confirm step; 403 from a 보내기 규칙 = its note).
     static func resultText(_ o: SessionSendOutcome) -> String {
         switch o.status {
         case 200: return "보냄 ✓"
+        case 409 where o.needConfirm: return "대시보드에서 확인이 필요해 — 보내기 규칙"
         case 409: return "터미널이 닫혀 있어 보낼 수 없음 — 터미널에서 직접 입력"
+        case 403 where o.error?.contains("보내기 규칙") == true: return "보내기 규칙이 막음: \(String(ruleNote(o.error ?? "").prefix(80)))"
         case 403: return "세션에 보내기가 꺼져 있어요 (설정 → 쓰기 액션)"
         case 0: return o.error.map { "보내지 못함: \($0)" } ?? "데몬이 응답하지 않아요"
         default: return "보내지 못함: \(String((o.error ?? "HTTP \(o.status)").prefix(80)))"
         }
+    }
+
+    /// "보내기 규칙이 막음 — 규칙 2 (session · hotfix-*): 핫픽스는 직접" → "핫픽스는 직접" (no note → "규칙 2 (…)").
+    static func ruleNote(_ detail: String) -> String {
+        let body = detail.components(separatedBy: " — ").dropFirst().joined(separator: " — ")
+        let rule = body.isEmpty ? detail : body
+        if let r = rule.range(of: "): ") { return String(rule[r.upperBound...]) }
+        return rule
     }
 }
 

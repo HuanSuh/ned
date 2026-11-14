@@ -23,7 +23,10 @@ const { CONFIG_PATH, EVENTS_DIR, localDay } = await import("../src/paths.js");
 const { SENT_ACTIONS_LOG, _setSessionOrca, readActionLog } = await import("../src/actions.js");
 const { _resetSendJobs } = await import("../src/send-jobs.js");
 const { _setSendReviewer } = await import("../src/send-review.js");
-const { CONFIRM_TTL_MS } = await import("../src/send-guard.js");
+const { CONFIRM_TTL_MS, _resetSpentTokens } = await import("../src/send-guard.js");
+const { _setSlackDirectory, buildSlackDirectory } = await import("../src/send-rules.js");
+const { DRAFTS_DIR } = await import("../src/drafts.js");
+const { _setSessionCreateDeps } = await import("../src/session-create.js");
 
 const request = (p: string, init?: RequestInit) => Promise.resolve(captured.fetch!(new Request(`http://ned.test${p}`, init)));
 const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -51,7 +54,18 @@ beforeEach(() => {
   _resetSendJobs();
   _setSendReviewer();
   _setSessionOrca();
+  _resetSpentTokens();
+  _setSlackDirectory(() => buildSlackDirectory({ items: [{ channel: "#general", from: "김철수", url: "https://acme.slack.com/archives/C0GEN/p1700000000000100" }] }));
 });
+
+let draftSeq = 0;
+/** A cached draft whose meta.reply_to is `to` (what the reply really goes to) → its id. */
+function draftTo(to: string): string {
+  const id = (0xabc0000000000000n + BigInt(++draftSeq)).toString(16);
+  fs.mkdirSync(DRAFTS_DIR, { recursive: true });
+  fs.writeFileSync(path.join(DRAFTS_DIR, `${id}.json`), JSON.stringify({ id, source: "email", meta: { message_id: `m-${id}`, reply_to: to }, drafts: [] }));
+  return id;
+}
 afterEach(() => vi.restoreAllMocks());
 
 describe("POST /api/send — confirm rule", () => {
@@ -101,7 +115,7 @@ describe("POST /api/send — confirm rule", () => {
 describe("block rule and switch order", () => {
   it("block → 403 with the rule's note, logged as refused", async () => {
     writeConfig({ rules: [{ source: "mail", target: "@partner.io", effect: "block", note: "파트너사엔 Ned 로 안 보냄" }] });
-    const r = await post("/api/send", { source: "email", mode: "send", text: "안녕하세요", ref: { message_id: "m1", title: "견적 — 김 <kim@partner.io>" } });
+    const r = await post("/api/send", { source: "email", mode: "send", text: "안녕하세요", draft_id: draftTo("\"김\" <kim@partner.io>"), ref: { message_id: "m1" } });
     expect(r.status).toBe(403);
     expect(r.data.error).toContain("파트너사엔 Ned 로 안 보냄");
     expect(readActionLog(1)[0]).toMatchObject({ action: "refused", rule: { effect: "block" } });
@@ -116,10 +130,13 @@ describe("block rule and switch order", () => {
 
   it("external rule: outside internal_domains → confirm; inside → straight through", async () => {
     writeConfig({ internal_domains: ["acme.com"], rules: [{ source: "mail", external: true, effect: "confirm", note: "회사 밖" }] });
-    const out = await post("/api/send", { source: "email", mode: "send", text: "hi", ref: { message_id: "m2", title: "x — <kim@partner.io>" } });
+    const out = await post("/api/send", { source: "email", mode: "send", text: "hi", draft_id: draftTo("kim@partner.io"), ref: { message_id: "m2" } });
     expect(out.status).toBe(409);
-    const inside = await post("/api/send", { source: "email", mode: "send", text: "hi", ref: { message_id: "m3", title: "x — <lee@acme.com>" } });
+    const inside = await post("/api/send", { source: "email", mode: "send", text: "hi", draft_id: draftTo("lee@acme.com"), ref: { message_id: "m3" } });
     expect(inside.status).toBe(202);
+    // M1/M2 fail closed: a look-alike domain, or no draft (recipient unknown — the title is not looked at)
+    expect((await post("/api/send", { source: "email", mode: "send", text: "hi", draft_id: draftTo("lee@acme.com.évil.io"), ref: { message_id: "m4" } })).status).toBe(409);
+    expect((await post("/api/send", { source: "email", mode: "send", text: "hi", ref: { message_id: "m5", title: "x — <lee@acme.com>" } })).status).toBe(409);
   });
 });
 
@@ -201,5 +218,61 @@ describe("POST /api/calendar/events and PUT /api/config", () => {
     expect(ok.status).toBe(200);
     const saved = await ok.json();
     expect(saved.actions).toMatchObject({ slack_send: true, rules: [{ source: "slack", target: "#general", effect: "confirm" }], internal_domains: ["acme.com"], review: "warn" });
+  });
+});
+
+describe("one-time tokens, chat cards, session create (보안 리뷰 반영)", () => {
+  it("L3: the same confirm token twice → the second is asked again (spent)", async () => {
+    writeConfig({ rules: [{ source: "slack", effect: "confirm" }] });
+    const first = await post("/api/send", slackBody({ draft_id: "abcdef0000000001" }));
+    const ok = await post("/api/send", { ...slackBody({ draft_id: "abcdef0000000001" }), confirm_token: first.data.confirm_token });
+    expect(ok.status).toBe(202);
+    await waitJob(ok.data.job_id);
+    _resetSendJobs(); // even with the job gone from memory, the token stays spent
+    const again = await post("/api/send", { ...slackBody({ draft_id: "abcdef0000000001" }), confirm_token: first.data.confirm_token });
+    expect(again.status).toBe(409);
+    expect(again.data.token_problem).toBe("spent");
+  });
+
+  it("a token reused for another recipient (only the channel changed) → asked again", async () => {
+    writeConfig({ rules: [{ source: "slack", effect: "confirm" }] });
+    const first = await post("/api/send", slackBody());
+    const other = { ...slackBody({ ref: { url: "https://acme.slack.com/archives/C0OTHER/p1700000000000100", title: "#general · 김철수" } }), confirm_token: first.data.confirm_token };
+    const r = await post("/api/send", other);
+    expect(r.status).toBe(409);
+    expect(r.data.token_problem).toBe("mismatch");
+  });
+
+  it("a Ned Net 확인 카드 (origin chat) goes through the same confirm rule", async () => {
+    writeConfig({ chat_write: true, rules: [{ source: "slack", target: "#general", effect: "confirm", note: "전체 채널" }] });
+    const first = await post("/api/send", slackBody({ origin: "chat" }));
+    expect(first.status).toBe(409);
+    expect(readActionLog(1)[0]).toMatchObject({ action: "need_confirm", origin: "chat" });
+    const second = await post("/api/send", { ...slackBody({ origin: "chat" }), confirm_token: first.data.confirm_token });
+    expect(second.status).toBe(202);
+  });
+
+  it("L1: /api/sessions/create — block 403 / confirm 409 on the worktree name; switches first", async () => {
+    // never the real Orca: every orca call fails, so the usual checks refuse (no worktree, nothing started)
+    _setSessionCreateDeps({ orca: async () => ({ ok: false, json: null, err: "mock: no orca" }), allowWrites: false });
+    const body = { repo: "/repos/alpha", worktree: { mode: "new", name: "hotfix-login" }, model: "opus", prompt: "로그인 고쳐줘", origin: "chat" };
+    writeConfig({ chat_write: true, chat_session_create: false, rules: [{ source: "session", target: "hotfix-*", effect: "block" }] });
+    const off = await post("/api/sessions/create", body);
+    expect(off.status).toBe(403);
+    expect(off.data.error).toMatch(/chat_session_create is off/); // the switch, not the rule
+    writeConfig({ chat_write: true, chat_session_create: true, rules: [{ source: "session", target: "hotfix-*", effect: "block", note: "핫픽스는 직접" }] });
+    const blocked = await post("/api/sessions/create", body);
+    expect(blocked.status).toBe(403);
+    expect(blocked.data.error).toContain("핫픽스는 직접");
+    writeConfig({ chat_write: true, chat_session_create: true, rules: [{ source: "session", target: "hotfix-*", effect: "confirm" }] });
+    const held = await post("/api/sessions/create", body);
+    expect(held.status).toBe(409);
+    expect(held.data).toMatchObject({ need_confirm: true });
+    expect(readActionLog(1)[0]).toMatchObject({ source: "session", mode: "create", action: "need_confirm" });
+    // with the token it passes the rule and reaches the usual checks (here: no Orca → refused at validate, not 409 again)
+    const go = await post("/api/sessions/create", { ...body, confirm_token: held.data.confirm_token });
+    expect(go.data.need_confirm).toBeUndefined();
+    expect(readActionLog(1)[0].action).not.toBe("need_confirm");
+    _setSessionCreateDeps(null);
   });
 });

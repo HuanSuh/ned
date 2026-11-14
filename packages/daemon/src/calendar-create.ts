@@ -8,6 +8,7 @@
  */
 import type { BuiltAction, SendRequest } from "./actions.js";
 import { extractJson } from "./claude.js";
+import { parseAddress } from "./address.js";
 
 export const CAL_CREATE = "mcp__claude_ai_Google_Calendar__create_event";
 
@@ -90,9 +91,12 @@ export function parseCalendarCreate(body: Record<string, unknown>): CalendarEven
   const description = typeof body.description === "string" ? body.description.trim() : "";
   if (description.length > MAX_DESCRIPTION) return `description longer than ${MAX_DESCRIPTION} chars`;
   const rawAtt = Array.isArray(body.attendees) ? body.attendees : typeof body.attendees === "string" ? body.attendees.split(/[,;\s]+/) : [];
-  const attendees = [...new Set(rawAtt.map((x) => str(x).toLowerCase()).filter(Boolean))];
-  const bad = attendees.find((a) => !EMAIL.test(a) || a.length > 254);
+  const given = [...new Set(rawAtt.map((x) => str(x).toLowerCase()).filter(Boolean))];
+  // Sent only in the normalized ASCII / punycode form the 보내기 규칙 judged (address.ts) — no look-alike that reads
+  // one way here and resolves another way at Google.
+  const bad = given.find((a) => !EMAIL.test(a) || !parseAddress(a));
   if (bad) return `invalid attendee email: ${bad.slice(0, 80)}`;
+  const attendees = [...new Set(given.map((a) => parseAddress(a)!))];
   if (attendees.length > MAX_ATTENDEES) return `at most ${MAX_ATTENDEES} attendees`;
   const calendar_id = str(body.calendar_id) || "primary";
   if (calendar_id !== "primary" && !CAL_ID.test(calendar_id)) return "calendar_id must be 'primary' or a calendar id (email)";

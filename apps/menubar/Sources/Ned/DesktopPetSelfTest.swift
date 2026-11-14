@@ -167,6 +167,12 @@ enum PetSelfTest {
         check(!r.active && r.text == "계속 진행해" && r.targets.contains { $0.id == "s-old" }, "failed send: back to idle, typed text kept, session still answerable")
         check(PetReply.resultText(SessionSendOutcome(status: 502, error: "orca terminal send 실패: boom")) == "보내지 못함: orca terminal send 실패: boom"
               && PetReply.resultText(SessionSendOutcome(status: 0, error: nil)) == "데몬이 응답하지 않아요", "other failures: the daemon's reason / no daemon")
+        check(PetReply.resultText(SessionSendOutcome(status: 409, error: "보내기 전에 확인이 필요해", needConfirm: true)) == "대시보드에서 확인이 필요해 — 보내기 규칙",
+              "409 need_confirm (보내기 규칙 confirm) → ask to confirm in the dashboard, not 'terminal closed'")
+        check(PetReply.resultText(SessionSendOutcome(status: 403, error: "보내기 규칙이 막음 — 규칙 2 (session · hotfix-*): 핫픽스는 직접")) == "보내기 규칙이 막음: 핫픽스는 직접"
+              && PetReply.resultText(SessionSendOutcome(status: 403, error: "보내기 규칙이 막음 — 규칙 1 (session)")) == "보내기 규칙이 막음: 규칙 1 (session)"
+              && PetReply.resultText(SessionSendOutcome(status: 403, error: "config.actions.session_send is off")) == "세션에 보내기가 꺼져 있어요 (설정 → 쓰기 액션)",
+              "403 from a 보내기 규칙 → its note; a switched-off send keeps the settings line")
         _ = r.openInput(); r.cancel()
         check(r.phase == .idle && !r.active, "esc → input closed")
         // Another app clicked while typing (panel resigns key) / pet hidden / replies off → interrupt keeps the text.

@@ -69,7 +69,8 @@ export function parseReview(text: string): ReviewOutcome | null {
   if (!j || (typeof j.ok !== "boolean" && !Array.isArray(j.issues))) return null;
   const issues = (Array.isArray(j.issues) ? j.issues : [])
     .map((x) => (x && typeof x === "object" ? (x as Record<string, unknown>) : {}))
-    .map((x) => ({ kind: (REVIEW_KINDS.includes(x.kind as ReviewKind) ? x.kind : "other") as ReviewKind, detail: String(x.detail ?? "").replace(/\s+/g, " ").trim().slice(0, 200) }))
+    // The model may quote the secret it found: mask it before the detail reaches the response or sent-actions.log.
+    .map((x) => ({ kind: (REVIEW_KINDS.includes(x.kind as ReviewKind) ? x.kind : "other") as ReviewKind, detail: maskSecrets(String(x.detail ?? "").replace(/\s+/g, " ").trim()).slice(0, 200) }))
     .filter((x) => x.detail)
     .slice(0, MAX_ISSUES);
   return { status: issues.length ? "issues" : "ok", issues };
@@ -86,7 +87,10 @@ export const claudeReviewer: SendReviewer = async (input, cfg) => {
   return parseReview(res.text) ?? { status: "failed", issues: [], note: "검토 못 함: 답을 읽지 못했어" };
 };
 
-const SECRET_RE = /\b(xox[abpr]-[\w-]{10,}|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16})\b|-----BEGIN [A-Z ]*PRIVATE KEY-----|(password|passwd|비밀번호)\s*[:=]\s*\S+/i;
+const SECRET_SRC = String.raw`\b(xox[abpr]-[\w-]{10,}|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16})\b|-----BEGIN [A-Z ]*PRIVATE KEY-----|(password|passwd|비밀번호)\s*[:=]\s*\S+`;
+const SECRET_RE = new RegExp(SECRET_SRC, "i");
+/** Secret-looking runs → "[가림]" (review details are logged to sent-actions.log). */
+export const maskSecrets = (s: string) => s.replace(new RegExp(SECRET_SRC, "gi"), "[가림]");
 /** NED_NO_LLM without an injected reviewer: an offline check for secret-looking strings only (clearly marked). */
 export const stubReviewer: SendReviewer = async (input) =>
   SECRET_RE.test(input.draft) ? { status: "issues", issues: [{ kind: "secret", detail: "(stub) 토큰·비밀번호처럼 보이는 문자열이 있어" }] } : { status: "ok", issues: [] };
