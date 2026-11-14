@@ -260,7 +260,7 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 
 ### HTTP API
 
-모든 라우트(`/api/*`·`/mcp`·정적 파일)는 `src/request-guard.ts` 를 먼저 거친다 — loopback 이 아닌 Host·Origin 은 403(DNS rebinding 방지, Origin·Host 가 없으면 허용).
+모든 라우트(`/api/*`·`/mcp`·정적 파일)는 `src/request-guard.ts` 를 먼저 거친다 — Host·Origin 이 loopback + 데몬 포트가 아니면 403(DNS rebinding·다른 포트 로컬 페이지 방지, Host 포트 생략도 거부, Origin·Host 가 없으면 허용).
 
 | Method | Path | 설명 |
 |---|---|---|
@@ -269,7 +269,7 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 | GET | `/api/briefings?limit=30` | 브리핑 히스토리 (최신 먼저) |
 | GET | `/api/feed` | 데스크톱 펫(Ned.app) 메시지 피드 `{items, pet, quiet, persona, quick_replies, session_send}` — `src/feed.ts`. `quick_replies` = `dashboard.session_quick_replies`, `session_send` = `actions.session_send`(펫 말풍선의 세션에 답하기). 통신기 메시지 탭(`chat-core.js buildFeed`)과 같은 입력·규칙(열린 attention, 24h 안 UPDATE 브리핑 headline, 내 답 이후 새 답글이 있는 Slack 스레드 — 소스 slack 이 꺼지면 빠짐, 같은 url 은 한 번), 최신순. 각 항목 `key`·`kind`·`title`·`detail`·`url`·`ts` + `pet_kind`(`pet.messages` 토글: email→mail, thread→slack, other→null=항상) + `deep`(링크 열기 규칙의 앱 딥링크). 브라우저 전용 chatNotes 는 없음. `test/feed-shared.test.ts` 가 같은 fixture 로 buildFeed 와 key·kind 순서를 비교 |
 | GET / PUT | `/api/config` | `config.yaml` 조회 / 부분 갱신 |
-| POST | `/mcp` | MCP Streamable HTTP(stateless·JSON 응답) — 도구 `ned_attention` 외 5개. GET/DELETE 405, loopback 아닌 Host·Origin 403. 아래 "MCP 서버" |
+| POST | `/mcp` | MCP Streamable HTTP(stateless·JSON 응답) — 도구 `ned_attention` 외 5개. GET/DELETE 405, loopback:데몬 포트가 아닌 Host·Origin 403(JSON-RPC 오류 모양). 아래 "MCP 서버" |
 | POST | `/api/heartbeat?daily=1` | heartbeat 강제 실행 (agenda 는 오래됐을 때만 갱신 — 호환용) |
 | POST | `/api/check?daily=1` | 대시보드 '지금 점검': agenda 1단계 새로 고침 → heartbeat. 결과 브리핑(또는 `{status:"skipped"}`) 반환, 동시 호출은 한 실행을 공유 |
 | GET | `/api/check` | 진행 중인 점검 단계 `{running, phase: "agenda"\|"judge"\|null, daily, started_at, phase_started_at}` |
@@ -565,8 +565,8 @@ detail `이력 · M/D · …`, `tab: home` / `anchor: card:<slack|mail|jira|gh|c
 - 트랜스포트: `@modelcontextprotocol/sdk` 의 `WebStandardStreamableHTTPServerTransport` — 웹 표준 Request/Response 라 hono 의 `c.req.raw` 를 그대로 넘긴다.
   `sessionIdGenerator: undefined`(stateless) + `enableJsonResponse: true`. 요청마다 `buildMcpServer()` 로 McpServer·트랜스포트를 새로 만들고 응답 뒤 닫는다
   (SDK 예제 `simpleStatelessStreamableHttp.ts` 와 같은 방식). `GET`/`DELETE /mcp` → 405 `Allow: POST`.
-- 로컬 전용: `127.0.0.1` 바인딩에 더해 서버 전체 가드 `src/request-guard.ts`(`app.use("*")` — `/api/*`·`/mcp`·정적 파일 모두) — Host 가 loopback(127.0.0.1·localhost·[::1], 포트 무관)이 아니거나, Origin 이 있는데 `http(s)://` loopback 이 아니면 403
-  (DNS rebinding 방지; SDK 의 `allowedOrigins`·`allowedHosts` 옵션은 deprecated 라 "외부 미들웨어" 권고대로 직접). Origin 없음(CLI 클라이언트)은 허용. 인증 없음.
+- 로컬 전용: `127.0.0.1` 바인딩에 더해 서버 전체 가드 `src/request-guard.ts`(`app.use("*", requestGuardMiddleware(port))` — `/api/*`·`/mcp`·정적 파일 모두, port = 실제 listen 포트) — Host 가 loopback(127.0.0.1·localhost·[::1]) + `:port` 가 아니거나(포트 생략 거부), Origin 이 있는데 `http(s)://loopback:port` 가 아니면 403
+  (DNS rebinding·같은 Mac 의 다른 포트 로컬 페이지(개발 서버 등) 방지; SDK 의 `allowedOrigins`·`allowedHosts` 옵션은 deprecated 라 "외부 미들웨어" 권고대로 직접). Origin 없음(CLI 클라이언트)은 허용. 인증 없음.
 - 도구: 순수 핸들러 `toolAttention`·`toolSessions`·`toolBriefing`·`toolHistory`·`toolFeed`(입력 + `ToolCtx` = config·state·agenda·reviewed·briefings·now) →
   `{summary, data, error?}`. `mcp.ts` 가 매 호출 `readToolCtx()` 로 디스크에서 새로 읽고, 결과를 텍스트 블록 두 개(요약 한 줄, JSON)로 싼다. `error` 면 `isError: true`.
   입력 스키마는 zod(raw shape) — 범위 밖 값은 SDK 가 isError 결과로 돌려준다. 읽기 도구는 `readOnlyHint: true`.

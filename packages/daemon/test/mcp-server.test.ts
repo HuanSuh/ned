@@ -106,6 +106,29 @@ describe("MCP over Streamable HTTP (/mcp)", () => {
     expect((await fetch(`http://127.0.0.1:${PORT}/api/state`, { headers: { origin: `http://127.0.0.1:${PORT}` } })).status).toBe(200);
   });
 
+  it("a loopback page / Host on another local port is refused; a Host without a port too", async () => {
+    const other = PORT === 3000 ? 3001 : 3000;
+    expect((await fetch(`http://127.0.0.1:${PORT}/api/state`, { headers: { origin: `http://127.0.0.1:${other}` } })).status).toBe(403);
+    expect((await fetch(`http://127.0.0.1:${PORT}/api/state`, { headers: { origin: `http://localhost:${other}` } })).status).toBe(403);
+    expect(await rawRequest("GET", "/api/state", `localhost:${other}`)).toMatch(/^HTTP\/1\.1 403/);
+    expect(await rawRequest("GET", "/api/state", "127.0.0.1")).toMatch(/^HTTP\/1\.1 403/);
+    expect(await rawRequest("GET", "/", "localhost")).toMatch(/^HTTP\/1\.1 403/);
+    // no Origin (fetch from Node sets Host 127.0.0.1:<port>) → allowed
+    expect((await fetch(`http://127.0.0.1:${PORT}/api/state`)).status).toBe(200);
+  });
+
+  it("/mcp 403 keeps the JSON-RPC error shape (other-port Origin and Host)", async () => {
+    const other = PORT === 3000 ? 3001 : 3000;
+    const r = await post({ origin: `http://127.0.0.1:${other}` });
+    expect(r.status).toBe(403);
+    const j = await r.json();
+    expect(j).toMatchObject({ jsonrpc: "2.0", id: null, error: { code: -32000 } });
+    expect(j.error.message).toMatch(/^Forbidden: Origin port not allowed/);
+    const raw = await rawRequest("POST", "/mcp", `127.0.0.1:${other}`,JSON.stringify(INIT));
+    expect(raw).toMatch(/^HTTP\/1\.1 403/);
+    expect(raw).toMatch(/"jsonrpc":"2\.0".*"code":-32000/);
+  });
+
   it("GET / DELETE → 405 (stateless: POST only)", async () => {
     expect((await fetch(URL_, { headers: { accept: "text/event-stream" } })).status).toBe(405);
     expect((await fetch(URL_, { method: "DELETE" })).status).toBe(405);

@@ -147,7 +147,8 @@ function mirrorToState(cfg: NedConfig): void {
  */
 export function startServer(getConfig: () => NedConfig): void {
   const app = new Hono();
-  app.use("*", requestGuardMiddleware); // DNS rebinding: non-loopback Host / Origin → 403 on every route (src/request-guard.ts)
+  const port = getConfig().port; // the port serve() listens on below — the guard only accepts this port
+  app.use("*", requestGuardMiddleware(port)); // DNS rebinding / other local ports: Host / Origin not loopback:<port> → 403 on every route (src/request-guard.ts)
 
   app.get("/", (c) => {
     const index = path.join(PUBLIC_DIR, "index.html");
@@ -542,7 +543,6 @@ export function startServer(getConfig: () => NedConfig): void {
     return c.body(fs.readFileSync(file), 200, { "content-type": type, "cache-control": "no-cache" });
   });
 
-  const port = getConfig().port;
   // 대화창 세션 만들기가 켜져 있으면 첫 대화 전에 Orca 등록 레포 목록을 읽어 둔다 (chatWriteBlock 은 캐시만 본다).
   const a0 = getConfig().actions;
   if (a0.chat_write && a0.chat_session_create) knownRepoPaths();
