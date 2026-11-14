@@ -193,6 +193,49 @@ describe("runUpdateCheck", () => {
   });
 });
 
+describe("fetchCapped (the real raw fetch, fetch injected)", () => {
+  const MAX = uc.RAW_MAX_BYTES;
+  /** A streaming body of `n` bytes in 8 KiB chunks; `pulled` counts what the reader actually took. */
+  const stream = (n: number) => {
+    const s = { pulled: 0, cancelled: false };
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (s.pulled >= n) return c.close();
+        const k = Math.min(8192, n - s.pulled);
+        s.pulled += k;
+        c.enqueue(new Uint8Array(k).fill(0x20));
+      },
+      cancel() { s.cancelled = true; },
+    }, { highWaterMark: 0 });
+    return { s, body };
+  };
+  const fake = (res: Response) => (async () => res) as unknown as typeof fetch;
+
+  it("a small 200 body → its text", async () => {
+    expect(await uc.fetchCapped("u", 5000, fake(new Response(manifest("0.9.0"))))).toEqual({ status: 200, text: manifest("0.9.0") });
+  });
+  it("Content-Length over 64 KiB → refused without reading the body", async () => {
+    const { s, body } = stream(MAX + 1);
+    const r = await uc.fetchCapped("u", 5000, fake(new Response(body, { headers: { "content-length": String(MAX + 1) } })));
+    expect(r).toMatchObject({ status: 0, text: "" });
+    expect(r.err).toContain("너무 큼");
+    expect(s.pulled).toBe(0);
+  });
+  it("no Content-Length, endless body → stops reading just past 64 KiB and cancels the stream", async () => {
+    const { s, body } = stream(10 * MAX);
+    const r = await uc.fetchCapped("u", 5000, fake(new Response(body)));
+    expect(r).toMatchObject({ status: 0, text: "" });
+    expect(r.err).toContain("너무 큼");
+    expect(s.pulled).toBeLessThanOrEqual(MAX + 8192);
+    expect(s.cancelled).toBe(true);
+  });
+  it("non-200 → status only, body not read", async () => {
+    const { s, body } = stream(1000);
+    expect(await uc.fetchCapped("u", 5000, fake(new Response(body, { status: 404 })))).toEqual({ status: 404, text: "" });
+    expect(s.pulled).toBe(0);
+  });
+});
+
 describe("GET /api/update-check (cache)", () => {
   beforeAll(() => { startServer(() => loadConfig()); });
   let ghCalls = 0; // counts raw fetches (the first source) — gh must not be reached

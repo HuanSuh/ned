@@ -167,18 +167,42 @@ export async function runUpdateCheck(d: UpdateDeps, env: NodeJS.ProcessEnv = pro
   return out;
 }
 
+/** plugin.json is ~1 KiB — a raw answer larger than this is refused (Content-Length) or cut off while reading (no buffering). */
+export const RAW_MAX_BYTES = 64 * 1024;
+
+/**
+ * GET `url` with a timeout, reading at most `max` bytes: a Content-Length over `max` is refused before the body is read,
+ * and the body stream is cancelled as soon as it passes `max` (status 0 + err either way). Non-200 bodies are not read.
+ */
+export async function fetchCapped(url: string, timeoutMs: number, fetchImpl: typeof fetch = fetch, max = RAW_MAX_BYTES): Promise<{ status: number; text: string; err?: string }> {
+  const tooLarge = (n: number | string) => ({ status: 0, text: "", err: `응답이 너무 큼 (${n} bytes > ${max})` });
+  try {
+    const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs), redirect: "follow", headers: { "cache-control": "no-cache" } });
+    if (res.status !== 200) { await res.body?.cancel().catch(() => {}); return { status: res.status, text: "" }; }
+    const cl = Number(res.headers.get("content-length"));
+    if (Number.isFinite(cl) && cl > max) { await res.body?.cancel().catch(() => {}); return tooLarge(cl); }
+    if (!res.body) return { status: 200, text: "" };
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > max) { await reader.cancel().catch(() => {}); return tooLarge(`${total}+`); }
+      chunks.push(value);
+    }
+    return { status: 200, text: new TextDecoder().decode(Buffer.concat(chunks)) };
+  } catch (e) {
+    const err = e as Error;
+    return { status: 0, text: "", err: err?.name === "TimeoutError" ? `timeout ${timeoutMs / 1000}s` : String(err?.message ?? e) };
+  }
+}
+
 const defaultDeps = (): UpdateDeps => ({
   readFile: (p) => { try { return fs.readFileSync(p, "utf8"); } catch { return null; } },
-  fetchText: async (url, timeoutMs) => {
-    try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), redirect: "follow", headers: { "cache-control": "no-cache" } });
-      return { status: res.status, text: res.status === 200 ? (await res.text()).slice(0, 1 << 20) : "" };
-    } catch (e) {
-      const err = e as Error;
-      return { status: 0, text: "", err: err?.name === "TimeoutError" ? `timeout ${timeoutMs / 1000}s` : String(err?.message ?? e) };
-    }
-  },
-  gh:(args) => new Promise((resolve) => {
+  fetchText: (url, timeoutMs) => fetchCapped(url, timeoutMs),
+  gh: (args) => new Promise((resolve) => {
     execFile("gh", args, { timeout: 15_000, maxBuffer: 1 << 20 }, (e, stdout, stderr) => {
       const ex = e as (NodeJS.ErrnoException & { code?: unknown }) | null;
       resolve({ code: ex ? (typeof ex.code === "number" ? ex.code : 1) : 0, out: String(stdout ?? ""), err: String(stderr ?? ex?.message ?? ""), missing: ex?.code === "ENOENT" });
