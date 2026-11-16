@@ -162,6 +162,11 @@
 .cm-act .ca-chip { display: inline-block; padding: 0 5px; border-radius: 4px; background: color-mix(in srgb, var(--cm-accent) 18%, transparent); color: var(--cm-accent-text, var(--fg)); font-weight: 600; }
 .cm-act .ca-chip.ext { background: color-mix(in srgb, var(--red) 18%, transparent); }
 .cm-act .ca-chip .ca-id { font: 10.5px var(--mono); font-weight: 400; opacity: .75; }
+.cm-act .ca-chip.unv { outline: 1px dashed var(--amber, #c90); }
+.cm-act .ca-chip.mis { outline: 1px solid var(--red); }
+.cm-act .ca-badge.unv { color: var(--fg); background: color-mix(in srgb, var(--amber, #c90) 25%, transparent); border-color: var(--amber, #c90); font-weight: 500; }
+.cm-act .ca-badge.mis { color: var(--red); border-color: var(--red); font-weight: 600; }
+.cm-act .ca-edited { font-size: 12px; color: var(--amber, #c90); }
 .cm-act .ca-chip.bad { background: color-mix(in srgb, var(--red) 22%, transparent); color: var(--red); }
 .cm-act .ca-chip.warn { background: color-mix(in srgb, var(--amber, #c90) 22%, transparent); color: var(--fg); font-weight: 500; }
 .cm-act .ca-notify { color: var(--dim); font-size: 12px; }

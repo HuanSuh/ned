@@ -14,7 +14,7 @@ import { extractOutputBlock, outputRef, saveOutput, type OutputRef } from "./out
 import { personaPrompt } from "./persona.js";
 import { briefingOk, readState, type Briefing, type NedState } from "./state.js";
 import { listTodos, type Todo } from "./todos.js";
-import { createSeenCollector, type SeenSlack } from "./slack-mentions.js";
+import { createSeenCollector, type SeenSlack, type SeenUser } from "./slack-mentions.js";
 
 /**
  * Ned 채팅 (dashboard PDA → 대화 탭). One `claude -p` per turn, continued with `--resume <session_id>`:
@@ -50,6 +50,8 @@ export interface ChatMessage {
    * A slack_send 확인 카드 may target one of these ("Ned 가 찾은 대상", src/slack-mentions.ts).
    */
   seen_slack?: SeenSlack[];
+  /** Users this turn's Slack user lookups returned (JSON result fields only: id + name) — a mention id must be one of these or cached. */
+  seen_users?: SeenUser[];
 }
 
 export const CHAT_ACTION_STATES = ["running", "executed", "failed", "cancelled"] as const;
@@ -502,6 +504,7 @@ export async function runChatTurn(prep: Extract<ChatPrep, { ok: true }>, emit: C
     const msg: ChatMessage = { role: "ned", text: answer, ts: Date.now(), cost_usd: cost };
     const sn = seen.result();
     if (sn.seen.length) msg.seen_slack = sn.seen;
+    if (sn.users.length) msg.seen_users = sn.users;
     if (res.aborted) msg.stopped = true;
     else if (!res.ok) msg.error = clip(res.error || "실패", 300);
     else {

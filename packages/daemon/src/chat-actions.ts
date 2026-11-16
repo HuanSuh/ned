@@ -8,6 +8,7 @@
  * (seen_slack saved from its Slack tool results) — and resolves the block's `mentions` into `<@U…>` / `<!subteam^S…>`
  * with an ID whitelist (slack-mentions.ts).
  */
+import { createHash } from "node:crypto";
 import { RSVP_STATUSES, onSendResult, queryActionLog, type ActionRef, type SendRequest } from "./actions.js";
 import { slackDirectory } from "./send-rules.js";
 import type { Agenda } from "./agenda.js";
@@ -33,6 +34,7 @@ import {
   type MentionReport,
   type MentionSpec,
   type SeenSlack,
+  type SeenUser,
   type SlackUsersCache,
 } from "./slack-mentions.js";
 
@@ -121,7 +123,7 @@ export function chatWriteBlock(cfg: Pick<NedConfig, "actions">): string {
 /** slack_send: which threads may be targeted + how to write mentions (the server re-checks both). */
 const SLACK_SEND_RULES = [
   "- `slack_send` 대상 스레드: (1) \"Ned 가 아는 것\" 의 Slack url, (2) 사용자가 이 대화에 붙인 Slack 링크, (3) 네가 이 대화에서 Slack 읽기 도구(검색·채널/스레드 읽기)로 **실제로 읽은** 메시지의 permalink — 이 셋만. permalink 는 도구 결과에 나온 그대로 쓰고 지어내지 않는다. 못 찾았으면 제안하지 말고 링크를 달라고 한다. 대상 스레드 첫 글을 `target_excerpt` 에 짧게 넣는다.",
-  "- `slack_send` 멘션: 본문엔 `@이름` 을 그대로 쓰고 `<@U…>` 같은 ID 는 넣지 않는다. 멘션한 사람마다 `mentions` 에 {text, candidates} 를 넣는다. 해석 순서: 대상 스레드 참여자 → 최근 대화 상대 → slack_search_users / slack_read_user_profile. 추측 금지 — 확실한 사람만 후보로, 동명이인이면 후보를 모두, 못 찾으면 candidates 는 빈 배열. 다른 회사(외부) 사용자면 external: true.",
+  "- `slack_send` 멘션: 본문엔 `@이름` 을 그대로 쓰고 `<@U…>` 같은 ID 는 넣지 않는다. 멘션한 사람마다 `mentions` 에 {text, candidates} 를 넣는다. 해석 순서: 대상 스레드 참여자 → 최근 대화 상대 → slack_search_users / slack_read_user_profile. 추측 금지 — 확실한 사람만 후보로, 동명이인이면 후보를 모두, 못 찾으면 candidates 는 빈 배열. 다른 회사(외부) 사용자면 external: true. 후보 id 는 이 대화에서 slack_search_users / slack_read_user_profile 결과에 나온 그대로만 쓴다 — Ned 가 그 결과로 id 를 확인하고, 확인 안 된 id 는 보내지 않는다.",
   "- `slack_send` 그룹 멘션(@mobile-dev 같은 유저그룹): `mentions` 에 {\"text\": \"@핸들\", \"group\": true, \"candidates\": []} — 그룹 ID 는 Ned 가 설정에서 채운다(모르면 글자로 감). `@here`·`@channel`·`@everyone` 같은 전체 알림은 쓰지 않는다(보낼 수 없다).",
 ];
 
@@ -159,11 +161,25 @@ export interface SlackCardInfo {
   thread_ts: string;
   /** The model's excerpt of the thread's first message (shown as the model's, unverified). */
   target_excerpt: string;
-  /** "external" (채널이 외부 공유 · 외부 사용자 멘션) · "internal" · "unknown" (정보 없음 → 회색 배지). */
-  external: "external" | "internal" | "unknown";
+  /**
+   * "external" (anyone — the model included — says the channel is shared or a mentioned person is external) · "unknown"
+   * (회색 배지). Never "internal": a model's `external: false` is a claim, and Ned has no trusted internal record.
+   */
+  external: "external" | "unknown";
   /** The text with resolved mentions (what gets sent). */
   preview_text: string;
   mentions: Pick<MentionReport, "resolved" | "unresolved" | "missing" | "broadcast">;
+  /** dashboard.slack_team_domain is not set: a pasted / found link of any workspace is accepted (the card says so). */
+  workspace_unset?: boolean;
+}
+
+/**
+ * What the card showed, bound to what will be sent: sha256 of {final text, where it goes} (first 32 hex). [실행] must
+ * send back the digest of the preview it rendered (`ack_digest`); a different one → 409 need_review + the new preview.
+ * /api/send checks the same digest for origin "chat" Slack sends.
+ */
+export function previewDigest(text: string, ref: Pick<ActionRef, "url" | "channel" | "thread_ts">): string {
+  return createHash("sha256").update(JSON.stringify({ t: text, r: [ref.url ?? "", ref.channel ?? "", ref.thread_ts ?? ""] })).digest("hex").slice(0, 32);
 }
 
 /** What validate needs beyond the switches + agenda: the conversation, the mention cache / groups, choices, today's count. */
@@ -180,6 +196,10 @@ export interface ChatValidateCtx {
   choices: Record<string, unknown>;
   /** actions.chat_write_daily_limit reached → the 429 body. */
   over?: ChatLimitBody | null;
+  /** Users this conversation's Slack user lookups returned (id → name) — mention ids must be these or cached. */
+  seen_users?: Record<string, SeenUser>;
+  /** [실행] (intent "run"): the digest of the preview the card rendered — must equal the one computed now. */
+  run?: { ack_digest: string };
 }
 const EMPTY_CTX: ChatValidateCtx = { team_domain: "", user_texts: [], seen: [], cache: { users: {} }, groups: { dir: new Map(), ids: new Set(), handles: [] }, choices: {} };
 
@@ -247,6 +267,8 @@ export function chatValidateContext(cfg: Pick<NedConfig, "actions"> & Partial<Pi
     team_domain: cfg.dashboard?.slack_team_domain ?? "",
     user_texts: msgs.filter((m) => m.role === "user").map((m) => m.text),
     seen: msgs.flatMap((m) => (m.role === "ned" && Array.isArray(m.seen_slack) ? m.seen_slack : [])),
+    seen_users: Object.fromEntries(msgs.flatMap((m) => (m.role === "ned" && Array.isArray(m.seen_users) ? m.seen_users : [])).map((u) => [u.id, u])),
+    ...(body.intent === "run" ? { run: { ack_digest: typeof body.ack_digest === "string" ? body.ack_digest : "" } } : {}),
     cache,
     groups: { dir: groupDirectory(gopts), ids: knownGroupIds(gopts), handles: (sl?.group_mentions ?? []).filter((g) => !/^S[A-Z0-9]{6,}$/.test(g)) },
     choices,
@@ -278,6 +300,8 @@ export interface ChatActionOk {
   max_wait_ms?: number;
   /** slack_send: target source / excerpt / external badge / mentions for the card. */
   slack?: SlackCardInfo;
+  /** slack_send: previewDigest of this answer — the card sends it back as ack_digest on [실행]. */
+  preview_digest?: string;
 }
 export interface ChatActionErr {
   ok: false;
@@ -288,6 +312,9 @@ export interface ChatActionErr {
   slack?: SlackCardInfo;
   /** 409 멘션 선택 필요 */
   need_choice?: boolean;
+  /** 409 [실행] with a stale / missing preview digest: the card shows the new preview (`slack`) and asks again. */
+  need_review?: boolean;
+  preview_digest?: string;
   /** 429 */
   limit?: number;
   used?: number;
@@ -468,13 +495,14 @@ export function validateChatAction(cfg: Pick<NedConfig, "actions">, raw: unknown
       if (!text) return err(400, "텍스트가 비어 있어", kind);
       const tg = slackSendTarget(known, s(t.url, 1000) || s(t.permalink, 1000), ctx);
       if (typeof tg === "string") return err(409, tg, kind);
-      const rep = resolveMentions(text, b.mentions, ctx.cache, ctx.groups, ctx.choices);
+      const rep = resolveMentions(text, b.mentions, ctx.cache, ctx.groups, ctx.choices, ctx.seen_users ?? {});
       // The model must write `@이름`, never ids: an id token it wrote that is still in the text is refused (the
       // whitelist below would let a cached id through otherwise). Ids the user types in by hand follow the whitelist.
       const modelIds = rawIdTokens(b.text).filter((tok) => text.includes(tok));
-      const allCands = b.mentions.flatMap((m) => m.candidates);
-      const external = b.channel_external === true || allCands.some((c) => c.external) || rep.resolved.some((r) => r.external) ? "external" : b.channel_external === false ? "internal" : "unknown";
+      // A model's word may only raise the badge to "external", never lower it.
+      const external = b.channel_external === true || b.mentions.some((m) => m.candidates.some((c) => c.external)) || rep.resolved.some((r) => r.external) ? "external" : "unknown";
       const slack: SlackCardInfo = {
+        ...(ctx.team_domain || tg.source === "known" ? {} : { workspace_unset: true }),
         target_source: tg.source,
         channel: tg.channel,
         channel_name: tg.channel_name,
@@ -487,9 +515,16 @@ export function validateChatAction(cfg: Pick<NedConfig, "actions">, raw: unknown
       if (rep.broadcast.length) return err(400, `전체 알림 멘션은 대화창에서 보낼 수 없음 — Slack 에서 직접 (${rep.broadcast.join(", ")})`, kind, { slack });
       if (modelIds.length) return err(400, `모델이 ID 를 직접 넣음(${modelIds.join(", ")}) — 본문엔 @이름 만 쓸 수 있어. 지우거나 대화로 다시 요청해 줘`, kind, { slack });
       if (rep.bad_ids.length) return err(400, `멘션할 수 없는 ID: ${rep.bad_ids.join(", ")} — 이 제안의 후보나 Ned 가 확인한 사람·그룹만 멘션할 수 있어`, kind, { slack });
+      if (rep.unverified_ids.length) return err(400, `Ned 가 확인하지 못한 사용자 ID: ${rep.unverified_ids.join(", ")} — 이 대화에서 Ned 가 사용자 검색으로 본 사람이나 전에 보낸 적 있는 사람만 멘션할 수 있어`, kind, { slack });
       if (rep.unresolved.length) return err(409, `멘션 선택 필요: ${rep.unresolved.map((u) => u.text).join(", ")} — 카드에서 누구인지 골라 줘`, kind, { slack, need_choice: true });
+      const digest = previewDigest(rep.text, tg.ref);
+      // [실행] after an edit (or any change since the preview the card drew): show the new preview first, never send blind.
+      if (ctx.run && ctx.run.ack_digest !== digest)
+        return err(409, "보낼 모양이 바뀌었어 — 새 미리보기(알림 받는 사람)를 확인하고 다시 실행해 줘", kind, { slack, need_review: true, preview_digest: digest });
       const out = send("slack", "send", tg.ref, tg.label);
       out.payload.text = rep.text;
+      out.payload.ack_digest = digest;
+      out.preview_digest = digest;
       // the people of THIS text go to the mention cache only if it is really sent (recordSentMentions)
       rememberMentions(rep.text, rep.resolved.filter((r) => r.kind === "user" && r.name !== r.id).map((r) => ({ id: r.id, name: r.name, ...(r.external ? { external: true } : {}) })));
       return { ...out, slack };

@@ -133,6 +133,9 @@ describe("rule matching", () => {
     expect(r([{ source: "slack", target: "C0OTHER", effect: "block" }])).toBeNull(); // an id rule is compared exactly
     expect(r([{ source: "slack", target: "C0NEW", effect: "block" }])?.rule.effect).toBe("block");
     expect(r([{ source: "mail", target: "@acme.com", effect: "block" }])).toBeNull(); // not a Slack rule
+    // N4: a name-target rule for every source ('*') can't be checked on that channel either
+    expect(r([{ source: "*", target: "#general", effect: "block" }])?.rule).toMatchObject({ effect: "confirm", note: UNKNOWN_CHANNEL_NOTE });
+    expect(r([{ source: "*", target: "C0OTHER9", effect: "block" }])).toBeNull();
     expect(r([])).toBeNull();
     // an uncertain name rule never weakens a later rule that does match and blocks; a later allow stays held
     expect(r([{ source: "slack", target: "#general", effect: "allow" }, { source: "slack", effect: "block", note: "Slack 금지" }])?.rule).toMatchObject({ effect: "block", note: "Slack 금지" });

@@ -268,7 +268,7 @@ export function matchSendRule(req: SendRequest, cfg: Pick<NedConfig, "actions">,
       // Slack channel Ned can't name (e.g. a 대화창 target from a pasted link): a name-based Slack rule can't be checked
       // → hold for confirm (fail closed). Id-shaped rule targets were compared exactly above and are skipped.
       // A later rule that does match still decides if it blocks (an uncertain name rule never weakens a block).
-      if (src === "slack" && rule.source === "slack" && tgt().name_known === false && !CHANNEL_ID_TARGET.test(rule.target.trim())) {
+      if (src === "slack" && (rule.source === "slack" || rule.source === "*") && tgt().name_known === false && !CHANNEL_ID_TARGET.test(rule.target.trim())) {
         unknownName ??= { index, rule: { ...rule, effect: "confirm", note: UNKNOWN_CHANNEL_NOTE } };
         continue;
       }

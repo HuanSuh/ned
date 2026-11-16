@@ -7,14 +7,17 @@
  * - parseSlackPermalink: a message permalink → {channel, ts, thread_ts, reply_to}; another workspace
  *   (dashboard.slack_team_domain) → refused. reply_to follows actions.ts: the thread root (thread_ts), else the message's
  *   own thread — except a DM (D…) single-message link, which posts to the DM itself (reply_to undefined).
- * - seen extraction: while a chat turn runs, only the *message fields* of Slack message-tool results are read — the
- *   Permalink / Channel / ts fields of each result, never the message body (a URL or "channel: … ts: …" inside a body is
- *   ignored). A read_thread / read_channel call counts its own input only when its result really has that ts. Results in
- *   a shape we cannot read with confidence add nothing (fail closed). Saved on the answer as `seen_slack` (≤ SEEN_MAX, newest kept).
- * - targetAllowed: a target must equal a pasted / seen message by channel AND by where the reply really goes (reply_to).
+ * - seen extraction: while a chat turn runs, only the *fields* of **JSON** Slack tool results are read — message tools:
+ *   each top-level message's permalink / channel / ts (never its text); user tools (search_users / read_user_profile):
+ *   each user's own id / name (`seen_users`). Text / markdown results are not read at all (fail closed — a body can imitate
+ *   any header or field line). A read_thread call counts its own input only when its result really has that ts.
+ *   Saved on the answer as `seen_slack` / `seen_users` (≤ 200 each, newest kept).
+ * - sameTarget: a target must equal a pasted / seen message by channel AND by where the reply really goes (reply_to);
+ *   a DM single message only lends the DM's top level.
  * - resolveMentions: the block's `mentions` (model candidates) → `<@U…>` / `<!subteam^S…>`. The model may not write ids
- *   itself; ids in the final text must belong to a mention still in the text (or, typed by the user, the cache); broadcast
- *   mentions (@here / @channel / @everyone) are refused.
+ *   itself; ids in the final text must be cached, or a candidate of a mention still in the text that a user lookup of
+ *   this conversation returned (else 400 — unverified); names shown are Ned's own when it has one (else flagged as the
+ *   model's, and a differing model name is flagged); broadcast mentions (@here / @channel / @everyone) are refused.
  * - cache ~/.ned/slack-users.json (TTL 24h, ≤ 2,000 users): written only after a real chat send succeeded (the resolved
  *   people of that send) or from the agenda — never from a card preview; a cached name is never overwritten by a model value.
  */
@@ -117,57 +120,49 @@ function chanOf(v: unknown): string | undefined {
   return undefined;
 }
 
-/** "Permalink: …", "Channel: #x (C…)", "Message_ts: …" — a field line of a text result (optionally "- " / "**"). */
-const FIELD_RE = /^\s*(?:[-*]\s+)?\**\s*(permalink|link|channel(?:[ _]id)?|(?:message[ _])?ts|thread[ _]ts|timestamp)\s*\**\s*:\s*\**\s*(.*)$/i;
-/** A label that starts the message body — everything after it in the block is someone's text, not a field. */
-const BODY_RE = /^\s*(?:[-*]\s+)?\**\s*(text|message|content|body|messages?\s*text)\s*\**\s*:/i;
-/** A new result block: a markdown heading or a horizontal rule. */
-const BLOCK_RE = /^\s*(#{1,6}\s|-{3,}\s*$|={3,}\s*$)/;
-
 /**
- * A text result split into result blocks; in each block only the field lines BEFORE the body label count, and only the
- * first value of each field. (A body may contain "Permalink: …" or a heading — the body itself is never read.)
+ * The messages a Slack tool result describes (fields only) — **JSON results only**. A text / markdown result is not
+ * read at all (fail closed): its message bodies are free text that can imitate any header or field line ("## Result 9",
+ * "Permalink: …"), and the repo has no verified fixture of the connector's text layout to anchor a stricter parser on.
+ * (Decision: docs/decision-log.md WU-07.)
  */
-function textMessages(text: string): ResultMessage[] {
-  const out: ResultMessage[] = [];
-  let cur: ResultMessage | null = null;
-  let inBody = false;
-  const flush = () => {
-    if (cur && (cur.permalink || cur.ts)) out.push(cur);
-    cur = null;
-  };
-  for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
-    if (BLOCK_RE.test(line)) {
-      flush();
-      inBody = false;
-      continue;
-    }
-    if (inBody) continue;
-    if (BODY_RE.test(line)) {
-      inBody = true;
-      continue;
-    }
-    const f = FIELD_RE.exec(line);
-    if (!f) continue;
-    cur ??= {};
-    const key = f[1].toLowerCase().replace(/[ _]/g, "");
-    const val = f[2];
-    if ((key === "permalink" || key === "link") && !cur.permalink) {
-      const url = /https:\/\/[^\s)\]>"']+/.exec(val)?.[0];
-      const p = url ? parseSlackPermalink(url) : null;
-      if (p && typeof p !== "string") cur.permalink = p;
-    } else if (key.startsWith("channel") && !cur.channel) cur.channel = CHANNEL_ID_RE.exec(val)?.[1];
-    else if ((key === "ts" || key === "messagets" || key === "timestamp") && !cur.ts) cur.ts = /\d{10}\.\d{6}/.exec(val)?.[0];
-    else if (key === "threadts" && !cur.thread_ts) cur.thread_ts = /\d{10}\.\d{6}/.exec(val)?.[0];
-  }
-  flush();
-  return out;
+export function resultMessages(text: unknown): ResultMessage[] {
+  return jsonMessages(String(text ?? "")) ?? [];
 }
 
-/** The messages a Slack tool result describes (fields only): JSON if it is JSON, else the text block format. */
-export function resultMessages(text: unknown): ResultMessage[] {
-  const s = String(text ?? "");
-  return jsonMessages(s) ?? textMessages(s);
+// ---------------------------------------------------------------- seen users (slack_search_users / read_user_profile)
+export interface SeenUser {
+  id: string;
+  name: string;
+  real_name?: string;
+}
+/**
+ * The users a user-lookup result describes — JSON only (fail closed, as above): top-level user objects of an array /
+ * {users|members|results: [...]} / one profile object; their own `id`, `name`/`display_name`, `real_name`
+ * (also under `profile`). Free text is never read.
+ */
+export function extractSeenUsers(text: unknown): SeenUser[] {
+  const t = String(text ?? "").trim();
+  if (!/^[[{]/.test(t)) return [];
+  let j: unknown;
+  try {
+    j = JSON.parse(t);
+  } catch {
+    return [];
+  }
+  const o = j && typeof j === "object" && !Array.isArray(j) ? (j as Record<string, unknown>) : null;
+  const list = Array.isArray(j) ? j : o ? ((["users", "members", "results"].map((k) => o[k]).find(Array.isArray) as unknown[] | undefined) ?? [o.user && typeof o.user === "object" ? o.user : o]) : [];
+  const out: SeenUser[] = [];
+  for (const x of list) {
+    if (!x || typeof x !== "object" || Array.isArray(x)) continue;
+    const u = x as Record<string, unknown>;
+    const p = u.profile && typeof u.profile === "object" ? (u.profile as Record<string, unknown>) : {};
+    const id = [u.id, u.user_id].find((v) => typeof v === "string" && USER_ID_RE.test(v)) as string | undefined;
+    const name = str(u.display_name) || str(p.display_name) || str(u.name) || str(u.real_name) || str(p.real_name);
+    const real = str(u.real_name) || str(p.real_name);
+    if (id && name) out.push({ id, name, ...(real && real !== name ? { real_name: real } : {}) });
+  }
+  return out;
 }
 
 /** Seen entries of one result: a message's permalink (if any), else its channel field + ts (channel defaults to `inputChannel`). */
@@ -201,6 +196,9 @@ export function mergeSeen(list: SeenSlack[], add: SeenSlack[]): SeenSlack[] {
 
 /** Slack tools whose results describe messages (canvases, profiles, channel / user search are not targets). */
 const MESSAGE_TOOLS = /^mcp__claude_ai_Slack__slack_(search_public_and_private|search_public|read_thread|read_channel)$/;
+/** Slack tools whose results describe users (the ids a mention may use — N2). */
+const USER_TOOLS = /^mcp__claude_ai_Slack__slack_(search_users|read_user_profile)$/;
+export const SEEN_USERS_MAX = 200;
 const flatText = (c: unknown): string =>
   typeof c === "string" ? c : Array.isArray(c) ? c.map((x) => (x && typeof x === "object" && typeof (x as { text?: unknown }).text === "string" ? (x as { text: string }).text : "")).join("\n") : "";
 
@@ -212,19 +210,27 @@ const flatText = (c: unknown): string =>
 export function createSeenCollector() {
   const calls = new Map<string, { name: string; input: Record<string, unknown> }>();
   let seen: SeenSlack[] = [];
+  const users = new Map<string, SeenUser>();
   return {
     onEvent(j: Record<string, unknown>): void {
       const content = (j.message as { content?: unknown } | undefined)?.content;
       if (!Array.isArray(content)) return;
       if (j.type === "assistant") {
         for (const c of content as { type?: string; id?: string; name?: string; input?: unknown }[])
-          if (c?.type === "tool_use" && c.id && c.name && MESSAGE_TOOLS.test(c.name)) calls.set(c.id, { name: c.name, input: c.input && typeof c.input === "object" ? (c.input as Record<string, unknown>) : {} });
+          if (c?.type === "tool_use" && c.id && c.name && (MESSAGE_TOOLS.test(c.name) || USER_TOOLS.test(c.name))) calls.set(c.id, { name: c.name, input: c.input && typeof c.input === "object" ? (c.input as Record<string, unknown>) : {} });
       } else if (j.type === "user") {
         for (const c of content as { type?: string; tool_use_id?: string; content?: unknown; is_error?: boolean }[]) {
           if (c?.type !== "tool_result" || !c.tool_use_id) continue;
           const call = calls.get(c.tool_use_id);
           if (!call || c.is_error) continue;
           const text = flatText(c.content);
+          if (USER_TOOLS.test(call.name)) {
+            for (const u of extractSeenUsers(text)) {
+              users.delete(u.id);
+              users.set(u.id, u);
+            }
+            continue;
+          }
           const reader = /read_(thread|channel)$/.test(call.name);
           const ch = reader && typeof call.input.channel_id === "string" && /^[CDG][A-Z0-9]{2,}$/.test(call.input.channel_id) ? call.input.channel_id : undefined;
           const add = extractSeenSlack(text, ch);
@@ -235,8 +241,8 @@ export function createSeenCollector() {
         }
       }
     },
-    result(): { seen: SeenSlack[] } {
-      return { seen };
+    result(): { seen: SeenSlack[]; users: SeenUser[] } {
+      return { seen, users: [...users.values()].slice(-SEEN_USERS_MAX) };
     },
   };
 }
@@ -244,11 +250,13 @@ export function createSeenCollector() {
 /**
  * Is target `t` the same message / thread as `x` (a pasted link or a seen message)? Same channel, and the place the
  * reply really goes (t.reply_to — from the link's thread_ts) must be x's ts or x's thread root. A DM top-level target
- * (no reply_to) must be x itself.
+ * (no reply_to) must be x itself — and a DM single message (D…, no thread_ts) only lends the DM's top level: a model
+ * can't turn it into a thread by adding ?thread_ts=<its ts>.
  */
 export function sameTarget(x: Pick<SeenSlack, "channel" | "ts" | "thread_ts">, t: Pick<SlackPermalink, "channel" | "ts" | "reply_to">): boolean {
   if (x.channel !== t.channel) return false;
   if (!t.reply_to) return x.ts === t.ts;
+  if (x.channel.startsWith("D") && !x.thread_ts) return false;
   return t.reply_to === x.ts || (!!x.thread_ts && t.reply_to === x.thread_ts);
 }
 export const seenHas = (seen: SeenSlack[], t: Pick<SlackPermalink, "channel" | "ts" | "reply_to">): boolean => seen.some((x) => sameTarget(x, t));
@@ -371,7 +379,13 @@ export interface MentionResolved {
   text: string;
   kind: "user" | "group";
   id: string;
+  /** Display name: Ned's own (cache / a user lookup this conversation) when it has one, else the model's word. */
   name: string;
+  /** users: Ned itself knows this id's name (cache or seen_users) — false = the name is only the model's claim. */
+  verified?: boolean;
+  /** users: the model named this id differently from what Ned knows (`model_name`). */
+  name_mismatch?: boolean;
+  model_name?: string;
   external?: boolean;
 }
 export interface MentionReport {
@@ -379,11 +393,13 @@ export interface MentionReport {
   text: string;
   resolved: MentionResolved[];
   /** The user must pick: several candidates, or a cache match by name (`via_cache`, even a single one). */
-  unresolved: { text: string; candidates: MentionCandidate[]; via_cache?: boolean }[];
+  unresolved: { text: string; candidates: (MentionCandidate & { verified?: boolean })[]; via_cache?: boolean }[];
   /** Kept as text (the card shows a yellow chip): nobody / no group id found, or a name glued to other letters. */
   missing: { text: string; kind: "user" | "group"; reason?: string }[];
   /** IDs in the final text that are not allowed (→ 400). */
   bad_ids: string[];
+  /** Candidate ids in the final text Ned never saw (not cached, not in this conversation's user lookups) (→ 400). */
+  unverified_ids: string[];
   /** @here / @channel / @everyone (either form) in the final text (→ 400). */
   broadcast: string[];
 }
@@ -410,9 +426,11 @@ const mentionRe = (at: string, flags = "g") => new RegExp(`${reEsc(at)}(?![A-Za-
 /** `@name` anywhere it could be meant (not inside a longer ASCII handle) — to notice one glued to other letters. */
 const looseRe = (at: string) => new RegExp(`${reEsc(at)}(?![A-Za-z0-9._-])`);
 
-const USER_TOKEN = /<@([A-Z0-9]+)(?:\|[^>]*)?>/g;
-const GROUP_TOKEN = /<!subteam\^([A-Z0-9]+)(?:\|[^>]*)?>/g;
-const BROADCAST = /<!(channel|here|everyone)(?:\|[^>]*)?>|(?<![\w@])@(channel|here|everyone)(?![\w-])/gi;
+/** Case-insensitive on purpose: `<@u0…>` is still a mention token and must pass the (upper-cased) whitelist. */
+const USER_TOKEN = /<@([A-Za-z0-9]+)(?:\|[^>]*)?>/g;
+const GROUP_TOKEN = /<!subteam\^([A-Za-z0-9]+)(?:\|[^>]*)?>/gi;
+/** @here / @channel / @everyone unless glued to a word or an address before (a@here.com) — `_@here`, `@@here` count. */
+export const BROADCAST = /<!(channel|here|everyone)(?:\|[^>]*)?>|(?<![A-Za-z0-9.])@(channel|here|everyone)(?![\w-])/gi;
 /** `<@…>` / `<!subteam^…>` / `<!…>` tokens in a text (what the model may not write itself). */
 export const rawIdTokens = (text: string): string[] => [...text.matchAll(/<[@!][^>\s]{1,80}>/g)].map((m) => m[0]);
 
@@ -421,8 +439,10 @@ export const rawIdTokens = (text: string): string[] => [...text.matchAll(/<[@!][
  * is ignored. 1 candidate → `<@U…>`; several → `choices[text]` when it is one of them, else unresolved; 0 → a single
  * cache match by exact name is offered as a choice (via_cache), else missing. A group → `<!subteam^S…>` when the
  * settings map its handle, else missing.
- * Whitelist on the FINAL text: `<@U…>` must be a candidate of a mention that was in the text, or (typed by the user) a
- * cached user; `<!subteam^S…>` a group id from the settings; no broadcast mentions at all.
+ * Whitelist on the FINAL text: `<@U…>` must be a cached user, or a candidate of a mention that was in the text AND an
+ * id Ned itself saw this conversation (`seenUsers` — user-lookup results); a candidate Ned never saw → unverified (400).
+ * `<!subteam^S…>` must be a group id from the settings; no broadcast mentions at all. Names shown come from Ned's own
+ * data first (verified), else the model's (verified: false); a different model name is flagged (name_mismatch).
  */
 export function resolveMentions(
   text: string,
@@ -430,12 +450,22 @@ export function resolveMentions(
   cache: SlackUsersCache,
   groups: { dir: Map<string, string>; ids: Set<string>; handles?: string[] },
   choices: Record<string, unknown> = {},
+  seenUsers: Record<string, SeenUser> = {},
 ): MentionReport {
-  const rep: MentionReport = { text, resolved: [], unresolved: [], missing: [], bad_ids: [], broadcast: [] };
-  const allowed = new Set<string>(Object.keys(cache.users));
+  const rep: MentionReport = { text, resolved: [], unresolved: [], missing: [], bad_ids: [], unverified_ids: [], broadcast: [] };
   const handles = new Set((groups.handles ?? []).map((h) => h.toLowerCase()));
   const present = mentions.filter((m) => looseRe(m.text).test(text));
-  for (const m of present) for (const c of m.candidates) allowed.add(c.id);
+  const presentCands = new Set(present.flatMap((m) => m.candidates.map((c) => c.id)));
+  /** Ned's own record of an id: the cache (agenda / a send that went through) or this conversation's user lookups. */
+  const known = (id: string): { name: string; real_name?: string; external?: boolean } | undefined => cache.users[id] ?? seenUsers[id];
+  const norm = (s: string | undefined) => (s ?? "").replace(/\s+/g, "").toLowerCase();
+  const describe = (id: string, modelName: string, modelExternal?: boolean): Omit<MentionResolved, "text" | "kind" | "id"> => {
+    const k = known(id);
+    if (!k) return { name: modelName || id, verified: false, ...(modelExternal ? { external: true } : {}) };
+    const mismatch = !!modelName && modelName !== id && norm(modelName) !== norm(k.name) && norm(modelName) !== norm(k.real_name);
+    return { name: k.name, verified: true, ...(mismatch ? { name_mismatch: true, model_name: modelName } : {}), ...(k.external || modelExternal ? { external: true } : {}) };
+  };
+  const withVerified = (cs: MentionCandidate[]) => cs.map((c) => ({ ...c, ...(known(c.id) ? { name: known(c.id)!.name, verified: true } : { verified: false }) }));
   const warnGlued = (m: MentionSpec, kind: "user" | "group") => {
     if (looseRe(m.text).test(rep.text)) rep.missing.push({ text: m.text, kind, reason: "뒤에 글자가 붙어 이름 경계를 알 수 없음 — 띄어 쓰거나 조사만 붙여 줘" });
   };
@@ -463,7 +493,7 @@ export function resolveMentions(
     else if (m.candidates.length > 1) {
       pick = m.candidates.find((c) => c.id === want);
       if (!pick) {
-        rep.unresolved.push({ text: m.text, candidates: m.candidates });
+        rep.unresolved.push({ text: m.text, candidates: withVerified(m.candidates) });
         continue;
       }
     } else {
@@ -472,7 +502,7 @@ export function resolveMentions(
         const h = hits[0];
         const cand = { id: h.id, name: h.name, ...(h.title ? { title: h.title } : {}), ...(h.external ? { external: true } : {}) };
         if (want !== h.id) {
-          rep.unresolved.push({ text: m.text, candidates: [cand], via_cache: true });
+          rep.unresolved.push({ text: m.text, candidates: [{ ...cand, verified: true }], via_cache: true });
           continue;
         }
         pick = cand;
@@ -483,22 +513,29 @@ export function resolveMentions(
       continue;
     }
     rep.text = rep.text.replace(mentionRe(m.text), `<@${pick.id}>`);
-    rep.resolved.push({ text: m.text, kind: "user", id: pick.id, name: pick.name, ...(pick.external ? { external: true } : {}) });
+    rep.resolved.push({ text: m.text, kind: "user", id: pick.id, ...describe(pick.id, pick.name, pick.external) });
     warnGlued(m, "user");
   }
-  for (const mm of rep.text.matchAll(USER_TOKEN)) if (!allowed.has(mm[1])) rep.bad_ids.push(mm[1]);
-  for (const mm of rep.text.matchAll(GROUP_TOKEN)) if (!groups.ids.has(mm[1])) rep.bad_ids.push(mm[1]);
+  for (const mm of rep.text.matchAll(USER_TOKEN)) {
+    const id = mm[1].toUpperCase();
+    if (cache.users[id]) continue;
+    if (presentCands.has(id)) {
+      if (!seenUsers[id]) rep.unverified_ids.push(id);
+    } else rep.bad_ids.push(id);
+  }
+  for (const mm of rep.text.matchAll(GROUP_TOKEN)) if (!groups.ids.has(mm[1].toUpperCase())) rep.bad_ids.push(mm[1]);
   for (const mm of rep.text.matchAll(BROADCAST)) rep.broadcast.push(mm[0]);
   // ids typed in by the user that ARE allowed still show on the card
   const shown = new Set(rep.resolved.map((r) => r.id));
   for (const mm of rep.text.matchAll(USER_TOKEN)) {
-    const id = mm[1];
-    if (shown.has(id) || !allowed.has(id)) continue;
+    const id = mm[1].toUpperCase();
+    if (shown.has(id) || rep.bad_ids.includes(id)) continue;
     shown.add(id);
-    const c = present.flatMap((m) => m.candidates).find((x) => x.id === id) ?? cache.users[id];
-    rep.resolved.push({ text: `<@${id}>`, kind: "user", id, name: c?.name ?? id, ...(c?.external ? { external: true } : {}) });
+    const c = present.flatMap((m) => m.candidates).find((x) => x.id === id);
+    rep.resolved.push({ text: `<@${mm[1]}>`, kind: "user", id, ...describe(id, c?.name ?? "", c?.external) });
   }
   rep.bad_ids = [...new Set(rep.bad_ids)];
+  rep.unverified_ids = [...new Set(rep.unverified_ids)];
   rep.broadcast = [...new Set(rep.broadcast)];
   return rep;
 }

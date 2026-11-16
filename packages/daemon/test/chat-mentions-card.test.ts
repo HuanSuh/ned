@@ -28,7 +28,7 @@ const BLOCK = {
 const SLACK_OK = {
   target_source: "found", channel: "C0TESTOPS01", channel_name: "", thread_ts: "1700000000.000100", target_excerpt: BLOCK.target_excerpt, external: "unknown",
   preview_text: "<@U0TESTPA01>님 <@U0TESTPB01>님 샘플 지표는 어디서 볼 수 있을까요?",
-  mentions: { resolved: [{ text: "@사람A", kind: "user", id: "U0TESTPA01", name: "사람A" }, { text: "@사람B", kind: "user", id: "U0TESTPB01", name: "사람B" }], unresolved: [], missing: [] },
+  mentions: { resolved: [{ text: "@사람A", kind: "user", id: "U0TESTPA01", name: "사람A", verified: true }, { text: "@사람B", kind: "user", id: "U0TESTPB01", name: "사람B", verified: true }], unresolved: [], missing: [] },
 };
 
 describe("golden card: chips + 알림 받는 사람", () => {
@@ -38,27 +38,43 @@ describe("golden card: chips + 알림 받는 사람", () => {
     expect(p.block.target_excerpt).toBe(BLOCK.target_excerpt);
   });
 
-  it("renders two name chips (with the id's start), the notify line, the source / unnamed-channel / 외부 확인 못 함 badges and the excerpt", () => {
+  it("renders two name chips with the full id, the notify line, the source / unnamed-channel / 외부 확인 못 함 badges and the excerpt", () => {
     const html = renderActionCard(BLOCK, { status: "idle", preview: { target_label: "Slack · C0TESTOPS01 (채널 이름 확인 안 됨) · 스레드 (Ned 가 찾은 대상)", label: "Slack 보내기", slack: SLACK_OK } }, { id: "7" });
     document.body.innerHTML = html;
     const chips = [...document.querySelectorAll(".ca-pv .ca-chip")].map((e) => e.textContent);
-    expect(chips).toEqual(["@사람A · U0TE…", "@사람B · U0TE…"]);
+    expect(chips).toEqual(["@사람A · U0TESTPA01", "@사람B · U0TESTPB01"]);
     expect([...document.querySelectorAll(".ca-badge.unk")].map((e) => e.textContent)).toContain("채널 이름 확인 안 됨 · C0TESTOPS01");
-    expect(document.querySelector(".ca-notify")!.textContent).toBe("알림 받는 사람: 사람A, 사람B");
+    expect(document.querySelector(".ca-notify")!.textContent).toBe("알림 받는 사람: 사람A(U0TESTPA01), 사람B(U0TESTPB01)");
     expect(document.querySelector(".ca-badge.src")!.textContent).toBe("Ned 가 찾은 대상 — 맞는지 확인");
     expect([...document.querySelectorAll(".ca-badge.unk")].map((e) => e.textContent)).toContain("외부 여부 확인 못 함");
     expect(document.querySelector(".ca-ex")!.textContent).toBe("Ned 발췌: “11/10 샘플 오류 현황 공유드립니다…”");
-    expect(document.querySelector(".ca-pv")!.textContent).not.toContain("U0TEST"); // ids only in title attributes
+    expect(document.querySelector("[data-ca-edited]")!.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("N2: a name only the model vouches for → yellow '이름 확인 안 됨'; a different model name → red mismatch badge (chip + notify line)", () => {
+    const sl = { ...SLACK_OK, preview_text: "<@U0TESTPA01> <@U0TESTPB01> 확인", mentions: { resolved: [
+      { text: "@사람A", kind: "user", id: "U0TESTPA01", name: "사람A", verified: false },
+      { text: "@사람B", kind: "user", id: "U0TESTPB01", name: "사람B", verified: true, name_mismatch: true, model_name: "사람Z" },
+    ], unresolved: [], missing: [] } };
+    document.body.innerHTML = renderActionCard(BLOCK, { status: "idle", preview: { slack: sl } }, { id: "12" });
+    expect(document.querySelector(".ca-pv .ca-badge.unv")!.textContent).toBe("이름 확인 안 됨");
+    expect(document.querySelector(".ca-pv .ca-badge.mis")!.textContent).toBe('이름 불일치: 모델 "사람Z"');
+    expect(document.querySelector(".ca-notify")!.textContent).toBe('알림 받는 사람: 사람A(U0TESTPA01 · 이름 확인 안 됨), 사람B(U0TESTPB01 · 이름 불일치: 모델 "사람Z")');
+  });
+
+  it("N7: no workspace domain set → a grey '워크스페이스 주소 미설정' badge", () => {
+    document.body.innerHTML = renderActionCard(BLOCK, { status: "idle", preview: { slack: { ...SLACK_OK, workspace_unset: true } } }, { id: "13" });
+    expect([...document.querySelectorAll(".ca-badge.unk")].map((e) => e.textContent)).toContain("워크스페이스 주소 미설정");
   });
 
   it("external people / channel → 외부 badge and (외부: …) in the notify line; not-found and group chips", () => {
     const sl = { ...SLACK_OK, external: "external", preview_text: "<@U0TESTEX01> @사람C @sample-team <!subteam^S0TESTGRP1> 확인",
       mentions: { resolved: [{ text: "@사람X", kind: "user", id: "U0TESTEX01", name: "사람X", external: true }, { text: "@mobile-dev", kind: "group", id: "S0TESTGRP1", name: "@mobile-dev" }], unresolved: [], missing: [{ text: "@사람C", kind: "user" }, { text: "@sample-team", kind: "group" }] } };
-    expect(notifyLine(sl)).toBe("알림 받는 사람: 👥 @mobile-dev (외부: 사람X)");
+    expect(notifyLine(sl)).toBe("알림 받는 사람: 👥 @mobile-dev (외부: 사람X(U0TESTEX01))");
     document.body.innerHTML = renderActionCard(BLOCK, { status: "idle", preview: { slack: sl } }, { id: "8" });
     expect(document.querySelector(".ca-badge.ext")!.textContent).toBe("외부");
     const chips = [...document.querySelectorAll(".ca-pv .ca-chip")].map((e) => e.textContent);
-    expect(chips).toEqual(["@사람X · U0TE…", "@사람C — 못 찾음, 글자로 보냄", "👥 @sample-team — 그룹 ID 없음, 글자로 보냄", "👥 @mobile-dev · S0TE…"]);
+    expect(chips).toEqual(["@사람X · U0TESTEX01", "@사람C — 못 찾음, 글자로 보냄", "👥 @sample-team — 그룹 ID 없음, 글자로 보냄", "👥 @mobile-dev · S0TESTGRP1"]);
     expect(document.querySelector(".ca-chip.warn.grp")!.getAttribute("title")).toBe("그룹 ID 를 설정 → 소스 → Slack 에 넣으면 멘션됨");
   });
 
@@ -78,7 +94,7 @@ describe("golden card: chips + 알림 받는 사람", () => {
     const sl = { ...SLACK_OK, mentions: { resolved: [], unresolved: [{ text: "@사람C", via_cache: true, candidates: [{ id: "U0TESTPC01", name: "사람C" }] }], missing: [] } };
     document.body.innerHTML = renderActionCard(BLOCK, { status: "idle", preview: { slack: sl } }, { id: "11" });
     expect(document.querySelector(".ca-mc")!.textContent).toContain("캐시로 해석");
-    expect([...document.querySelectorAll<HTMLOptionElement>('select[data-ca-mention="@사람C"] option')].map((o) => o.textContent)).toEqual(["고르기 (보내기 전에 필수)", "사람C · U0TE…"]);
+    expect([...document.querySelectorAll<HTMLOptionElement>('select[data-ca-mention="@사람C"] option')].map((o) => o.textContent)).toEqual(["고르기 (보내기 전에 필수)", "사람C · U0TESTPC01"]);
   });
 });
 
@@ -94,7 +110,7 @@ describe("동명이인 dropdown", () => {
     render();
     const sel = root.querySelector<HTMLSelectElement>('select[data-ca-mention="@사람A"]')!;
     expect([...sel.options].map((o) => o.value)).toEqual(["", "U0TESTPA01", "U0TESTPA02"]);
-    expect(sel.options[2].textContent).toBe("사람A · 디자인 · U0TE…");
+    expect(sel.options[2].textContent).toBe("사람A · 디자인 · U0TESTPA02");
 
     const postJson = vi.fn(async () => ({ ok: true, status: 200, data: { ok: true, endpoint: "/api/send", label: "Slack 보내기", payload: { source: "slack", mode: "send", ref: {}, text: "<@U0TESTPA02>님 확인 부탁드려요", origin: "chat" } } }));
     const sendAndWait = vi.fn(async () => ({ ok: true, status: 200, data: { ok: true, detail: "https://acme.slack.com/archives/C0TESTOPS01/p2" } }));
@@ -113,9 +129,50 @@ describe("동명이인 dropdown", () => {
 
     root.querySelector<HTMLButtonElement>("[data-ca-run]")!.click();
     for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
-    expect(postJson).toHaveBeenCalledWith("/api/chat/actions/validate", expect.objectContaining({ conversation_id: "c-test0009", mention_choices: { "@사람A": "U0TESTPA02" } }));
+    expect(postJson).toHaveBeenCalledWith("/api/chat/actions/validate", expect.objectContaining({ conversation_id: "c-test0009", mention_choices: { "@사람A": "U0TESTPA02" }, intent: "run" }));
     expect(sendAndWait).toHaveBeenCalledTimes(1);
     expect((sendAndWait.mock.calls[0] as unknown[])[0]).toMatchObject({ text: "<@U0TESTPA02>님 확인 부탁드려요", origin: "chat" });
+  });
+});
+
+describe("N1: edit → [실행] shows the new preview first", () => {
+  it("typing reveals '편집됨'; the first run sends no digest → 409 need_review → new chips + digest; the second run sends it and goes through", async () => {
+    const B = { ...BLOCK, text: "확인 부탁드려요", mentions: [{ text: "@사람A", candidates: [{ id: "U0TESTPA01", name: "사람A" }] }] };
+    const root = document.createElement("div");
+    document.body.replaceChildren(root);
+    const state: Record<string, unknown> = { status: "idle", preview: { slack: { ...SLACK_OK, preview_text: "확인 부탁드려요", mentions: { resolved: [], unresolved: [], missing: [] } }, digest: "d-old" } };
+    const render = () => { root.innerHTML = renderActionCard(B, state, { id: "20" }); };
+    render();
+    const NEW = { ...SLACK_OK, preview_text: "<@U0TESTPA01> 확인 부탁드려요", mentions: { resolved: [{ text: "@사람A", kind: "user", id: "U0TESTPA01", name: "사람A", verified: true }], unresolved: [], missing: [] } };
+    const postJson = vi.fn(async (_u: string, body: Record<string, unknown>) => body.ack_digest === "d-new"
+      ? { ok: true, status: 200, data: { ok: true, endpoint: "/api/send", label: "Slack 보내기", payload: { source: "slack", mode: "send", ref: {}, text: "<@U0TESTPA01> 확인 부탁드려요", origin: "chat", ack_digest: "d-new" } } }
+      : { ok: false, status: 409, data: { ok: false, need_review: true, preview_digest: "d-new", slack: NEW, error: "보낼 모양이 바뀌었어 — 새 미리보기(알림 받는 사람)를 확인하고 다시 실행해 줘" } });
+    const sendAndWait = vi.fn(async () => ({ ok: true, status: 200, data: { ok: true, detail: "https://acme.slack.com/archives/C0TESTOPS01/p3" } }));
+    wireActionCards(root, {
+      get: () => ({ block: B, state }),
+      set: (_id: string, patch: Record<string, unknown>, rerender = true) => { Object.assign(state, patch); if (rerender) render(); },
+      persist: async () => ({ ok: true, status: 200 }),
+      deps: { postJson, sendAndWait },
+      ctx: () => ({ conversation_id: "c-test0020" }),
+    });
+    const flush = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0)); };
+    const ta = root.querySelector<HTMLTextAreaElement>("[data-ca-text]")!;
+    ta.value = "@사람A 확인 부탁드려요";
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(root.querySelector("[data-ca-edited]")!.hasAttribute("hidden")).toBe(false);
+
+    root.querySelector<HTMLButtonElement>("[data-ca-run]")!.click();
+    await flush();
+    expect((postJson.mock.calls[0] as unknown[])[1]).toMatchObject({ intent: "run", ack_digest: "" }); // edited: no digest of the old preview
+    expect(sendAndWait).not.toHaveBeenCalled();
+    expect([...root.querySelectorAll(".ca-pv .ca-chip")].map((e) => e.textContent)).toEqual(["@사람A · U0TESTPA01"]);
+    expect(root.querySelector("[data-ca-edited]")!.hasAttribute("hidden")).toBe(true);
+
+    root.querySelector<HTMLButtonElement>("[data-ca-run]")!.click();
+    await flush();
+    expect((postJson.mock.calls[1] as unknown[])[1]).toMatchObject({ ack_digest: "d-new" });
+    expect(sendAndWait).toHaveBeenCalledTimes(1);
+    expect((sendAndWait.mock.calls[0] as unknown[])[0]).toMatchObject({ ack_digest: "d-new", text: "<@U0TESTPA01> 확인 부탁드려요" });
   });
 });
 

@@ -12,7 +12,7 @@ import { knownRepoPaths, parseSessionCreate, sessionCreateDeps, startSessionCrea
 import { AGENDA_SOURCES, agendaBusy, enabledSources, readAgenda, runningSources, startAgendaRefresh, type AgendaSourceKey } from "./agenda.js";
 import { contextStatus, requestContext } from "./agenda-context.js";
 import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runChatTurn, setChatActionState, sseFrame, stopChat } from "./chat.js";
-import { chatLimitReached, chatValidateContext, reserveChatSend, validateChatAction } from "./chat-actions.js";
+import { chatLimitReached, chatValidateContext, previewDigest, reserveChatSend, validateChatAction } from "./chat-actions.js";
 import { isExternal, sendTargetOf } from "./send-rules.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
@@ -412,9 +412,14 @@ export function startServer(getConfig: () => NedConfig): void {
     return j ? c.json(viewJob(j)) : c.json({ error: "unknown job (daemon restarted?) — look in GET /api/actions" }, 404);
   };
   app.post("/api/send", async (c) => {
-    const req = parseSendRequest(await readBody(c));
+    const body = await readBody(c);
+    const req = parseSendRequest(body);
     if (typeof req === "string") return c.json({ ok: false, error: req }, 400);
     if (req.mode === "create") return c.json({ ok: false, error: "calendar create goes through POST /api/calendar/events" }, 400);
+    // 대화창 Slack 보내기: only what a card previewed — the validate answer's ack_digest must match this text + target
+    // (an older card / a hand-made request without it → 409 need_review; the card re-validates and shows the preview).
+    if (req.origin === "chat" && req.source === "slack" && body.ack_digest !== previewDigest(req.text, req.ref))
+      return c.json({ ok: false, need_review: true, error: "보낼 모양을 카드에서 다시 확인해 줘 — 미리보기와 다른 대화창 Slack 보내기 요청이야" }, 409);
     return startJob(c, req);
   });
   app.get("/api/send/:job_id", jobView);

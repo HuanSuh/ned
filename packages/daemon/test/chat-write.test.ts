@@ -149,7 +149,7 @@ describe("validateChatAction", () => {
     const r = v({ kind: "slack_send", target: { url: `${SLACK_URL}/`, channel: "CEVIL" }, text: "원문", summary: "kim 에게 답" }, on, "고친 문장");
     expect(r).toMatchObject({ ok: true, endpoint: "/api/send", label: "Slack 보내기", summary: "kim 에게 답", text: "고친 문장", target_label: "Slack · #dev · kim" });
     if (!r.ok) throw new Error();
-    expect(r.payload).toEqual({ source: "slack", mode: "send", ref: { url: SLACK_URL, title: "#dev · kim" }, text: "고친 문장", origin: "chat" }); // CEVIL dropped
+    expect(r.payload).toEqual({ source: "slack", mode: "send", ref: { url: SLACK_URL, title: "#dev · kim" }, text: "고친 문장", origin: "chat", ack_digest: ca.previewDigest("고친 문장", { url: SLACK_URL }) }); // CEVIL dropped
 
     expect(v({ kind: "gmail_draft", target: { url: MAIL_URL }, text: "검토할게요" })).toMatchObject({ ok: true, payload: { source: "email", mode: "gmail_draft", ref: { message_id: "msg-1", thread_id: "18f00aa" }, origin: "chat" } });
     expect(v({ kind: "gmail_send", target: { url: MAIL_URL }, text: "네" })).toMatchObject({ ok: true, payload: { source: "email", mode: "send" } });
@@ -207,7 +207,11 @@ describe("routes", () => {
 
   it("POST /api/send origin chat: refused unless chat_write too; then a job whose log line (and /api/actions) says origin chat", async () => {
     setConfig({ slack_send: true });
-    const body = { source: "slack", mode: "send", ref: { url: SLACK_URL }, text: "곧 배포", origin: "chat" };
+    const body = { source: "slack", mode: "send", ref: { url: SLACK_URL }, text: "곧 배포", origin: "chat", ack_digest: ca.previewDigest("곧 배포", { url: SLACK_URL }) };
+    // a chat Slack send without the card's preview digest (an older client) → 409 need_review, nothing started
+    const stale = await post("/api/send", { ...body, ack_digest: undefined });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ need_review: true });
     let r = await post("/api/send", body);
     expect(r.status).toBe(403);
     expect(await r.json()).toMatchObject({ ok: false, action: "refused", detail: expect.stringContaining("config.actions.chat_write") });

@@ -228,12 +228,13 @@ function cardState(m, block) {
     c.fetching = true; st.cards[id] = c;
     const extras = (d) => ({ ...(d.slack ? { slack: d.slack } : {}), ...(d.mail_external ? { mail_external: d.mail_external } : {}) });
     postJson("/api/chat/actions/validate", { block, ...(c.text != null ? { text: c.text } : {}), ...validateCtx({ conversation_id: st.chatId, mention_choices: c.mention_choices }) }).then((r) => {
-      if (r.data?.ok) setCard(id, { fetching: false, preview: { target_label: r.data.target_label, label: r.data.label, summary: r.data.summary, ...extras(r.data) } });
+      // `digest` = what this preview shows (text + target); [실행] sends it back so nothing unseen is sent (N1)
+      if (r.data?.ok) setCard(id, { fetching: false, edited: false, preview: { target_label: r.data.target_label, label: r.data.label, summary: r.data.summary, ...extras(r.data), ...(r.data.preview_digest ? { digest: r.data.preview_digest } : {}) } });
       // 멘션 선택 필요 (409) / 하루 상한 (429): still show the target + mentions so the user can pick / see why.
       else setCard(id, { fetching: false, previewError: r.data?.error || `검증 실패 (HTTP ${r.status})`, ...(r.data?.slack ? { preview: { slack: r.data.slack } } : {}) });
     }).catch(() => setCard(id, { fetching: false }, false));
   }
-  return { status, text: c.text ?? m.action?.text, result: c.result !== undefined ? c.result : m.action?.result, tick: c.tick, preview: c.preview, previewError: c.previewError, mention_choices: c.mention_choices };
+  return { status, text: c.text ?? m.action?.text, result: c.result !== undefined ? c.result : m.action?.result, tick: c.tick, preview: c.preview, previewError: c.previewError, mention_choices: c.mention_choices, edited: c.edited };
 }
 function cardBlockOf(id) {
   const m = st.msgs.find((x) => x.role === "ned" && String(x.ts) === String(id));
