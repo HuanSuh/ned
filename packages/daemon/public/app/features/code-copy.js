@@ -43,6 +43,17 @@ function flash(btn) {
 }
 
 export async function onCopyClick(e) {
+  // "<@U…> 포함 복사" (chat-core.js codeBlockHtml with settled Slack mentions): the alternate text from data-alt.
+  const alt = e.target.closest?.(".cm-copy-alt");
+  if (alt) {
+    e.preventDefault();
+    if (await copyText(alt.dataset.alt ?? "", alt.ownerDocument)) {
+      clearTimeout(timers.get(alt));
+      alt.classList.add("ok");
+      timers.set(alt, setTimeout(() => alt.classList.remove("ok"), COPIED_MS));
+    }
+    return;
+  }
   const btn = e.target.closest?.(".cm-copy");
   if (!btn) return;
   e.preventDefault();
