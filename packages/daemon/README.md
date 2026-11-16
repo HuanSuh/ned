@@ -503,22 +503,27 @@ Agenda 응답 형태:
   `source: "todo"` 줄로 남음) → 설정 → 오늘 한 액션의 "대화창" 배지. Jira 상태 변경은 카드 텍스트(상태 이름)로 전환 목록에서 id 를 찾아 실행.
 - **대화창 Slack 대상·멘션**(`src/slack-mentions.ts`, WU-07 — 모델과 모델이 읽은 메시지는 신뢰하지 않음): `slack_send` 대상은 agenda 항목 · 그 대화의
   user 메시지(사용자가 친 글 그대로)에 붙은 permalink · 모델이 그 대화에서 Slack 메시지 도구(search_public(_and_private)·read_thread·read_channel)로 읽은 메시지.
-  턴마다 `createSeenCollector` 가 stream-json 의 해당 `tool_use`/`tool_result` 에서 **결과 항목의 필드만**(`resultMessages`: 텍스트는 블록(`## …`/`---`)마다
-  본문 라벨(`Text:` 등) 앞의 `Permalink`·`Channel`·ts 줄 첫 값, JSON 은 최상위 메시지의 permalink·channel·ts) 뽑아 답 메시지 `seen_slack`(최근 ≤200, 본문 없음)에 남긴다.
-  블록 채널과 어긋난 permalink 는 버리고, read_thread 의 입력 ts 는 결과에 그 ts 가 있을 때만. validate 는 `conversation_id` 로 대화를 읽어
-  `sameTarget`(채널 + 실제 답글 위치 reply_to)으로 대조(`chatValidateContext`), `dashboard.slack_team_domain` 과 다른 워크스페이스는 409.
+  턴마다 `createSeenCollector` 가 stream-json 의 해당 `tool_use`/`tool_result` 에서 **JSON 결과의 필드만** 뽑는다 — 메시지 도구: `resultMessages`(최상위 메시지의
+  permalink·channel·ts) → 답 메시지 `seen_slack`, 사용자 도구(search_users·read_user_profile): `extractSeenUsers`(사용자 자신의 id·name) → `seen_users`(각 최근 ≤200).
+  텍스트(마크다운) 결과는 읽지 않는다(fail closed — decision-log WU-07). 메시지 channel 과 어긋난 permalink 는 버리고, read_thread 의 입력 ts 는 결과에 그 ts 가
+  있을 때만. validate 는 `conversation_id` 로 대화를 읽어 `sameTarget`(채널 + 실제 답글 위치 reply_to, DM 단일 메시지는 DM 최상위만)으로 대조(`chatValidateContext`),
+  `dashboard.slack_team_domain` 과 다른 워크스페이스는 409(비어 있으면 `slack.workspace_unset`).
+  N1: 응답 `preview_digest` = `previewDigest(최종 본문, ref)`(sha256 앞 32자, payload 에도 `ack_digest`). 본문 `intent:"run"` 이면 `ack_digest` 가 같아야 하고 다르면
+  409 `need_review` + 새 `slack`·`preview_digest`. `POST /api/send` 도 `origin:"chat"`·`source:"slack"` 이면 `ack_digest === previewDigest(text, ref)` 필수(아니면 409 `need_review`).
   답글 = `thread_ts` → 그 스레드, 없으면 그 메시지, D… 단일 메시지면 DM 최상위(`replyTarget` = actions.ts 규칙). 카드 채널 이름은 `slackDirectory()` 의 이름만.
   블록 `mentions: [{text:"@이름", candidates:[{id, name, real_name?, title?, external?}], group?}]` → `resolveMentions`: 본문에 있는 멘션만, 1명 `<@U…>`,
   여럿 → 드롭다운(`mention_choices`, 고르기 전 409 `need_choice`), 0명 → 캐시에 같은 이름 1명이면 `via_cache` 선택지(역시 409), 아니면 글자.
   이름 뒤 한글은 조사(`NAME_PARTICLES`)만. 그룹 핸들 → ID 는 `filters.slack.group_ids` 만. 400: 모델 원문에 있던 `<@…>`/`<!…>` 가 남음(`rawIdTokens`),
-  `<@U…>` 가 본문에 남은 멘션의 후보도 캐시도 아님, `<!subteam^…>` 가 설정 ID 아님, 전체 알림(`<!here|channel|everyone>`·`@here` 등).
+  `<@U…>`(대소문자 무시) 가 캐시에도 없고 본문에 남은 멘션의 후보도 아님(`bad_ids`) 또는 후보지만 `seen_users` 에 없음(`unverified_ids` — "Ned 가 확인하지 못한 사용자 ID"),
+  `<!subteam^…>` 가 설정 ID 아님, 전체 알림(`<!here|channel|everyone>`·`@here` 등, 앞이 영숫자·`.` 가 아니면). 표시 이름은 캐시·seen_users 이름 우선(`verified`),
+  모델 이름과 다르면 `name_mismatch`·`model_name`. `slack.external` 은 "external"|"unknown" 뿐(모델 값으로 내려가지 않음).
   캐시 `~/.ned/slack-users.json`(`paths.ts SLACK_USERS_PATH`, TTL 24h, ≤2,000명): agenda 의 id 가진 사용자(trusted) + 대화창 Slack 보내기가 **성공한 뒤**
   그 payload 의 해석된 사람(`actions.ts onSendResult` → `recordSentMentions`, 기존 이름은 덮지 않음). validate(카드 미리보기)는 쓰지 않는다.
   Slack 외부 여부는 카드 배지만(규칙 판정엔 안 씀). `NED_NO_LLM_CHAT_EVENTS=<json 파일>` 이면 스텁 턴이 그 stream-json 이벤트를 먼저 흘린다(테스트용).
 - **대화창 하루 상한**(`actions.chat_write_daily_limit`, 기본 20, 0 = 무제한): used = `chatSentToday`(오늘 로컬 자정부터 `origin:"chat"`·ok·dry_run 아님·`transitions` 아님 줄 수)
   + 진행 중 슬롯. `/api/send`·`/api/calendar/events` 는 `startSendJob(…, admit)` 안에서 twin 합류·already_sent 판정 **뒤** `reserveChatSend` 로 동기 예약
   (작업 끝·미시작 시 해제) → 넘으면 429 `{ok:false, error, limit, used}`. `/api/todos`(origin chat, refused 로 기록)·validate 도 429.
-- 보내기 규칙: 이름 모르는 Slack 채널(`sendTargetOf().name_known === false`)에 이름 기반 Slack 규칙이 있으면 confirm(`UNKNOWN_CHANNEL_NOTE`), 뒤에서 맞는 block 은 우선.
+- 보내기 규칙: 이름 모르는 Slack 채널(`sendTargetOf().name_known === false`)에 이름 기반 Slack·`*` 규칙이 있으면 confirm(`UNKNOWN_CHANNEL_NOTE`), 뒤에서 맞는 block 은 우선.
 - **세션 만들기**(`src/session-create.ts`): 검증(토글·`orca repo list` 허용 목록·상한 2 — `~/.ned/chat-sessions.json` 의 handle 이 `orca terminal list` 에 살아 있는 것 + 진행 중 작업) 후 작업에서
   `orca worktree create --name <n> --repo path:<repo> --parent-worktree path:<repo> --agent claude --model <m> --surface terminal`(기존이면 `orca agent launch --worktree path:<wt>`) —
   `--prompt` 는 쓰지 않는다(초안으로만 남는 버그) → `orca terminal read --screen` 에 Claude 입력줄/상태줄이 보일 때까지(최대 90초, 신뢰 확인 화면이면 409)
