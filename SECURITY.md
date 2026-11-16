@@ -24,6 +24,9 @@ with steps to reproduce, impact, and the version you tested (`version` in `.clau
 - Ned.app (메뉴 막대 앱, WKWebView 브리지) / Ned.app (menu bar app, WKWebView bridges)
 - 설치·업데이트 스크립트 (`scripts/*.sh`, `/ned:install`, 자동 업데이트) / install and update scripts
 
+- 대화창 쓰기(확인 카드)의 Slack 대상(붙인 링크·Ned 가 찾은 대상)과 멘션 해석 — 모델과 모델이 읽은 메시지(프롬프트 인젝션 포함)는 신뢰하지 않는다. 서버 검사: 대상은 agenda·사용자가 직접 붙인 링크·Slack 메시지 도구 결과의 필드(본문 제외)와 채널 + 실제 답글 위치로 일치, 다른 워크스페이스 거부, 멘션 ID 는 본문에 남은 멘션의 후보(사용자가 넣은 ID 는 + 실제 전송으로 확인된 캐시)만, 모델이 쓴 ID·전체 알림(@here 등) 거부, 그룹 ID 는 설정만, 하루 상한, 이름 모르는 채널은 이름 규칙이 있으면 확인 후. 이를 우회해 사람이 카드에서 보지 못한 곳·사람에게 보내게 되는 경우는 범위 안
+  / chat-proposed Slack sends (pasted links, threads Ned found) and mention resolution — the model and anything it read are untrusted; bypassing the server checks above so a send reaches a thread or a person the card did not show is in scope
+
 범위 밖 / Out of scope:
 - claude.ai 커넥터(Slack·Gmail·Google Calendar·Atlassian·GitHub)와 Claude Code 자체 — 각 제공자에게 제보한다
   / claude.ai connectors and Claude Code itself — report those to their providers
