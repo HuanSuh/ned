@@ -622,6 +622,12 @@ async function sendToSession(req: SendRequest): Promise<{ status: 200 | 400 | 40
 
 // ---------------------------------------------------------------------------------------------- entry point
 
+const sendResultHooks: ((req: SendRequest, ok: boolean) => void)[] = [];
+/** Called after every performSend outcome (ok = really done). 대화창 멘션 캐시 (chat-actions.ts) listens. */
+export function onSendResult(fn: (req: SendRequest, ok: boolean) => void): void {
+  if (!sendResultHooks.includes(fn)) sendResultHooks.push(fn);
+}
+
 /**
  * The one place Ned writes anywhere. Gated per source/mode by config.actions; every attempt — allowed,
  * refused or failed — is appended to ~/.ned/sent-actions.log. Connector actions run `claude -p` in dontAsk mode
@@ -641,6 +647,13 @@ export async function performSend(req: SendRequest, cfg: NedConfig): Promise<Sen
   const finish = (status: SendResult["status"], ok: boolean, action: string, detail0: string, event?: CreatedEvent): SendResult => {
     const detail = action === "refused" || action === "need_confirm" ? detail0 : `${detail0}${reviewNote}`;
     appendActionLog({ ...entry, action, ok, result: detail, ...(event ? { event } : {}) });
+    for (const fn of sendResultHooks) {
+      try {
+        fn(req, ok);
+      } catch {
+        /* a listener must not break the send */
+      }
+    }
     log(`send: ${req.source}/${req.mode} ${action} → ${ok ? "ok" : action.startsWith("dry_run:") ? "dry-run" : `FAIL(${status})`} ${detail.slice(0, 160)}`);
     return { ok, action, detail, logged_at, status, ...(event ? { event } : {}) };
   };

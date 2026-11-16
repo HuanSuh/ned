@@ -51,7 +51,7 @@ export function parseActionBlock(answer) {
   const block = { kind: j.kind, target, text: btext, summary: typeof j.summary === "string" ? j.summary.trim().slice(0, 200) : "" };
   // slack_send extras (WU-07) travel to validate as-is; the server cleans and checks them.
   if (Array.isArray(j.mentions) && j.mentions.length) block.mentions = j.mentions;
-  for (const k of ["target_excerpt", "channel_name"]) if (typeof j[k] === "string" && j[k].trim()) block[k] = j[k].trim().slice(0, 300);
+  if (typeof j.target_excerpt === "string" && j.target_excerpt.trim()) block.target_excerpt = j.target_excerpt.trim().slice(0, 300);
   if (typeof j.channel_external === "boolean") block.channel_external = j.channel_external;
   return { text, block, error: "", pending: false };
 }
@@ -72,23 +72,32 @@ export function mentionMap(block, choices = {}) {
 const SRC_KO = { known: "Ned 가 아는 항목", pasted: "붙인 링크", found: "Ned 가 찾은 대상 — 맞는지 확인" };
 const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** The text to send with `<@U…>` / `<!subteam^S…>` as name chips and not-found mentions as yellow chips. */
+/** "U0TESTPA01" → "U0TE…" — the chip shows whose id it really is (the name alone is the model's word). */
+export const shortId = (id) => (String(id).length > 5 ? `${String(id).slice(0, 4)}…` : String(id));
+
+/**
+ * The text to send with `<@U…>` / `<!subteam^S…>` as name chips (+ the id's start), not-found / glued mentions as
+ * yellow chips and broadcast mentions (@here · @channel · @everyone) as red chips (the server refuses those: 400).
+ */
 export function mentionPreviewHtml(text, sl) {
   const res = sl?.mentions?.resolved || [], miss = sl?.mentions?.missing || [];
   const byId = Object.fromEntries(res.map((r) => [r.id, r]));
-  const alts = ["<@([A-Z0-9]+)(?:\\|[^>]*)?>", "<!subteam\\^([A-Z0-9]+)(?:\\|[^>]*)?>", ...miss.map((m) => `(${reEsc(m.text)})(?![A-Za-z0-9._-])`)];
-  const re = new RegExp(alts.join("|"), "g");
+  const alts = ["<@([A-Z0-9]+)(?:\\|[^>]*)?>", "<!subteam\\^([A-Z0-9]+)(?:\\|[^>]*)?>", "(<!(?:channel|here|everyone)(?:\\|[^>]*)?>|(?<![\\w@])@(?:channel|here|everyone)(?![\\w-]))", ...miss.map((m) => `(${reEsc(m.text)})(?![A-Za-z0-9._-])`)];
+  const re = new RegExp(alts.join("|"), "gi");
   let out = "", last = 0, m;
   const src = String(text ?? "");
   while ((m = re.exec(src))) {
     out += esc(src.slice(last, m.index));
-    if (m[1]) { const r = byId[m[1]]; out += `<span class="ca-chip${r?.external ? " ext" : ""}" title="${esc(m[1])}">@${esc(r?.name || m[1])}</span>`; }
-    else if (m[2]) { const r = byId[m[2]]; out += `<span class="ca-chip grp" title="${esc(m[2])}">👥 ${esc(r?.name || m[2])}</span>`; }
+    if (m[1]) { const r = byId[m[1]]; out += `<span class="ca-chip${r?.external ? " ext" : ""}" title="${esc(m[1])}">@${esc(r?.name || m[1])} · <span class="ca-id">${esc(shortId(m[1]))}</span></span>`; }
+    else if (m[2]) { const r = byId[m[2]]; out += `<span class="ca-chip grp" title="${esc(m[2])}">👥 ${esc(r?.name || m[2])} · <span class="ca-id">${esc(shortId(m[2]))}</span></span>`; }
+    else if (m[3]) out += `<span class="ca-chip bad" title="전체 알림 멘션은 대화창에서 보낼 수 없음 — Slack 에서 직접">${esc(m[3])} — 전체 알림, 보낼 수 없음</span>`;
     else {
       const mm = miss.find((x) => x.text === m[0]);
-      out += mm?.kind === "group"
-        ? `<span class="ca-chip warn grp" title="그룹 ID 를 설정 → 소스 → Slack 에 넣으면 멘션됨">👥 ${esc(m[0])} — 그룹 ID 없음, 글자로 보냄</span>`
-        : `<span class="ca-chip warn">${esc(m[0])} — 못 찾음, 글자로 보냄</span>`;
+      out += mm?.reason
+        ? `<span class="ca-chip warn" title="${esc(mm.reason)}">${esc(m[0])} — 이름 경계 모름, 글자로 보냄</span>`
+        : mm?.kind === "group"
+          ? `<span class="ca-chip warn grp" title="그룹 ID 를 설정 → 소스 → Slack 에 넣으면 멘션됨">👥 ${esc(m[0])} — 그룹 ID 없음, 글자로 보냄</span>`
+          : `<span class="ca-chip warn">${esc(m[0])} — 못 찾음, 글자로 보냄</span>`;
     }
     last = re.lastIndex;
     if (m[0] === "") re.lastIndex++;
@@ -110,12 +119,15 @@ function slackExtrasHtml(sl, choices = {}, editable = true) {
   if (!sl) return "";
   const ext = sl.external === "external" ? `<span class="ca-badge ext">외부</span>` : sl.external === "unknown" ? `<span class="ca-badge unk" title="채널·사람이 외부인지 정보가 없어">외부 여부 확인 못 함</span>` : "";
   const src = SRC_KO[sl.target_source] ? `<span class="ca-badge src s-${esc(sl.target_source)}">${esc(SRC_KO[sl.target_source])}</span>` : "";
-  const ex = sl.target_excerpt ? `<div class="ca-ex" title="대상 스레드 첫 글">“${esc(String(sl.target_excerpt).slice(0, 200))}”</div>` : "";
-  const un = (sl.mentions?.unresolved || []).map((u) => `<label class="ca-mc">${esc(u.text)} 은(는) 누구? <select data-ca-mention="${esc(u.text)}"${editable ? "" : " disabled"}><option value="">고르기 (보내기 전에 필수)</option>${(u.candidates || []).map((c) => `<option value="${esc(c.id)}"${choices[u.text] === c.id ? " selected" : ""}>${esc([c.name, c.real_name, c.title].filter(Boolean).join(" · "))}${c.external ? " (외부)" : ""}</option>`).join("")}</select></label>`).join("");
+  // a pasted / found channel Ned can't name: show its id and say so (the model's channel name is never shown)
+  const unnamed = sl.channel && !sl.channel_name ? `<span class="ca-badge unk" title="Ned 가 모은 Slack 목록에 없는 채널이야 — ID 로 확인해 줘">채널 이름 확인 안 됨 · ${esc(sl.channel)}</span>` : "";
+  const ex = sl.target_excerpt ? `<div class="ca-ex" title="Ned(모델)가 적은 발췌 — 원문과 다를 수 있어">Ned 발췌: “${esc(String(sl.target_excerpt).slice(0, 200))}”</div>` : "";
+  const un = (sl.mentions?.unresolved || []).map((u) => `<label class="ca-mc">${esc(u.text)} 은(는) 누구?${u.via_cache ? ' <span class="ca-badge unk" title="모델이 후보를 못 줘서 Ned 의 캐시에서 이름으로 찾았어">캐시로 해석</span>' : ""} <select data-ca-mention="${esc(u.text)}"${editable ? "" : " disabled"}><option value="">고르기 (보내기 전에 필수)</option>${(u.candidates || []).map((c) => `<option value="${esc(c.id)}"${choices[u.text] === c.id ? " selected" : ""}>${esc([c.name, c.real_name, c.title, shortId(c.id)].filter(Boolean).join(" · "))}${c.external ? " (외부)" : ""}</option>`).join("")}</select></label>`).join("");
   const nl = notifyLine(sl);
-  const pv = sl.preview_text != null && ((sl.mentions?.resolved || []).length || (sl.mentions?.missing || []).length)
+  const m = sl.mentions || {};
+  const pv = sl.preview_text != null && ((m.resolved || []).length || (m.missing || []).length || (m.broadcast || []).length)
     ? `<div class="ca-pv" aria-label="보낼 모양 미리보기">${mentionPreviewHtml(sl.preview_text, sl).replace(/\n/g, "<br>")}</div>` : "";
-  return `<div class="ca-badges">${src}${ext}</div>${ex}${pv}${nl ? `<div class="ca-notify">${esc(nl)}</div>` : ""}${un}`;
+  return `<div class="ca-badges">${src}${unnamed}${ext}</div>${ex}${pv}${nl ? `<div class="ca-notify">${esc(nl)}</div>` : ""}${un}`;
 }
 
 /** Best-effort target line before the server has checked it (validate's target_label replaces it). */

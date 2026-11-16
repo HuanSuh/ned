@@ -122,10 +122,13 @@ function inline(s) {
 // consumed by the split, so <pre><code>'s textContent is exactly the original block text — that's what gets copied.
 const COPY_ICON = '<svg class="ic-copy" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M11 3.5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>'
   + '<svg class="ic-ok" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-/** `code` with each "@이름" of `mentions` ({"@이름": "<@U…>"}) replaced — same matching as the server (not inside @name.x). */
+/** = src/slack-mentions.ts NAME_PARTICLES: Hangul right after a name counts only as these particles (@사람A님, not @사람A준). */
+const NAME_PARTICLES = "님|씨|께|에게|한테|이랑|랑|이|가|은|는|을|를|도|과|와|의";
+/** `code` with each "@이름" of `mentions` ({"@이름": "<@U…>"}) replaced — same matching as the server. */
 export function withMentionIds(code, mentions = {}) {
   let out = String(code ?? "");
-  for (const k of Object.keys(mentions).sort((a, b) => b.length - a.length)) out = out.replace(new RegExp(`${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9._-])`, "g"), mentions[k]);
+  for (const k of Object.keys(mentions).sort((a, b) => b.length - a.length))
+    out = out.replace(new RegExp(`${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9._-])(?=$|[^가-힣]|(?:${NAME_PARTICLES})+(?![가-힣]))`, "g"), mentions[k]);
   return out;
 }
 /**

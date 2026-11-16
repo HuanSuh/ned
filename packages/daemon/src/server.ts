@@ -12,8 +12,7 @@ import { knownRepoPaths, parseSessionCreate, sessionCreateDeps, startSessionCrea
 import { AGENDA_SOURCES, agendaBusy, enabledSources, readAgenda, runningSources, startAgendaRefresh, type AgendaSourceKey } from "./agenda.js";
 import { contextStatus, requestContext } from "./agenda-context.js";
 import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runChatTurn, setChatActionState, sseFrame, stopChat } from "./chat.js";
-import { chatLimitReached, chatValidateContext, validateChatAction } from "./chat-actions.js";
-import { updateUsersCache } from "./slack-mentions.js";
+import { chatLimitReached, chatValidateContext, reserveChatSend, validateChatAction } from "./chat-actions.js";
 import { isExternal, sendTargetOf } from "./send-rules.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
@@ -357,7 +356,10 @@ export function startServer(getConfig: () => NedConfig): void {
       return c.json({ ok: false, error: "config.actions.chat_write is off — turn it on in settings to allow this" }, 403);
     }
     const over = chatLimitReached(cfg);
-    if (over) return c.json(over, 429);
+    if (over) {
+      appendActionLog({ ...entry, action: "refused", ok: false, result: over.error });
+      return c.json(over, 429);
+    }
     const t = addTodo(body);
     if (!t) return c.json({ error: "title required" }, 400);
     appendActionLog({ ...entry, action: "todo_add", ok: true, result: `todo ${t.id}${t.due ? ` (마감 ${t.due})` : ""}` });
@@ -387,12 +389,11 @@ export function startServer(getConfig: () => NedConfig): void {
   // 202 {job_id} now, GET /api/send/:job_id for the result. A switched-off action is still refused here (403).
   const startJob = async (c: Context, req: SendRequest) => {
     const cfg = loadConfig();
-    // 대화창 하루 전송 상한 (actions.chat_write_daily_limit): only real writes count / are held — not a Jira transitions lookup.
-    if (req.origin === "chat" && req.mode !== "transitions") {
-      const over = chatLimitReached(cfg);
-      if (over) return c.json(over, 429);
-    }
-    const st = await startSendJob(req, cfg);
+    // 대화창 하루 전송 상한 (actions.chat_write_daily_limit): only real writes count / are held — not a Jira transitions
+    // lookup. Checked inside startSendJob after the twin / already_sent answers, with a slot held while the send runs.
+    const admit = req.origin === "chat" && req.mode !== "transitions" ? () => reserveChatSend(cfg) : undefined;
+    const st = await startSendJob(req, cfg, undefined, admit);
+    if (st.kind === "over") return c.json(st.body as Record<string, unknown>, 429);
     if (st.kind === "sync") {
       const { status, ...out } = st.result;
       return c.json(status === 200 ? out : { ...out, error: out.detail }, status);
@@ -491,9 +492,7 @@ export function startServer(getConfig: () => NedConfig): void {
       const { status, ...out } = r;
       return c.json(out, status);
     }
-    // 확정된 멘션 후보 (1명 · 고른 사람) → 캐시 (TTL 24h) — later turns / hand-typed <@U…> may use them.
-    const confirmed = (r.slack?.mentions.resolved ?? []).filter((m) => m.kind === "user" && m.name !== m.id);
-    if (confirmed.length) updateUsersCache({ users: confirmed.map((m) => ({ id: m.id, name: m.name, ...(m.external ? { external: true } : {}) })) });
+    // (멘션 캐시는 여기서 쓰지 않는다 — 실제 전송이 성공한 뒤에만: chat-actions.ts recordSentMentions.)
     // 메일: the 보내기 규칙's own external judgement (send-rules.ts, fail closed) → the card's 외부 배지.
     if (r.kind === "gmail_send" || r.kind === "gmail_draft") {
       const req = parseSendRequest(r.payload);

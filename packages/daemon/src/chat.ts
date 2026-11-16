@@ -14,7 +14,7 @@ import { extractOutputBlock, outputRef, saveOutput, type OutputRef } from "./out
 import { personaPrompt } from "./persona.js";
 import { briefingOk, readState, type Briefing, type NedState } from "./state.js";
 import { listTodos, type Todo } from "./todos.js";
-import { createSeenCollector, updateUsersCache, type SeenSlack } from "./slack-mentions.js";
+import { createSeenCollector, type SeenSlack } from "./slack-mentions.js";
 
 /**
  * Ned 채팅 (dashboard PDA → 대화 탭). One `claude -p` per turn, continued with `--resume <session_id>`:
@@ -502,7 +502,6 @@ export async function runChatTurn(prep: Extract<ChatPrep, { ok: true }>, emit: C
     const msg: ChatMessage = { role: "ned", text: answer, ts: Date.now(), cost_usd: cost };
     const sn = seen.result();
     if (sn.seen.length) msg.seen_slack = sn.seen;
-    if (sn.groups.length) updateUsersCache({ groups: sn.groups }); // <!subteam^S…|@handle> → 그룹 멘션에 쓸 ID
     if (res.aborted) msg.stopped = true;
     else if (!res.ok) msg.error = clip(res.error || "실패", 300);
     else {

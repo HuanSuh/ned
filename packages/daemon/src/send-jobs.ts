@@ -115,7 +115,9 @@ export type StartOutcome =
   | { kind: "sync"; result: SendResult }
   | { kind: "already_sent"; sent: { at: string; detail: string; job_id?: string } }
   | { kind: "need_confirm"; need: NeedConfirm }
-  | { kind: "job"; job: SendJob; reused: boolean };
+  | { kind: "job"; job: SendJob; reused: boolean }
+  /** admit (대화창 하루 상한) refused: the route answers 429 with `body`. */
+  | { kind: "over"; body: unknown };
 
 /**
  * Start (or join) the job for `req`. A switched-off action or a `block` rule is refused synchronously (instant, logged
@@ -123,7 +125,7 @@ export type StartOutcome =
  * already_sent, and only then the confirm step (send-guard.ts): a `confirm` rule or review issues without a valid
  * confirm_token → need_confirm (logged; the route answers 409). `run` is injectable for tests.
  */
-export async function startSendJob(req: SendRequest, cfg: NedConfig, run: typeof performSend = performSend): Promise<StartOutcome> {
+export async function startSendJob(req: SendRequest, cfg: NedConfig, run: typeof performSend = performSend, admit?: Admit): Promise<StartOutcome> {
   prune();
   if (!gate(req, cfg).on || blockingRule(req, cfg)) return { kind: "sync", result: await run(req, cfg) };
   const key = sendKey(req);
@@ -131,7 +133,22 @@ export async function startSendJob(req: SendRequest, cfg: NedConfig, run: typeof
   if (live) return { kind: "job", job: live, reused: true };
   const sent = findRecentSent(req);
   if (sent) return { kind: "already_sent", sent };
+  // 대화창 하루 상한: checked here — after joining a twin / already_sent (those send nothing new) — and a slot is held
+  // synchronously until this send is over, so two concurrent requests can't both pass at limit − 1.
+  const slot = admit?.();
+  if (slot && "over" in slot) return { kind: "over", body: slot.over };
+  let started = false;
+  try {
+    return await startGuarded(req, cfg, run, key, () => { started = true; return slot?.release; });
+  } finally {
+    if (!started) slot?.release();
+  }
+}
 
+/** A cap check that holds a slot: {over} = refuse (429), else release() when the send is over. */
+export type Admit = () => { over: unknown } | { release: () => void };
+
+async function startGuarded(req: SendRequest, cfg: NedConfig, run: typeof performSend, key: string, onStart: () => (() => void) | undefined): Promise<StartOutcome> {
   const decision = await guardSend(req, cfg);
   if (decision.kind === "confirm") {
     const { need, guard } = decision;
@@ -147,6 +164,7 @@ export async function startSendJob(req: SendRequest, cfg: NedConfig, run: typeof
 
   const job: SendJob = { id: randomUUID(), key, req, state: "running", started_at: Date.now() };
   jobs.set(job.id, job);
+  const release = onStart(); // the held slot now belongs to this job
   void (async () => {
     let result: SendResult;
     try {
@@ -161,6 +179,7 @@ export async function startSendJob(req: SendRequest, cfg: NedConfig, run: typeof
     job.result = result;
     job.state = "done";
     job.finished_at = Date.now();
+    release?.();
   })();
   return { kind: "job", job, reused: false };
 }
