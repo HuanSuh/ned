@@ -307,7 +307,7 @@ null 이면 `agenda_refresh_minutes`(기본 60), 1..1440)가 지난 소스만 �
 | GET | `/api/chats` | `{ chats: [{id,title,updated_at,messages,cost_usd}], active, input_max }` 최신순 |
 | GET | `/api/chat/:id` | 저장된 대화 `{ id, title, session_id, cost_usd, messages: [{role: user\|ned, text, ts, cost_usd?, error?, stopped?, action?, output?, output_error?}], running }` |
 | POST | `/api/chat/:id/stop` | 진행 중인 턴에 SIGTERM (없으면 404). 지금까지 흐른 텍스트가 `stopped: true` 로 저장됨 |
-| POST | `/api/chat/actions/validate` | 확인 카드 검증 `{ block: <ned-action JSON>, text?: 고친 텍스트 }` → 200 `{ ok, kind, endpoint: /api/send\|/api/calendar/events\|/api/todos, payload (origin "chat"), label, summary, target_label, text, text_optional, lookup? }` · 400 형식 · 403 `actions.chat_write`/해당 스위치 꺼짐 · 409 대상이 최근 agenda/state 에 없음. 실행은 안 함 (`src/chat-actions.ts`) |
+| POST | `/api/chat/actions/validate` | 확인 카드 검증 `{ block: <ned-action JSON>, text?: 고친 텍스트, conversation_id?, mention_choices?: {"@이름": "U…"} }` → 200 `{ ok, kind, endpoint: /api/send\|/api/calendar/events\|/api/todos, payload (origin "chat"), label, summary, target_label, text, text_optional, lookup?, slack?: {target_source, channel, channel_name, thread_ts, target_excerpt, external, preview_text, mentions}, mail_external? }` · 400 형식·허용 안 된 멘션 ID · 403 `actions.chat_write`/해당 스위치 꺼짐 · 409 대상이 agenda/붙인 링크/읽은 메시지 어디에도 없음·다른 워크스페이스·멘션 선택 필요(`need_choice`, `slack` 동봉) · 429 하루 상한 `{limit, used}`. 실행은 안 함 (`src/chat-actions.ts`) |
 | POST | `/api/chat/:id/action` | 카드 상태 저장 `{ ts (ned 메시지), state: running\|executed\|failed\|cancelled, text?, result? }` → 메시지의 `action`. (없음\|failed)→running\|cancelled, running→나머지; executed·cancelled 는 최종(409) |
 | POST | `/api/send` | 초안 보내기 — `config.actions` 로 켠 것만. 꺼져 있으면 403, 금지 규칙 403, 확인 규칙·검토 이슈 409 `need_confirm`(+`confirm_token` 재전송) — 아래 "보내기 규칙" |
 | GET | `/api/actions` | `sent-actions.log` 최근 50건 (최신 먼저) |
@@ -501,6 +501,29 @@ Agenda 응답 형태:
   `POST /api/chat/actions/validate` 가 만든 요청을 **기존** `/api/send`·`/api/calendar/events`·`/api/todos` 로 보낸다(`origin: "chat"`).
   `origin: "chat"` 요청은 각 스위치에 더해 `actions.chat_write` 도 켜져 있어야 하고(꺼지면 403 refused), 로그 줄에 `origin` 이 붙는다(할 일 추가도
   `source: "todo"` 줄로 남음) → 설정 → 오늘 한 액션의 "대화창" 배지. Jira 상태 변경은 카드 텍스트(상태 이름)로 전환 목록에서 id 를 찾아 실행.
+- **대화창 Slack 대상·멘션**(`src/slack-mentions.ts`, WU-07 — 모델과 모델이 읽은 메시지는 신뢰하지 않음): `slack_send` 대상은 agenda 항목 · 그 대화의
+  user 메시지(사용자가 친 글 그대로)에 붙은 permalink · 모델이 그 대화에서 Slack 메시지 도구(search_public(_and_private)·read_thread·read_channel)로 읽은 메시지.
+  턴마다 `createSeenCollector` 가 stream-json 의 해당 `tool_use`/`tool_result` 에서 **JSON 결과의 필드만** 뽑는다 — 메시지 도구: `resultMessages`(최상위 메시지의
+  permalink·channel·ts) → 답 메시지 `seen_slack`, 사용자 도구(search_users·read_user_profile): `extractSeenUsers`(사용자 자신의 id·name) → `seen_users`(각 최근 ≤200).
+  텍스트(마크다운) 결과는 읽지 않는다(fail closed — decision-log WU-07). 메시지 channel 과 어긋난 permalink 는 버리고, read_thread 의 입력 ts 는 결과에 그 ts 가
+  있을 때만. validate 는 `conversation_id` 로 대화를 읽어 `sameTarget`(채널 + 실제 답글 위치 reply_to, DM 단일 메시지는 DM 최상위만)으로 대조(`chatValidateContext`),
+  `dashboard.slack_team_domain` 과 다른 워크스페이스는 409(비어 있으면 `slack.workspace_unset`).
+  N1: 응답 `preview_digest` = `previewDigest(최종 본문, ref)`(sha256 앞 32자, payload 에도 `ack_digest`). 본문 `intent:"run"` 이면 `ack_digest` 가 같아야 하고 다르면
+  409 `need_review` + 새 `slack`·`preview_digest`. `POST /api/send` 도 `origin:"chat"`·`source:"slack"` 이면 `ack_digest === previewDigest(text, ref)` 필수(아니면 409 `need_review`).
+  답글 = `thread_ts` → 그 스레드, 없으면 그 메시지, D… 단일 메시지면 DM 최상위(`replyTarget` = actions.ts 규칙). 카드 채널 이름은 `slackDirectory()` 의 이름만.
+  블록 `mentions: [{text:"@이름", candidates:[{id, name, real_name?, title?, external?}], group?}]` → `resolveMentions`: 본문에 있는 멘션만, 1명 `<@U…>`,
+  여럿 → 드롭다운(`mention_choices`, 고르기 전 409 `need_choice`), 0명 → 캐시에 같은 이름 1명이면 `via_cache` 선택지(역시 409), 아니면 글자.
+  이름 뒤 한글은 조사(`NAME_PARTICLES`)만. 그룹 핸들 → ID 는 `filters.slack.group_ids` 만. 400: 모델 원문에 있던 `<@…>`/`<!…>` 가 남음(`rawIdTokens`),
+  `<@U…>`(대소문자 무시) 가 캐시에도 없고 본문에 남은 멘션의 후보도 아님(`bad_ids`) 또는 후보지만 `seen_users` 에 없음(`unverified_ids` — "Ned 가 확인하지 못한 사용자 ID"),
+  `<!subteam^…>` 가 설정 ID 아님, 전체 알림(`<!here|channel|everyone>`·`@here` 등, 앞이 영숫자·`.` 가 아니면). 표시 이름은 캐시·seen_users 이름 우선(`verified`),
+  모델 이름과 다르면 `name_mismatch`·`model_name`. `slack.external` 은 "external"|"unknown" 뿐(모델 값으로 내려가지 않음).
+  캐시 `~/.ned/slack-users.json`(`paths.ts SLACK_USERS_PATH`, TTL 24h, ≤2,000명): agenda 의 id 가진 사용자(trusted) + 대화창 Slack 보내기가 **성공한 뒤**
+  그 payload 의 해석된 사람(`actions.ts onSendResult` → `recordSentMentions`, 기존 이름은 덮지 않음). validate(카드 미리보기)는 쓰지 않는다.
+  Slack 외부 여부는 카드 배지만(규칙 판정엔 안 씀). `NED_NO_LLM_CHAT_EVENTS=<json 파일>` 이면 스텁 턴이 그 stream-json 이벤트를 먼저 흘린다(테스트용).
+- **대화창 하루 상한**(`actions.chat_write_daily_limit`, 기본 20, 0 = 무제한): used = `chatSentToday`(오늘 로컬 자정부터 `origin:"chat"`·ok·dry_run 아님·`transitions` 아님 줄 수)
+  + 진행 중 슬롯. `/api/send`·`/api/calendar/events` 는 `startSendJob(…, admit)` 안에서 twin 합류·already_sent 판정 **뒤** `reserveChatSend` 로 동기 예약
+  (작업 끝·미시작 시 해제) → 넘으면 429 `{ok:false, error, limit, used}`. `/api/todos`(origin chat, refused 로 기록)·validate 도 429.
+- 보내기 규칙: 이름 모르는 Slack 채널(`sendTargetOf().name_known === false`)에 이름 기반 Slack·`*` 규칙이 있으면 confirm(`UNKNOWN_CHANNEL_NOTE`), 뒤에서 맞는 block 은 우선.
 - **세션 만들기**(`src/session-create.ts`): 검증(토글·`orca repo list` 허용 목록·상한 2 — `~/.ned/chat-sessions.json` 의 handle 이 `orca terminal list` 에 살아 있는 것 + 진행 중 작업) 후 작업에서
   `orca worktree create --name <n> --repo path:<repo> --parent-worktree path:<repo> --agent claude --model <m> --surface terminal`(기존이면 `orca agent launch --worktree path:<wt>`) —
   `--prompt` 는 쓰지 않는다(초안으로만 남는 버그) → `orca terminal read --screen` 에 Claude 입력줄/상태줄이 보일 때까지(최대 90초, 신뢰 확인 화면이면 409)
@@ -702,6 +725,7 @@ detail `이력 · M/D · …`, `tab: home` / `anchor: card:<slack|mail|jira|gh|c
   drafts/<id>.json       답장 초안 캐시 (1시간): {id, source, mode, context_age_minutes, context, drafts, cost_usd, created_at, hint, tone, meta}
   drafts/_pregenerate.json  마지막 미리 생성 실행 결과 (GET /api/draft/status)
   sent-actions.log       POST /api/send 시도 기록 JSONL (거절·실패 포함)
+  slack-users.json       대화창 멘션 캐시 — 확정된 Slack 사용자·그룹 ID (24시간, ≤2,000명)
   archive.json           Obsidian 아카이브 상태: {dirty: {day: ms}, written: {day: ms}, src_seen, src_counts: {day: {source: n}}, last_write_at, last_write_path, last_error, last_error_at, last_embed} (14일)
   outputs/<id>.{json,md} 정리 결과물 (대화창 ```ned-output) — 아카이브가 꺼져 있어도 항상 저장
   chat-sessions.json     대화창에서 만든 세션: [{job_id, created_at, repo, mode, name, model, worktree_path, worktree_id, handle, ok, stage}] (14일)

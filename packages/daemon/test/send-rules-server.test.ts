@@ -27,6 +27,7 @@ const { CONFIRM_TTL_MS, _resetSpentTokens } = await import("../src/send-guard.js
 const { _setSlackDirectory, buildSlackDirectory } = await import("../src/send-rules.js");
 const { DRAFTS_DIR } = await import("../src/drafts.js");
 const { _setSessionCreateDeps } = await import("../src/session-create.js");
+const { previewDigest } = await import("../src/chat-actions.js");
 
 const request = (p: string, init?: RequestInit) => Promise.resolve(captured.fetch!(new Request(`http://ned.test${p}`, init)));
 const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -254,10 +255,12 @@ describe("one-time tokens, chat cards, session create (보안 리뷰 반영)", (
 
   it("a Ned Net 확인 카드 (origin chat) goes through the same confirm rule", async () => {
     writeConfig({ chat_write: true, rules: [{ source: "slack", target: "#general", effect: "confirm", note: "전체 채널" }] });
-    const first = await post("/api/send", slackBody({ origin: "chat" }));
+    // a chat Slack send carries the digest of the card's preview (WU-07 N1)
+    const chatBody = slackBody({ origin: "chat", ack_digest: previewDigest("배포 끝났어요", { url: "https://acme.slack.com/archives/C0GEN/p1700000000000100" }) });
+    const first = await post("/api/send", chatBody);
     expect(first.status).toBe(409);
     expect(readActionLog(1)[0]).toMatchObject({ action: "need_confirm", origin: "chat" });
-    const second = await post("/api/send", { ...slackBody({ origin: "chat" }), confirm_token: first.data.confirm_token });
+    const second = await post("/api/send", { ...chatBody, confirm_token: first.data.confirm_token });
     expect(second.status).toBe(202);
   });
 

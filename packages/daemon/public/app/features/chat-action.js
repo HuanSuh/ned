@@ -48,7 +48,98 @@ export function parseActionBlock(answer) {
     target = { ...Object.fromEntries(["repo", "worktree", "model"].filter((k) => j[k] !== undefined).map((k) => [k, j[k]])), ...target };
     if (!btext && typeof j.prompt === "string") btext = j.prompt.trim();
   }
-  return { text, block: { kind: j.kind, target, text: btext, summary: typeof j.summary === "string" ? j.summary.trim().slice(0, 200) : "" }, error: "", pending: false };
+  const block = { kind: j.kind, target, text: btext, summary: typeof j.summary === "string" ? j.summary.trim().slice(0, 200) : "" };
+  // slack_send extras (WU-07) travel to validate as-is; the server cleans and checks them.
+  if (Array.isArray(j.mentions) && j.mentions.length) block.mentions = j.mentions;
+  if (typeof j.target_excerpt === "string" && j.target_excerpt.trim()) block.target_excerpt = j.target_excerpt.trim().slice(0, 300);
+  if (typeof j.channel_external === "boolean") block.channel_external = j.channel_external;
+  return { text, block, error: "", pending: false };
+}
+
+/** "@이름" → "<@U…>" for the block's mentions that are settled: one candidate, or the one picked on the card. */
+export function mentionMap(block, choices = {}) {
+  const out = {};
+  for (const m of Array.isArray(block?.mentions) ? block.mentions : []) {
+    const text = typeof m?.text === "string" ? (m.text.startsWith("@") ? m.text : `@${m.text}`) : "";
+    const cands = (Array.isArray(m?.candidates) ? m.candidates : []).filter((c) => /^[UW][A-Z0-9]{6,}$/.test(String(c?.id || "")));
+    if (!text || m.group) continue;
+    const pick = cands.length === 1 ? cands[0] : cands.find((c) => c.id === choices[text]);
+    if (pick) out[text] = `<@${pick.id}>`;
+  }
+  return out;
+}
+
+const SRC_KO = { known: "Ned 가 아는 항목", pasted: "붙인 링크", found: "Ned 가 찾은 대상 — 맞는지 확인" };
+const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** "U0TESTPA01" → "U0TE…" — the chip shows whose id it really is (the name alone is the model's word). */
+
+/**
+ * The text to send with `<@U…>` / `<!subteam^S…>` as name chips (+ the id's start), not-found / glued mentions as
+ * yellow chips and broadcast mentions (@here · @channel · @everyone) as red chips (the server refuses those: 400).
+ */
+export function mentionPreviewHtml(text, sl) {
+  const res = sl?.mentions?.resolved || [], miss = sl?.mentions?.missing || [];
+  const byId = Object.fromEntries(res.map((r) => [r.id, r]));
+  // = src/slack-mentions.ts BROADCAST (N6: `_@here`, `@@here` count; `a@here.com` does not)
+  const alts = ["<@([A-Za-z0-9]+)(?:\\|[^>]*)?>", "<!subteam\\^([A-Za-z0-9]+)(?:\\|[^>]*)?>", "(<!(?:channel|here|everyone)(?:\\|[^>]*)?>|(?<![A-Za-z0-9.])@(?:channel|here|everyone)(?![\\w-]))", ...miss.map((m) => `(${reEsc(m.text)})(?![A-Za-z0-9._-])`)];
+  const re = new RegExp(alts.join("|"), "gi");
+  let out = "", last = 0, m;
+  const src = String(text ?? "");
+  while ((m = re.exec(src))) {
+    out += esc(src.slice(last, m.index));
+    if (m[1]) { const id = m[1].toUpperCase(), r = byId[id]; out += `<span class="ca-chip${r?.external ? " ext" : ""}${r && r.verified === false ? " unv" : ""}${r?.name_mismatch ? " mis" : ""}">@${esc(r?.name || id)} · <span class="ca-id">${esc(id)}</span>${userFlags(r)}</span>`; }
+    else if (m[2]) { const r = byId[m[2]]; out += `<span class="ca-chip grp">👥 ${esc(r?.name || m[2])} · <span class="ca-id">${esc(m[2])}</span></span>`; }
+    else if (m[3]) out += `<span class="ca-chip bad" title="전체 알림 멘션은 대화창에서 보낼 수 없음 — Slack 에서 직접">${esc(m[3])} — 전체 알림, 보낼 수 없음</span>`;
+    else {
+      const mm = miss.find((x) => x.text === m[0]);
+      out += mm?.reason
+        ? `<span class="ca-chip warn" title="${esc(mm.reason)}">${esc(m[0])} — 이름 경계 모름, 글자로 보냄</span>`
+        : mm?.kind === "group"
+          ? `<span class="ca-chip warn grp" title="그룹 ID 를 설정 → 소스 → Slack 에 넣으면 멘션됨">👥 ${esc(m[0])} — 그룹 ID 없음, 글자로 보냄</span>`
+          : `<span class="ca-chip warn">${esc(m[0])} — 못 찾음, 글자로 보냄</span>`;
+    }
+    last = re.lastIndex;
+    if (m[0] === "") re.lastIndex++;
+  }
+  return out + esc(src.slice(last));
+}
+
+/** A user chip's warnings: the name is only the model's (yellow) / the model named this id differently (red). */
+function userFlags(r) {
+  if (!r || r.kind === "group") return "";
+  if (r.name_mismatch) return ` <span class="ca-badge mis" title="Ned 가 아는 이 ID 의 이름과 모델이 적은 이름(${esc(r.model_name || "")})이 달라 — 사람을 확인해 줘">이름 불일치: 모델 "${esc(r.model_name || "")}"</span>`;
+  if (r.verified === false) return ` <span class="ca-badge unv" title="이 이름은 모델이 적은 것 — Ned 가 확인한 이름이 아니야">이름 확인 안 됨</span>`;
+  return "";
+}
+const personLabel = (r) => (r.kind === "group" ? `👥 ${r.name}` : `${r.name}(${r.id}${r.name_mismatch ? ` · 이름 불일치: 모델 "${r.model_name || ""}"` : r.verified === false ? " · 이름 확인 안 됨" : ""})`);
+
+/** "알림 받는 사람: 이름(U…), 이름(U… · 이름 확인 안 됨) (외부: 이름(U…))" — "" when nobody is notified. */
+export function notifyLine(sl) {
+  const res = sl?.mentions?.resolved || [];
+  if (!res.length) return "";
+  const inside = res.filter((r) => !r.external).map(personLabel);
+  const outside = res.filter((r) => r.external).map(personLabel);
+  return `알림 받는 사람: ${[inside.join(", "), outside.length ? `(외부: ${outside.join(", ")})` : ""].filter(Boolean).join(" ")}`;
+}
+
+/** The slack_send / mail extras: source badge, external badge, excerpt, preview with chips, notify line, mention dropdowns. */
+function slackExtrasHtml(sl, choices = {}, editable = true, edited = false) {
+  if (!sl) return "";
+  const ws = sl.workspace_unset ? `<span class="ca-badge unk" title="설정 → 외형 → 링크 열기의 Slack 워크스페이스 주소(dashboard.slack_team_domain)를 넣으면 다른 워크스페이스 링크를 막아">워크스페이스 주소 미설정</span>` : "";
+  const ext = sl.external === "external" ? `<span class="ca-badge ext">외부</span>` : sl.external === "unknown" ? `<span class="ca-badge unk" title="채널·사람이 외부인지 정보가 없어">외부 여부 확인 못 함</span>` : "";
+  const src = SRC_KO[sl.target_source] ? `<span class="ca-badge src s-${esc(sl.target_source)}">${esc(SRC_KO[sl.target_source])}</span>` : "";
+  // a pasted / found channel Ned can't name: show its id and say so (the model's channel name is never shown)
+  const unnamed = sl.channel && !sl.channel_name ? `<span class="ca-badge unk" title="Ned 가 모은 Slack 목록에 없는 채널이야 — ID 로 확인해 줘">채널 이름 확인 안 됨 · ${esc(sl.channel)}</span>` : "";
+  const ex = sl.target_excerpt ? `<div class="ca-ex" title="Ned(모델)가 적은 발췌 — 원문과 다를 수 있어">Ned 발췌: “${esc(String(sl.target_excerpt).slice(0, 200))}”</div>` : "";
+  const un = (sl.mentions?.unresolved || []).map((u) => `<label class="ca-mc">${esc(u.text)} 은(는) 누구?${u.via_cache ? ' <span class="ca-badge unk" title="모델이 후보를 못 줘서 Ned 의 캐시에서 이름으로 찾았어">캐시로 해석</span>' : ""} <select data-ca-mention="${esc(u.text)}"${editable ? "" : " disabled"}><option value="">고르기 (보내기 전에 필수)</option>${(u.candidates || []).map((c) => `<option value="${esc(c.id)}"${choices[u.text] === c.id ? " selected" : ""}>${esc([c.name, c.real_name, c.title, c.id].filter(Boolean).join(" · "))}${c.verified === false ? " (Ned 가 확인 못 한 ID)" : ""}${c.external ? " (외부)" : ""}</option>`).join("")}</select></label>`).join("");
+  const nl = notifyLine(sl);
+  const m = sl.mentions || {};
+  const pv = sl.preview_text != null && ((m.resolved || []).length || (m.missing || []).length || (m.broadcast || []).length)
+    ? `<div class="ca-pv" aria-label="보낼 모양 미리보기">${mentionPreviewHtml(sl.preview_text, sl).replace(/\n/g, "<br>")}</div>` : "";
+  // N1: after an edit the preview above is the OLD text — [실행] first shows the new one (server 409 need_review)
+  const ed = `<div class="ca-edited" data-ca-edited${edited ? "" : " hidden"}>편집됨 — 실행 전에 다시 확인 (실행을 누르면 새 미리보기부터 보여 줘)</div>`;
+  return `<div class="ca-badges">${src}${unnamed}${ws}${ext}</div>${ex}${pv}${nl ? `<div class="ca-notify">${esc(nl)}</div>` : ""}${ed}${un}`;
 }
 
 /** Best-effort target line before the server has checked it (validate's target_label replaces it). */
@@ -90,6 +181,7 @@ export function renderActionCard(block, state = {}, { id = "" } = {}) {
   <div class="ca-hd"><span class="ca-k">⚡ 실행 제안 · ${esc(label)}</span></div>
   <div class="ca-sum">${esc(sum)}</div>
   <div class="ca-tg" title="대상은 바꿀 수 없어 — 다른 대상이면 대화로 다시 요청해 줘"><span class="ca-l">대상</span> ${esc(tgt)}</div>
+  ${slackExtrasHtml(state.preview?.slack || (state.preview?.mail_external ? { external: state.preview.mail_external } : null), state.mention_choices || {}, editable, !!state.edited)}
   <div class="ca-l">${esc(TEXT_KO[block.kind] || "텍스트")}${editable ? " <span class=\"ca-hint\">(고칠 수 있어)</span>" : ""}</div>
   ${tx}
   ${foot}
@@ -117,13 +209,21 @@ export function pickTransition(list, want) {
   return list.find((t) => n(t.name) === w || n(t.to) === w) || list.find((t) => n(t.name).includes(w) || n(t.to).includes(w)) || null;
 }
 
+/** {conversation_id, mention_choices} for validate (붙인 링크 · Ned 가 읽은 메시지 · 동명이인 선택). */
+export const validateCtx = (ctx = {}) => ({
+  ...(ctx.conversation_id ? { conversation_id: ctx.conversation_id } : {}),
+  ...(ctx.mention_choices && Object.keys(ctx.mention_choices).length ? { mention_choices: ctx.mention_choices } : {}),
+});
+
 /**
  * Validate + run one proposal with `text`. deps: { postJson, sendAndWait, onTick }. Resolves { ok, final, detail, link }.
  * Never invents a request: the endpoint + payload come from the server's validate answer.
  */
-export async function runChatAction(block, text, { postJson, sendAndWait, onTick } = {}) {
-  const v = await postJson("/api/chat/actions/validate", { block, text }).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
-  if (!v.ok || !v.data?.ok) return { ok: false, final: false, detail: v.data?.error || `검증 실패 (HTTP ${v.status})` };
+export async function runChatAction(block, text, { postJson, sendAndWait, onTick, ctx = {} } = {}) {
+  // intent "run" + the digest of the preview this card drew: the server refuses (409 need_review) if what would be sent
+  // differs from it — e.g. after an edit — and returns the new preview instead.
+  const v = await postJson("/api/chat/actions/validate", { block, text, ...validateCtx(ctx), intent: "run", ack_digest: ctx.ack_digest || "" }).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
+  if (!v.ok || !v.data?.ok) return { ok: false, final: false, detail: v.data?.error || `검증 실패 (HTTP ${v.status})`, ...(v.data?.slack ? { slack: v.data.slack } : {}), ...(v.data?.need_review ? { need_review: true, preview_digest: v.data.preview_digest } : {}) };
   const d = v.data;
   if (d.endpoint === "/api/todos") {
     const r = await postJson("/api/todos", d.payload).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
@@ -157,7 +257,20 @@ export function wireActionCards(root, h) {
   const idOf = (el) => el.closest("[data-ca]")?.dataset.ca;
   root.addEventListener("input", (e) => {
     const ta = e.target.closest?.("[data-ca-text]"); if (!ta) return;
-    const id = idOf(ta); if (id != null) h.set(id, { text: ta.value }, false);
+    const id = idOf(ta); if (id == null) return;
+    h.set(id, { text: ta.value, edited: true }, false); // no re-render while typing: just reveal the "편집됨" line
+    const note = ta.closest("[data-ca]")?.querySelector("[data-ca-edited]");
+    if (note) note.hidden = false;
+  });
+  // 동명이인: picking a person re-checks the card (the server says who gets notified, and whether it can be sent now).
+  root.addEventListener("change", (e) => {
+    const sel = e.target.closest?.("[data-ca-mention]"); if (!sel) return;
+    const id = idOf(sel); if (id == null) return;
+    const cur = h.get(id); if (!cur) return;
+    const ta = sel.closest("[data-ca]")?.querySelector("[data-ca-text]");
+    const choices = { ...(cur.state?.mention_choices || {}) };
+    if (sel.value) choices[sel.dataset.caMention] = sel.value; else delete choices[sel.dataset.caMention];
+    h.set(id, { mention_choices: choices, ...(ta ? { text: ta.value } : {}), preview: null, previewError: "" });
   });
   root.addEventListener("click", async (e) => {
     const run = e.target.closest?.("[data-ca-run]"), cancel = e.target.closest?.("[data-ca-cancel]");
@@ -179,11 +292,15 @@ export function wireActionCards(root, h) {
       h.set(id, { status: "running", text, result: null, tick: "" });
       const claim = await h.persist(id, { state: "running", text }).catch(() => ({ ok: false, status: 0 }));
       if (claim?.status === 409) { h.set(id, { status: "executed", result: { ok: false, detail: claim.data?.error || "이미 처리된 카드야" } }); return; }
-      const res = await runChatAction(cur.block, text, { ...h.deps, onTick: (ms, stage) => h.set(id, { tick: `${STAGE_KO[stage] ? `${STAGE_KO[stage]} · ` : ""}${Math.round(ms / 1000)}초` }) });
+      // the digest of the preview on screen — none after an edit (it showed the old text), so the server answers with the new one
+      const shown = cur.state?.edited ? "" : cur.state?.preview?.digest || "";
+      const ctx = { ...(h.ctx ? h.ctx(id) : {}), mention_choices: cur.state?.mention_choices || {}, ack_digest: shown };
+      const res = await runChatAction(cur.block, text, { ...h.deps, ctx, onTick: (ms, stage) => h.set(id, { tick: `${STAGE_KO[stage] ? `${STAGE_KO[stage]} · ` : ""}${Math.round(ms / 1000)}초` }) });
       const status = res.ok || res.final ? "executed" : "failed";
       const result = { ok: res.ok, detail: res.detail, ...(res.link ? { link: res.link } : {}) };
       await h.persist(id, { state: status, text, result }).catch(() => null);
-      h.set(id, { status, result, tick: "" });
+      const preview = res.slack ? { ...(cur.state?.preview || {}), slack: res.slack, digest: res.need_review ? res.preview_digest : undefined } : undefined;
+      h.set(id, { status, result, tick: "", ...(preview ? { preview } : {}), ...(res.need_review ? { edited: false } : {}) });
     } finally { busy.delete(id); }
   });
 }

@@ -95,7 +95,7 @@ describe("runChatAction", () => {
     const postJson = vi.fn(async (_p: string) => ({ ok: true, status: 200, data: { ok: true, endpoint: "/api/send", label: "Slack 보내기", payload: { source: "slack", mode: "send", ref: { url: "u" }, text: "새 글", origin: "chat" } } }));
     const sendAndWait = vi.fn(async () => ({ ok: true, status: 200, data: { ok: true, detail: "https://acme.slack.com/archives/C1/p9 ($0.010)" } }));
     const r = await runChatAction(BLOCK, "새 글", { postJson, sendAndWait });
-    expect(postJson).toHaveBeenCalledWith("/api/chat/actions/validate", { block: BLOCK, text: "새 글" });
+    expect(postJson).toHaveBeenCalledWith("/api/chat/actions/validate", { block: BLOCK, text: "새 글", intent: "run", ack_digest: "" });
     expect(sendAndWait).toHaveBeenCalledWith({ source: "slack", mode: "send", ref: { url: "u" }, text: "새 글", origin: "chat" }, expect.objectContaining({ label: "대화창 · Slack 보내기" }));
     expect(r).toEqual({ ok: true, final: true, detail: "https://acme.slack.com/archives/C1/p9 ($0.010)", link: "https://acme.slack.com/archives/C1/p9" });
   });
@@ -185,7 +185,7 @@ describe("wireActionCards (DOM)", () => {
     await flush(); await flush();
 
     expect(postJson).toHaveBeenCalledTimes(1);
-    expect(postJson).toHaveBeenCalledWith("/api/chat/actions/validate", { block: BLOCK, text: "고친 글" });
+    expect(postJson).toHaveBeenCalledWith("/api/chat/actions/validate", { block: BLOCK, text: "고친 글", intent: "run", ack_digest: "" });
     expect(sendAndWait).toHaveBeenCalledTimes(1);
     expect(persist.mock.calls.map((c) => (c[1] as { state: string }).state)).toEqual(["running", "executed"]);
     expect(persist.mock.calls[1][1]).toMatchObject({ text: "고친 글", result: { ok: true, link: "https://acme.slack.com/archives/C1/p5" } });

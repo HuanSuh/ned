@@ -1,7 +1,7 @@
 /* Ned 통신기 (comms) — the DOM-free half: SSE parser, markdown-lite, the 메시지 feed and every HTML string.
  * features/comms.js mounts and wires it; tests import this file directly (no document at import). */
 import { esc, safeUrl } from "../util.js";
-import { parseActionBlock, renderActionCard } from "./chat-action.js";
+import { mentionMap, parseActionBlock, renderActionCard } from "./chat-action.js";
 import { parseOutputBlock, renderOutputCard } from "./chat-output.js";
 
 // ---------- persona wording (structure is shared; only words + theme tokens change) ----------
@@ -122,11 +122,29 @@ function inline(s) {
 // consumed by the split, so <pre><code>'s textContent is exactly the original block text — that's what gets copied.
 const COPY_ICON = '<svg class="ic-copy" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M11 3.5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>'
   + '<svg class="ic-ok" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-export const codeBlockHtml = (code) =>
-  `<div class="cm-code"><button type="button" class="cm-copy" aria-label="복사" title="복사">${COPY_ICON}</button><pre><code>${esc(code)}</code></pre></div>`;
-export function mdLite(text) {
+/** = src/slack-mentions.ts NAME_PARTICLES: Hangul right after a name counts only as these particles (@사람A님, not @사람A준). */
+const NAME_PARTICLES = "님|씨|께|에게|한테|이랑|랑|이|가|은|는|을|를|도|과|와|의";
+/** `code` with each "@이름" of `mentions` ({"@이름": "<@U…>"}) replaced — same matching as the server. */
+export function withMentionIds(code, mentions = {}) {
+  let out = String(code ?? "");
+  for (const k of Object.keys(mentions).sort((a, b) => b.length - a.length))
+    out = out.replace(new RegExp(`${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9._-])(?=$|[^가-힣]|(?:${NAME_PARTICLES})+(?![가-힣]))`, "g"), mentions[k]);
+  return out;
+}
+/**
+ * A fenced block + copy button. With `mentions` (the answer's settled Slack mentions) and a block that names one of them,
+ * a second option copies the text with `<@U…>` — Slack's input box may paste it as plain text (the real mention is Ned's send).
+ */
+export const codeBlockHtml = (code, mentions = null) => {
+  const alt = mentions && Object.keys(mentions).length ? withMentionIds(code, mentions) : code;
+  const menu = alt !== code
+    ? `<span class="cm-copym"><button type="button" class="cm-copy-alt" data-alt="${esc(alt)}" title="Slack 입력창에 붙이면 글자로 들어갈 수 있음 — 진짜 멘션은 Ned 로 보내기">&lt;@U…&gt; 포함 복사</button><span class="cm-copyh">Slack 입력창에 붙이면 글자로 들어갈 수 있음 — 진짜 멘션은 Ned 로 보내기</span></span>`
+    : "";
+  return `<div class="cm-code"><button type="button" class="cm-copy" aria-label="${alt !== code ? "@이름 텍스트로 복사" : "복사"}" title="${alt !== code ? "@이름 텍스트로 복사" : "복사"}">${COPY_ICON}</button>${menu}<pre><code>${esc(code)}</code></pre></div>`;
+};
+export function mdLite(text, { mentions = null } = {}) {
   const parts = String(text ?? "").split(/```[^\n`]*\n?/);
-  return parts.map((p, i) => (i % 2 ? codeBlockHtml(p.replace(/\n$/, "")) : p.split("\n").map(inline).join("<br>"))).join("");
+  return parts.map((p, i) => (i % 2 ? codeBlockHtml(p.replace(/\n$/, ""), mentions) : p.split("\n").map(inline).join("<br>"))).join("");
 }
 
 // ---------- 메시지 feed ----------
@@ -175,8 +193,11 @@ function nedBody(m, cardState) {
   const out = po.block || m.output || m.output_error ? renderOutputCard({ out: m.output || null, err: m.output_error || "", block: po.block }, mdLite) : "";
   const pa = parseActionBlock(po.text);
   if (!pa.block && !pa.error) return (po.text ? mdLite(po.text) : "") + out;
-  const card = pa.block ? renderActionCard(pa.block, cardState(m, pa.block), { id: String(m.ts) }) : `<div class="cm-act bad">⚠ ${esc(pa.error)}</div>`;
-  return (pa.text ? mdLite(pa.text) : "") + out + card;
+  const cs = pa.block ? cardState(m, pa.block) : null;
+  const card = pa.block ? renderActionCard(pa.block, cs, { id: String(m.ts) }) : `<div class="cm-act bad">⚠ ${esc(pa.error)}</div>`;
+  // 복사용 초안: code blocks of this answer offer "<@U…> 포함 복사" for the proposal's settled mentions.
+  const mentions = pa.block ? mentionMap(pa.block, cs?.mention_choices || {}) : null;
+  return (pa.text ? mdLite(pa.text, { mentions }) : "") + out + card;
 }
 const defaultCardState = (m) => ({ status: m.action?.state || "idle", text: m.action?.text, result: m.action?.result });
 

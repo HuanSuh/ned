@@ -36,6 +36,8 @@ export const TODOS_PATH = path.join(NED_HOME, "todos.json");
 export const DISMISSED_PATH = path.join(NED_HOME, "dismissed.json");
 /** Attention ids the user marked 확인 완료 → when (ms). Survives attention being rebuilt. */
 export const REVIEWED_PATH = path.join(NED_HOME, "reviewed.json");
+/** 대화창 멘션 캐시 (src/slack-mentions.ts): Slack user / group ids Ned confirmed — TTL 24h, ≤ 2,000 users. */
+export const SLACK_USERS_PATH = path.join(NED_HOME, "slack-users.json");
 
 /** Local calendar date as YYYY-MM-DD (matches the hook, which uses local time too). */
 export function localDay(d = new Date()): string {

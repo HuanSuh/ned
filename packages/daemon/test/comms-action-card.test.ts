@@ -48,7 +48,7 @@ describe("comms panel + 확인 카드", () => {
 
     const seq = calls.slice(2).map((c) => c.url);
     expect(seq).toEqual([`/api/chat/${CHAT_ID}/action`, "/api/chat/actions/validate", "/api/todos", `/api/chat/${CHAT_ID}/action`]);
-    expect(calls[3].body).toEqual({ block: { kind: "todo_add", target: { due: "2026-11-10" }, text: "보고서", summary: "보고서 할 일 추가" }, text: "보고서 초안 쓰기" });
+    expect(calls[3].body).toEqual({ block: { kind: "todo_add", target: { due: "2026-11-10" }, text: "보고서", summary: "보고서 할 일 추가" }, text: "보고서 초안 쓰기", conversation_id: CHAT_ID, intent: "run", ack_digest: "" });
     expect(calls[4].body).toEqual({ title: "보고서 초안 쓰기", due: "2026-11-10", origin: "chat" });
     expect(calls[2].body).toEqual({ ts: 2, state: "running", text: "보고서 초안 쓰기" });
     expect(calls[5].body).toMatchObject({ ts: 2, state: "executed", result: { ok: true, detail: "할 일 추가됨: 보고서 초안 쓰기 (마감 2026-11-10)" } });

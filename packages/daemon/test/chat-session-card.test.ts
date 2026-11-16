@@ -45,7 +45,7 @@ describe("runChatAction / outcomeOf", () => {
     const postJson = vi.fn(async () => ({ ok: true, status: 200, data: VALID }));
     const sendAndWait = vi.fn(async () => ({ ok: true, status: 200, data: { ok: true, detail: "started /wt/login-fix (term_1) · opus", session: { handle: "term_1" } } }));
     const r = await runChatAction(BLOCK, "고친 프롬프트", { postJson, sendAndWait });
-    expect(postJson).toHaveBeenCalledWith("/api/chat/actions/validate", { block: BLOCK, text: "고친 프롬프트" });
+    expect(postJson).toHaveBeenCalledWith("/api/chat/actions/validate", { block: BLOCK, text: "고친 프롬프트", intent: "run", ack_digest: "" });
     expect(sendAndWait).toHaveBeenCalledWith(VALID.payload, expect.objectContaining({ endpoint: "/api/sessions/create", maxWaitMs: 480000, match: VALID.match, label: "대화창 · 새 에이전트 세션 만들기" }));
     expect(r).toMatchObject({ ok: true, final: true, detail: expect.stringContaining("started") });
   });
@@ -93,7 +93,7 @@ describe("wireActionCards (DOM)", () => {
     release();
     await flush(); await flush();
 
-    expect(postJson).toHaveBeenCalledWith("/api/chat/actions/validate", { block: BLOCK, text: ta.value });
+    expect(postJson).toHaveBeenCalledWith("/api/chat/actions/validate", { block: BLOCK, text: ta.value, intent: "run", ack_digest: "" });
     expect(sendAndWait).toHaveBeenCalledTimes(1);
     expect(persist.mock.calls.map((c) => (c[1] as { state: string }).state)).toEqual(["running", "executed"]);
     expect(states["9"].status).toBe("executed");

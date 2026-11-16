@@ -6,7 +6,7 @@ import { diffConfig, isEmptyPatch, mergePatch } from "../features/config-diff.js
 import { readCardLayout, renderCardLayout } from "../features/cardlayout.js";
 import { ACTION_DEFAULTS, ACTION_KO } from "../features/drafts.js";
 import { originChip } from "../features/draftref.js";
-import { parseQuickReplies, quickRepliesMsg, readSendRules, readToneBySource, SEND_RULES_CSS, sendRulesClick, sendRulesHtml, sendRulesMsg, syncSendRules, syncWriteActionGroups, writeActionsHtml } from "./settings-actions.js";
+import { chatLimitMsg, groupIdsMsg, groupIdsText, parseGroupIds, readChatLimit, parseQuickReplies, quickRepliesMsg, readSendRules, readToneBySource, SEND_RULES_CSS, sendRulesClick, sendRulesHtml, sendRulesMsg, syncSendRules, syncWriteActionGroups, writeActionsHtml } from "./settings-actions.js";
 import { initAppSettings, readUpdates, renderUpdates } from "./settings-app.js";
 import { initArchive, readArchive, renderArchive } from "./settings-archive.js";
 import { initHistorySettings, readHistorySettings, renderHistorySettings } from "./settings-history.js";
@@ -215,6 +215,7 @@ export function renderConfig(c = S.config, { preview = false } = {}) {
   excl.ack = [...(c.filters?.slack?.ack_reactions || [])];
   excl.group = [...(c.filters?.slack?.group_mentions || [])];
   $("c-ackmax").value = c.filters?.slack?.ack_check_max ?? 3;
+  $("c-group-ids").value = groupIdsText(c.filters?.slack?.group_ids);
   for (const id of Object.values(X_MSG)) $(id).textContent = "";
   renderExcl();
   $("cfg-port").textContent = c.port ? `port ${c.port}` : "";
@@ -275,10 +276,10 @@ export function readBody() {
     ...readAutoSched(), // quiet_schedule, idle_schedule
     quiet_hours: $("c-qon").checked ? { start: $("c-qs").value || "23:00", end: $("c-qe").value || "08:00" } : null,
     sources,
-    filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack], ack_check_max: $("c-ackmax").value === "" ? null : Number($("c-ackmax").value), group_mentions: [...excl.group] }, jira: { exclude_projects: [...excl.jira] } },
+    filters: { slack: { exclude_channels: [...excl.slack], watch_channels: [...excl.watch], ack_reactions: [...excl.ack], ack_check_max: $("c-ackmax").value === "" ? null : Number($("c-ackmax").value), group_mentions: [...excl.group], group_ids: parseGroupIds($("c-group-ids").value) }, jira: { exclude_projects: [...excl.jira] } },
     dashboard: { ...readCardLayout(), theme: readTheme(), ...readLinkPrefs(), session_quick_replies: parseQuickReplies($("c-quick-replies").value) },
     notifications: readNotifications(),
-    actions: { ...Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])), ...(readSendRules($("c-sendrules")) || {}) },
+    actions: { ...Object.fromEntries([...document.querySelectorAll("[data-act]")].map((c) => [c.dataset.act, c.checked])), ...(readChatLimit($("wa-groups")) !== undefined ? { chat_write_daily_limit: readChatLimit($("wa-groups")) } : {}), ...(readSendRules($("c-sendrules")) || {}) },
     reply_tone: $("c-tone").value.trim(),
     reply_tone_by_source: readToneBySource($("wa-groups")),
     claude_model: $("c-model").value.trim() || null,
@@ -390,6 +391,10 @@ export function init() {
     if (quickErr) { msg.className = "msg err"; msg.textContent = `저장 안 함: ${quickErr}`; $("c-quick-replies").focus(); return; }
     const respErr = responsibilitiesMsg(patch.responsibilities);
     if (respErr) { msg.className = "msg err"; msg.textContent = `저장 안 함: ${respErr}`; $("c-resp")?.querySelector('[data-rf="title"]:placeholder-shown')?.focus(); return; }
+    const limitErr = chatLimitMsg(patch.actions);
+    if (limitErr) { msg.className = "msg err"; msg.textContent = `저장 안 함: ${limitErr}`; $("c-chat-limit")?.focus(); return; }
+    const gidErr = groupIdsMsg(patch.filters?.slack?.group_ids);
+    if (gidErr) { msg.className = "msg err"; msg.textContent = `저장 안 함: ${gidErr}`; $("c-group-ids").focus(); return; }
     const rulesErr = sendRulesMsg(patch.actions);
     if (rulesErr) { msg.className = "msg err"; msg.textContent = `저장 안 함: ${rulesErr}`; $("c-sr-domains")?.focus(); return; }
     btn.disabled = true; msg.className = "msg"; msg.textContent = "저장 중…";
