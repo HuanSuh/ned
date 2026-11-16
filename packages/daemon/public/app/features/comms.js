@@ -6,7 +6,7 @@ import { S, alive, subscribe } from "../state.js";
 import { $, esc, lsGet, lsSet, hhmm, rel } from "../util.js";
 import { MINI, persona } from "./personas.js";
 import { postJson } from "../api.js";
-import { parseActionBlock, wireActionCards } from "./chat-action.js";
+import { parseActionBlock, validateCtx, wireActionCards } from "./chat-action.js";
 import { OUTPUT_CSS, wireOutputCards } from "./chat-output.js";
 import { toast } from "../ui/toast.js";
 import { sendAndWait } from "./sendjob.js";
@@ -226,12 +226,14 @@ function cardState(m, block) {
   // A pending card shows the server's own target line (and an early "꺼져 있어") — one validate per card.
   if (status === "idle" && !c.preview && !c.previewError && !c.fetching) {
     c.fetching = true; st.cards[id] = c;
-    postJson("/api/chat/actions/validate", { block }).then((r) => {
-      if (r.data?.ok) setCard(id, { fetching: false, preview: { target_label: r.data.target_label, label: r.data.label, summary: r.data.summary } });
-      else setCard(id, { fetching: false, previewError: r.data?.error || `검증 실패 (HTTP ${r.status})` });
+    const extras = (d) => ({ ...(d.slack ? { slack: d.slack } : {}), ...(d.mail_external ? { mail_external: d.mail_external } : {}) });
+    postJson("/api/chat/actions/validate", { block, ...(c.text != null ? { text: c.text } : {}), ...validateCtx({ conversation_id: st.chatId, mention_choices: c.mention_choices }) }).then((r) => {
+      if (r.data?.ok) setCard(id, { fetching: false, preview: { target_label: r.data.target_label, label: r.data.label, summary: r.data.summary, ...extras(r.data) } });
+      // 멘션 선택 필요 (409) / 하루 상한 (429): still show the target + mentions so the user can pick / see why.
+      else setCard(id, { fetching: false, previewError: r.data?.error || `검증 실패 (HTTP ${r.status})`, ...(r.data?.slack ? { preview: { slack: r.data.slack } } : {}) });
     }).catch(() => setCard(id, { fetching: false }, false));
   }
-  return { status, text: c.text ?? m.action?.text, result: c.result !== undefined ? c.result : m.action?.result, tick: c.tick, preview: c.preview, previewError: c.previewError };
+  return { status, text: c.text ?? m.action?.text, result: c.result !== undefined ? c.result : m.action?.result, tick: c.tick, preview: c.preview, previewError: c.previewError, mention_choices: c.mention_choices };
 }
 function cardBlockOf(id) {
   const m = st.msgs.find((x) => x.role === "ned" && String(x.ts) === String(id));
@@ -324,7 +326,7 @@ export function init() {
   $("cm-new").addEventListener("click", newChat);
   for (const b of panel.querySelectorAll("[data-cmtab]")) b.addEventListener("click", () => setTab(b.dataset.cmtab));
   $("cm-feed").addEventListener("click", onFeedClick);
-  wireActionCards(log, { get: cardBlockOf, set: setCard, persist: persistCard, deps: { postJson, sendAndWait } });
+  wireActionCards(log, { get: cardBlockOf, set: setCard, persist: persistCard, deps: { postJson, sendAndWait }, ctx: () => ({ conversation_id: st.chatId }) });
   wireOutputCards(log, { postJson, toast }); // 정리 결과물 저장 카드: Finder 에서 보기
   { const css = document.createElement("style"); css.textContent = OUTPUT_CSS; document.head.appendChild(css); }
   $("cm-allread").addEventListener("click", () => { for (const x of st.feed) st.seen.add(x.key); saveSeen(); render(); });

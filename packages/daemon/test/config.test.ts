@@ -282,7 +282,7 @@ describe("normalizers", () => {
   it("mergeFilters: a patch with only slack keeps jira", () => {
     const cur = normalizeFilters({ slack: { exclude_channels: ["a"] }, jira: { exclude_projects: ["MNT"] } });
     const next = mergeFilters(cur, { slack: { watch_channels: ["#ops"] } });
-    expect(next).toEqual({ slack: { exclude_channels: ["a"], watch_channels: ["ops"], ack_reactions: ["white_check_mark", "eyes", "+1", "heavy_check_mark"], ack_check_max: 3, group_mentions: [] }, jira: { exclude_projects: ["MNT"] } });
+    expect(next).toEqual({ slack: { exclude_channels: ["a"], watch_channels: ["ops"], ack_reactions: ["white_check_mark", "eyes", "+1", "heavy_check_mark"], ack_check_max: 3, group_mentions: [], group_ids: {} }, jira: { exclude_projects: ["MNT"] } });
   });
   it("ack_check_max: default 3, clamped to 1..8, junk → default, survives a patch without it", () => {
     expect(normalizeFilters({}).slack.ack_check_max).toBe(3);

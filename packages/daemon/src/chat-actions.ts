@@ -4,13 +4,34 @@
  * [실행], asks POST /api/chat/actions/validate to check it and build the request for an EXISTING endpoint
  * (/api/send, /api/calendar/events, /api/todos) — there is no chat-only execution path. Only the text is editable;
  * the target (channel, recipient, issue, PR, event, session) must be an item Ned already knows (agenda / state).
+ * Slack (WU-07) also takes a thread the user pasted a permalink of, or one the model really read this conversation
+ * (seen_slack saved from its Slack tool results) — and resolves the block's `mentions` into `<@U…>` / `<!subteam^S…>`
+ * with an ID whitelist (slack-mentions.ts).
  */
-import { RSVP_STATUSES, type ActionRef } from "./actions.js";
+import { RSVP_STATUSES, queryActionLog, type ActionRef } from "./actions.js";
 import type { Agenda } from "./agenda.js";
 import { parseCalendarCreate } from "./calendar-create.js";
+import type { Chat } from "./chat.js";
 import type { NedActions, NedConfig } from "./config.js";
+import { localDay } from "./paths.js";
 import type { NedState } from "./state.js";
 import { MAX_PROMPT, PLAN_FIRST, knownRepoPaths, parseSessionCreate, sessionLogRef } from "./session-create.js";
+import {
+  agendaSlackUsers,
+  groupDirectory,
+  knownGroupIds,
+  parseMentions,
+  parseSlackPermalink,
+  permalinksIn,
+  readUsersCache,
+  resolveMentions,
+  seenHas,
+  updateUsersCache,
+  type MentionReport,
+  type MentionSpec,
+  type SeenSlack,
+  type SlackUsersCache,
+} from "./slack-mentions.js";
 
 export const CHAT_ACTION_KINDS = ["todo_add", "slack_send", "gmail_draft", "gmail_send", "jira_comment", "jira_transition", "github_review", "calendar_create", "calendar_rsvp", "session_send", "session_create"] as const;
 export type ChatActionKind = (typeof CHAT_ACTION_KINDS)[number];
@@ -47,7 +68,8 @@ export const CHAT_KIND_KO: Record<ChatActionKind, string> = {
 /** One line per kind for the prompt: what `target` holds and what `text` is. */
 const KIND_SPEC: Record<ChatActionKind, string> = {
   todo_add: '`target`: {"due": "YYYY-MM-DD"(선택)} · `text`: 할 일 제목',
-  slack_send: '`target`: {"url": "<맥락의 Slack 항목 url>"} · `text`: 보낼 메시지(그 메시지의 스레드에 답글)',
+  slack_send:
+    '`target`: {"url": "<Slack 메시지 permalink>", "channel_name": "#채널(알면)", "channel_external": true|false(채널이 외부 공유면 true, 모르면 생략)} · `target_excerpt`: 대상 스레드 첫 글 발췌(200자 이내) · `mentions`: [{"text": "@이름", "candidates": [{"id": "U…", "name": "표시 이름", "real_name": "", "title": "", "external": false}]}] · `text`: 보낼 메시지(그 메시지의 스레드에 답글)',
   gmail_draft: '`target`: {"url": "<맥락의 메일 url>"} · `text`: 답장 본문',
   gmail_send: '`target`: {"url": "<맥락의 메일 url>"} · `text`: 답장 본문',
   jira_comment: '`target`: {"url": "<맥락의 Jira 이슈 url>"} · `text`: 코멘트',
@@ -86,11 +108,19 @@ export function chatWriteBlock(cfg: Pick<NedConfig, "actions">): string {
     "- 지금 허용된 kind 는 이것뿐이다 (목록에 없는 동작은 제안하지 말고 \"설정 → 쓰기 액션에서 켜야 해\" 라고 안내):",
     ...kinds.map((k) => `  - \`${k}\` (${CHAT_KIND_KO[k]}): ${KIND_SPEC[k]}`),
     ...(kinds.includes("session_create") ? [sessionCreateRepoLine()] : []),
-    "- `target` 의 url·event_id·session_id 는 아래 \"Ned 가 아는 것\" 에 있는 값만 그대로 쓴다. 지어내거나 고치지 않는다. 맥락에 없는 대상이면 제안하지 말고 대시보드에서 하라고 안내한다.",
+    ...(kinds.includes("slack_send") ? SLACK_SEND_RULES : []),
+    "- `target` 의 url·event_id·session_id 는 아래 \"Ned 가 아는 것\" 에 있는 값만 그대로 쓴다(Slack 은 아래 예외). 지어내거나 고치지 않는다. 맥락에 없는 대상이면 제안하지 말고 대시보드에서 하라고 안내한다.",
     "- JSON 은 유효해야 한다(따옴표·쉼표). 블록 밖 답변은 평소처럼 짧게 — 무엇을 제안했는지 한 줄. 블록은 한 답변에 하나만.",
     "- 사용자가 확인 없이 바로 하라고 해도 블록으로 제안만 한다.",
   ].join("\n");
 }
+
+/** slack_send: which threads may be targeted + how to write mentions (the server re-checks both). */
+const SLACK_SEND_RULES = [
+  "- `slack_send` 대상 스레드: (1) \"Ned 가 아는 것\" 의 Slack url, (2) 사용자가 이 대화에 붙인 Slack 링크, (3) 네가 이 대화에서 Slack 읽기 도구(검색·채널/스레드 읽기)로 **실제로 읽은** 메시지의 permalink — 이 셋만. permalink 는 도구 결과에 나온 그대로 쓰고 지어내지 않는다. 못 찾았으면 제안하지 말고 링크를 달라고 한다. 대상 스레드 첫 글을 `target_excerpt` 에 짧게 넣는다.",
+  "- `slack_send` 멘션: 본문엔 `@이름` 을 그대로 쓰고 `<@U…>` 같은 ID 는 넣지 않는다. 멘션한 사람마다 `mentions` 에 {text, candidates} 를 넣는다. 해석 순서: 대상 스레드 참여자 → 최근 대화 상대 → slack_search_users / slack_read_user_profile. 추측 금지 — 확실한 사람만 후보로, 동명이인이면 후보를 모두, 못 찾으면 candidates 는 빈 배열. 다른 회사(외부) 사용자면 external: true.",
+  "- `slack_send` 그룹 멘션(@mobile-dev 같은 유저그룹): `mentions` 에 {\"text\": \"@핸들\", \"group\": true, \"candidates\": []} — 그룹 ID 는 Ned 가 설정·읽은 메시지에서 채운다(모르면 글자로 감).",
+];
 
 /** session_create: the repos the proposal may name (Orca 등록 레포 — cached, refreshed in the background). */
 function sessionCreateRepoLine(): string {
@@ -107,6 +137,84 @@ export interface ChatActionBlock {
   target: Record<string, unknown>;
   text: string;
   summary: string;
+  /** slack_send: people / groups to mention (model candidates — slack-mentions.ts). */
+  mentions: MentionSpec[];
+  /** slack_send: the thread's first message, as the model read it (card only, ≤ 200 chars). */
+  target_excerpt: string;
+  /** slack_send: the channel is shared with another company (model's read of the channel info); undefined = unknown. */
+  channel_external?: boolean;
+  /** slack_send: "#channel" as the model named it (card only). */
+  channel_name: string;
+}
+
+/** slack_send extras for the 확인 카드 (also on a 400 / 409 so the card can show the mention dropdowns). */
+export interface SlackCardInfo {
+  /** known = Ned 가 아는 항목 · pasted = 사용자가 붙인 링크 · found = 모델이 이 대화에서 읽은 메시지 (확인 필요). */
+  target_source: "known" | "pasted" | "found";
+  channel: string;
+  channel_name: string;
+  /** Where the reply goes (thread root ts). */
+  thread_ts: string;
+  target_excerpt: string;
+  /** "external" (채널이 외부 공유 · 외부 사용자 멘션) · "internal" · "unknown" (정보 없음 → 회색 배지). */
+  external: "external" | "internal" | "unknown";
+  /** The text with resolved mentions (what gets sent). */
+  preview_text: string;
+  mentions: Pick<MentionReport, "resolved" | "unresolved" | "missing">;
+}
+
+/** What validate needs beyond the switches + agenda: the conversation, the mention cache / groups, choices, today's count. */
+export interface ChatValidateCtx {
+  /** dashboard.slack_team_domain ("" = any workspace). */
+  team_domain: string;
+  /** The conversation's user messages (permalinks the user pasted). */
+  user_texts: string[];
+  /** Slack messages the model read in this conversation (its answers' seen_slack). */
+  seen: SeenSlack[];
+  cache: SlackUsersCache;
+  groups: { dir: Map<string, string>; ids: Set<string>; handles: string[] };
+  /** "@이름" → the user id the user picked on the card (동명이인). */
+  choices: Record<string, unknown>;
+  /** actions.chat_write_daily_limit reached → the 429 body. */
+  over?: ChatLimitBody | null;
+}
+const EMPTY_CTX: ChatValidateCtx = { team_domain: "", user_texts: [], seen: [], cache: { users: {}, groups: {} }, groups: { dir: new Map(), ids: new Set(), handles: [] }, choices: {} };
+
+export interface ChatLimitBody {
+  ok: false;
+  error: string;
+  limit: number;
+  used: number;
+}
+/** origin "chat" writes that really went out today (local midnight): ok, not a dry run, not a Jira transitions lookup. */
+export function chatSentToday(now = new Date()): number {
+  return queryActionLog({ since: localDay(now) }, Number.MAX_SAFE_INTEGER).filter((e) => e.origin === "chat" && e.ok && !String(e.action).startsWith("dry_run:") && e.mode !== "transitions").length;
+}
+/** The 429 body when actions.chat_write_daily_limit (> 0) is reached, else null. */
+export function chatLimitReached(cfg: Pick<NedConfig, "actions">, now = new Date()): ChatLimitBody | null {
+  const limit = cfg.actions.chat_write_daily_limit ?? 0;
+  if (!(limit > 0)) return null;
+  const used = chatSentToday(now);
+  return used >= limit ? { ok: false, error: `오늘 대화창 전송 상한(${limit}) 도달 — 설정 → 쓰기 액션 → 대화창에서 바꿀 수 있어`, limit, used } : null;
+}
+
+/** POST /api/chat/actions/validate body + the conversation → ChatValidateCtx (cache refreshed with agenda users). */
+export function chatValidateContext(cfg: Pick<NedConfig, "actions"> & Partial<Pick<NedConfig, "dashboard" | "filters">>, agenda: Agenda, body: Record<string, unknown>, chat: Chat | null): ChatValidateCtx {
+  const msgs = chat?.messages ?? [];
+  const fromAgenda = agendaSlackUsers(agenda.slack);
+  const cache = fromAgenda.length ? updateUsersCache({ users: fromAgenda }) : readUsersCache();
+  const sl = cfg.filters?.slack;
+  const gopts = { group_mentions: sl?.group_mentions ?? [], group_ids: sl?.group_ids ?? {}, cache: cache.groups };
+  const choices = body.mention_choices && typeof body.mention_choices === "object" && !Array.isArray(body.mention_choices) ? (body.mention_choices as Record<string, unknown>) : {};
+  return {
+    team_domain: cfg.dashboard?.slack_team_domain ?? "",
+    user_texts: msgs.filter((m) => m.role === "user").map((m) => m.text),
+    seen: msgs.flatMap((m) => (m.role === "ned" && Array.isArray(m.seen_slack) ? m.seen_slack : [])),
+    cache,
+    groups: { dir: groupDirectory(gopts), ids: knownGroupIds(gopts), handles: (sl?.group_mentions ?? []).filter((g) => !/^S[A-Z0-9]{6,}$/.test(g)) },
+    choices,
+    over: chatLimitReached(cfg),
+  };
 }
 
 export type ChatEndpoint = "/api/send" | "/api/calendar/events" | "/api/todos" | "/api/sessions/create";
@@ -131,13 +239,21 @@ export interface ChatActionOk {
   match?: Record<string, unknown>;
   /** Longest the card waits for the job (ms) — session_create runs up to a few minutes. */
   max_wait_ms?: number;
+  /** slack_send: target source / excerpt / external badge / mentions for the card. */
+  slack?: SlackCardInfo;
 }
 export interface ChatActionErr {
   ok: false;
-  /** 400 malformed · 403 not allowed (switch off) · 409 target not among the known items. */
-  status: 400 | 403 | 409;
+  /** 400 malformed / unknown mention id · 403 not allowed (switch off) · 409 target not among the known items / 멘션 선택 필요 · 429 하루 상한. */
+  status: 400 | 403 | 409 | 429;
   error: string;
   kind?: ChatActionKind;
+  slack?: SlackCardInfo;
+  /** 409 멘션 선택 필요 */
+  need_choice?: boolean;
+  /** 429 */
+  limit?: number;
+  used?: number;
 }
 
 const s = (v: unknown, n = 500) => (typeof v === "string" ? v.trim().slice(0, n) : typeof v === "number" ? String(v) : "");
@@ -146,7 +262,7 @@ const clip = (v: unknown, n: number) => {
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 };
 const MAX_TEXT = 4000;
-const err = (status: ChatActionErr["status"], error: string, kind?: ChatActionKind): ChatActionErr => ({ ok: false, status, error, ...(kind ? { kind } : {}) });
+const err = (status: ChatActionErr["status"], error: string, kind?: ChatActionKind, extra: Partial<ChatActionErr> = {}): ChatActionErr => ({ ok: false, status, error, ...(kind ? { kind } : {}), ...extra });
 
 /** A raw block (object or its JSON text) → ChatActionBlock, or an error string. */
 export function parseChatActionBlock(raw: unknown): ChatActionBlock | string {
@@ -168,7 +284,17 @@ export function parseChatActionBlock(raw: unknown): ChatActionBlock | string {
     target = { ...Object.fromEntries(["repo", "worktree", "model"].filter((k) => o[k] !== undefined).map((k) => [k, o[k]])), ...target };
     if (!text && typeof o.prompt === "string") text = o.prompt.trim();
   }
-  return { kind: o.kind, target, text, summary: clip(o.summary, 200) };
+  const ext = typeof o.channel_external === "boolean" ? o.channel_external : typeof target.channel_external === "boolean" ? target.channel_external : undefined;
+  return {
+    kind: o.kind,
+    target,
+    text,
+    summary: clip(o.summary, 200),
+    mentions: parseMentions(o.mentions),
+    target_excerpt: clip(o.target_excerpt ?? target.target_excerpt, 200),
+    ...(ext !== undefined ? { channel_external: ext } : {}),
+    channel_name: clip(o.channel_name ?? target.channel_name, 80),
+  };
 }
 
 /** Normalised URL key: no trailing slash / fragment-insensitive for Slack-style query strings kept. */
@@ -189,6 +315,44 @@ function findSlack(k: KnownItems, url: string): { url: string; title: string } |
   }
   const a = (k.state.attention ?? []).find((x) => x.kind === "slack" && sameUrl(x.url, url));
   return a ? { url: a.url!, title: a.title } : null;
+}
+
+const TARGET_SOURCE_KO = { known: "Ned 가 아는 항목", pasted: "붙인 링크", found: "Ned 가 찾은 대상" } as const;
+
+/**
+ * slack_send target: (a) an agenda item → as before; else the url must be a Slack permalink of this workspace and
+ * (b) the user pasted it in this conversation, or (c) the model read that message / thread in this conversation.
+ * The reply goes to the thread root (thread_ts), else to the message's own thread.
+ */
+function slackSendTarget(
+  known: KnownItems,
+  url: string,
+  b: ChatActionBlock,
+  ctx: ChatValidateCtx,
+): { source: SlackCardInfo["target_source"]; ref: ActionRef; label: string; channel: string; channel_name: string; thread_ts: string } | string {
+  const hit = findSlack(known, url);
+  if (hit) {
+    const p = parseSlackPermalink(hit.url);
+    const pp = typeof p === "string" ? null : p;
+    const name = b.channel_name || hit.title.split(" · ")[0] || "";
+    return { source: "known", ref: { url: hit.url, title: hit.title }, label: `Slack · ${hit.title}`, channel: pp?.channel ?? "", channel_name: name, thread_ts: pp?.reply_to ?? "" };
+  }
+  if (!url) return "Slack 대상 url 이 없어";
+  const p = parseSlackPermalink(url, ctx.team_domain);
+  if (typeof p === "string") return `그 Slack 대상은 쓸 수 없어 — ${p}`;
+  const same = (x: { channel: string; ts: string }) => x.channel === p.channel && x.ts === p.ts;
+  const source: SlackCardInfo["target_source"] | null = ctx.user_texts.some((t) => permalinksIn(t).some(same)) ? "pasted" : seenHas(ctx.seen, p) ? "found" : null;
+  if (!source) return "그 Slack 메시지는 Ned 가 아는 항목도, 이 대화에 붙인 링크도, Ned 가 이 대화에서 읽은 메시지도 아니야 — 스레드 링크를 붙여 줘";
+  const name = b.channel_name ? (b.channel_name.startsWith("#") || /^(DM|그룹 DM)/.test(b.channel_name) ? b.channel_name : `#${b.channel_name}`) : "";
+  const title = `${name || p.channel} · 스레드`;
+  return {
+    source,
+    ref: { url: p.url, channel: p.channel, ts: p.ts, thread_ts: p.reply_to, title },
+    label: `Slack · ${title} (${TARGET_SOURCE_KO[source]})`,
+    channel: p.channel,
+    channel_name: name,
+    thread_ts: p.reply_to,
+  };
 }
 
 function findMail(k: KnownItems, url: string): { url: string; thread_id?: string; message_id?: string; title: string } | null {
@@ -225,13 +389,15 @@ const RSVP_KO: Record<string, string> = { accepted: "수락", declined: "거절"
  * Check a proposal against the switches and the known items; build the request for the existing endpoint.
  * `textOverride` = the card's edited text (only the text is editable).
  */
-export function validateChatAction(cfg: Pick<NedConfig, "actions">, raw: unknown, known: KnownItems, textOverride?: unknown): ChatActionOk | ChatActionErr {
+export function validateChatAction(cfg: Pick<NedConfig, "actions">, raw: unknown, known: KnownItems, textOverride?: unknown, ctx: ChatValidateCtx = EMPTY_CTX): ChatActionOk | ChatActionErr {
   const b = parseChatActionBlock(raw);
   if (typeof b === "string") return err(400, b);
   const kind = b.kind;
   if (cfg.actions.chat_write !== true) return err(403, "대화창 쓰기가 꺼져 있어 — 설정 → 쓰기 액션 → 대화창 → '대화창에서 쓰기 허용'(actions.chat_write)", kind);
   const g = CHAT_KIND_GATE[kind];
   if (g && cfg.actions[g] !== true) return err(403, `'${CHAT_KIND_KO[kind]}' 이 꺼져 있어 — 설정 → 쓰기 액션에서 actions.${g} 를 켜야 해`, kind);
+  // 하루 상한: the endpoints refuse too (429) — said here first so the card shows it before [실행]. Sessions have their own cap.
+  if (ctx.over && kind !== "session_create") return err(429, ctx.over.error, kind, { limit: ctx.over.limit, used: ctx.over.used });
   const text = typeof textOverride === "string" ? textOverride.trim() : b.text;
   const maxText = kind === "session_create" ? MAX_PROMPT : MAX_TEXT;
   if (text.length > maxText) return err(400, `텍스트는 ${maxText}자까지야 (지금 ${text.length}자)`, kind);
@@ -257,9 +423,26 @@ export function validateChatAction(cfg: Pick<NedConfig, "actions">, raw: unknown
     }
     case "slack_send": {
       if (!text) return err(400, "텍스트가 비어 있어", kind);
-      const hit = findSlack(known, s(t.url, 1000));
-      if (!hit) return err(409, "그 Slack 메시지는 Ned 가 아는 항목이 아니야 (대상 url 이 최근 agenda 에 없음)", kind);
-      return send("slack", "send", { url: hit.url, title: hit.title }, `Slack · ${hit.title}`);
+      const tg = slackSendTarget(known, s(t.url, 1000) || s(t.permalink, 1000), b, ctx);
+      if (typeof tg === "string") return err(409, tg, kind);
+      const rep = resolveMentions(text, b.mentions, ctx.cache, ctx.groups, ctx.choices);
+      const allCands = b.mentions.flatMap((m) => m.candidates);
+      const external = b.channel_external === true || allCands.some((c) => c.external) || rep.resolved.some((r) => r.external) ? "external" : b.channel_external === false ? "internal" : "unknown";
+      const slack: SlackCardInfo = {
+        target_source: tg.source,
+        channel: tg.channel,
+        channel_name: tg.channel_name,
+        thread_ts: tg.thread_ts,
+        target_excerpt: b.target_excerpt,
+        external,
+        preview_text: rep.text,
+        mentions: { resolved: rep.resolved, unresolved: rep.unresolved, missing: rep.missing },
+      };
+      if (rep.bad_ids.length) return err(400, `멘션할 수 없는 ID: ${rep.bad_ids.join(", ")} — 이 제안의 후보나 Ned 가 확인한 사람·그룹만 멘션할 수 있어`, kind, { slack });
+      if (rep.unresolved.length) return err(409, `멘션 선택 필요: ${rep.unresolved.map((u) => u.text).join(", ")} — 카드에서 누구인지 골라 줘`, kind, { slack, need_choice: true });
+      const out = send("slack", "send", tg.ref, tg.label);
+      out.payload.text = rep.text;
+      return { ...out, slack };
     }
     case "gmail_draft":
     case "gmail_send": {

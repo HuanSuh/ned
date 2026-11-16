@@ -14,6 +14,7 @@ import { extractOutputBlock, outputRef, saveOutput, type OutputRef } from "./out
 import { personaPrompt } from "./persona.js";
 import { briefingOk, readState, type Briefing, type NedState } from "./state.js";
 import { listTodos, type Todo } from "./todos.js";
+import { createSeenCollector, updateUsersCache, type SeenSlack } from "./slack-mentions.js";
 
 /**
  * Ned 채팅 (dashboard PDA → 대화 탭). One `claude -p` per turn, continued with `--resume <session_id>`:
@@ -44,6 +45,11 @@ export interface ChatMessage {
   output?: OutputRef;
   /** The ```ned-output block could not be read (malformed JSON / empty markdown). */
   output_error?: string;
+  /**
+   * Slack messages / threads the model read with a Slack tool this turn — ids + permalinks only (≤ 200), never the text.
+   * A slack_send 확인 카드 may target one of these ("Ned 가 찾은 대상", src/slack-mentions.ts).
+   */
+  seen_slack?: SeenSlack[];
 }
 
 export const CHAT_ACTION_STATES = ["running", "executed", "failed", "cancelled"] as const;
@@ -395,8 +401,20 @@ export function toolLabel(name: string): string {
   return name;
 }
 
-/** NED_NO_LLM: stream a canned answer (NED_NO_LLM_CHAT, else an echo) in a few chunks; honours stop. */
-async function stubTurn(chat: Chat, text: string, emit: ChatEmit, signal: AbortSignal): Promise<ClaudeRunResult> {
+/**
+ * NED_NO_LLM: stream a canned answer (NED_NO_LLM_CHAT, else an echo) in a few chunks; honours stop.
+ * NED_NO_LLM_CHAT_EVENTS = a JSON file of stream-json events (tool_use / tool_result fixtures) fed to `onEvent` first.
+ */
+async function stubTurn(chat: Chat, text: string, emit: ChatEmit, signal: AbortSignal, onEvent?: (j: Record<string, unknown>) => void): Promise<ClaudeRunResult> {
+  const evFile = process.env.NED_NO_LLM_CHAT_EVENTS;
+  if (evFile && onEvent) {
+    try {
+      const evs = JSON.parse(fs.readFileSync(evFile, "utf8")) as unknown;
+      if (Array.isArray(evs)) for (const e of evs) if (e && typeof e === "object") onEvent(e as Record<string, unknown>);
+    } catch (e) {
+      log(`chat: NED_NO_LLM_CHAT_EVENTS unreadable (${clip(e, 80)})`);
+    }
+  }
   const answer = process.env.NED_NO_LLM_CHAT || `(NED_NO_LLM) "${clip(text, 60)}" 잘 받았어.`;
   const delay = Number(process.env.NED_NO_LLM_DELAY_MS) || 0;
   const parts = answer.match(/[\s\S]{1,8}/g) ?? [answer];
@@ -437,7 +455,9 @@ export async function runChatTurn(prep: Extract<ChatPrep, { ok: true }>, emit: C
     emit("start", { conversation_id: chat.id, title: chat.title });
 
     let streamed = "";
+    const seen = createSeenCollector();
     const onEvent = (j: Record<string, unknown>) => {
+      seen.onEvent(j);
       if (j.type === "stream_event") {
         const ev = j.event as { type?: string; delta?: { type?: string; text?: string } } | undefined;
         if (ev?.type === "message_start") {
@@ -454,7 +474,7 @@ export async function runChatTurn(prep: Extract<ChatPrep, { ok: true }>, emit: C
     };
 
     let res: ClaudeRunResult;
-    if (llmDisabled()) res = await stubTurn(chat, text, emit, ctl.signal);
+    if (llmDisabled()) res = await stubTurn(chat, text, emit, ctl.signal, onEvent);
     else {
       const system = buildChatSystemPrompt(cfg, liveChatContext(cfg));
       res = await runClaude(text, chatRunOptions(cfg, system, chat.session_id), { onEvent, signal: ctl.signal });
@@ -480,6 +500,9 @@ export async function runChatTurn(prep: Extract<ChatPrep, { ok: true }>, emit: C
       if (mm) mm.action = dm.action;
     }
     const msg: ChatMessage = { role: "ned", text: answer, ts: Date.now(), cost_usd: cost };
+    const sn = seen.result();
+    if (sn.seen.length) msg.seen_slack = sn.seen;
+    if (sn.groups.length) updateUsersCache({ groups: sn.groups }); // <!subteam^S…|@handle> → 그룹 멘션에 쓸 ID
     if (res.aborted) msg.stopped = true;
     else if (!res.ok) msg.error = clip(res.error || "실패", 300);
     else {

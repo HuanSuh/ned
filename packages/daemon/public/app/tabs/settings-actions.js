@@ -41,7 +41,7 @@ const ACTION_HINT = {
 /** Groups to show: known keys present in defaults/config go to their source; unknown keys land in "기타" so new ones never vanish. */
 export function writeActionGroups(config, defaults) {
   // switches only: rules / internal_domains / review are the 보내기 규칙 group's (sendRulesHtml), not toggles
-  const present = [...new Set([...Object.keys(defaults || {}), ...Object.keys(config?.actions || {}).filter((k) => typeof config.actions[k] === "boolean")])];
+  const present = [...new Set([...Object.keys(defaults || {}).filter((k) => typeof defaults[k] !== "number"), ...Object.keys(config?.actions || {}).filter((k) => typeof config.actions[k] === "boolean")])];
   const known = new Set(WA_GROUPS.flatMap((g) => g.keys));
   const groups = WA_GROUPS.map((g) => ({ ...g, keys: g.keys.filter((k) => present.includes(k)) })).filter((g) => g.keys.length);
   const other = present.filter((k) => !known.has(k));
@@ -67,11 +67,50 @@ export function writeActionsHtml(config, defaults, ko) {
   const tones = config?.reply_tone_by_source && typeof config.reply_tone_by_source === "object" ? config.reply_tone_by_source : {};
   return writeActionGroups(config, defaults).map((g) => {
     const off = !!g.src && config?.sources?.[g.src] === false;
-    const tone = g.tone ? `<div class="watone"><label for="c-tone-${g.tone}">답장 말투</label><input type="text" id="c-tone-${g.tone}" data-tone-src="${g.tone}" placeholder="기본 말투 사용" maxlength="200" value="${esc(tones[g.tone] || "")}"></div>` : "";
+    const tone = g.tone ? `<div class="watone"><label for="c-tone-${g.tone}">답장 말투</label><input type="text" id="c-tone-${g.tone}" data-tone-src="${g.tone}" placeholder="기본 말투 사용" maxlength="200" value="${esc(tones[g.tone] || "")}"></div>`
+      : g.id === "chat" ? chatLimitHtml(acts.chat_write_daily_limit) : "";
     return `<div class="wagrp${off ? " off" : ""}" data-wagrp="${g.id}"${g.src ? ` data-wasrc="${g.src}"` : ""} role="group" aria-labelledby="wa-h-${g.id}">
       <div class="wah"><span class="waic" aria-hidden="true">${g.icon}</span><h3 id="wa-h-${g.id}">${esc(g.label)}</h3><span class="offnote"${off ? "" : " hidden"}>소스가 꺼져 있어 — 설정은 그대로 보존돼</span></div>
       <div class="wab"><div class="toggles">${g.keys.filter((k) => !RADIO[k]).map((k) => toggle(k, acts[k], ko || {})).join("")}</div>${g.keys.filter((k) => RADIO[k]).map((k) => radio(k, acts[k], ko || {})).join("")}${tone}</div></div>`;
   }).join("");
+}
+
+// ---------- 대화창 하루 전송 상한 (config.actions.chat_write_daily_limit) ----------
+/** = src/config.ts CHAT_DAILY_LIMIT_MAX / CHAT_DAILY_LIMIT_DEFAULT. */
+export const CHAT_LIMIT_MAX = 200, CHAT_LIMIT_DEFAULT = 20;
+export function chatLimitHtml(v) {
+  const n = Number.isInteger(v) ? v : CHAT_LIMIT_DEFAULT;
+  return `<div class="watone"><label for="c-chat-limit">하루 전송 상한</label><input type="number" id="c-chat-limit" min="0" max="${CHAT_LIMIT_MAX}" step="1" value="${n}" aria-describedby="c-chat-limit-h"><span class="hint" id="c-chat-limit-h">대화창 확인 카드로 오늘(자정부터) 실제로 보낸 건수가 이만큼이면 더 안 보내(0 = 무제한, 최대 ${CHAT_LIMIT_MAX}).</span></div>`;
+}
+/** #c-chat-limit → a number for actions.chat_write_daily_limit (not rendered → undefined: nothing to send). */
+export function readChatLimit(root) {
+  const el = root?.querySelector?.("#c-chat-limit");
+  if (!el) return undefined;
+  return el.value === "" ? CHAT_LIMIT_DEFAULT : Number(el.value);
+}
+/** Save guard (= src/config.ts chatDailyLimitError). */
+export function chatLimitMsg(actions) {
+  const v = actions?.chat_write_daily_limit;
+  if (v === undefined) return null;
+  return Number.isInteger(v) && v >= 0 && v <= CHAT_LIMIT_MAX ? null : `대화창 하루 전송 상한은 0~${CHAT_LIMIT_MAX} 정수야 (0 = 무제한)`;
+}
+
+// ---------- 그룹 핸들 ↔ ID (config.filters.slack.group_ids; 설정 → 소스 → Slack) ----------
+/** = src/config.ts GROUP_IDS_MAX. */
+export const GROUP_IDS_MAX = 20;
+/** "@Mobile-Dev = s0abc123\nqa=S0QA1234" → ["mobile-dev=S0ABC123", "qa=S0QA1234"] (lines / commas; kept as typed when malformed — the guard says why). */
+export const parseGroupIds = (s) => String(s ?? "").split(/[\n,]+/).map((l) => l.trim()).filter(Boolean).map((l) => {
+  const [h, id] = l.split(/\s*[=:\s]\s*/);
+  return id ? `${h.replace(/^@+/, "").toLowerCase()}=${id.toUpperCase()}` : l;
+});
+/** {handle: id} → textarea text, one "handle = ID" per line. */
+export const groupIdsText = (m) => Object.entries(m && typeof m === "object" ? m : {}).map(([h, id]) => `${h} = ${id}`).join("\n");
+/** Save guard (= src/config.ts groupIdsError): → message or null. */
+export function groupIdsMsg(list) {
+  if (!Array.isArray(list)) return null;
+  if (list.length > GROUP_IDS_MAX) return `그룹 핸들 ↔ ID 는 ${GROUP_IDS_MAX}개까지야`;
+  const bad = list.find((e) => !/^[a-z0-9._-]{1,80}=S[A-Z0-9]{6,}$/.test(e));
+  return bad ? `그룹 핸들 ↔ ID "${bad.slice(0, 40)}" — "핸들 = S로 시작하는 ID" 형식이어야 해 (예: mobile-dev = S0ABC123)` : null;
 }
 
 /** Dim a group whose source is off (values kept, still editable and saved). `isOn(src)` reads the 소스 toggles. */

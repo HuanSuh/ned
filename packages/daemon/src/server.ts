@@ -12,10 +12,12 @@ import { knownRepoPaths, parseSessionCreate, sessionCreateDeps, startSessionCrea
 import { AGENDA_SOURCES, agendaBusy, enabledSources, readAgenda, runningSources, startAgendaRefresh, type AgendaSourceKey } from "./agenda.js";
 import { contextStatus, requestContext } from "./agenda-context.js";
 import { CHAT_INPUT_MAX, activeChat, listChats, prepareChatTurn, readChat, runChatTurn, setChatActionState, sseFrame, stopChat } from "./chat.js";
-import { validateChatAction } from "./chat-actions.js";
+import { chatLimitReached, chatValidateContext, validateChatAction } from "./chat-actions.js";
+import { updateUsersCache } from "./slack-mentions.js";
+import { isExternal, sendTargetOf } from "./send-rules.js";
 import { costSummary } from "./costs.js";
 import { checkRange, fetchCalendarRange } from "./calendar.js";
-import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, normalizeUpdates, normalizePet, normalizeResponsibilities, quickRepliesError, responsibilitiesError, restoreConfigBackup, sendRulesError, saveConfig, slackTeamDomainError, slackTeamIdError, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type NedPet, type PersonaId } from "./config.js";
+import { HISTORY_SOURCES, PERSONAS, configChanges, configUpdatedAt, deepMerge, listConfigBackups, loadConfig, logValue, mergeFilters, normalizeActions, normalizeAgendaSourceMinutes, normalizeArchive, normalizeDashboard, normalizeHistory, normalizeIdleSchedule, normalizeNotifications, normalizeQuietSchedule, normalizeReplyTone, normalizeReplyToneBySource, normalizePersona, normalizeUpdates, normalizePet, normalizeResponsibilities, quickRepliesError, responsibilitiesError, restoreConfigBackup, chatDailyLimitError, groupIdsError, sendRulesError, saveConfig, slackTeamDomainError, slackTeamIdError, sourceRefreshMinutes, watchChannels, type HistorySource, type NedConfig, type NedPet, type PersonaId } from "./config.js";
 import { DraftError, generateDraft, parseDraftRequest, pregenStatus } from "./drafts.js";
 import { readRecentEvents } from "./events.js";
 import { historyStatus, queryHistory } from "./history.js";
@@ -198,6 +200,10 @@ export function startServer(getConfig: () => NedConfig): void {
     if (quickErr) return c.json({ error: quickErr, field: "dashboard.session_quick_replies" }, 400);
     const respErr = responsibilitiesError(body.responsibilities);
     if (respErr) return c.json({ error: respErr, field: "responsibilities" }, 400);
+    const limitErr = chatDailyLimitError(body.actions);
+    if (limitErr) return c.json({ error: limitErr }, 400);
+    const groupIdsErr = groupIdsError(body.filters);
+    if (groupIdsErr) return c.json({ error: groupIdsErr }, 400);
     const rulesErr = sendRulesError(body.actions);
     if (rulesErr) return c.json({ error: rulesErr, field: "actions.rules" }, 400);
     const merged = mergeConfigPatch(cur, body);
@@ -345,10 +351,13 @@ export function startServer(getConfig: () => NedConfig): void {
     const ts = new Date().toISOString();
     const title = typeof body.title === "string" ? body.title.trim() : "";
     const entry = { ts, source: "todo", mode: "add", ref: { title: title.slice(0, 200) }, text: title.slice(0, 120), origin };
-    if (loadConfig().actions.chat_write !== true) {
+    const cfg = loadConfig();
+    if (cfg.actions.chat_write !== true) {
       appendActionLog({ ...entry, action: "refused", ok: false, result: "config.actions.chat_write is off — turn it on in settings to allow this" });
       return c.json({ ok: false, error: "config.actions.chat_write is off — turn it on in settings to allow this" }, 403);
     }
+    const over = chatLimitReached(cfg);
+    if (over) return c.json(over, 429);
     const t = addTodo(body);
     if (!t) return c.json({ error: "title required" }, 400);
     appendActionLog({ ...entry, action: "todo_add", ok: true, result: `todo ${t.id}${t.due ? ` (마감 ${t.due})` : ""}` });
@@ -377,7 +386,13 @@ export function startServer(getConfig: () => NedConfig): void {
   // Connector sends take 30~60s (claude -p) — longer than the app's WebView waits — so they run as a job:
   // 202 {job_id} now, GET /api/send/:job_id for the result. A switched-off action is still refused here (403).
   const startJob = async (c: Context, req: SendRequest) => {
-    const st = await startSendJob(req, loadConfig());
+    const cfg = loadConfig();
+    // 대화창 하루 전송 상한 (actions.chat_write_daily_limit): only real writes count / are held — not a Jira transitions lookup.
+    if (req.origin === "chat" && req.mode !== "transitions") {
+      const over = chatLimitReached(cfg);
+      if (over) return c.json(over, 429);
+    }
+    const st = await startSendJob(req, cfg);
     if (st.kind === "sync") {
       const { status, ...out } = st.result;
       return c.json(status === 200 ? out : { ...out, error: out.detail }, status);
@@ -467,10 +482,23 @@ export function startServer(getConfig: () => NedConfig): void {
     const body = await readBody(c);
     const cfg = loadConfig();
     const state = readState();
-    const r = validateChatAction(cfg, body.block, { agenda: readAgenda(), state }, body.text);
+    const agenda = readAgenda();
+    // The conversation (붙인 링크 · Ned 가 읽은 Slack 메시지), the mention cache, and the user's mention choices.
+    const conv = typeof body.conversation_id === "string" ? readChat(body.conversation_id) : null;
+    const ctx = chatValidateContext(cfg, agenda, body, conv);
+    const r = validateChatAction(cfg, body.block, { agenda, state }, body.text, ctx);
     if (!r.ok) {
       const { status, ...out } = r;
       return c.json(out, status);
+    }
+    // 확정된 멘션 후보 (1명 · 고른 사람) → 캐시 (TTL 24h) — later turns / hand-typed <@U…> may use them.
+    const confirmed = (r.slack?.mentions.resolved ?? []).filter((m) => m.kind === "user" && m.name !== m.id);
+    if (confirmed.length) updateUsersCache({ users: confirmed.map((m) => ({ id: m.id, name: m.name, ...(m.external ? { external: true } : {}) })) });
+    // 메일: the 보내기 규칙's own external judgement (send-rules.ts, fail closed) → the card's 외부 배지.
+    if (r.kind === "gmail_send" || r.kind === "gmail_draft") {
+      const req = parseSendRequest(r.payload);
+      const ext = typeof req === "string" ? null : isExternal(sendTargetOf(req), "mail", cfg.actions.internal_domains ?? []);
+      return c.json({ ...r, mail_external: ext === true ? "external" : ext === false ? "internal" : "unknown" });
     }
     if (r.kind === "session_create") {
       // The Orca checks too (등록 레포 · 기존 워크트리 · 대화창 출처 상한 2) — read-only, so the card shows a refusal before [실행].

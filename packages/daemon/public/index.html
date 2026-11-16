@@ -219,6 +219,9 @@
                     <div class="chipin" data-xbox="group"><span class="cl">SLACK 그룹</span><span class="chips" id="x-group"></span><input type="text" id="x-group-in" data-x="group" list="dl-group" placeholder="@mobile-dev, S0ABC123 ⏎" aria-label="집계할 Slack 유저그룹 추가" aria-describedby="xg-hint" autocomplete="off"></div>
                     <span class="hint" id="xg-hint">내가 속한 유저그룹(@팀) 멘션도 모아. 그룹 ID(S…, 그룹 프로필의 ⋯ → ID 복사) 또는 핸들. 최대 8개, 그룹마다 검색 1번 추가. 답 필요에는 그룹에 구체적으로 물은 것만.</span>
                     <span class="excl-msg" id="g-msg" role="status"></span></div>
+                  <div class="xitem"><label class="lab" for="c-group-ids">그룹 핸들 ↔ ID</label>
+                    <textarea id="c-group-ids" rows="3" placeholder="mobile-dev = S0ABC123" spellcheck="false" autocomplete="off" aria-describedby="c-group-ids-h"></textarea>
+                    <span class="hint" id="c-group-ids-h">대화창에서 Slack 으로 보낼 때 @핸들을 진짜 그룹 멘션으로 바꿔 줘. 한 줄에 하나 "핸들 = 그룹 ID"(최대 20). Slack 커넥터가 유저그룹 목록을 못 읽어서 직접 넣어야 해 — 없으면 @핸들은 글자로 가.</span></div>
                 </div>
               </div>
               <div class="sgrp" data-srcgrp="jira" role="group" aria-labelledby="g-jira-h">

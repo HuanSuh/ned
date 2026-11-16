@@ -518,6 +518,11 @@ export interface NedActions {
   /** Ned 대화창이 제안한 새 에이전트 세션(Orca 워크트리 + claude + 첫 프롬프트)을 확인 후 시작 (POST /api/sessions/create). Default off. */
   chat_session_create: boolean;
   /**
+   * 대화창 하루 전송 상한: origin "chat" 으로 오늘(로컬 자정부터) 실제로 보낸(ok) 쓰기가 이 수에 닿으면 /api/send ·
+   * /api/calendar/events · /api/todos (origin chat) 가 429. 0 = 무제한. 0..CHAT_DAILY_LIMIT_MAX, default 20.
+   */
+  chat_write_daily_limit: number;
+  /**
    * 보내기 규칙 (≤ SEND_RULES_MAX, top-down, first match wins): per target allow / confirm (the server holds the send
    * until the user confirms — 409 + confirm_token) / block (403). A switch above that is off still refuses first.
    * See src/send-rules.ts.
@@ -530,7 +535,19 @@ export interface NedActions {
 }
 
 /** The on/off switches of config.actions (everything but rules / internal_domains / review). */
-export type ActionSwitch = Exclude<keyof NedActions, "rules" | "internal_domains" | "review">;
+export type ActionSwitch = Exclude<keyof NedActions, "rules" | "internal_domains" | "review" | "chat_write_daily_limit">;
+
+export const CHAT_DAILY_LIMIT_MAX = 200;
+export const CHAT_DAILY_LIMIT_DEFAULT = 20;
+const isDailyLimit = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= CHAT_DAILY_LIMIT_MAX;
+/** actions.chat_write_daily_limit: an integer 0..200 (0 = 무제한), else `fallback`. */
+export const normalizeChatDailyLimit = (v: unknown, fallback = CHAT_DAILY_LIMIT_DEFAULT): number => (isDailyLimit(v) ? v : isDailyLimit(fallback) ? fallback : CHAT_DAILY_LIMIT_DEFAULT);
+/** PUT /api/config: a chat_write_daily_limit that is not an integer 0..200 → the error, else null. */
+export function chatDailyLimitError(actions: unknown): string | null {
+  const v = actions && typeof actions === "object" ? (actions as { chat_write_daily_limit?: unknown }).chat_write_daily_limit : undefined;
+  if (v === undefined || isDailyLimit(v)) return null;
+  return `대화창 하루 전송 상한(actions.chat_write_daily_limit)은 0~${CHAT_DAILY_LIMIT_MAX} 정수야 (0 = 무제한)`;
+}
 
 // ---------- 보내기 규칙 (actions.rules / internal_domains / review) ----------
 export const RULE_SOURCES = ["slack", "mail", "jira", "github", "calendar", "session", "*"] as const;
@@ -608,6 +625,7 @@ export const DEFAULT_ACTIONS: NedActions = {
   calendar_create: false,
   chat_write: false,
   chat_session_create: false,
+  chat_write_daily_limit: CHAT_DAILY_LIMIT_DEFAULT,
   rules: [],
   internal_domains: [],
   review: "off",
@@ -622,6 +640,7 @@ export function normalizeActions(raw: unknown, base: NedActions = DEFAULT_ACTION
   const switches = Object.fromEntries(ACTION_SWITCHES.map((k) => [k, typeof r[k] === "boolean" ? (r[k] as boolean) : base[k]])) as Record<ActionSwitch, boolean>;
   return {
     ...switches,
+    chat_write_daily_limit: normalizeChatDailyLimit(r.chat_write_daily_limit, normalizeChatDailyLimit(base.chat_write_daily_limit)),
     rules: "rules" in r ? normalizeSendRules(r.rules) : normalizeSendRules(base.rules),
     internal_domains: "internal_domains" in r ? normalizeInternalDomains(r.internal_domains) : normalizeInternalDomains(base.internal_domains),
     review: normalizeSendReview(r.review, normalizeSendReview(base.review)),
@@ -711,6 +730,11 @@ export interface NedFilters {
      * or handles without "@" ("mobile-dev"). [] = off (no extra search). At most GROUP_MENTIONS_MAX.
      */
     group_mentions: string[];
+    /**
+     * 그룹 핸들 → 유저그룹 ID ({"mobile-dev": "S0ABC123"}, ≤ GROUP_IDS_MAX): 대화창 보내기에서 `@mobile-dev` 를 진짜 그룹
+     * 멘션(`<!subteam^S…>`)으로 바꿀 때 쓴다 — 커넥터에 유저그룹 목록 도구가 없어서 사람이 넣는다.
+     */
+    group_ids: Record<string, string>;
   };
   /** Jira project keys, e.g. ["MNT", "IP2"]. */
   jira: { exclude_projects: string[] };
@@ -755,17 +779,54 @@ export function normalizeGroupMentions(v: unknown): string[] {
 /** User-group ID ("S0ABC123") vs. handle ("mobile-dev"). */
 export const isGroupId = (g: string): boolean => /^S[A-Z0-9]{6,}$/.test(g) && /\d/.test(g);
 
+export const GROUP_IDS_MAX = 20;
+const GROUP_HANDLE_RE = /^[a-z0-9._-]{1,80}$/;
+const GROUP_ID_RE = /^S[A-Z0-9]{6,}$/;
+/** One "handle → id" entry from "@Mobile-Dev=S0ABC123" / "mobile-dev S0ABC123" / {handle, id}; null when unusable. */
+function groupIdEntry(e: unknown): [string, string] | null {
+  let h: unknown, id: unknown;
+  if (typeof e === "string") [h, id] = e.trim().split(/\s*[=:\s]\s*/);
+  else if (Array.isArray(e)) [h, id] = e;
+  else if (e && typeof e === "object") ({ handle: h, id } = e as { handle?: unknown; id?: unknown });
+  const handle = typeof h === "string" ? h.trim().replace(/^@+/, "").toLowerCase() : "";
+  const gid = typeof id === "string" ? id.trim().toUpperCase() : "";
+  return GROUP_HANDLE_RE.test(handle) && GROUP_ID_RE.test(gid) ? [handle, gid] : null;
+}
+const groupIdEntries = (v: unknown): unknown[] => (Array.isArray(v) ? v : v && typeof v === "object" ? Object.entries(v as Record<string, unknown>) : typeof v === "string" ? v.split(/[,\n]+/).filter((x) => x.trim()) : []);
+/**
+ * filters.slack.group_ids: a map, a list of "handle=ID" / {handle, id}, or a comma / newline separated string → a clean
+ * {handle: id} map (handle lower-case without "@", id `^S[A-Z0-9]{6,}$`, ≤ GROUP_IDS_MAX, bad entries dropped).
+ */
+export function normalizeGroupIds(v: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const e of groupIdEntries(v)) {
+    const kv = groupIdEntry(e);
+    if (kv && Object.keys(out).length < GROUP_IDS_MAX) out[kv[0]] = kv[1];
+  }
+  return out;
+}
+/** PUT /api/config: filters.slack.group_ids with a bad entry / > 20 → the error, else null. */
+export function groupIdsError(filters: unknown): string | null {
+  const v = filters && typeof filters === "object" ? (filters as { slack?: { group_ids?: unknown } }).slack?.group_ids : undefined;
+  if (v === undefined) return null;
+  const list = groupIdEntries(v);
+  if (!Array.isArray(v) && (!v || typeof v !== "object")) return "그룹 핸들 ↔ ID(filters.slack.group_ids)는 {핸들: ID} 또는 목록이어야 해";
+  if (list.length > GROUP_IDS_MAX) return `그룹 핸들 ↔ ID 는 ${GROUP_IDS_MAX}개까지야`;
+  const bad = list.find((e) => !groupIdEntry(e));
+  return bad === undefined ? null : `그룹 핸들 ↔ ID "${String(Array.isArray(bad) ? bad.join("=") : typeof bad === "object" ? JSON.stringify(bad) : bad).slice(0, 60)}" — 핸들은 영문 소문자·숫자·._-, ID 는 S 로 시작하는 대문자·숫자 7자 이상(예: mobile-dev = S0ABC123)`;
+}
+
 /**
  * Coerce whatever came from YAML / PUT into clean filters. Channel names lose a leading "#" and spaces;
  * Jira keys are upper-cased and must look like a project key (they are pasted into JQL verbatim).
  */
 export function normalizeFilters(raw: unknown): NedFilters {
-  const f = (raw && typeof raw === "object" ? raw : {}) as { slack?: { exclude_channels?: unknown; watch_channels?: unknown; ack_reactions?: unknown; ack_check_max?: unknown; group_mentions?: unknown }; jira?: { exclude_projects?: unknown } };
+  const f = (raw && typeof raw === "object" ? raw : {}) as { slack?: { exclude_channels?: unknown; watch_channels?: unknown; ack_reactions?: unknown; ack_check_max?: unknown; group_mentions?: unknown; group_ids?: unknown }; jira?: { exclude_projects?: unknown } };
   const chans = (v: unknown) => strs(v).map((c) => c.trim().replace(/^#+/, "").replace(/\s+/g, "")).filter((c) => c && c.length <= 80);
   const channels = chans(f.slack?.exclude_channels);
   const watch = chans(f.slack?.watch_channels);
   const projects = strs(f.jira?.exclude_projects).map((k) => k.trim().toUpperCase()).filter((k) => /^[A-Z][A-Z0-9_]{0,19}$/.test(k));
-  return { slack: { exclude_channels: uniq(channels), watch_channels: uniq(watch).slice(0, 20), ack_reactions: normalizeAckReactions(f.slack?.ack_reactions), ack_check_max: normalizeAckCheckMax(f.slack?.ack_check_max), group_mentions: normalizeGroupMentions(f.slack?.group_mentions) }, jira: { exclude_projects: uniq(projects) } };
+  return { slack: { exclude_channels: uniq(channels), watch_channels: uniq(watch).slice(0, 20), ack_reactions: normalizeAckReactions(f.slack?.ack_reactions), ack_check_max: normalizeAckCheckMax(f.slack?.ack_check_max), group_mentions: normalizeGroupMentions(f.slack?.group_mentions), group_ids: normalizeGroupIds(f.slack?.group_ids) }, jira: { exclude_projects: uniq(projects) } };
 }
 
 /** Deep-merge a partial filters patch over the current filters (a key that is present replaces that list). */
@@ -885,7 +946,7 @@ export const DEFAULT_CONFIG: NedConfig = {
   idle_schedule: DEFAULT_IDLE_SCHEDULE,
   sources: { gmail: true, slack: true, jira: true, github: true, sentry: true, calendar: true },
   persona: "ned",
-  filters: { slack: { exclude_channels: [], watch_channels: [], ack_reactions: [...DEFAULT_ACK_REACTIONS], ack_check_max: ACK_CHECK_MAX_DEFAULT, group_mentions: [] }, jira: { exclude_projects: [] } },
+  filters: { slack: { exclude_channels: [], watch_channels: [], ack_reactions: [...DEFAULT_ACK_REACTIONS], ack_check_max: ACK_CHECK_MAX_DEFAULT, group_mentions: [], group_ids: {} }, jira: { exclude_projects: [] } },
   port: 7777,
   claude_model: null,
   claude_max_turns: 25,

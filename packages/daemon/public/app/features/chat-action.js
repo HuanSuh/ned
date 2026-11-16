@@ -48,7 +48,74 @@ export function parseActionBlock(answer) {
     target = { ...Object.fromEntries(["repo", "worktree", "model"].filter((k) => j[k] !== undefined).map((k) => [k, j[k]])), ...target };
     if (!btext && typeof j.prompt === "string") btext = j.prompt.trim();
   }
-  return { text, block: { kind: j.kind, target, text: btext, summary: typeof j.summary === "string" ? j.summary.trim().slice(0, 200) : "" }, error: "", pending: false };
+  const block = { kind: j.kind, target, text: btext, summary: typeof j.summary === "string" ? j.summary.trim().slice(0, 200) : "" };
+  // slack_send extras (WU-07) travel to validate as-is; the server cleans and checks them.
+  if (Array.isArray(j.mentions) && j.mentions.length) block.mentions = j.mentions;
+  for (const k of ["target_excerpt", "channel_name"]) if (typeof j[k] === "string" && j[k].trim()) block[k] = j[k].trim().slice(0, 300);
+  if (typeof j.channel_external === "boolean") block.channel_external = j.channel_external;
+  return { text, block, error: "", pending: false };
+}
+
+/** "@이름" → "<@U…>" for the block's mentions that are settled: one candidate, or the one picked on the card. */
+export function mentionMap(block, choices = {}) {
+  const out = {};
+  for (const m of Array.isArray(block?.mentions) ? block.mentions : []) {
+    const text = typeof m?.text === "string" ? (m.text.startsWith("@") ? m.text : `@${m.text}`) : "";
+    const cands = (Array.isArray(m?.candidates) ? m.candidates : []).filter((c) => /^[UW][A-Z0-9]{6,}$/.test(String(c?.id || "")));
+    if (!text || m.group) continue;
+    const pick = cands.length === 1 ? cands[0] : cands.find((c) => c.id === choices[text]);
+    if (pick) out[text] = `<@${pick.id}>`;
+  }
+  return out;
+}
+
+const SRC_KO = { known: "Ned 가 아는 항목", pasted: "붙인 링크", found: "Ned 가 찾은 대상 — 맞는지 확인" };
+const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** The text to send with `<@U…>` / `<!subteam^S…>` as name chips and not-found mentions as yellow chips. */
+export function mentionPreviewHtml(text, sl) {
+  const res = sl?.mentions?.resolved || [], miss = sl?.mentions?.missing || [];
+  const byId = Object.fromEntries(res.map((r) => [r.id, r]));
+  const alts = ["<@([A-Z0-9]+)(?:\\|[^>]*)?>", "<!subteam\\^([A-Z0-9]+)(?:\\|[^>]*)?>", ...miss.map((m) => `(${reEsc(m.text)})(?![A-Za-z0-9._-])`)];
+  const re = new RegExp(alts.join("|"), "g");
+  let out = "", last = 0, m;
+  const src = String(text ?? "");
+  while ((m = re.exec(src))) {
+    out += esc(src.slice(last, m.index));
+    if (m[1]) { const r = byId[m[1]]; out += `<span class="ca-chip${r?.external ? " ext" : ""}" title="${esc(m[1])}">@${esc(r?.name || m[1])}</span>`; }
+    else if (m[2]) { const r = byId[m[2]]; out += `<span class="ca-chip grp" title="${esc(m[2])}">👥 ${esc(r?.name || m[2])}</span>`; }
+    else {
+      const mm = miss.find((x) => x.text === m[0]);
+      out += mm?.kind === "group"
+        ? `<span class="ca-chip warn grp" title="그룹 ID 를 설정 → 소스 → Slack 에 넣으면 멘션됨">👥 ${esc(m[0])} — 그룹 ID 없음, 글자로 보냄</span>`
+        : `<span class="ca-chip warn">${esc(m[0])} — 못 찾음, 글자로 보냄</span>`;
+    }
+    last = re.lastIndex;
+    if (m[0] === "") re.lastIndex++;
+  }
+  return out + esc(src.slice(last));
+}
+
+/** "알림 받는 사람: 이름, 이름 (외부: 이름)" — "" when nobody is notified. */
+export function notifyLine(sl) {
+  const res = sl?.mentions?.resolved || [];
+  if (!res.length) return "";
+  const inside = res.filter((r) => !r.external).map((r) => (r.kind === "group" ? `👥 ${r.name}` : r.name));
+  const outside = res.filter((r) => r.external).map((r) => r.name);
+  return `알림 받는 사람: ${[inside.join(", "), outside.length ? `(외부: ${outside.join(", ")})` : ""].filter(Boolean).join(" ")}`;
+}
+
+/** The slack_send / mail extras: source badge, external badge, excerpt, preview with chips, notify line, mention dropdowns. */
+function slackExtrasHtml(sl, choices = {}, editable = true) {
+  if (!sl) return "";
+  const ext = sl.external === "external" ? `<span class="ca-badge ext">외부</span>` : sl.external === "unknown" ? `<span class="ca-badge unk" title="채널·사람이 외부인지 정보가 없어">외부 여부 확인 못 함</span>` : "";
+  const src = SRC_KO[sl.target_source] ? `<span class="ca-badge src s-${esc(sl.target_source)}">${esc(SRC_KO[sl.target_source])}</span>` : "";
+  const ex = sl.target_excerpt ? `<div class="ca-ex" title="대상 스레드 첫 글">“${esc(String(sl.target_excerpt).slice(0, 200))}”</div>` : "";
+  const un = (sl.mentions?.unresolved || []).map((u) => `<label class="ca-mc">${esc(u.text)} 은(는) 누구? <select data-ca-mention="${esc(u.text)}"${editable ? "" : " disabled"}><option value="">고르기 (보내기 전에 필수)</option>${(u.candidates || []).map((c) => `<option value="${esc(c.id)}"${choices[u.text] === c.id ? " selected" : ""}>${esc([c.name, c.real_name, c.title].filter(Boolean).join(" · "))}${c.external ? " (외부)" : ""}</option>`).join("")}</select></label>`).join("");
+  const nl = notifyLine(sl);
+  const pv = sl.preview_text != null && ((sl.mentions?.resolved || []).length || (sl.mentions?.missing || []).length)
+    ? `<div class="ca-pv" aria-label="보낼 모양 미리보기">${mentionPreviewHtml(sl.preview_text, sl).replace(/\n/g, "<br>")}</div>` : "";
+  return `<div class="ca-badges">${src}${ext}</div>${ex}${pv}${nl ? `<div class="ca-notify">${esc(nl)}</div>` : ""}${un}`;
 }
 
 /** Best-effort target line before the server has checked it (validate's target_label replaces it). */
@@ -90,6 +157,7 @@ export function renderActionCard(block, state = {}, { id = "" } = {}) {
   <div class="ca-hd"><span class="ca-k">⚡ 실행 제안 · ${esc(label)}</span></div>
   <div class="ca-sum">${esc(sum)}</div>
   <div class="ca-tg" title="대상은 바꿀 수 없어 — 다른 대상이면 대화로 다시 요청해 줘"><span class="ca-l">대상</span> ${esc(tgt)}</div>
+  ${slackExtrasHtml(state.preview?.slack || (state.preview?.mail_external ? { external: state.preview.mail_external } : null), state.mention_choices || {}, editable)}
   <div class="ca-l">${esc(TEXT_KO[block.kind] || "텍스트")}${editable ? " <span class=\"ca-hint\">(고칠 수 있어)</span>" : ""}</div>
   ${tx}
   ${foot}
@@ -117,13 +185,19 @@ export function pickTransition(list, want) {
   return list.find((t) => n(t.name) === w || n(t.to) === w) || list.find((t) => n(t.name).includes(w) || n(t.to).includes(w)) || null;
 }
 
+/** {conversation_id, mention_choices} for validate (붙인 링크 · Ned 가 읽은 메시지 · 동명이인 선택). */
+export const validateCtx = (ctx = {}) => ({
+  ...(ctx.conversation_id ? { conversation_id: ctx.conversation_id } : {}),
+  ...(ctx.mention_choices && Object.keys(ctx.mention_choices).length ? { mention_choices: ctx.mention_choices } : {}),
+});
+
 /**
  * Validate + run one proposal with `text`. deps: { postJson, sendAndWait, onTick }. Resolves { ok, final, detail, link }.
  * Never invents a request: the endpoint + payload come from the server's validate answer.
  */
-export async function runChatAction(block, text, { postJson, sendAndWait, onTick } = {}) {
-  const v = await postJson("/api/chat/actions/validate", { block, text }).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
-  if (!v.ok || !v.data?.ok) return { ok: false, final: false, detail: v.data?.error || `검증 실패 (HTTP ${v.status})` };
+export async function runChatAction(block, text, { postJson, sendAndWait, onTick, ctx = {} } = {}) {
+  const v = await postJson("/api/chat/actions/validate", { block, text, ...validateCtx(ctx) }).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
+  if (!v.ok || !v.data?.ok) return { ok: false, final: false, detail: v.data?.error || `검증 실패 (HTTP ${v.status})`, ...(v.data?.slack ? { slack: v.data.slack } : {}) };
   const d = v.data;
   if (d.endpoint === "/api/todos") {
     const r = await postJson("/api/todos", d.payload).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
@@ -159,6 +233,16 @@ export function wireActionCards(root, h) {
     const ta = e.target.closest?.("[data-ca-text]"); if (!ta) return;
     const id = idOf(ta); if (id != null) h.set(id, { text: ta.value }, false);
   });
+  // 동명이인: picking a person re-checks the card (the server says who gets notified, and whether it can be sent now).
+  root.addEventListener("change", (e) => {
+    const sel = e.target.closest?.("[data-ca-mention]"); if (!sel) return;
+    const id = idOf(sel); if (id == null) return;
+    const cur = h.get(id); if (!cur) return;
+    const ta = sel.closest("[data-ca]")?.querySelector("[data-ca-text]");
+    const choices = { ...(cur.state?.mention_choices || {}) };
+    if (sel.value) choices[sel.dataset.caMention] = sel.value; else delete choices[sel.dataset.caMention];
+    h.set(id, { mention_choices: choices, ...(ta ? { text: ta.value } : {}), preview: null, previewError: "" });
+  });
   root.addEventListener("click", async (e) => {
     const run = e.target.closest?.("[data-ca-run]"), cancel = e.target.closest?.("[data-ca-cancel]");
     if (!run && !cancel) return;
@@ -179,11 +263,12 @@ export function wireActionCards(root, h) {
       h.set(id, { status: "running", text, result: null, tick: "" });
       const claim = await h.persist(id, { state: "running", text }).catch(() => ({ ok: false, status: 0 }));
       if (claim?.status === 409) { h.set(id, { status: "executed", result: { ok: false, detail: claim.data?.error || "이미 처리된 카드야" } }); return; }
-      const res = await runChatAction(cur.block, text, { ...h.deps, onTick: (ms, stage) => h.set(id, { tick: `${STAGE_KO[stage] ? `${STAGE_KO[stage]} · ` : ""}${Math.round(ms / 1000)}초` }) });
+      const ctx = { ...(h.ctx ? h.ctx(id) : {}), mention_choices: cur.state?.mention_choices || {} };
+      const res = await runChatAction(cur.block, text, { ...h.deps, ctx, onTick: (ms, stage) => h.set(id, { tick: `${STAGE_KO[stage] ? `${STAGE_KO[stage]} · ` : ""}${Math.round(ms / 1000)}초` }) });
       const status = res.ok || res.final ? "executed" : "failed";
       const result = { ok: res.ok, detail: res.detail, ...(res.link ? { link: res.link } : {}) };
       await h.persist(id, { state: status, text, result }).catch(() => null);
-      h.set(id, { status, result, tick: "" });
+      h.set(id, { status, result, tick: "", ...(res.slack ? { preview: { ...(cur.state?.preview || {}), slack: res.slack } } : {}) });
     } finally { busy.delete(id); }
   });
 }
