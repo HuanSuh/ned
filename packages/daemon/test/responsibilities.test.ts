@@ -118,7 +118,8 @@ describe("heartbeat prompt — 맡긴 일 section", () => {
     for (const f of ["heartbeat", "briefing"] as const) {
       const pre = respBlocks(template(f), false);
       expect(sha(pre)).toBe(PRE_FEATURE[f]); // the template minus its blocks IS the pre-feature file
-      for (const list of [[], [R({ enabled: false })], [R({ until: yesterday() })]]) {
+      // "yesterday" relative to `at`, not the wall clock — the render runs at a fixed date.
+      for (const list of [[], [R({ enabled: false })], [R({ until: localDay(new Date(at.getTime() - 24 * 3600_000)) })]]) {
         const cfg = cfgWith(list);
         const now = renderHeartbeatPrompt(cfg, f === "briefing", emptyState(), [], AGENDA, { now: at });
         const before = renderHeartbeatPrompt(cfg, f === "briefing", emptyState(), [], AGENDA, { now: at, template: pre });
