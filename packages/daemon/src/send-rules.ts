@@ -47,7 +47,14 @@ export interface SendTarget {
   empty?: "unknown" | "nobody" | "unjudged";
   /** One line for people / the review prompt: "#general · 김철수", "a@x.com", "ABC-12", … */
   label: string;
+  /** slack: Ned's own data names this channel (a #name, or the people of a DM) — false = only its id is known. */
+  name_known?: boolean;
 }
+
+/** M4: why a Slack send to a channel Ned can't name is held when a name-based Slack rule exists. */
+export const UNKNOWN_CHANNEL_NOTE = "채널 이름을 몰라 이름 규칙을 확인할 수 없음 — 채널 ID 로 규칙을 쓰면 정확";
+/** A rule target that is a channel id (upper-case, with a digit — "#general" is a name, not G-ENERAL). */
+const CHANNEL_ID_TARGET = /^(?=.*\d)#?[CDG][A-Z0-9]{6,}$/;
 
 const clean = (s: string) => s.trim().replace(/^#/, "").toLowerCase();
 const recipientsOf = (list: unknown[]) => list.filter((x): x is string => typeof x === "string" && !!x.trim()).map((raw) => ({ raw: raw.trim(), addr: parseAddress(raw) }));
@@ -93,6 +100,8 @@ let slackDirFn: () => Map<string, SlackDirEntry> = () => {
     return new Map();
   }
 };
+/** Ned's own Slack directory now (channel id → names / people) — the 대화창 카드 takes channel names from here. */
+export const slackDirectory = (): Map<string, SlackDirEntry> => slackDirFn();
 /** Tests: swap the Slack directory (undefined → the agenda again). */
 export function _setSlackDirectory(fn?: () => Map<string, SlackDirEntry>): void {
   slackDirFn = fn ?? (() => {
@@ -167,7 +176,8 @@ export function sendTargetOf(req: SendRequest, meta?: DraftMeta): SendTarget {
       if (/^[DG]/.test(id)) names.push(...(known?.people ?? []));
       else if (who && known?.people.has(who)) names.push(who);
       const shown = [...(known?.names ?? [])][0];
-      return { names: [...new Set(names)], recipients: [], label: [shown ? `#${shown}` : id, who && known?.people.has(who) ? who : ""].filter(Boolean).join(" · ") };
+      const nameKnown = !!known && (known.names.size > 0 || (/^[DG]/.test(id) && known.people.size > 0));
+      return { names: [...new Set(names)], recipients: [], label: [shown ? `#${shown}` : id, who && known?.people.has(who) ? who : ""].filter(Boolean).join(" · "), name_known: nameKnown };
     }
     case "email": {
       // The draft's reply_to; no draft (e.g. a Ned Net card with only message_id) → what Ned's agenda collected for it.
@@ -250,10 +260,18 @@ export function matchSendRule(req: SendRequest, cfg: Pick<NedConfig, "actions">,
   const src = ruleSourceOf(req.source);
   let t = target;
   const tgt = () => (t ??= sendTargetOf(req));
+  let unknownName: RuleMatch | undefined;
   for (let index = 0; index < rules.length; index++) {
     const rule = rules[index];
     if (rule.source !== "*" && rule.source !== src) continue;
     if (rule.target && !tgt().names.some((n) => targetMatches(rule.target!, n))) {
+      // Slack channel Ned can't name (e.g. a 대화창 target from a pasted link): a name-based Slack rule can't be checked
+      // → hold for confirm (fail closed). Id-shaped rule targets were compared exactly above and are skipped.
+      // A later rule that does match still decides if it blocks (an uncertain name rule never weakens a block).
+      if (src === "slack" && rule.source === "slack" && tgt().name_known === false && !CHANNEL_ID_TARGET.test(rule.target.trim())) {
+        unknownName ??= { index, rule: { ...rule, effect: "confirm", note: UNKNOWN_CHANNEL_NOTE } };
+        continue;
+      }
       // Mail with no known recipient: a block / confirm target rule counts as matching (fail closed); allow never does.
       const unknownMail = src === "mail" && !tgt().recipients.some((r) => r.addr) && rule.effect !== "allow";
       if (!unknownMail) continue;
@@ -262,9 +280,9 @@ export function matchSendRule(req: SendRequest, cfg: Pick<NedConfig, "actions">,
       const ext = isExternal(tgt(), src, cfg.actions.internal_domains ?? []);
       if (ext === null || ext !== rule.external) continue;
     }
-    return { index, rule };
+    return unknownName && rule.effect !== "block" ? unknownName : { index, rule };
   }
-  return null;
+  return unknownName ?? null;
 }
 
 /** "규칙 3 (메일 · @acme.com): 외부 메일은 한 번 더" — the reason line shown to the user. */

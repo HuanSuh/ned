@@ -12,7 +12,7 @@ import { parseAddress } from "../src/address.js";
 import { sessionCreateRequest } from "../src/session-create.js";
 import { CONFIRM_TTL_MS, _resetSpentTokens, checkConfirmToken, guardSend, issueConfirmToken, needConfirmSummary, spendConfirmToken } from "../src/send-guard.js";
 import { _setSendReviewer, buildReviewPrompt, maskSecrets, parseReview, reviewInput, wantsReview, type SendReviewer } from "../src/send-review.js";
-import { _setMailDirectory, _setSlackDirectory, buildMailDirectory, buildSlackDirectory, isExternal, matchSendRule, sendTargetOf, targetMatches } from "../src/send-rules.js";
+import { UNKNOWN_CHANNEL_NOTE, _setMailDirectory, _setSlackDirectory, buildMailDirectory, buildSlackDirectory, isExternal, matchSendRule, sendTargetOf, targetMatches } from "../src/send-rules.js";
 
 const ALL_ON = { ...DEFAULT_ACTIONS, slack_send: true, gmail_send: true, jira_comment: true, github_review: true, calendar_create: true, calendar_rsvp: true, session_send: true };
 const cfgWith = (rules: SendRule[], over: Partial<NedConfig["actions"]> = {}): NedConfig => ({ ...DEFAULT_CONFIG, actions: { ...ALL_ON, rules, ...over } });
@@ -117,12 +117,29 @@ describe("rule matching", () => {
     // M2: the client's ref.title cannot name the channel — a spoofed "#general" on another id is that other id only
     const spoof = slack({ ref: { channel: "C0EVIL", title: "#general · 김철수" } });
     expect(sendTargetOf(spoof).names).toEqual(["c0evil"]);
-    expect(m("#general", spoof)).toBeNull();
+    // C0EVIL is a channel Ned can't name: the title doesn't make it #general, but a name rule can't be checked → confirm
+    expect(m("#general", spoof)?.rule).toMatchObject({ effect: "confirm", note: UNKNOWN_CHANNEL_NOTE });
     expect(m("C0EVIL", spoof)).not.toBeNull();
     // a channel Ned has never seen: only its id
     _setSlackDirectory(() => new Map());
     expect(sendTargetOf(slack()).names).toEqual(["c0gen"]);
-    expect(m("#general")).toBeNull();
+    expect(sendTargetOf(slack()).name_known).toBe(false);
+  });
+
+  it("M4: a Slack channel Ned can't name + any name-based Slack rule → held for confirm (fail closed); id rules stay exact", () => {
+    _setSlackDirectory(() => new Map());
+    const r = (rules: SendRule[]) => matchSendRule(slack({ ref: { channel: "C0NEW", url: "https://acme.slack.com/archives/C0NEW/p1700000000000100" } }), cfgWith(rules));
+    for (const effect of ["block", "allow", "confirm"] as const) expect(r([{ source: "slack", target: "#general", effect }])?.rule).toMatchObject({ effect: "confirm", note: UNKNOWN_CHANNEL_NOTE });
+    expect(r([{ source: "slack", target: "C0OTHER", effect: "block" }])).toBeNull(); // an id rule is compared exactly
+    expect(r([{ source: "slack", target: "C0NEW", effect: "block" }])?.rule.effect).toBe("block");
+    expect(r([{ source: "mail", target: "@acme.com", effect: "block" }])).toBeNull(); // not a Slack rule
+    expect(r([])).toBeNull();
+    // an uncertain name rule never weakens a later rule that does match and blocks; a later allow stays held
+    expect(r([{ source: "slack", target: "#general", effect: "allow" }, { source: "slack", effect: "block", note: "Slack 금지" }])?.rule).toMatchObject({ effect: "block", note: "Slack 금지" });
+    expect(r([{ source: "slack", target: "#general", effect: "block" }, { source: "*", effect: "allow" }])?.rule).toMatchObject({ effect: "confirm", note: UNKNOWN_CHANNEL_NOTE });
+    // a channel Ned does know is matched by name as before
+    _setSlackDirectory(DIR);
+    expect(matchSendRule(slack(), cfgWith([{ source: "slack", target: "#random", effect: "block" }]))).toBeNull();
   });
 
   it("mail: the draft's reply_to only (parsed whole, display name ok) — never addresses scanned from ref.title", () => {
