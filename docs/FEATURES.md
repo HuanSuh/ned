@@ -8,19 +8,19 @@
 Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub·Sentry)를 모으는 로컬 대시보드(탭: 홈·인박스·타임라인·설정). 전역 키: h 홈, i 인박스, r 지금 점검, ⌘K·/ 검색, ⌘J 통신기.
 - **홈**: 일정(일/주, ＋·드래그로 만들기, ⋯ 응답), 할 일(NED 액션·개인, n 입력), 소스 카드(메일·Jira·Slack·GitHub — `확인 필요 | 전체`, 이력, ↻ 갱신), 팔로업 카드(멘션 없는 채널 요약).
 - **인박스**: 우선·기타·기록(브리핑) 3탭 + "장비실"(세션 상태). **타임라인**: 시간순.
-- **순찰/브리핑**: "지금 점검"(r) = 소스 갱신 → 판단 → 알림. 자동 순찰 `heartbeat_minutes`(무변경이면 건너뜀 `heartbeat_skip_unchanged`), 아침 브리핑 `briefing_time`.
+- **순찰/브리핑**: "지금 점검"(r) = 소스 갱신 → 판단 → 알림. 자동 순찰 `heartbeat_minutes`(무변경 건너뜀), 아침 브리핑 `briefing_time`.
 - **맡긴 일**(`responsibilities`, ≤5, 설정 → 맡긴 일): 책임마다 순찰이 순조·주의·막힘 + 한 줄 평가 → 홈 위 띠. 막혀서 내 몫이면 할 일에도.
 - **야간·유휴 감속**: 조용한 시간·유휴(`idle_schedule`)엔 자동 실행 감속·정지(`quiet_schedule.mode` normal/slow/pause), 수동은 즉시.
-- **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기 확인 카드, `actions.chat_session_create` 면 새 세션; 정리는 노트로), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글.
+- **통신기 "Ned Net"**(⌘J): "대화" 탭 = 질문(읽기 전용; `actions.chat_write` 면 쓰기 확인 카드 — Slack 은 붙인 링크·읽은 스레드도, @멘션·외부 배지, 하루 상한 `actions.chat_write_daily_limit`; `actions.chat_session_create` 면 새 세션; 정리는 노트로), "메시지" 탭 = 새 알림·브리핑·새 Slack 답글.
 - **답장 초안 ✎**: 초안 3개 → 복사/열기/보내기(Slack·메일·Jira 는 미답 질문별 1:1 답). 쓰기는 켠 것만(`actions.*` — gmail_draft·session_send 기본 켬, Jira·GitHub·캘린더는 ⋯). **세션에 답하기**: 대기 세션 행·펫 말풍선의 빠른 답(`dashboard.session_quick_replies`)·한 줄 입력 → Orca 터미널.
 - **확인 완료 ✓**: 접음(새 변경 시 다시 열림). Slack 은 내 답글·해제 이모지(`filters.slack.ack_reactions`)면 자동 해제.
 - **Gmail 읽음 표시**(`actions.gmail_mark_read`): 메일 ✓ = Gmail 읽음.
 - **보내기 규칙**(`actions.rules`): 대상별 허용·확인 후·금지(첫 일치). 보내기 전 자동 검토 `actions.review`.
 - **아카이브(Obsidian)**: 볼트 `archive.vault` + `archive.enabled` → 매일 `<archive.folder>/Daily/…/날짜.md`, `archive.daily_embed`.
 - **수집 이력**: 소스별 보관(`history.keep_days.*`), 증분 수집(Slack 재검색 창 `history.collect.slack_hours`), 표시 구간(`history.display.*`).
-- **링크 열기**: Slack·Figma·Notion 링크는 앱으로(`dashboard.open_links_in_app`, 팀 ID `dashboard.slack_team_id`).
-- **설치**: 플러그인 `ned@ned`→`/ned:install`(업데이트 `/plugin update ned`→`/reload-plugins`→`/ned:install`), MCP `/mcp`(도구 `ned_attention` 등).
-- **Ned.app 메뉴**: 상태·대시보드·설정·업데이트·종료. 앱 설정·`updates.*`: 설정 → 앱.
+- **링크 열기**: Slack·Figma·Notion 링크는 앱으로(`dashboard.open_links_in_app`).
+- **설치**: 플러그인 `ned@ned`→`/ned:install`(업데이트 `/plugin update ned`→`/ned:install`), MCP `/mcp`.
+- **Ned.app 메뉴**: 상태·대시보드·설정·업데이트. 앱 설정·`updates.*`: 설정 → 앱.
 - **시작하기**: 커넥터·자동 실행·서명 점검.
 - **데스크톱 펫**(외형 `pet.enabled`, 끔): 늘 떠 있는 Ned, 테두리 색 = 상태, 새 소식 말풍선(`pet.messages.*`).
 - **설정**(하단 "저장"): 외형(테마 `dashboard.theme`, 카드 배치·잠금 `dashboard.locked`, 팔로업 별도 카드 `dashboard.watch_cards`, 링크 열기) · 소스(`sources.*`, Slack 팔로업·제외 채널·해제 이모지·그룹 멘션 `filters.slack.*`, Jira 제외 `filters.jira.exclude_projects`) · 알림(`notifications.*`, 조용한 시간 `quiet_hours`) · 순찰 주기(위 순찰·감속 키, `signal_check_minutes`, `agenda_refresh_minutes`, `agenda_source_minutes.*`) · 쓰기 액션(`actions.*`, 말투 `reply_tone`·`reply_tone_by_source.*`, 오늘 한 액션) · 수집·보관(`history.*`) · 아카이브(`archive.*`) · Claude(`claude_model`, `claude_max_turns`, 하루 상한 `agenda_daily_budget_usd`).
@@ -159,13 +159,20 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 보여 주는 것: 모든 탭에 떠 있는 패널, 제목 "Ned Net"(태그 NED · NET; 페르소나를 바꾸면 이름도 바뀜). "대화" 탭 = Ned 에게 질문(Ned 가 아는 맥락 + 읽기 도구로 답, 쓰기 안 함), "메시지" 탭 = 열린 attention·최근 24h 업데이트 브리핑·"내 답 이후 새 답글 N건" Slack 스레드·닫혀 있던 동안 온 답(안 읽음 배지).
 - 데이터: 대화 = 턴마다 `claude -p`(읽기 전용, 최대 12턴, 질문 2,000자), `~/.ned/chats/`(최근 20개). 비용은 "대화 $x · 오늘 $y".
 - 언제: "오늘 뭐 남았어?", "이 PR 상태는?", "이 기능 어떻게 켜?" 같은 질문.
-- 코드 블록: 답의 ``` 블록마다 우상단 복사 버튼(키보드 Enter/Space 가능) — 언어 표기 줄 빼고 원문만 복사, 1.5초 ✓.
+- 코드 블록: 답의 ``` 블록마다 우상단 복사 버튼(키보드 Enter/Space 가능) — 언어 표기 줄 빼고 원문만 복사, 1.5초 ✓. 같은 답의 Slack 제안에 정해진 멘션이 있으면 옆에 "<@U…> 포함 복사"(아래 "대화창에서 쓰기" 의 복사용 초안).
 - 키·버튼·설정: ⌘J(Ctrl+J) 열고 닫기, Esc 닫기, ⏎ 전송, ⇧⏎ 줄바꿈, "중단", "새 대화", ▾ 접기, 가장자리 크기 조절. 하루 상한 도달 시 대화도 막힘 — 예외는 config.yaml `chat_ignore_budget: true`.
 
 ### 통신기 — 대화창에서 쓰기 (확인 카드)
 - 보여 주는 것: "Slack 에 이렇게 답해 줘", "이거 할 일에 넣어 줘" 같은 요청에 Ned 가 답 끝에 **실행 제안 카드**를 붙인다 — 요약, 대상(읽기 전용: 채널·메일·이슈·PR·일정·세션), 텍스트(편집 가능 — 할 일 제목·보낼 글·일정 제목·Jira 옮길 상태), [실행] [취소]. 실행하면 결과(✓ 실행됨 + 링크 / ⚠ 실패 → "다시 실행")가 카드에 남고, 취소하면 "취소됨"으로 접힌다. 한 카드는 한 번만 실행된다.
 - 데이터: 모델은 여전히 읽기 도구만 쓰고 ```ned-action 블록으로 **제안만** 한다(시스템 프롬프트엔 지금 허용된 동작만 들어감). [실행] → `/api/chat/actions/validate` 가 스위치와 대상(최근 agenda/state 에 있는 항목인지 url·id 로)을 확인해 요청을 만들고, 기존 `/api/send` · `/api/calendar/events` · `/api/todos` 로 실행(`origin: "chat"`). 카드 상태는 `~/.ned/chats/` 의 그 답에 저장(`/api/chat/:id/action`). 기록은 `~/.ned/sent-actions.log` → 설정 → 오늘 한 액션에 "대화창" 배지.
 - 언제: 대화하다가 그 자리에서 답장·할 일·일정·리뷰까지 끝내고 싶을 때. 대상은 바꿀 수 없어 — 다른 대상이면 대화로 다시 요청.
+- Slack 대상 스레드(`slack_send`) — 셋 중 하나여야 함(아니면 409): ① **Ned 가 아는 항목**(최근 agenda), ② **붙인 링크** — 이 대화에서 사용자가 붙인 permalink, ③ **Ned 가 찾은 대상** — Ned 가 이 대화에서 Slack 읽기 도구(검색·채널/스레드 읽기)로 실제로 읽은 메시지·스레드. ③ 은 턴마다 데몬이 Slack 도구 결과에서 permalink·(채널, ts) 쌍만 뽑아 그 답에 `seen_slack`(최대 200개, 본문은 저장 안 함)으로 남긴 것과 대조한다. 답글은 링크에 `thread_ts` 가 있으면 그 스레드, 없으면 그 메시지의 스레드로. 다른 워크스페이스 링크(`dashboard.slack_team_domain` 이 설정돼 있을 때 도메인이 다르면)는 거부. 카드 대상 줄 = 채널 이름 · 출처 배지("Ned 가 아는 항목" / "붙인 링크" / "Ned 가 찾은 대상 — 맞는지 확인") · 스레드 첫 글 발췌(200자).
+- 사람 멘션: 모델은 본문에 `@이름` 만 쓰고(ID 금지) 블록 `mentions` 에 후보를 단다(스레드 참여자 → 최근 대화 상대 → 사용자 검색 순, 추측 금지). 서버가 후보 1명이면 `<@U…>` 로 바꾸고, 여러 명(동명이인)이면 카드에 **고르기 드롭다운** — 고르기 전엔 보내지 않음(409 "멘션 선택 필요"), 0명이면 글자 그대로(노란 칩 "@이름 — 못 찾음, 글자로 보냄"). 최종 본문의 `<@U…>` 는 이 제안의 후보이거나 Ned 가 확인한 사람(캐시 `~/.ned/slack-users.json`, 24시간·최대 2,000명)만 — 카드에서 직접 넣은 ID 도 같은 규칙(그 밖은 400). 미리보기는 `<@U…>` 를 이름 칩으로, 아래에 "알림 받는 사람: 이름, 이름 (외부: 이름)".
+- 그룹 멘션 `@mobile-dev`: 아래 "Slack 그룹 멘션" 의 그룹 ID 를 알면 `<!subteam^S…>`(👥 칩), 모르면 글자 그대로 + 안내 칩("그룹 ID 를 설정 → 소스 → Slack 에 넣으면 멘션됨").
+- 외부 배지: 메일은 보내기 규칙의 외부 판정(회사 도메인 밖이면 "외부", 판정 못 하면 "외부 여부 확인 못 함"). Slack 은 모델이 본 채널 정보(외부 공유)나 멘션 후보의 external 이면 "외부", 정보가 없으면 회색 "외부 여부 확인 못 함". Slack 외부 여부는 **배지일 뿐** — 보내기 규칙의 외부·내부 판정은 지금처럼 메일·캘린더만.
+- 하루 상한 `actions.chat_write_daily_limit`(기본 20, 0~200, 0 = 무제한): 대화창 출처로 오늘(로컬 자정부터) **실제로 보낸**(성공) 쓰기 수(`sent-actions.log` 의 `origin: "chat"`·ok, Jira 전환 목록 읽기 제외)가 닿으면 `/api/send`·`/api/calendar/events`·`/api/todos`(대화창 출처) 가 429 `{error, limit, used}`, 카드엔 "오늘 대화창 전송 상한(20) 도달 — 설정에서 바꿀 수 있어". 대시보드 버튼의 보내기는 세지도 막지도 않음. 세션 만들기는 자기 상한(2개)만.
+- 복사용 초안: 같은 답의 코드 블록에 제안의 멘션(1명이거나 카드에서 고른 사람)이 나오면 복사 버튼 옆에 "<@U…> 포함 복사" — 기본 복사는 "@이름 텍스트로 복사". Slack 입력창에 붙이면 글자로 들어갈 수 있으니 진짜 멘션은 Ned 로 보내기.
+- `actions.chat_write` 를 끄면 다음 질문부터 바로 읽기 전용(프롬프트에 제안 형식이 빠지고, 도구는 원래 읽기만).
 - 설정: 설정 → 쓰기 액션 → 대화창 → "대화창에서 쓰기 허용" `actions.chat_write`(기본 꺼짐). 각 동작은 자기 스위치도 켜져 있어야 함(할 일 추가는 chat_write 만): `todo_add` · `slack_send` · `gmail_draft` · `gmail_send` · `jira_comment` · `jira_transition` · `github_review` · `calendar_create` · `calendar_rsvp` · `session_send` · `session_create`(`actions.chat_session_create`, 아래 "대화창에서 세션 만들기").
 
 ### 통신기 — 정리 결과물 (노트 저장)
@@ -194,7 +201,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
   - Jira: "Jira 코멘트" `actions.jira_comment` · "Jira 상태 변경" `actions.jira_transition`(⋯ → 코멘트 초안 쓰기…/상태 변경…)
   - GitHub: "GitHub 리뷰·코멘트" `actions.github_review`(⋯ → 리뷰 초안 쓰기…/바로 승인; 리뷰 코멘트·변경 요청·승인+코멘트·PR 코멘트)
   - 캘린더: "캘린더 참석 응답" `actions.calendar_rsvp` · "캘린더 일정 생성" `actions.calendar_create`
-  - 대화창: "대화창에서 쓰기 허용" `actions.chat_write`(꺼짐) — 통신기 대화가 확인 카드로 쓰기를 제안(위 "대화창에서 쓰기")
+  - 대화창: "대화창에서 쓰기 허용" `actions.chat_write`(꺼짐) — 통신기 대화가 확인 카드로 쓰기를 제안(위 "대화창에서 쓰기") · "하루 전송 상한" `c-chat-limit` → `actions.chat_write_daily_limit`(기본 20, 0 = 무제한, 최대 200)
   - "세션 빠른 답" `dashboard.session_quick_replies`(기본 ㄱㄱ, 승인, 계속) — 위 "세션에 답하기".
   - 아래 "오늘 한 액션" 표(소스·결과 필터, "읽기 포함", 새로고침). 소스 옆 출처 칩 = 어디서 실행했는지(카드 / 지난 N일 / 팔로업 / 대화창 / 세션 행 / 펫).
 - Slack 이모지 리액션 보내기는 없음(커넥터에 도구 없음).
@@ -232,6 +239,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 보여 주는 것: 내가 속한 Slack 유저그룹(@mobile-dev 등)을 향한 멘션도 Slack 카드에 "그룹"(👥) 칩으로. `전체` 에는 모두, `확인 필요` 에는 그룹에 구체적으로 묻거나 요청했는데 아무도(나 포함) 답하지 않은 것만(공지·공유 제외). 같은 메시지가 개인 멘션에도 걸리면 개인 멘션으로(dm > 멘션 > 스레드 > 그룹). 그룹 멘션은 스레드 팔로업 대상이 아님.
 - 데이터: agenda Slack 1단계에서 그룹마다 검색 1번 추가(기존 검색과 같은 턴, 턴 수 그대로) — ID 면 `<!subteam^S…>`, 핸들이면 `"@핸들"` 로 찾음. `reason: "group"`.
 - 설정: 설정 → 소스 → Slack → "그룹 멘션"(`filters.slack.group_mentions`, 기본 [], 최대 8). 그룹 ID(`S…`, Slack 그룹 프로필 ⋯ → ID 복사 — 가장 정확) 또는 핸들(`@mobile-dev`, 앞 @ 는 떼어 저장). 비우면 검색 안 함.
+- 보내기 쪽(대화창 확인 카드의 `@핸들` → `<!subteam^S…>`): Slack 커넥터에 유저그룹 목록 도구가 없어서 그룹 ID 는 Ned 가 아는 것만 쓴다 — ① 설정 → 소스 → Slack → "그룹 핸들 ↔ ID" `c-group-ids` → `filters.slack.group_ids`({핸들: ID}, 한 줄에 "핸들 = S…", 최대 20, 핸들 소문자·영숫자·`._-`·앞 @ 제거, ID `S` + 대문자·숫자 6자 이상), ② 위 그룹 멘션의 ID(본문에 `<!subteam^S…>` 를 직접 넣을 때 허용), ③ 대화에서 Ned 가 읽은 메시지 원문의 `<!subteam^S…|@핸들>`(캐시 `~/.ned/slack-users.json`, 24시간). 모르면 `@핸들` 은 글자로 감.
 
 ### 검색 ⌘K
 - 보여 주는 것: 주의 항목·세션·일정·Jira·GitHub·메일·Slack·개인 할 일·브리핑·타임라인 이벤트·초안·설정 항목 통합 검색, 한글 초성 매칭.
@@ -337,11 +345,13 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `filters.slack.ack_reactions` | white_check_mark, eyes, +1, heavy_check_mark | 소스 → Slack → 답 필요 해제 이모지 |
 | `filters.slack.ack_check_max` | 3 (1~8) | 소스 → Slack → 한 번에 확인할 이모지 |
 | `filters.slack.group_mentions` | [] (최대 8) | 소스 → Slack → 그룹 멘션 |
+| `filters.slack.group_ids` | {} (핸들 → `S…` ID, 최대 20) | 소스 → Slack → 그룹 핸들 ↔ ID (대화창 보내기의 `<!subteam^…>`) |
 | `filters.jira.exclude_projects` | [] | 소스 → Jira → 제외 프로젝트 |
 | `responsibilities` (항목: `id` · `title` · `goal` · `sources` · `keywords` · `until` · `enabled`) | [] (최대 5) | 맡긴 일 |
 | `notifications.enabled` · `notifications.briefing` · `notifications.sound` · `notifications.summary_threshold` · `notifications.quiet_delivery` | true · true · true · 3 · skip | 알림 |
 | `notifications.kinds.session` · `notifications.kinds.email` · `notifications.kinds.slack` · `notifications.kinds.jira` · `notifications.kinds.github` · `notifications.kinds.sentry` · `notifications.kinds.calendar` | 전부 true | 알림 → 소스별 |
 | `actions.slack_send` · `actions.gmail_draft` · `actions.gmail_send` · `actions.gmail_mark_read` · `actions.session_send` · `actions.jira_comment` · `actions.jira_transition` · `actions.github_review` · `actions.calendar_rsvp` · `actions.calendar_create` · `actions.chat_write` · `actions.chat_session_create` | gmail_draft·session_send 만 true | 쓰기 액션 → 허용할 동작 |
+| `actions.chat_write_daily_limit` | 20 (0~200 정수, 0 = 무제한) | 쓰기 액션 → 대화창 → 하루 전송 상한 |
 | `actions.rules` (항목: `source` slack·mail·jira·github·calendar·session·* · `target` · `external` · `effect` allow·confirm·block · `note`) · `actions.internal_domains` · `actions.review` (off·warn) | [] (최대 30) · [] · off | 쓰기 액션 → 보내기 규칙 |
 | `reply_tone` · `reply_tone_by_source.slack` · `reply_tone_by_source.email` · `reply_tone_by_source.session` | "간결하고 정중한 존댓말, 핵심 먼저" · null | 쓰기 액션 → 기본 말투 / 답장 말투 |
 | `dashboard.theme` · `dashboard.card_order` · `dashboard.card_span` · `dashboard.locked` · `dashboard.watch_cards` · `dashboard.layout` | system · slack,mail,jira,github · — · false · true · null | 외형 (layout 은 홈 드래그 배치) |
@@ -385,6 +395,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `x-ack-in` | 소스 → Slack → 답 필요 해제 이모지 | `filters.slack.ack_reactions` |
 | `c-ackmax` | 소스 → Slack → 한 번에 확인할 이모지 | `filters.slack.ack_check_max` |
 | `x-group-in` | 소스 → Slack → 그룹 멘션 | `filters.slack.group_mentions` |
+| `c-group-ids` | 소스 → Slack → 그룹 핸들 ↔ ID | `filters.slack.group_ids` |
 | `x-jira-in` | 소스 → Jira → 제외 프로젝트 | `filters.jira.exclude_projects` |
 | `c-resp-add` | 맡긴 일 → ＋ 맡긴 일 추가 (`settings-responsibilities.js` 가 그림) | `responsibilities` |
 | 행마다 `data-rf` | 맡긴 일 → 켜기 · 제목 · 챙길 것 · 볼 곳 · 키워드 · 언제까지 | `responsibilities.enabled` · `responsibilities.title` · `responsibilities.goal` · `responsibilities.sources` · `responsibilities.keywords` · `responsibilities.until` |
@@ -415,7 +426,7 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 | `c-arch-inc` | 아카이브 → 담을 것 | `archive.include.*` |
 | `c-arch-embed` | 아카이브 → 내 데일리 노트 embed | `archive.daily_embed` |
 
-쓰기 액션 토글은 `data-act="<키>"` → `actions.<키>` (부록 A).
+쓰기 액션 토글은 `data-act="<키>"` → `actions.<키>` (부록 A). 대화창 그룹의 하루 전송 상한 `c-chat-limit` → `actions.chat_write_daily_limit`.
 보내기 규칙(`c-sendrules`, `settings-actions.js` 가 그림): 규칙 줄 → `actions.rules`, `c-sr-domains` → `actions.internal_domains`, `c-sr-review` → `actions.review`.
 
 ## 부록 C — HTTP API (대시보드가 쓰는 로컬 API, 127.0.0.1)
@@ -427,7 +438,8 @@ Ned = 에이전트 세션·업무 신호(Slack·메일·캘린더·Jira·GitHub�
 - 일정: `/api/calendar`(기간 조회) · `/api/calendar/events`(일정 만들기)
 - 초안·보내기: `/api/draft` · `/api/send`(세션에 답하기도 — `source:"session"`, 글 ≤2,000자, 터미널 없음/닫힘·권한 대화상자 대기 409; 보내기 규칙 확인·검토 이슈 409 `need_confirm` → 같은 본문 + `confirm_token` 으로 재전송, 금지 규칙 403 — 위 "보내기 규칙")
 - 세션 만들기: `/api/sessions/create`(대화창 확인 카드 [실행], 진행은 `/api/sessions/create/:job_id`)
-- 통신기: `/api/chat`(SSE) · `/api/chat/:id` · `/api/chat/:id/stop` · `/api/chats` · `/api/chat/actions/validate`(확인 카드 검증) · `/api/chat/:id/action`(카드 상태 저장)
+- 통신기: `/api/chat`(SSE) · `/api/chat/:id` · `/api/chat/:id/stop` · `/api/chats` · `/api/chat/actions/validate`(확인 카드 검증 — 본문 `{block, text?, conversation_id?, mention_choices?}`; 200 + Slack 이면 `slack` {target_source known·pasted·found, channel, thread_ts, target_excerpt, external, preview_text, mentions}, 메일이면 `mail_external`; 400 형식·허용 안 된 멘션 ID · 403 스위치 꺼짐 · 409 모르는 대상 / 다른 워크스페이스 / "멘션 선택 필요"(`need_choice`) · 429 하루 상한) · `/api/chat/:id/action`(카드 상태 저장)
+- 대화창 하루 상한: `/api/send` · `/api/calendar/events` · `/api/todos` 에 `origin: "chat"` 이면 오늘 성공한 대화창 쓰기 수가 `actions.chat_write_daily_limit` 에 닿을 때 429 `{ok:false, error, limit, used}`
 - 아카이브: `/api/archive/status`(볼트 배지·마지막 쓰기·마지막 오류) · `/api/archive/flush`(지금 쓰기) · `/api/outputs`(정리 결과물 목록) · `/api/outputs/:id`(하나, 마크다운 포함) · `/api/outputs/:id/reveal`(Finder 에서 보기)
 - 시작하기: `/api/setup`(점검 결과, `?refresh=1` 다시 확인) · `/api/setup/dismiss`(창 닫음 기록, `{dismissed:false}` 면 되돌림)
 - 업데이트: `/api/update-check`(`{current, latest, source, update_available, checked_at, steps, error?, status}`, 10분 캐시, `?refresh=1` 은 새로 + 기록) · `/api/update/status`(자동 업데이트 상태: 설정·마지막/다음 확인·마지막 설치 시도) · `/api/update/install`(지금 업데이트, 202 시작 / 409 이유)
