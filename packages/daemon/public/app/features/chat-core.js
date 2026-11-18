@@ -3,6 +3,8 @@
 import { esc, safeUrl } from "../util.js";
 import { mentionMap, parseActionBlock, renderActionCard } from "./chat-action.js";
 import { parseOutputBlock, renderOutputCard } from "./chat-output.js";
+import { agendaIndex, sourceParts, srcBtn } from "./focus.js";
+import { slackReviewKey } from "./revkeys.js";
 
 // ---------- persona wording (structure is shared; only words + theme tokens change) ----------
 export const COMMS_VOICE = {
@@ -241,18 +243,26 @@ export const DAY_MS = 24 * 3600_000;
 export function buildFeed({ state, briefings = [], agenda = null, chatNotes = [] } = {}, seen = new Set(), now = Date.now()) {
   const out = [];
   const urls = new Set();
+  const index = agendaIndex(agenda), sessBy = Object.fromEntries((state?.sessions || []).map((s) => [s.id, s]));
+  // target = what a click focuses in the inbox (features/focus.js resolveFocus); src = the short 출처 줄; srcKind = the 원문 button.
   for (const a of state?.attention || []) {
     if (a.reviewed_at) continue;
-    out.push({ key: `att:${a.id}`, kind: a.kind || "other", title: clip(a.title, 120), detail: clip(a.detail, 120), url: safeUrl(a.url), ts: a.ts || 0, go: a.source === "sessions" ? "inbox" : "inbox" });
+    const kind = a.kind || "other", sess = a.source === "sessions" ? sessBy[String(a.id).replace(/^session:/, "")] || null : null;
+    out.push({ key: `att:${a.id}`, kind, title: clip(a.title, 120), detail: clip(a.detail, 120), url: safeUrl(a.url), ts: a.ts || 0, go: "inbox",
+      target: { item: a.id, tab: "priority" }, srcKind: kind, src: sourceParts({ kind, url: a.url }, { index, sess, short: true }) });
     if (a.url) urls.add(a.url);
   }
   for (const b of briefings || []) {
     if (b.status !== "UPDATE" || !b.headline || now - (b.ts || 0) > DAY_MS) continue;
-    out.push({ key: `brief:${b.id}`, kind: "briefing", title: clip(b.headline, 120), detail: `${b.type === "daily" ? "아침 브리핑" : "순찰"} · ${(b.action_items || []).length}건`, url: null, ts: b.ts, go: "inbox" });
+    out.push({ key: `brief:${b.id}`, kind: "briefing", title: clip(b.headline, 120), detail: `${b.type === "daily" ? "아침 브리핑" : "순찰"} · ${(b.action_items || []).length}건`, url: null, ts: b.ts, go: "inbox",
+      target: { item: `bf:${b.id}`, tab: "history", ...((b.action_items || []).length ? { at: "action_items.0" } : {}) } });
   }
   for (const t of agenda?.slack?.threads || []) {
     if (!(t.new_since_me > 0) || (t.url && urls.has(t.url))) continue;
-    out.push({ key: `thr:${t.key}@${t.last_reply_ts || ""}`, kind: "thread", title: clip(`${t.channel || "Slack"} · 내 답 이후 새 답글 ${t.new_since_me}건`, 120), detail: clip(`${t.last_reply_from ? t.last_reply_from + ": " : ""}${t.last_reply_text || t.thread_summary || ""}`, 120), url: safeUrl(t.url), ts: Date.parse(t.last_reply_at || "") || 0, go: "home" });
+    const rk = slackReviewKey(t);
+    // A thread lives on the home Slack card; it focuses an inbox row only when a 기타 item has the same message (else #home).
+    out.push({ key: `thr:${t.key}@${t.last_reply_ts || ""}`, kind: "thread", title: clip(`${t.channel || "Slack"} · 내 답 이후 새 답글 ${t.new_since_me}건`, 120), detail: clip(`${t.last_reply_from ? t.last_reply_from + ": " : ""}${t.last_reply_text || t.thread_summary || ""}`, 120), url: safeUrl(t.url), ts: Date.parse(t.last_reply_at || "") || 0, go: "home",
+      target: rk ? { item: rk, tab: "other" } : null, fallback: "home", srcKind: "slack" });
   }
   for (const c of chatNotes) out.push({ key: c.key, kind: "chat", title: clip(c.title, 120), detail: clip(c.detail, 120), url: null, ts: c.ts, go: "chat" });
   out.sort((x, y) => y.ts - x.ts);
@@ -261,9 +271,15 @@ export function buildFeed({ state, briefings = [], agenda = null, chatNotes = []
 
 export function feedHtml(items, voice, relFn = () => "") {
   if (!items.length) return `<div class="cm-none">${esc(voice.noMsgs)}</div>`;
-  return items.map((x, i) => `<button type="button" class="cm-it${x.unread ? " new" : ""}" data-fi="${i}" title="${esc(x.url ? "열기 (새 탭) · 읽음 처리" : "대시보드에서 보기 · 읽음 처리")}">
-  <span class="ic" aria-hidden="true">${x.icon}</span><span class="tt">${esc(x.title)}</span><span class="tm">${esc(relFn(x.ts))}</span>${x.detail ? `<span class="sb">${esc(x.detail)}</span>` : ""}${x.unread ? '<span class="dot" aria-label="안 읽음"></span>' : ""}
-</button>`).join("");
+  // The 원문 button sits beside (not inside) the row button — no nested interactive content.
+  return items.map((x, i) => {
+    const src = x.srcKind ? srcBtn(x.srcKind, x.url, "cm-src") : "";
+    const line = x.src && x.src.length > 1 ? `<span class="srcl">${x.src.map(esc).join(" · ")}</span>` : "";
+    const sb = line || x.detail ? `<span class="sb">${line}${line && x.detail ? " — " : ""}${x.detail ? esc(x.detail) : ""}</span>` : "";
+    return `<div class="cm-row${src ? " has-src" : ""}"><button type="button" class="cm-it${x.unread ? " new" : ""}" data-fi="${i}" title="${esc(x.go === "chat" ? "대화에서 보기 · 읽음 처리" : "대시보드에서 이 항목 보기 · 읽음 처리")}">
+  <span class="ic" aria-hidden="true">${x.icon}</span><span class="tt">${esc(x.title)}</span><span class="tm">${esc(relFn(x.ts))}</span>${sb}${x.unread ? '<span class="dot" aria-label="안 읽음"></span>' : ""}
+</button>${src}</div>`;
+  }).join("");
 }
 
 // ---------- chat ----------

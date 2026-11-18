@@ -33,9 +33,9 @@ describe("feed", () => {
   it("feed rows (snapshot)", () => {
     const f = buildFeed({ state, briefings: [], agenda: null }, new Set(), NOW);
     expect(feedHtml(f, COMMS_VOICE.ned, () => "1분 전")).toMatchInlineSnapshot(`
-      "<button type="button" class="cm-it new" data-fi="0" title="열기 (새 탭) · 읽음 처리">
+      "<div class="cm-row has-src"><button type="button" class="cm-it new" data-fi="0" title="대시보드에서 이 항목 보기 · 읽음 처리">
         <span class="ic" aria-hidden="true">💬</span><span class="tt">kim: 배포 언제?</span><span class="tm">1분 전</span><span class="dot" aria-label="안 읽음"></span>
-      </button>"
+      </button><a class="cm-src" href="https://slack/1" target="_blank" rel="noopener" data-src="slack" title="Slack에서 원문 열기" aria-label="Slack에서 원문 열기"><span aria-hidden="true">💬</span></a></div>"
     `);
     expect(feedHtml([], COMMS_VOICE.jarvis)).toBe('<div class="cm-none">새 알림이 없어요.</div>');
   });
