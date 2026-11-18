@@ -7,13 +7,17 @@
  *  - source:<값> / in:<값>  slack·슬랙 · mail·메일·gmail · jira·지라 · github·깃허브·gh · calendar·일정·캘린더 · session·세션 ·
  *                           briefing·브리핑 · todo·할일 · draft·초안 · event·이벤트·타임라인 · settings·설정 · attention·주의
  *  - from:<이름>            people only (Slack 보낸 이, 메일 발신자, GitHub 작성자) — substring, case-insensitive, spaces
- *                           ignored ("서 지수/팀X" ← from:서지수), 초성 (from:ㅅㅈㅅ)
- *  - channel:<채널> / #채널  Slack channel, substring, case-insensitive (#123 — digits only — stays a word: PR numbers)
+ *                           ignored ("서 지수/팀X" ← from:서지수), 초성 (from:ㅅㅈㅅ). Jira 는 agenda 데이터에 사람 필드
+ *                           (담당자·보고자)가 없어 from: 대상 아님.
+ *  - channel:<채널> / #채널  Slack channel, substring, case-insensitive (#123 — digits only — stays a word: PR numbers;
+ *                           a quoted "#foo" is a plain word too)
  *  - days:N · after:<날짜> · before:<날짜>   날짜 = YYYY-MM-DD · MM/DD · M/D, local; no year → this year, or last year
- *                           when that is in the future. after = on/after that day, before = before that day.
+ *                           when this year's date is more than YEARLESS_AHEAD_DAYS (60) days ahead.
+ *                           after = on/after that day, before = before that day.
  *  - is:open · is:done (✓ 처리) · is:mine (내가 쓴 것 — only items whose data says so)
  * Same key twice = OR (source:슬랙 source:메일); different keys = AND. An unknown key / bad value (foo:bar,
- * source:없는것, after:13/45) is a plain search word (the result count doesn't suddenly drop to 0) and a grey chip.
+ * source:없는것, after:13/45) is not used as a filter but searched as a word (필터로 쓰지 않고 검색어로 찾음 — the
+ * result count doesn't suddenly drop to 0) and shows a grey chip.
  * A known key with no value yet (`from:` while typing) is ignored. Remaining words score as before (초성 included);
  * keys without words = filter only, newest first.
  */
@@ -101,13 +105,15 @@ const IS_LABEL = { open: "열림", done: "✓ 처리됨", mine: "내 것" } as c
 export const QUERY_KEYS = ["source", "in", "from", "channel", "days", "after", "before", "is"] as const;
 const KNOWN = new Set<string>(QUERY_KEYS);
 const DAY = 86_400_000;
+/** A yearless date further ahead than this is last year's (after:12/31 typed in January); closer = this year. */
+export const YEARLESS_AHEAD_DAYS = 60;
 
 export interface QueryChip {
   /** Key as typed, lower-cased ("#" for the #채널 form). */
   key: string;
   value: string;
   label: string;
-  /** false = 인식 못 함 (grey): the token stays a plain search word. */
+  /** false = 인식 못 함 (grey): not used as a filter, searched as a plain word. */
   ok: boolean;
   /** [start, end) of the token in the raw query (chip ✕ removes it). */
   start: number;
@@ -135,7 +141,7 @@ export interface FilterFields {
   type: string;
   /** Source kind (slack / mail / jira / github / calendar / session / briefing / todo / draft / event / settings / attention). */
   src?: string;
-  /** Sender-ish names: Slack 보낸 이, 메일 발신자, GitHub 작성자 (Jira 담당자·보고자 when the data has them). */
+  /** Sender-ish names: Slack 보낸 이, 메일 발신자, GitHub 작성자. Jira rows carry no person fields → none. */
   people?: string[];
   channel?: string;
   ts: number | null;
@@ -168,7 +174,7 @@ const unquote = (s: string): string => s.replace(/^"/, "").replace(/"$/, "");
 const compact = (s: string): string => norm(s).replace(/\s+/g, "");
 const two = (n: number) => String(n).padStart(2, "0");
 
-/** YYYY-MM-DD · MM/DD · M/D → local midnight (ms), null when invalid. No year: this year, last year if in the future. */
+/** YYYY-MM-DD · MM/DD · M/D → local midnight (ms), null when invalid. No year: this year, last year if > 60 days ahead. */
 export function parseDay(v: string, now = Date.now()): number | null {
   let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(v.trim());
   let y: number, mo: number, d: number, yearless = false;
@@ -184,7 +190,7 @@ export function parseDay(v: string, now = Date.now()): number | null {
   const today = new Date(now);
   const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
   let t = at(y);
-  if (yearless && (t == null || t > todayStart)) t = at(y - 1);
+  if (yearless && (t == null || t > todayStart + YEARLESS_AHEAD_DAYS * DAY)) t = at(y - 1);
   return t;
 }
 const dayLabel = (t: number, now: number) => {
@@ -339,6 +345,22 @@ export function acSuggest(ctx: AcContext, cands: FilterFields[], max = 8): AcIte
     .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
     .slice(0, max)
     .map(([v, n]) => ({ value: v, label: ctx.kind === "channel" ? `#${v}` : v, count: n }));
+}
+
+/**
+ * The value being typed is already complete — don't open the list: a source alias (source:slack = 슬랙), or exactly one
+ * of the suggestions (from:서지수 even when 서지수/팀X is also offered; #팀-매출).
+ */
+export function acSettled(ctx: AcContext, items: AcItem[]): boolean {
+  const pre = ctx.prefix.trim();
+  if (!pre) return false;
+  if (ctx.kind === "source") return !!SOURCE_OF[compact(pre)];
+  if (ctx.kind === "from") {
+    const v = compact(pre).replace(/^@+/, "");
+    return items.some((it) => compact(it.value).replace(/^@+/, "") === v);
+  }
+  const v = norm(pre).replace(/^#+/, "");
+  return items.some((it) => norm(it.value) === v);
 }
 
 /** Replace the token being typed with the chosen value (quoted when it has spaces) + a space. */

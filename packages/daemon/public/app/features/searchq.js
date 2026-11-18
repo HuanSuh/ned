@@ -1,7 +1,9 @@
 /* ⌘K 검색 — matching + 검색 키(연산자) parser + filters + autocomplete helpers. Copy of src/search-query.ts (the single
  * definition); test/search-query-shared.test.ts runs both on the same case table. Pure (no DOM, no imports).
  * Keys: source:/in: · from: · channel:/#채널 · days:N · after:/before: (YYYY-MM-DD · MM/DD · M/D) · is:open|done|mine.
- * Same key twice = OR, different keys = AND; unknown key / bad value = plain search word + grey chip; keys only = newest first. */
+ * Same key twice = OR, different keys = AND; unknown key / bad value = 필터로 쓰지 않고 검색어로 찾음 + grey chip;
+ * keys only = newest first. Yearless dates: this year unless > 60 days ahead (then last year). Jira 는 사람 필드가 없어
+ * from: 대상 아님. A quoted "#foo" is a plain word. */
 
 // ---------- matching ----------
 
@@ -85,6 +87,8 @@ const IS_LABEL = { open: "열림", done: "✓ 처리됨", mine: "내 것" };
 export const QUERY_KEYS = ["source", "in", "from", "channel", "days", "after", "before", "is"];
 const KNOWN = new Set(QUERY_KEYS);
 const DAY = 86_400_000;
+/** A yearless date further ahead than this is last year's (after:12/31 typed in January); closer = this year. */
+export const YEARLESS_AHEAD_DAYS = 60;
 
 /** Whitespace-separated tokens; a double quote opens a run that may contain spaces (unclosed → to the end). */
 export function spans(q) {
@@ -108,7 +112,7 @@ const unquote = (s) => s.replace(/^"/, "").replace(/"$/, "");
 const compact = (s) => norm(s).replace(/\s+/g, "");
 const two = (n) => String(n).padStart(2, "0");
 
-/** YYYY-MM-DD · MM/DD · M/D → local midnight (ms), null when invalid. No year: this year, last year if in the future. */
+/** YYYY-MM-DD · MM/DD · M/D → local midnight (ms), null when invalid. No year: this year, last year if > 60 days ahead. */
 export function parseDay(v, now = Date.now()) {
   let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(v.trim());
   let y, mo, d, yearless = false;
@@ -124,7 +128,7 @@ export function parseDay(v, now = Date.now()) {
   const today = new Date(now);
   const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
   let t = at(y);
-  if (yearless && (t == null || t > todayStart)) t = at(y - 1);
+  if (yearless && (t == null || t > todayStart + YEARLESS_AHEAD_DAYS * DAY)) t = at(y - 1);
   return t;
 }
 const dayLabel = (t, now) => {
@@ -272,6 +276,22 @@ export function acSuggest(ctx, cands, max = 8) {
     .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
     .slice(0, max)
     .map(([v, n]) => ({ value: v, label: ctx.kind === "channel" ? `#${v}` : v, count: n }));
+}
+
+/**
+ * The value being typed is already complete — don't open the list: a source alias (source:slack = 슬랙), or exactly one
+ * of the suggestions (from:서지수 even when 서지수/팀X is also offered; #팀-매출).
+ */
+export function acSettled(ctx, items) {
+  const pre = ctx.prefix.trim();
+  if (!pre) return false;
+  if (ctx.kind === "source") return !!SOURCE_OF[compact(pre)];
+  if (ctx.kind === "from") {
+    const v = compact(pre).replace(/^@+/, "");
+    return items.some((it) => compact(it.value).replace(/^@+/, "") === v);
+  }
+  const v = norm(pre).replace(/^#+/, "");
+  return items.some((it) => norm(it.value) === v);
 }
 
 /** Replace the token being typed with the chosen value (quoted when it has spaces) + a space. */

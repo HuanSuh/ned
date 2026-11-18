@@ -7,7 +7,7 @@
  * 검색 키 (from: source: #채널 days: after: before: is:) — parser / filters / ranking / autocomplete live in
  * app/features/searchq.js (copy of src/search-query.ts), so the palette and GET /api/search give the same hits.
  * Loaded as a module (index.html: <script type="module" src="/search.js">). */
-import { acApply, acContext, acSuggest, norm, parseQuery, removeChip, runQuery } from "./app/features/searchq.js";
+import { acApply, acContext, acSettled, acSuggest, norm, parseQuery, removeChip, runQuery } from "./app/features/searchq.js";
 import { activityMs, reviewedAt, srcKey } from "./app/features/revkeys.js";
 
 (() => {
@@ -111,10 +111,10 @@ import { activityMs, reviewedAt, srcKey } from "./app/features/revkeys.js";
     return data.loading;
   }
 
-  // Structured fields for the 검색 키 filters — same values as src/search.ts candidates().
+  // Structured fields for the 검색 키 filters — same values as src/search.ts candidates(). Jira rows have no person
+  // fields (담당자·보고자) in the agenda data → no people, not a from: target.
   const ATT_SRC = { email: "mail", slack: "slack", jira: "jira", github: "github", calendar: "calendar", session: "session" };
   const ME = "나", MY_PR = /^my_pr/;
-  const jiraPeople = (j) => [j.assignee, j.reporter].filter((v) => typeof v === "string" && v.trim());
   const one = (v) => (typeof v === "string" && v.trim() ? [v] : []);
 
   /** Same ids / anchors as src/search.ts so local and server hits dedupe. */
@@ -127,7 +127,7 @@ import { activityMs, reviewedAt, srcKey } from "./app/features/revkeys.js";
     for (const x of st.attention || []) out.push({ type: "attention", id: x.id, title: x.title, detail: x.detail || "", ts: x.ts, url: safeUrl(x.url), kind: x.kind, tab: "inbox", anchor: `row:${x.id}`, src: ATT_SRC[x.kind] || "attention", done: !!x.reviewed_at, fields: [[x.title, 3], [x.kind, 2], [x.detail, 1]] });
     for (const s of st.sessions || []) out.push({ type: "session", id: s.id, title: s.worktree, detail: s.last_summary || s.last_prompt || STATUS_KO[s.status] || s.status, ts: s.last_event_ts, url: null, kind: "session", tab: "inbox", anchor: `session:${s.id}`, status: s.status, src: "session", fields: [[s.worktree, 3], [s.status, 2], [STATUS_KO[s.status], 2], [s.cwd, 1], [s.last_prompt, 1], [s.last_summary, 1]] });
     if (on("calendar")) for (const c of a.calendar || []) out.push({ type: "calendar", id: c.id, title: c.title, detail: [c.all_day ? "종일" : isoTs(c.start) ? hhmm(isoTs(c.start)) : "", c.location].filter(Boolean).join(" · "), ts: isoTs(c.start), url: safeUrl(c.url) || safeUrl(c.meet_url), kind: "calendar", tab: "home", anchor: "card:cal", src: "calendar", fields: [[c.title, 3], [c.location, 1]] });
-    if (on("jira")) for (const j of a.jira || []) out.push({ type: "jira", id: j.key, title: j.title, detail: [j.key, j.status, j.priority, j.due ? `마감 ${j.due}` : ""].filter(Boolean).join(" · "), ts: isoTs(j.updated), url: safeUrl(j.url), kind: "jira", tab: "home", anchor: "card:jira", src: "jira", people: jiraPeople(j), done: revDone("jira", j), fields: [[j.title, 3], [j.key, 3], [j.status, 1], [j.priority, 1]] });
+    if (on("jira")) for (const j of a.jira || []) out.push({ type: "jira", id: j.key, title: j.title, detail: [j.key, j.status, j.priority, j.due ? `마감 ${j.due}` : ""].filter(Boolean).join(" · "), ts: isoTs(j.updated), url: safeUrl(j.url), kind: "jira", tab: "home", anchor: "card:jira", src: "jira", done: revDone("jira", j), fields: [[j.title, 3], [j.key, 3], [j.status, 1], [j.priority, 1]] });
     if (on("github")) for (const g of a.github || []) out.push({ type: "github", id: `${g.repo}#${g.number}`, title: g.title, detail: `${g.repo}#${g.number} · @${g.author}`, ts: isoTs(g.updated), url: safeUrl(g.url), kind: "github", tab: "home", anchor: "card:gh", src: "github", people: g.author ? [g.author] : [], done: revDone("github", g), mine: MY_PR.test(g.reason || "") || undefined, fields: [[g.title, 3], [`${g.repo}#${g.number}`, 2], [g.author, 2], [g.reason, 1]] });
     if (on("gmail") && a.mail) {
       const seen = new Set();
@@ -414,17 +414,19 @@ import { activityMs, reviewedAt, srcKey } from "./app/features/revkeys.js";
   // ---------- 검색 키: chips + autocomplete ----------
   function paintChips() {
     if (!chipsEl) return;
-    chipsEl.innerHTML = st.pq.chips.map((c, i) => `<span class="qc${c.ok ? "" : " off"}" data-ci="${i}"${c.ok ? "" : ` title="인식 못 함 — 평범한 검색어로 찾음"`}>${esc(c.label)}<button type="button" data-chip-x="${i}" aria-label="조건 제거: ${esc(c.label)}" title="조건 제거">✕</button></span>`).join("");
+    chipsEl.innerHTML = st.pq.chips.map((c, i) => `<span class="qc${c.ok ? "" : " off"}" data-ci="${i}"${c.ok ? "" : ` title="인식 못 함 — 필터로 쓰지 않고 검색어로 찾음"`}>${esc(c.label)}<button type="button" data-chip-x="${i}" aria-label="조건 제거: ${esc(c.label)}" title="조건 제거">✕</button></span>`).join("");
   }
-  /** Open the list when the caret is in a from: / source: / in: / channel: / # token (unless Esc dismissed it for this text). */
+  /**
+   * Open the list when the caret is in a from: / source: / in: / channel: / # token — not when Esc dismissed it for this
+   * text, and not when the value is already complete (acSettled: a source alias, or exactly one of the suggestions).
+   */
   function updateAc() {
     st.ac = null;
     if (st.open && !st.detail && st.acOff !== input.value) {
       const ctx = acContext(input.value, input.selectionStart ?? input.value.length);
       if (ctx) {
         const items = acSuggest(ctx, data.cands);
-        const exact = items.length === 1 && norm(items[0].value) === norm(ctx.prefix.trim());
-        if (items.length && !exact) st.ac = { ctx, items, sel: 0 };
+        if (items.length && !acSettled(ctx, items)) st.ac = { ctx, items, sel: 0 };
       }
     }
     paintAc();
@@ -444,8 +446,9 @@ import { activityMs, reviewedAt, srcKey } from "./app/features/revkeys.js";
     st.ac = null; st.q = input.value; st.sel = 0; st.selKey = null;
     refresh(); updateAc();
   }
-  /** Keys while the autocomplete list is open: ↑↓ / Tab / Ctrl+N/P pick, ⏎ fills, Esc closes the list only. */
+  /** Keys while the autocomplete list is open: ↑↓ / Tab / Ctrl+N/P pick, ⏎ fills, Esc closes the list only. ⌘⏎ / ⇧⏎ / Ctrl+⏎ go to the results. */
   function acKey(e) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey || e.shiftKey)) { st.ac = null; paintAc(); return false; }
     const n = st.ac.items.length;
     const mv = (d) => { e.preventDefault(); st.ac.sel = (st.ac.sel + d + n) % n; paintAc(); return true; };
     if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n") || (e.key === "Tab" && !e.shiftKey)) return mv(1);

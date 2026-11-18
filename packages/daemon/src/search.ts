@@ -77,11 +77,6 @@ const revDone = (marks: Marks, kind: string, x: Parameters<typeof srcKey>[1]) =>
 const MY_PR = /^my_pr/;
 /** How the agenda writes my own Slack messages (DM / 팔로업 recent rows). */
 const ME = "나";
-/** Jira 담당자·보고자 — only when the item carries them (today's agenda Jira rows don't). */
-const jiraPeople = (j: object): string[] => {
-  const r = j as Record<string, unknown>;
-  return [r.assignee, r.reporter].filter((v): v is string => typeof v === "string" && !!v.trim());
-};
 
 function drafts(): Cand[] {
   // Drafts store isn't settled yet: accept NED_HOME/drafts.json (array or {drafts: []}) or NED_HOME/drafts/*.json.
@@ -152,7 +147,8 @@ function candidates(): Cand[] {
   if (cfg.sources.jira) for (const j of a.jira) {
     out.push({
       type: "jira", id: j.key, title: j.title, detail: [j.key, j.status, j.priority, j.due ? `마감 ${j.due}` : ""].filter(Boolean).join(" · "), ts: isoTs(j.updated), url: url(j.url), kind: "jira", tab: "home", anchor: "card:jira",
-      src: "jira", people: jiraPeople(j), done: revDone(marks, "jira", j),
+      // Jira 는 agenda 데이터에 사람 필드(담당자·보고자)가 없어 from: 대상 아님 (people 없음).
+      src: "jira", done: revDone(marks, "jira", j),
       fields: [[j.title, 3], [j.key, 3], [j.status, 1], [j.priority, 1]],
     });
   }
@@ -296,8 +292,7 @@ function histFilterFields(src: HistorySource, it: Record<string, any>, channel?:
   }
   if (src === "mail") return { src, people: s(it.from) };
   if (src === "github") return { src, people: s(it.author), mine: MY_PR.test(String(it.reason ?? "")) || undefined };
-  if (src === "jira") return { src, people: jiraPeople(it) };
-  return { src };
+  return { src }; // jira (no person fields — not a from: target), calendar
 }
 
 /**
@@ -308,9 +303,10 @@ export function search(q: string, limit = 50): SearchHit[] {
   const now = Date.now();
   const pq = parseQuery(q, now);
   if (!pq.terms.length && !pq.active) return [];
+  // The filter fields (src / people / channel / done / mine) are internal like `fields` — not part of the hit.
   return runQuery(candidates(), pq, now)
     .slice(0, limit)
-    .map(({ fields: _f, ...c }) => ({ ...c, score: Math.round(c.score * 10) / 10 }));
+    .map(({ fields: _f, src: _s, people: _p, channel: _c, done: _d, mine: _m, ...c }) => ({ ...c, score: Math.round(c.score * 10) / 10 }));
 }
 
 export function registerSearch(app: Hono): void {

@@ -32,6 +32,8 @@ const AGENDA = {
       slackRow("#팀-매출", "서지수/팀X", "매출 리포트 확인 부탁", T1, "C0TEST001"),
       slackRow("#general", "사람B", "서지수 님이 매출 얘기함", T2, "C0TEST002"),
       slackRow("#팀-매출", "사람A", "배포 일정 공유", T3, "C0TEST001"),
+      slackRow("#팀-매출", "서지수", "정산 마감 공유", now - 7 * H, "C0TEST001"), // exact "서지수" next to 서지수/팀X
+      slackRow("#test", "<b>사람D</b>", "굵게 <img src=x onerror=1> 테스트", now - 8 * H, "C0TEST004"),
     ],
     all: [], watch: [],
   },
@@ -40,6 +42,7 @@ const AGENDA = {
 const MARKS = { [`slack:C0TEST001:${slackTs(T3)}`]: now };
 const TODOS = [{ id: "t1", title: "매출 보고서", done: false, created_at: now - 3 * H, done_at: null, due: null, note: null }, { id: "t2", title: "정리", done: true, created_at: now - 4 * H, done_at: now, due: null, note: null }];
 
+const openSpy = vi.fn();
 const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
 const $ = (id: string) => document.getElementById(id)!;
 const input = () => $("nsp-q") as HTMLInputElement;
@@ -66,6 +69,8 @@ beforeAll(async () => {
     return json([]); // briefings, events, /api/search (local hits only — compared with the server below)
   }));
   window.HTMLElement.prototype.scrollIntoView ??= () => {};
+  window.open = openSpy as unknown as typeof window.open; // ⏎ on a hit with a url (no NED.openLink here)
+  window.requestAnimationFrame ??= ((cb: FrameRequestCallback) => setTimeout(() => cb(performance.now()), 0)) as typeof window.requestAnimationFrame;
   await import("../public/search.js");
   (window as any).NedSearch.open("");
   await (window as any).NedSearch.refresh();
@@ -126,16 +131,20 @@ describe("palette DOM", () => {
     const ac = $("nsp-ac");
     expect(ac.hidden).toBe(false);
     const labels = [...ac.querySelectorAll(".aci span:first-child")].map((x) => x.textContent);
-    expect(labels).toEqual(expect.arrayContaining(["서지수/팀X", "서 지수 <jisu@example.com>"]));
-    expect(labels).not.toContain("사람B");
+    expect(labels.sort()).toEqual(["서 지수 <jisu@example.com>", "서지수", "서지수/팀X"]);
     const sel0 = selIdx();
+    const acSel = () => ac.querySelector<HTMLElement>(".aci.sel")!.dataset.ai;
     key({ key: "ArrowDown" });
-    expect(ac.querySelector<HTMLElement>(".aci.sel")!.dataset.ai).toBe("1");
+    expect(acSel()).toBe("1");
     key({ key: "Tab" });
-    expect(ac.querySelector<HTMLElement>(".aci.sel")!.dataset.ai).toBe("0"); // 2 items: wraps
+    expect(acSel()).toBe("2");
     key({ key: "n", ctrlKey: true });
+    expect(acSel()).toBe("0"); // 3 items: wraps
     key({ key: "p", ctrlKey: true });
-    expect(ac.querySelector<HTMLElement>(".aci.sel")!.dataset.ai).toBe("0");
+    key({ key: "Tab", shiftKey: true });
+    expect(acSel()).toBe("1");
+    key({ key: "ArrowUp" });
+    expect(acSel()).toBe("0");
     expect(selIdx()).toBe(sel0); // results didn't move
     const pick = ac.querySelector(".aci.sel span")!.textContent!;
     key({ key: "Enter" });
@@ -163,5 +172,90 @@ describe("palette DOM", () => {
     $("nsp-ac").querySelector<HTMLElement>(".aci")!.click();
     expect(input().value).toBe("#팀-매출 ");
     expect([...$("nsp-chips").querySelectorAll(".qc")].map((c) => c.textContent!.replace("✕", ""))).toEqual(["채널: #팀-매출"]);
+  });
+
+  it("chips, suggestions and rows escape HTML (query value and names)", () => {
+    type("from:\"<img src=x onerror=1>\" foo:<b>x</b>");
+    expect($("nsp-chips").querySelector("img, b")).toBeNull();
+    expect($("nsp-chips").textContent).toContain("보낸 사람: <img src=x onerror=1>");
+    expect($("nsp-chips").textContent).toContain("foo:<b>x</b> · 인식 못 함");
+    type("from:사람");
+    expect($("nsp-ac").hidden).toBe(false);
+    expect($("nsp-ac").querySelector("b, img")).toBeNull();
+    expect([...$("nsp-ac").querySelectorAll(".aci span:first-child")].map((x) => x.textContent)).toContain("<b>사람D</b>");
+    type("굵게");
+    expect(keys()).toHaveLength(1);
+    expect($("nsp-res").querySelector(".it b, .it img")).toBeNull();
+    expect($("nsp-res").textContent).toContain("<b>사람D</b>");
+  });
+});
+
+describe("palette: a complete key value doesn't hold ⏎ / ↓ (list stays shut)", () => {
+  const reopen = () => (window as any).NedSearch.open("");
+  const firstUrl = () => {
+    const r = document.querySelector<HTMLElement>("#nsp-res .it.sel")!;
+    return search(input().value).find((h) => `${h.type}:${h.id}` === r.dataset.key)!.url;
+  };
+
+  it("from:서지수 (exact, though 서지수/팀X is offered too) → list shut, one ⏎ opens the result", () => {
+    reopen();
+    type("from:서지수");
+    expect($("nsp-ac").hidden).toBe(true);
+    const url = firstUrl();
+    openSpy.mockClear();
+    key({ key: "Enter" });
+    expect(openSpy).toHaveBeenCalledWith(url, "_blank", "noopener");
+    expect($("nsp").classList.contains("open")).toBe(false);
+  });
+
+  it("source:slack (alias of 슬랙) → list shut, one ⏎ opens the result", () => {
+    reopen();
+    type("source:slack");
+    expect($("nsp-ac").hidden).toBe(true);
+    const url = firstUrl();
+    openSpy.mockClear();
+    key({ key: "Enter" });
+    expect(openSpy).toHaveBeenCalledWith(url, "_blank", "noopener");
+  });
+
+  it("⏎ fills from the list, the next ⏎ opens the result", () => {
+    reopen();
+    type("from:서지");
+    expect($("nsp-ac").hidden).toBe(false);
+    openSpy.mockClear();
+    key({ key: "Enter" });
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(input().value).toMatch(/^from:\S.* $/);
+    expect($("nsp-ac").hidden).toBe(true);
+    const url = firstUrl();
+    key({ key: "Enter" });
+    expect(openSpy).toHaveBeenCalledWith(url, "_blank", "noopener");
+  });
+
+  it("list open: ⌘⏎ is the results' new tab (palette stays), not a fill", () => {
+    reopen();
+    type("from:서");
+    expect($("nsp-ac").hidden).toBe(false);
+    const url = firstUrl();
+    openSpy.mockClear();
+    key({ key: "Enter", metaKey: true });
+    expect(openSpy).toHaveBeenCalledWith(url, "_blank", "noopener");
+    expect(input().value).toBe("from:서");
+    expect($("nsp").classList.contains("open")).toBe(true);
+    expect($("nsp-ac").hidden).toBe(true);
+  });
+
+  it("list open: ⇧⏎ is the results' 대시보드에서 보기 (not on this page → the palette's detail view)", async () => {
+    reopen();
+    type("from:서");
+    expect($("nsp-ac").hidden).toBe(false);
+    const title = document.querySelector("#nsp-res .it.sel .tt")!.textContent;
+    openSpy.mockClear();
+    key({ key: "Enter", shiftKey: true });
+    expect(input().value).toBe("from:서");
+    expect($("nsp").classList.contains("open")).toBe(false); // navigate() closed it
+    await vi.waitFor(() => expect(document.querySelector("#nsp .dv h2")?.textContent).toBe(title), { timeout: 4000, interval: 50 });
+    expect(openSpy).not.toHaveBeenCalled();
+    (window as any).NedSearch.close();
   });
 });

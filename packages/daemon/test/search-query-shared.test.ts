@@ -58,15 +58,26 @@ describe.each(SIDES)("parseQuery (%s)", (_n, s) => {
     expect(p("#12").filters.channel).toEqual([]);
     expect(p("#12").terms).toEqual(["#12"]);
     expect(p("#").terms).toEqual(["#"]);
+    expect(p("\"#foo\"")).toMatchObject({ terms: ["#foo"], chips: [], active: false }); // quoted → plain word
   });
 
-  it("days / after / before — local dates, no year → this year or last year if in the future", () => {
+  it("days / after / before — local dates, no year → this year unless > 60 days ahead (then last year)", () => {
     expect(p("days:7").filters.after).toBe(NOW - 7 * D);
     expect(p("after:2026-11-01").filters.after).toBe(day(2026, 11, 1));
     expect(p("after:11/1").filters.after).toBe(day(2026, 11, 1));
     expect(p("before:03/05").filters.before).toBe(day(2026, 3, 5));
-    expect(p("after:12/25").filters.after).toBe(day(2025, 12, 25)); // future this year → last year
-    expect(p("after:11/18").filters.after).toBe(day(2026, 11, 18)); // today is not the future
+    expect(p("after:11/18").filters.after).toBe(day(2026, 11, 18));
+    // near future stays this year
+    expect(p("before:11/19").filters.before).toBe(day(2026, 11, 19));
+    expect(p("source:일정 after:12/1").filters.after).toBe(day(2026, 12, 1));
+    expect(p("after:12/25").filters.after).toBe(day(2026, 12, 25)); // 37 days ahead
+    // typed in January: a date far ahead this year means last year's
+    const JAN = new Date(2026, 0, 10, 9, 0, 0).getTime();
+    expect(s.parseQuery("after:12/31", JAN).filters.after).toBe(day(2025, 12, 31));
+    expect(s.parseQuery("after:12/31", JAN).chips[0].label).toBe("2025-12-31 이후");
+    expect(s.parseQuery("before:3/1", JAN).filters.before).toBe(day(2026, 3, 1)); // 50 days ahead
+    expect(s.parseQuery("before:3/15", JAN).filters.before).toBe(day(2025, 3, 15)); // 64 days ahead
+    expect(s.parseQuery("after:2026-12-31", JAN).filters.after).toBe(day(2026, 12, 31)); // explicit year: as typed
     expect(p("after:11/1 after:11/10").filters.after).toBe(day(2026, 11, 10)); // tighter wins
     expect(p("after:11/1").chips[0].label).toBe("11/1 이후");
     expect(p("after:2025-12-25").chips[0].label).toBe("2025-12-25 이후");
@@ -197,6 +208,23 @@ describe.each(SIDES)("autocomplete (%s)", (_n, s) => {
     expect(s.acSuggest({ kind: "source", key: "source", prefix: "", start: 0, end: 7, hash: false }, []).length).toBe(8);
   });
 
+  it("acSettled: a complete value keeps the list shut (alias, or exactly one suggestion even with longer ones)", () => {
+    const ctx = (q: string) => s.acContext(q, q.length)!;
+    const people = [...CANDS, { type: "slack", ts: 0, people: ["서지수"] }];
+    const settled = (q: string, cands: unknown[] = people) => s.acSettled(ctx(q), s.acSuggest(ctx(q), cands));
+    expect(settled("from:서지수")).toBe(true); // 서지수/팀X also offered
+    expect(settled("from:서지")).toBe(false);
+    expect(settled("from:\"서 지수")).toBe(true); // spaces ignored, like the filter
+    expect(settled("from:@SEO-JISU")).toBe(true);
+    expect(settled("source:slack")).toBe(true); // = 슬랙
+    expect(settled("in:GH")).toBe(true);
+    expect(settled("source:슬")).toBe(false);
+    expect(settled("#팀-매출")).toBe(true);
+    expect(settled("channel:#팀-매출")).toBe(true);
+    expect(settled("#팀")).toBe(false);
+    expect(settled("from:")).toBe(false);
+  });
+
   it("acApply quotes values with spaces; removeChip drops one token", () => {
     const q = "매출 from:서 #x";
     const ctx = s.acContext(q, 9)!;
@@ -212,6 +240,7 @@ describe("server and client agree on the whole case table", () => {
   const QUERIES = [
     "from:서지수", "from:ㅅㅈㅅ", "from:\"서 지수\"", "source:슬랙 from:서지수 매출", "#팀-매출", "channel:팀 is:done", "is:open", "is:done",
     "is:mine", "days:2", "after:11/15", "before:11/1", "매출", "ㅁㅊ", "foo:bar", "source:없는것 매출", "in:gh", "source:할일 is:open", "#12",
+    "after:12/1", "before:11/19", "\"#팀-매출\"",
   ];
   it.each(QUERIES)("%s", (q) => {
     expect(client.parseQuery(q, NOW)).toEqual(server.parseQuery(q, NOW));

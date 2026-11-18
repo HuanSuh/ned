@@ -598,8 +598,9 @@ detail `이력 · M/D · …`, `tab: home` / `anchor: card:<slack|mail|jira|gh|c
 
 **검색 키**: `GET /api/search?q=` 는 `src/search-query.ts`(`parseQuery` → 단어 + 필터, `runQuery` = 필터 → 점수 → 순위; 키만 있으면 최신순)로 거른다 —
 대시보드 `public/app/features/searchq.js` 가 그 복제(`test/search-query-shared.test.ts`). 후보(`Cand`)는 텍스트 가중치 `fields` 와 별도로
-`src`·`people`(Slack 보낸 이·메일 발신자·GitHub 작성자·Jira 담당자/보고자가 있으면)·`channel`·`ts`·`done`(주의 항목 `reviewed_at`, 할 일 `done`,
-소스 항목 ✓ = `review-keys.ts` 판정)·`mine`(내 PR `my_pr_*`, Slack 보낸 이 "나")를 가진다. `from:` 은 `people` 만 본다.
+`src`·`people`(Slack 보낸 이·메일 발신자·GitHub 작성자 — Jira 는 agenda 에 사람 필드가 없어 없음)·`channel`·`ts`·`done`(주의 항목 `reviewed_at`, 할 일 `done`,
+소스 항목 ✓ = `review-keys.ts` 판정)·`mine`(내 PR `my_pr_*`, Slack 보낸 이 "나")를 가진다. `from:` 은 `people` 만 본다. 이 필드들은 `fields` 처럼
+내부용이라 응답 히트에서 뺀다.
 
 ## Obsidian 아카이브 (`src/archive.ts`, `src/vault.ts`, `src/outputs.ts`)
 
