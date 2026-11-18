@@ -60,6 +60,14 @@ details.msess[open] .rack { max-height: 40vh; overflow: auto; }
 .ctx .h { font: 11.5px var(--mono); color: var(--faint); margin-right: 8px; }
 .ctx ul { margin: 0; padding-left: 18px; color: var(--dim); } .ctx li { margin: 4px 0; }
 .ctx li .d { color: var(--faint); font-size: 12.5px; }
+/* detail text through mdLite (tabs/inbox.js mdBody): inline code / ``` blocks / GFM tables (.cm-tbl rules + copy
+ * buttons live in comms.css). .body keeps pre-wrap for plain text; the block widgets reset it. Theme tokens only. */
+.md-lite a { color: var(--info); }
+.md-lite code { font: 12px var(--mono); background: var(--hover); padding: 0 4px; border-radius: 4px; }
+.md-lite .cm-code { white-space: normal; }
+.md-lite pre { margin: 0; padding: 8px 36px 8px 8px; background: var(--hover); border-radius: 6px; overflow: auto; white-space: pre; }
+.md-lite pre code { background: none; padding: 0; }
+.ctx li .d.md-lite .cm-tbl table { color: var(--dim); }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; font-size: 13px; color: var(--dim); }
 .kv dt { color: var(--faint); } .kv dd { margin: 0; word-break: break-word; }
 pre.raw { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: 12px var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; margin: 6px 0 0; color: var(--dim); }
