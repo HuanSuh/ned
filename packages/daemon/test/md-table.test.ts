@@ -5,9 +5,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 // @ts-expect-error — plain browser ES module (public/app), no types
-import { mdLite, messagesHtml, COMMS_VOICE, splitRow, tableAligns, tableTsv, plainInline } from "../public/app/features/chat-core.js";
+import { mdLite, messagesHtml, COMMS_VOICE, splitRow, tableAligns, tableTsv, tsvCell, plainInline } from "../public/app/features/chat-core.js";
 // @ts-expect-error — plain browser ES module (public/app), no types
-import { bindCodeCopy, codeOf } from "../public/app/features/code-copy.js";
+import { COPIED_MS, bindCodeCopy, codeOf } from "../public/app/features/code-copy.js";
 // @ts-expect-error — plain browser ES module (public/app), no types
 import { renderOutputCard } from "../public/app/features/chat-output.js";
 
@@ -126,6 +126,44 @@ describe("mdLite tables", () => {
     expect(cells(dom(done))).toEqual(["1", "2"]);
   });
 
+  it("live bubble: a finished line (raw stream ends with \\n) joins at once, even though parseOutputBlock trims it", () => {
+    const live = messagesHtml([], COMMS_VOICE.ned, { text: "| a | b |\n|---|---|\n| 1 | 2 |\n" });
+    expect(cells(dom(live))).toEqual(["1", "2"]);
+    // delimiter line done → header-only table right away, not one line late
+    expect(dom(messagesHtml([], COMMS_VOICE.ned, { text: "| a | b |\n|---|---|\n" })).querySelector("table")).not.toBeNull();
+  });
+
+  it("one blank line right before / after a table leaves no extra <br>", () => {
+    expect(mdLite(`앞\n\n${BASIC}\n\n뒤`)).toMatch(/^앞<div class="cm-code cm-tablewrap"[\s\S]*<\/table><\/div><\/div>뒤$/);
+    expect(mdLite(`앞\n${BASIC}\n뒤`)).toMatch(/^앞<div[\s\S]*<\/div>뒤$/);
+    // two blank lines still keep one break
+    expect(mdLite(`앞\n\n\n${BASIC}`)).toMatch(/^앞<br><div/);
+  });
+
+  it("CRLF input renders the same as LF", () => {
+    const crlf = `앞\r\n${BASIC.replace(/\n/g, "\r\n")}\r\n뒤`;
+    expect(mdLite(crlf)).toBe(mdLite(`앞\n${BASIC}\n뒤`));
+    expect(cells(dom(mdLite(crlf)))).toEqual(["샘플 계획", "진행", "사람A", "대기"]);
+  });
+
+  it("a table right after a closing fence", () => {
+    const d = dom(mdLite(`\`\`\`\ncode | x\n\`\`\`\n${BASIC}\n끝`));
+    expect(d.querySelector("pre code")!.textContent).toBe("code | x");
+    expect(cells(d)).toEqual(["샘플 계획", "진행", "사람A", "대기"]);
+    expect(d.lastChild!.textContent).toBe("끝");
+  });
+
+  it("mentions + a table + a mention-bearing code block in one answer: table → TSV alt, code → <@U…> alt", () => {
+    const d = dom(mdLite(`${BASIC}\n\`\`\`\n@사람A님 확인 부탁드려요\n\`\`\``, { mentions: { "@사람A": "<@U0TESTPA01>" } }));
+    const alts = [...d.querySelectorAll<HTMLElement>(".cm-copy-alt")];
+    expect(alts.map((a) => a.textContent)).toEqual(["TSV 복사", "<@U…> 포함 복사"]);
+    expect(alts[0].dataset.alt).toBe("이름\t상태\n샘플 계획\t진행\n사람A\t대기"); // table text is never mention-replaced
+    expect(alts[1].dataset.alt).toBe("<@U0TESTPA01>님 확인 부탁드려요");
+    const [tb, cb] = [...d.querySelectorAll<HTMLButtonElement>(".cm-copy")];
+    expect(codeOf(tb)).toBe(BASIC);
+    expect(codeOf(cb)).toBe("@사람A님 확인 부탁드려요");
+  });
+
   it("output card (renderOutputCard with mdLite) renders tables too", () => {
     const html = renderOutputCard({ block: { kind: "note", title: "샘플 계획", markdown: BASIC } }, mdLite);
     expect(dom(html).querySelector(".co-md .cm-tbl table")).not.toBeNull();
@@ -140,6 +178,36 @@ describe("table copy", () => {
     expect(tableTsv([["a", "b"], ["1\t2", "x\ny"]])).toBe("a\tb\n1 2\tx y");
     const d = dom(mdLite("| 이름 | 링크 |\n|:--|--:|\n| **사람A** | [PR](https://example.com/1) |\n| `코드` |"));
     expect((d.querySelector(".cm-copy-alt") as HTMLElement).dataset.alt).toBe("이름\t링크\n사람A\tPR\n코드\t");
+  });
+
+  it("TSV: formula-looking cells get a leading ', cells with \" are quoted; plain numbers stay numbers", () => {
+    expect(tsvCell("=HYPERLINK(\"x\")")).toBe("\"'=HYPERLINK(\"\"x\"\")\"");
+    expect(tsvCell("+1+1")).toBe("'+1+1");
+    expect(tsvCell("-cmd")).toBe("'-cmd");
+    expect(tsvCell("@SUM(A1)")).toBe("'@SUM(A1)");
+    expect(tsvCell("`=1+2`")).toBe("'=1+2"); // after inline marks are stripped
+    expect(tsvCell("-5")).toBe("-5");
+    expect(tsvCell("+3.5%")).toBe("+3.5%");
+    expect(tsvCell("-1,200")).toBe("-1,200");
+    expect(tsvCell("\"인용\" 끝")).toBe("\"\"\"인용\"\" 끝\"");
+    expect(tsvCell("보통 글")).toBe("보통 글");
+    expect(tableTsv([["a", "b"], ["=1", "x"]])).toBe("a\tb\n'=1\tx");
+  });
+
+  it("copy ✓ then back to the button's own label (표 복사 (마크다운)), not a generic one", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    Object.defineProperty(window.navigator, "clipboard", { value: { writeText: vi.fn(async () => {}) }, configurable: true });
+    document.body.innerHTML = `<div class="bb">${mdLite(BASIC)}</div>`;
+    bindCodeCopy(document);
+    const btn = document.querySelector<HTMLButtonElement>(".cm-tablewrap .cm-copy")!;
+    btn.click();
+    await vi.waitFor(() => expect(btn.getAttribute("aria-label")).toBe("복사됨"));
+    expect(btn.title).toBe("복사됨");
+    vi.advanceTimersByTime(COPIED_MS);
+    expect(btn.getAttribute("aria-label")).toBe("표 복사 (마크다운)");
+    expect(btn.title).toBe("표 복사 (마크다운)");
+    expect(btn.classList.contains("ok")).toBe(false);
+    vi.useRealTimers();
   });
 
   it("main button copies the markdown source, the alt copies TSV (delegated handler)", async () => {
@@ -162,6 +230,9 @@ describe("table copy", () => {
     expect(rule).toMatch(/overflow-x:\s*auto/);
     expect(rule).toMatch(/max-width:\s*100%/);
     expect(css).toMatch(/\.cm-tbl table\s*\{[^}]*overflow-wrap:\s*normal/);
+    // copy buttons get their own row above the table (never over header cells), and aren't sticky there
+    expect(css).toMatch(/\.cm-tablewrap \.cm-tbl\s*\{[^}]*margin-top:\s*\d+px/);
+    expect(css).toMatch(/\.cm-tablewrap > \.cm-copy, \.cm-tablewrap > \.cm-copym\s*\{[^}]*position:\s*static/);
     // no hard-coded colors in the table rules — theme tokens only
     const tbl = css.split("\n").filter((l) => l.includes(".cm-tbl")).join("\n");
     expect(tbl).not.toMatch(/#[0-9a-f]{3,6}\b/i);

@@ -146,7 +146,11 @@
 /* GFM table (chat-core.js tableHtml): same copy button / "TSV 복사" as code blocks; only .cm-tbl scrolls sideways so the
  * bubble's text keeps wrapping. The bubble's overflow-wrap:anywhere would squeeze columns to one character, so the
  * table opts out (keep-all keeps Korean words whole). Theme tokens only — works for every theme / persona. */
-.cm-tbl { overflow-x: auto; max-width: 100%; padding-right: 34px; -webkit-overflow-scrolling: touch; }
+.cm-tbl { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
+/* The copy icon + "TSV 복사" get their own row above the table (never over the header cells); not sticky, so a
+ * tall table scrolling past doesn't drag them over the rows. Code blocks keep the overlay. */
+.cm-tablewrap .cm-tbl { margin-top: 30px; }
+.cm-tablewrap > .cm-copy, .cm-tablewrap > .cm-copym { position: static; margin-top: 0; }
 .cm-tbl table { border-collapse: collapse; font-size: 12.5px; line-height: 1.45; overflow-wrap: normal; word-break: keep-all; color: var(--fg); }
 .cm-tbl th, .cm-tbl td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
 .cm-tbl th { font-weight: 700; background: var(--hover); white-space: nowrap; }

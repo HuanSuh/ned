@@ -166,8 +166,18 @@ export function tableAligns(line) {
 }
 /** Inline markdown → plain text (for TSV): `code` / [text](url) / **bold** lose their marks; bare urls stay. */
 export const plainInline = (s) => String(s).replace(/`([^`\n]+)`|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|\*\*([^*\n]+)\*\*/g, (m, c, t, _u, b) => c ?? t ?? b ?? m);
-/** Rows (header first, each already cut/filled to the header width) → TSV; tabs / newlines inside a cell become spaces. */
-export const tableTsv = (rows) => rows.map((r) => r.map((c) => plainInline(c).replace(/[\t\r\n]+/g, " ")).join("\t")).join("\n");
+/**
+ * One TSV cell: tabs / newlines → spaces; a cell starting with = + - @ (not a plain number) gets a leading ' so a
+ * spreadsheet doesn't run it as a formula (cells can carry model / read-message text); a cell with " is quoted
+ * ("…", inner "" doubled) so the paste parser can't swallow the following tabs / rows.
+ */
+export function tsvCell(c) {
+  let s = plainInline(c).replace(/[\t\r\n]+/g, " ");
+  if (/^[=+\-@]/.test(s) && !/^[+-]?\d[\d,]*(\.\d+)?%?$/.test(s)) s = "'" + s;
+  return s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
+}
+/** Rows (header first, each already cut/filled to the header width) → TSV (tsvCell per cell). */
+export const tableTsv = (rows) => rows.map((r) => r.map(tsvCell).join("\t")).join("\n");
 /**
  * A table block + the code-block copy button (features/code-copy.js): main copy = the table's markdown source
  * (`data-md`), "TSV 복사" (.cm-copy-alt `data-alt`) = tab-separated plain text for spreadsheets / Confluence.
@@ -203,16 +213,17 @@ function textHtml(p, openTail = false) {
     if (!header || header.length !== aligns.length) { buf.push(head); continue; }
     let j = i + 2;
     while (j < end && lines[j].trim() && hasPipe(lines[j])) j++;
+    if (buf.length && !buf[buf.length - 1].trim()) buf.pop(); // the table is a block: one blank line before it adds nothing
     flush();
     out.push(tableHtml(lines.slice(i, j).join("\n"), header, aligns, lines.slice(i + 2, j).map(splitRow)));
-    i = j - 1;
+    i = j < lines.length && !lines[j].trim() ? j : j - 1; // …nor one right after it
   }
   flush();
   return out.join("");
 }
 /** `live`: the streaming answer — an unfinished last line stays text (see textHtml). */
 export function mdLite(text, { mentions = null, live = false } = {}) {
-  const src = String(text ?? "");
+  const src = String(text ?? "").replace(/\r\n?/g, "\n");
   const parts = src.split(/```[^\n`]*\n?/);
   const tail = live && !src.endsWith("\n");
   return parts.map((p, i) => (i % 2 ? codeBlockHtml(p.replace(/\n$/, ""), mentions) : textHtml(p, tail && i === parts.length - 1))).join("");
@@ -286,7 +297,8 @@ export function messagesHtml(msgs, voice, live = null, timeFn = () => "", hello 
   const lo = live ? parseOutputBlock(live.text) : null; // a ned-output block shows as a 저장 카드 once saved
   const lp = live ? parseActionBlock(lo.text) : null; // a proposal shows as a card once the answer is done
   // Nothing after the text yet (no ned-output / ned-action block started) → its last line may be half-typed.
-  const open = live && !(lo.block || lo.pending || lp.block || lp.pending);
+  // Judged on the raw stream: parseOutputBlock trims, so lp.text never ends with "\n" even when the line is done.
+  const open = live && !(lo.block || lo.pending || lp.block || lp.pending) && !/\n$/.test(live.text ?? "");
   if (live) html += `<div class="cm-msg ned live"><div class="bb">${lp.text ? mdLite(lp.text, { live: open }) : ""}${lo.block || lo.pending ? `<div class="cm-out s-pending">📎 정리 결과 저장 준비 중…</div>` : ""}${lp.block || lp.pending ? `<div class="cm-act s-pending">⚡ 실행 제안 준비 중…</div>` : ""}<div class="cm-think"><span class="spin"></span>${esc(live.tool ? `${voice.thinking} ${live.tool}` : voice.thinking)}</div></div></div>`;
   return html;
 }
