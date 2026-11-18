@@ -11,6 +11,7 @@ import { PF, PILL_KINDS, pillRow, srcOn } from "../ui/chips.js";
 import { EVENT_KO, KIND_ICON, KIND_KO, STATUS_KO, STATUS_LED, iconBtn, openIcon, reviewIcon } from "../ui/icons.js";
 import { toast } from "../ui/toast.js";
 import { $, dayLabel, esc, hhmm, lsSet, mdhm, rel, safeUrl } from "../util.js";
+import { mdLite } from "../features/chat-core.js";
 
 // ---------- inbox model ----------
 export function model() {
@@ -120,11 +121,17 @@ export function openDetail() { $("detail").classList.add("open"); }
 export function closeDetail() { $("detail").classList.remove("open"); }
 
 // ---------- detail ----------
+/**
+ * Multi-line text in the detail pane (attention / briefing item `detail` — model or read-message text): the chat's
+ * markdown-lite (chat-core.js mdLite: escaped; links, `code`, **bold**, ``` blocks and GFM tables with the same copy
+ * buttons, delegated by code-copy.js). One-line list rows / titles stay plain esc().
+ */
+export const mdBody = (s, cls = "body") => `<div class="${cls} md-lite">${mdLite(s)}</div>`;
 export function sectionList(title, xs) {
   if (!xs || !xs.length) return "";
   return `<h3>${esc(title)}</h3><ul>${xs.map((x) => {
       const u = safeUrl(x.url);
-      return `<li>${KIND_ICON[x.kind] ? KIND_ICON[x.kind] + " " : ""}${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(x.title)}</a>` : esc(x.title)}${x.detail ? `<div class="d">${esc(x.detail)}</div>` : ""}</li>`;
+      return `<li>${KIND_ICON[x.kind] ? KIND_ICON[x.kind] + " " : ""}${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(x.title)}</a>` : esc(x.title)}${x.detail ? mdBody(x.detail, "d") : ""}</li>`;
     }).join("")}</ul>`;
 }
 export const bfLabel = (b) => `${b.type === "daily" ? "아침 브리핑" : "점검"}${bfFailed(b) ? " 실패" : ""} · ${dayLabel(b.ts)} ${hhmm(b.ts)}`;
@@ -188,7 +195,7 @@ export function renderDetail(it, m) {
     html = `<div class="dwrap">${back}
         <div class="crumb"><span class="stk ${it.att ? "a" : it.label === "참고" ? "" : "b"}">${it.att ? "행동 필요" : esc(it.label)}</span><span>${KIND_ICON[it.kind] || ""} ${esc(KIND_KO[it.kind] || it.kind)}</span><span>· ${rel(it.ts)}</span></div>
         <h2>${esc(it.title)}</h2>
-        ${it.detail ? `<div class="body">${esc(it.detail)}</div>` : ""}
+        ${it.detail ? mdBody(it.detail) : ""}
         <div class="dacts">
           ${it.sess ? draftBtn("session", sessionRef(it.sess), it.att?.id) : it.kind === "slack" ? draftBtn("slack", slackRef(it), it.att?.id) : it.kind === "email" ? draftBtn("email", mailRef(it), it.att?.id) : ""}
           ${openIcon(it.url)}${it.att ? reviewIcon(it.att) + iconBtn("close", "닫기 — 처리 완료로 치우기 (e)", { attrs: 'id="done"' }) : it.rk ? reviewIcon({ id: it.rk, reviewed_at: it.rat }) : ""}
