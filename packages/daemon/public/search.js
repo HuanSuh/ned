@@ -3,7 +3,13 @@
  * fetches the same APIs the page uses (cached 30 s), searches them locally on every keystroke, and merges
  * GET /api/search?q= (all briefings, 30 days of events, drafts) deduped on type+id. Styles follow the page's CSS
  * variables, so personas and light/dark apply. Navigation drives the page through its own DOM (hash routes, tab
- * buttons, rows, cards) because the page keeps its state private. */
+ * buttons, rows, cards) because the page keeps its state private.
+ * 검색 키 (from: source: #채널 days: after: before: is:) — parser / filters / ranking / autocomplete live in
+ * app/features/searchq.js (copy of src/search-query.ts), so the palette and GET /api/search give the same hits.
+ * Loaded as a module (index.html: <script type="module" src="/search.js">). */
+import { acApply, acContext, acSettled, acSuggest, norm, parseQuery, removeChip, runQuery } from "./app/features/searchq.js";
+import { activityMs, reviewedAt, srcKey } from "./app/features/revkeys.js";
+
 (() => {
   "use strict";
   if (window.__nedSearch) return;
@@ -41,34 +47,7 @@
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } }
   const editable = (t) => !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
-  // ---------- matching (mirrors src/search.ts) ----------
-  const CHO = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ";
-  const norm = (s) => String(s == null ? "" : s).normalize("NFC").toLowerCase();
-  function chosung(s) { let o = ""; for (const ch of s) { const c = ch.charCodeAt(0); o += c >= 0xac00 && c <= 0xd7a3 ? CHO[Math.floor((c - 0xac00) / 588)] : ch; } return o; }
-  const isCho = (t) => /^[ㄱ-ㅎ]+$/.test(t);
-  const WORD_SEP = /[\s\-_/#@:.,()[\]<>"'·|]/;
-  function tokenScore(text, tok) {
-    if (!text) return 0;
-    if (text.startsWith(tok)) return 6;
-    let i = text.indexOf(tok);
-    if (i >= 0) { for (; i >= 0; i = text.indexOf(tok, i + 1)) if (WORD_SEP.test(text[i - 1] ?? " ")) return 4; return 2; }
-    if (isCho(tok) && chosung(text).includes(tok)) return 1.5;
-    return 0;
-  }
-  const tokenize = (q) => norm(q).split(/\s+/).filter(Boolean).slice(0, 8);
-  function scoreFields(fields, toks, ts, now) {
-    if (!toks.length) return 0;
-    const f = fields.map(([t, w]) => [norm(t), w]).filter(([t]) => t);
-    let total = 0;
-    for (const tok of toks) {
-      let best = 0;
-      for (const [t, w] of f) best = Math.max(best, tokenScore(t, tok) * w);
-      if (!best) return 0;
-      total += best;
-    }
-    if (ts) { const days = Math.abs(now - ts) / 86_400_000; total += days < 1 ? 2 : days < 7 ? 1 : 0; }
-    return total;
-  }
+  // ---------- matching: app/features/searchq.js (parseQuery → terms + filters, runQuery = filter + score + rank) ----------
   /** <mark> each token occurrence in `text` (substring matches only; 초성 matches aren't highlighted). */
   function hl(text, toks) {
     const s = String(text == null ? "" : text), n = norm(s);
@@ -132,21 +111,29 @@
     return data.loading;
   }
 
+  // Structured fields for the 검색 키 filters — same values as src/search.ts candidates(). Jira rows have no person
+  // fields (담당자·보고자) in the agenda data → no people, not a from: target.
+  const ATT_SRC = { email: "mail", slack: "slack", jira: "jira", github: "github", calendar: "calendar", session: "session" };
+  const ME = "나", MY_PR = /^my_pr/;
+  const one = (v) => (typeof v === "string" && v.trim() ? [v] : []);
+
   /** Same ids / anchors as src/search.ts so local and server hits dedupe. */
   function buildCands(d) {
     const out = [];
     const st = d.state || {}, a = d.agenda || {}, src = (d.config && d.config.sources) || a.sources || {};
     const on = (k) => src[k] !== false;
-    for (const x of st.attention || []) out.push({ type: "attention", id: x.id, title: x.title, detail: x.detail || "", ts: x.ts, url: safeUrl(x.url), kind: x.kind, tab: "inbox", anchor: `row:${x.id}`, fields: [[x.title, 3], [x.kind, 2], [x.detail, 1]] });
-    for (const s of st.sessions || []) out.push({ type: "session", id: s.id, title: s.worktree, detail: s.last_summary || s.last_prompt || STATUS_KO[s.status] || s.status, ts: s.last_event_ts, url: null, kind: "session", tab: "inbox", anchor: `session:${s.id}`, status: s.status, fields: [[s.worktree, 3], [s.status, 2], [STATUS_KO[s.status], 2], [s.cwd, 1], [s.last_prompt, 1], [s.last_summary, 1]] });
-    if (on("calendar")) for (const c of a.calendar || []) out.push({ type: "calendar", id: c.id, title: c.title, detail: [c.all_day ? "종일" : isoTs(c.start) ? hhmm(isoTs(c.start)) : "", c.location].filter(Boolean).join(" · "), ts: isoTs(c.start), url: safeUrl(c.url) || safeUrl(c.meet_url), kind: "calendar", tab: "home", anchor: "card:cal", fields: [[c.title, 3], [c.location, 1]] });
-    if (on("jira")) for (const j of a.jira || []) out.push({ type: "jira", id: j.key, title: j.title, detail: [j.key, j.status, j.priority, j.due ? `마감 ${j.due}` : ""].filter(Boolean).join(" · "), ts: isoTs(j.updated), url: safeUrl(j.url), kind: "jira", tab: "home", anchor: "card:jira", fields: [[j.title, 3], [j.key, 3], [j.status, 1], [j.priority, 1]] });
-    if (on("github")) for (const g of a.github || []) out.push({ type: "github", id: `${g.repo}#${g.number}`, title: g.title, detail: `${g.repo}#${g.number} · @${g.author}`, ts: isoTs(g.updated), url: safeUrl(g.url), kind: "github", tab: "home", anchor: "card:gh", fields: [[g.title, 3], [`${g.repo}#${g.number}`, 2], [g.author, 2], [g.reason, 1]] });
+    const marks = a.reviewed || {};
+    const revDone = (kind, x) => reviewedAt(marks, srcKey(kind, x), activityMs(kind, x)) > 0;
+    for (const x of st.attention || []) out.push({ type: "attention", id: x.id, title: x.title, detail: x.detail || "", ts: x.ts, url: safeUrl(x.url), kind: x.kind, tab: "inbox", anchor: `row:${x.id}`, src: ATT_SRC[x.kind] || "attention", done: !!x.reviewed_at, fields: [[x.title, 3], [x.kind, 2], [x.detail, 1]] });
+    for (const s of st.sessions || []) out.push({ type: "session", id: s.id, title: s.worktree, detail: s.last_summary || s.last_prompt || STATUS_KO[s.status] || s.status, ts: s.last_event_ts, url: null, kind: "session", tab: "inbox", anchor: `session:${s.id}`, status: s.status, src: "session", fields: [[s.worktree, 3], [s.status, 2], [STATUS_KO[s.status], 2], [s.cwd, 1], [s.last_prompt, 1], [s.last_summary, 1]] });
+    if (on("calendar")) for (const c of a.calendar || []) out.push({ type: "calendar", id: c.id, title: c.title, detail: [c.all_day ? "종일" : isoTs(c.start) ? hhmm(isoTs(c.start)) : "", c.location].filter(Boolean).join(" · "), ts: isoTs(c.start), url: safeUrl(c.url) || safeUrl(c.meet_url), kind: "calendar", tab: "home", anchor: "card:cal", src: "calendar", fields: [[c.title, 3], [c.location, 1]] });
+    if (on("jira")) for (const j of a.jira || []) out.push({ type: "jira", id: j.key, title: j.title, detail: [j.key, j.status, j.priority, j.due ? `마감 ${j.due}` : ""].filter(Boolean).join(" · "), ts: isoTs(j.updated), url: safeUrl(j.url), kind: "jira", tab: "home", anchor: "card:jira", src: "jira", done: revDone("jira", j), fields: [[j.title, 3], [j.key, 3], [j.status, 1], [j.priority, 1]] });
+    if (on("github")) for (const g of a.github || []) out.push({ type: "github", id: `${g.repo}#${g.number}`, title: g.title, detail: `${g.repo}#${g.number} · @${g.author}`, ts: isoTs(g.updated), url: safeUrl(g.url), kind: "github", tab: "home", anchor: "card:gh", src: "github", people: g.author ? [g.author] : [], done: revDone("github", g), mine: MY_PR.test(g.reason || "") || undefined, fields: [[g.title, 3], [`${g.repo}#${g.number}`, 2], [g.author, 2], [g.reason, 1]] });
     if (on("gmail") && a.mail) {
       const seen = new Set();
       for (const m of [...(a.mail.items || []).map((x) => ({ id: x.id, from: x.from, subject: x.subject, snip: x.why || x.snippet, ts: x.received, url: x.url })), ...(a.mail.all || []).map((x) => ({ id: x.id, from: x.from, subject: x.subject, snip: "", ts: x.ts, url: x.url }))]) {
         if (seen.has(m.id)) continue; seen.add(m.id);
-        out.push({ type: "mail", id: m.id, title: m.subject || "(제목 없음)", detail: [m.from, m.snip].filter(Boolean).join(" · "), ts: isoTs(m.ts), url: safeUrl(m.url), kind: "email", tab: "home", anchor: "card:mail", fields: [[m.subject, 3], [m.from, 2], [m.snip, 1]] });
+        out.push({ type: "mail", id: m.id, title: m.subject || "(제목 없음)", detail: [m.from, m.snip].filter(Boolean).join(" · "), ts: isoTs(m.ts), url: safeUrl(m.url), kind: "email", tab: "home", anchor: "card:mail", src: "mail", people: m.from ? [m.from] : [], done: revDone("email", m), fields: [[m.subject, 3], [m.from, 2], [m.snip, 1]] });
       }
     }
     if (on("slack") && a.slack) {
@@ -155,7 +142,7 @@
         const id = x.url || `${x.channel}:${x.ts}`;
         if (seen.has(id)) continue; seen.add(id);
         const th = x.thread || {}; // followed thread: summary + latest reply are searchable too
-        out.push({ type: "slack", id, title: x.text || "(내용 없음)", detail: [`${x.channel} · ${x.from}${x.reason === "group" ? " · 그룹 멘션" : ""}`, th.thread_summary].filter(Boolean).join(" — "), ts: isoTs(x.ts), url: safeUrl(x.url), kind: "slack", tab: "home", anchor: "card:slack", fields: [[x.text, 3], [x.channel, 2], [x.from, 2], [th.thread_summary, 2], [th.last_reply_text, 1], [th.last_reply_from, 1]] });
+        out.push({ type: "slack", id, title: x.text || "(내용 없음)", detail: [`${x.channel} · ${x.from}${x.reason === "group" ? " · 그룹 멘션" : ""}`, th.thread_summary].filter(Boolean).join(" — "), ts: isoTs(x.ts), url: safeUrl(x.url), kind: "slack", tab: "home", anchor: "card:slack", src: "slack", people: one(x.from), channel: x.channel, done: revDone("slack", x), mine: x.from === ME || undefined, fields: [[x.text, 3], [x.channel, 2], [x.from, 2], [th.thread_summary, 2], [th.last_reply_text, 1], [th.last_reply_from, 1]] });
       }
       // 팔로업 channel highlights → their own card (card:watch:<channel>), or the Slack card's fold when dashboard.watch_cards is off.
       const wOff = d.config && d.config.dashboard && d.config.dashboard.watch_cards === false;
@@ -163,24 +150,24 @@
         const id = x.url || `${w.channel}:${x.ts}`;
         if (seen.has(id)) continue; seen.add(id);
         out.push({ type: "slack", id, title: x.text || "(내용 없음)", detail: `${w.channel} · ${x.from}${x.needs_me ? " · 나한테" : ""}`, ts: isoTs(x.ts), url: safeUrl(x.url), kind: "slack", tab: "home",
-          anchor: wOff ? "card:slack" : `card:watch:${String(w.channel || "").replace(/^#+/, "")}`, fields: [[x.text, 3], [w.channel, 2], [x.from, 2], [w.summary, 1]] });
+          anchor: wOff ? "card:slack" : `card:watch:${String(w.channel || "").replace(/^#+/, "")}`, src: "slack", people: one(x.from), channel: w.channel, done: revDone("slack", x), mine: x.from === ME || undefined, fields: [[x.text, 3], [w.channel, 2], [x.from, 2], [w.summary, 1]] });
       }
     }
-    for (const t of Array.isArray(d.todos) ? d.todos : []) out.push({ type: "todo", id: t.id, title: t.title, detail: [t.done ? "완료" : "", t.due ? `마감 ${t.due}` : "", t.note || ""].filter(Boolean).join(" · "), ts: t.created_at, url: null, kind: "me", tab: "home", anchor: "card:todo", done: !!t.done, fields: [[t.title, 3], [t.note, 1]] });
+    for (const t of Array.isArray(d.todos) ? d.todos : []) out.push({ type: "todo", id: t.id, title: t.title, detail: [t.done ? "완료" : "", t.due ? `마감 ${t.due}` : "", t.note || ""].filter(Boolean).join(" · "), ts: t.created_at, url: null, kind: "me", tab: "home", anchor: "card:todo", src: "todo", done: !!t.done, fields: [[t.title, 3], [t.note, 1]] });
     for (const b of Array.isArray(d.briefings) ? d.briefings : []) {
       const secs = ["action_items", "updates", "fyi", "sessions"], items = secs.flatMap((sec) => (b[sec] || []).map((x) => ({ ...x, section: sec })));
       const failed = b.ok === false || (b.ok == null && b.raw != null); // features/dailyfail.js bfFailed
       const label = `${b.type === "daily" ? "아침 브리핑" : "점검"}${failed ? " (실패)" : ""}`;
-      out.push({ type: "briefing", id: b.id, title: b.headline || `${label} · ${failed ? "Claude 실패" : b.status === "NED_OK" ? "이상 무" : `${items.length}건`}`, detail: items.map((x) => x.title).slice(0, 3).join(" · ") || label, ts: b.ts, url: null, kind: "briefing", tab: "inbox", anchor: `briefing:${b.id}`, items, status: b.status, local: true,
+      out.push({ type: "briefing", id: b.id, title: b.headline || `${label} · ${failed ? "Claude 실패" : b.status === "NED_OK" ? "이상 무" : `${items.length}건`}`, detail: items.map((x) => x.title).slice(0, 3).join(" · ") || label, ts: b.ts, url: null, kind: "briefing", tab: "inbox", anchor: `briefing:${b.id}`, items, status: b.status, local: true, src: "briefing",
         fields: [[b.headline, 3], [label, 1], [b.status, 1], ...items.flatMap((x) => [[x.title, 2], [x.detail, 1], [x.kind, 1]])] });
     }
     for (const e of Array.isArray(d.events) ? d.events : []) {
       const msg = e.prompt ?? e.message ?? e.reason ?? (e.agent_type ? `agent ${e.agent_type}` : "");
       const wt = e.orca_worktree ? base(String(e.orca_worktree).split("::").pop()) : base(e.cwd), label = EVENT_KO[e.event] || e.event;
-      out.push({ type: "event", id: `${e.ts}:${e.event}:${e.session_id ?? ""}`, title: msg ? String(msg).replace(/\s+/g, " ").slice(0, 160) : label, detail: [label, wt].filter(Boolean).join(" · "), ts: e.ts, url: null, kind: "event", tab: "timeline", anchor: `day:${localDay(e.ts)}`, body: msg ? String(msg) : "", local: true,
+      out.push({ type: "event", id: `${e.ts}:${e.event}:${e.session_id ?? ""}`, title: msg ? String(msg).replace(/\s+/g, " ").slice(0, 160) : label, detail: [label, wt].filter(Boolean).join(" · "), ts: e.ts, url: null, kind: "event", tab: "timeline", anchor: `day:${localDay(e.ts)}`, body: msg ? String(msg) : "", local: true, src: "event",
         fields: [[msg, 3], [wt, 2], [label, 1], [e.event, 1], [e.notification_type, 1]] });
     }
-    for (const s of SETTINGS) out.push({ type: "settings", id: s.id, title: s.title, detail: s.detail, ts: null, url: null, kind: "settings", tab: "settings", anchor: `el:${s.el}`, fields: [[s.title, 3], [s.keys, 2], [s.detail, 1]] });
+    for (const s of SETTINGS) out.push({ type: "settings", id: s.id, title: s.title, detail: s.detail, ts: null, url: null, kind: "settings", tab: "settings", anchor: `el:${s.el}`, src: "settings", fields: [[s.title, 3], [s.keys, 2], [s.detail, 1]] });
     return out;
   }
 
@@ -221,6 +208,19 @@
   #nsp .it.sel .chip { border-color: color-mix(in srgb, var(--hero) 40%, var(--line)); }
   #nsp .it.done .tt { text-decoration: line-through; color: var(--dim); }
   #nsp mark { background: color-mix(in srgb, var(--hero) 26%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
+  #nsp .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+  #nsp .chips:empty { display: none; }
+  #nsp .qc { display: inline-flex; align-items: center; gap: 2px; font: 500 12px var(--sans); color: var(--fg); background: color-mix(in srgb, var(--hero) 14%, var(--raise)); border: 1px solid color-mix(in srgb, var(--hero) 35%, var(--line)); border-radius: 999px; padding: 1px 2px 1px 9px; white-space: nowrap; }
+  #nsp .qc.off { color: var(--faint); background: var(--raise); border-color: var(--line); }
+  #nsp .qc button { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 5px; font-size: 11px; opacity: .7; }
+  #nsp .qc button:hover { opacity: 1; }
+  #nsp .ac { border-bottom: 1px solid var(--line); padding: 4px 0; max-height: 240px; overflow-y: auto; }
+  #nsp .ac[hidden] { display: none; }
+  #nsp .aci { display: flex; gap: 8px; align-items: center; margin: 0 6px; padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  #nsp .aci.sel { background: var(--sel); }
+  #nsp .aci .n { margin-left: auto; color: var(--faint); font: 11px var(--mono); }
+  #nsp .hint { padding: 10px 16px 2px; font-size: 12px; color: var(--dim); }
+  #nsp .hint code { font: 11.5px var(--mono); color: var(--fg); background: var(--hover); border-radius: 4px; padding: 0 4px; }
   #nsp .none { padding: 26px 16px; text-align: center; color: var(--dim); font-size: 13px; }
   #nsp .ft { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--faint); background: var(--side, var(--pane)); }
   #nsp .ft .sp { flex: 1; }
@@ -238,8 +238,11 @@
   `;
 
   // ---------- DOM ----------
-  const st = { open: false, q: "", rows: [], sel: 0, selKey: null, server: [], serverQ: "", busy: false, detail: null, ctl: null, timer: 0, lastFocus: null };
-  let root, input, res, busyEl, palEl;
+  const st = { open: false, q: "", pq: parseQuery(""), rows: [], sel: 0, selKey: null, server: [], serverQ: "", busy: false, detail: null, ctl: null, timer: 0, lastFocus: null,
+    /** Autocomplete list ({ ctx, items, sel }) — while it is open it takes ↑↓ / Tab / Ctrl+N/P / ⏎ / Esc. */
+    ac: null, acOff: null };
+  let root, input, res, busyEl, palEl, chipsEl, acEl;
+  const HINT = `<div class="hint" id="nsp-hint">검색 키: <code>from:이름</code> <code>source:슬랙</code> <code>#채널</code> <code>days:7</code> <code>is:open</code></div>`;
 
   function mount() {
     const style = document.createElement("style");
@@ -250,15 +253,28 @@
     root.id = "nsp";
     root.innerHTML = `<div class="pal" role="dialog" aria-modal="true" aria-label="검색">
       <div class="qrow"><span class="qi" aria-hidden="true">🔍</span><input type="text" id="nsp-q" placeholder="검색 — 주의 항목, 세션, 일정, Jira, 메일, Slack, 브리핑, 설정…" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="nsp-res" aria-autocomplete="list"><span class="busy" id="nsp-busy" aria-hidden="true"></span><kbd>esc</kbd></div>
+      <div class="chips" id="nsp-chips" aria-label="검색 조건"></div>
+      <div class="ac" id="nsp-ac" role="listbox" aria-label="자동완성" hidden></div>
       <div class="res" id="nsp-res" role="listbox" aria-label="검색 결과"></div>
       <div class="ft"><span><kbd>↑</kbd><kbd>↓</kbd> 이동</span><span><kbd>⏎</kbd> 열기</span><span class="hide-sm"><kbd>${MOD}⏎</kbd> 새 탭</span><span class="hide-sm"><kbd>⇧⏎</kbd> 대시보드에서 보기</span><span class="sp"></span><span><kbd>esc</kbd> 닫기</span></div>
     </div>`;
     document.body.appendChild(root);
     palEl = root.querySelector(".pal");
-    input = $("nsp-q"); res = $("nsp-res"); busyEl = $("nsp-busy");
+    input = $("nsp-q"); res = $("nsp-res"); busyEl = $("nsp-busy"); chipsEl = $("nsp-chips"); acEl = $("nsp-ac");
     root.addEventListener("mousedown", (e) => { if (e.target === root) close(); });
-    input.addEventListener("input", () => { st.q = input.value; st.sel = 0; st.selKey = null; refresh(); });
+    input.addEventListener("input", () => { st.acOff = null; st.q = input.value; st.sel = 0; st.selKey = null; refresh(); updateAc(); });
     input.addEventListener("keydown", onKey);
+    // caret moved inside the query (←/→/Home/End, click): the token under it may be a key being typed
+    input.addEventListener("keyup", (e) => { if (/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key)) updateAc(); });
+    input.addEventListener("click", () => updateAc());
+    chipsEl.addEventListener("click", (e) => {
+      const x = e.target.closest("[data-chip-x]"); if (!x) return;
+      const c = st.pq.chips[+x.dataset.chipX]; if (!c) return;
+      input.value = removeChip(input.value, c); st.q = input.value; st.sel = 0; st.selKey = null; st.acOff = null;
+      refresh(); input.focus(); updateAc();
+    });
+    acEl.addEventListener("mousedown", (e) => e.preventDefault()); // keep the caret in the input
+    acEl.addEventListener("click", (e) => { const r = e.target.closest(".aci"); if (r && st.ac) acPick(+r.dataset.ai); });
     res.addEventListener("mousemove", (e) => { const r = e.target.closest(".it"); if (r && +r.dataset.i !== st.sel) { st.sel = +r.dataset.i; st.selKey = st.rows[st.sel]?.key ?? null; paintSel(); } });
     res.addEventListener("click", (e) => {
       const clr = e.target.closest("[data-clear-recent]");
@@ -287,30 +303,26 @@
     if (typeof q === "string") input.value = q;
     st.q = input.value; st.sel = 0; st.selKey = null;
     input.select(); input.focus();
-    render();
-    loadData().then(() => { if (st.open) refresh(); });
+    st.ac = null; st.acOff = null;
+    render(); paintAc();
+    loadData().then(() => { if (st.open) { refresh(); updateAc(); } });
   }
   function close() {
     if (!st.open) return;
     st.open = false;
+    st.ac = null; paintAc();
     root.classList.remove("open");
     if (st.ctl) st.ctl.abort();
     if (st.lastFocus && st.lastFocus.focus && document.contains(st.lastFocus)) try { st.lastFocus.focus({ preventScroll: true }); } catch { /* ignore */ }
   }
 
   // ---------- results ----------
-  function localHits(toks) {
-    const now = Date.now(), out = [];
-    for (const c of data.cands) {
-      const score = scoreFields(c.fields, toks, c.ts, now); if (score > 0) out.push({ ...c, score });
-    }
-    return out;
-  }
-  function merged() {
-    const toks = tokenize(st.q);
-    if (!toks.length) return [];
+  /** Local hits: the same parser / filters / ranking as GET /api/search (app/features/searchq.js). */
+  const localHits = (pq) => runQuery(data.cands, pq, Date.now());
+  function merged(pq) {
+    if (!pq.terms.length && !pq.active) return [];
     const by = new Map();
-    for (const h of localHits(toks)) by.set(`${h.type}:${h.id}`, h);
+    for (const h of localHits(pq)) by.set(`${h.type}:${h.id}`, h);
     if (st.serverQ === st.q.trim()) for (const h of st.server) { const k = `${h.type}:${h.id}`; if (!by.has(k)) by.set(k, { ...h, remote: true }); }
     return [...by.values()];
   }
@@ -341,7 +353,7 @@
 
   function rowHtml(h, i, toks) {
     const tm = h.type === "settings" ? "" : rel(h.ts);
-    return `<div class="it${h.type === "todo" && h.done ? " done" : ""}" role="option" id="nsp-o${i}" data-i="${i}" aria-selected="false">
+    return `<div class="it${h.type === "todo" && h.done ? " done" : ""}" role="option" id="nsp-o${i}" data-i="${i}" data-key="${esc(`${h.type}:${h.id}`)}" aria-selected="false">
       <span class="ic" aria-hidden="true">${iconOf(h)}</span>
       <span class="tt">${hl(h.title, toks)}</span>
       <span class="sb">${hl(h.detail || "", toks)}</span>
@@ -351,11 +363,13 @@
 
   function render() {
     if (!st.open) return;
+    const pq = (st.pq = parseQuery(st.q));
+    paintChips();
     if (st.detail) return renderDetail();
-    const toks = tokenize(st.q);
+    const toks = pq.terms;
     let html = "";
     const rows = [];
-    if (!toks.length) {
+    if (!toks.length && !pq.active) {
       const rq = recents();
       if (rq.length) {
         html += `<div class="gh">최근 검색<span class="sp"></span><button type="button" data-clear-recent>지우기</button></div>`;
@@ -367,8 +381,9 @@
         for (const h of att) { const i = rows.length; rows.push({ ...h, key: `${h.type}:${h.id}` }); html += rowHtml(h, i, []); }
       }
       if (!rows.length) html = `<div class="none">${data.at ? `무엇이든 찾아 줄게. 제목·키·채널·사람 이름 아무거나 — 초성(ㄹㅂ)도 돼.` : "불러오는 중…"}</div>`;
+      if (!st.q.trim()) html = HINT + html; // empty input: one line on the 검색 키
     } else {
-      const hits = merged();
+      const hits = merged(pq);
       for (const [type, label] of GROUPS) {
         const g = hits.filter((h) => h.type === type).sort((a, b) => b.score - a.score || (b.ts || 0) - (a.ts || 0));
         if (!g.length) continue;
@@ -396,6 +411,53 @@
     if (el) { el.classList.add("sel"); el.setAttribute("aria-selected", "true"); el.scrollIntoView({ block: "nearest" }); input.setAttribute("aria-activedescendant", el.id); }
     else input.removeAttribute("aria-activedescendant");
   }
+  // ---------- 검색 키: chips + autocomplete ----------
+  function paintChips() {
+    if (!chipsEl) return;
+    chipsEl.innerHTML = st.pq.chips.map((c, i) => `<span class="qc${c.ok ? "" : " off"}" data-ci="${i}"${c.ok ? "" : ` title="인식 못 함 — 필터로 쓰지 않고 검색어로 찾음"`}>${esc(c.label)}<button type="button" data-chip-x="${i}" aria-label="조건 제거: ${esc(c.label)}" title="조건 제거">✕</button></span>`).join("");
+  }
+  /**
+   * Open the list when the caret is in a from: / source: / in: / channel: / # token — not when Esc dismissed it for this
+   * text, and not when the value is already complete (acSettled: a source alias, or exactly one of the suggestions).
+   */
+  function updateAc() {
+    st.ac = null;
+    if (st.open && !st.detail && st.acOff !== input.value) {
+      const ctx = acContext(input.value, input.selectionStart ?? input.value.length);
+      if (ctx) {
+        const items = acSuggest(ctx, data.cands);
+        if (items.length && !acSettled(ctx, items)) st.ac = { ctx, items, sel: 0 };
+      }
+    }
+    paintAc();
+  }
+  function paintAc() {
+    if (!acEl) return;
+    if (!st.ac) { acEl.hidden = true; acEl.innerHTML = ""; return; }
+    const { ctx, items, sel } = st.ac;
+    acEl.hidden = false;
+    acEl.innerHTML = items.map((it, i) => `<div class="aci${i === sel ? " sel" : ""}" role="option" data-ai="${i}" aria-selected="${i === sel}"><span>${esc(it.label)}</span>${ctx.kind === "source" ? `<span class="n">${esc(it.value)}</span>` : it.count ? `<span class="n">${it.count}</span>` : ""}</div>`).join("");
+    acEl.querySelector(".aci.sel")?.scrollIntoView({ block: "nearest" });
+  }
+  function acPick(i) {
+    const it = st.ac && st.ac.items[i]; if (!it) return;
+    const r = acApply(input.value, st.ac.ctx, it.value);
+    input.value = r.q; input.setSelectionRange(r.caret, r.caret);
+    st.ac = null; st.q = input.value; st.sel = 0; st.selKey = null;
+    refresh(); updateAc();
+  }
+  /** Keys while the autocomplete list is open: ↑↓ / Tab / Ctrl+N/P pick, ⏎ fills, Esc closes the list only. ⌘⏎ / ⇧⏎ / Ctrl+⏎ go to the results. */
+  function acKey(e) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey || e.shiftKey)) { st.ac = null; paintAc(); return false; }
+    const n = st.ac.items.length;
+    const mv = (d) => { e.preventDefault(); st.ac.sel = (st.ac.sel + d + n) % n; paintAc(); return true; };
+    if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n") || (e.key === "Tab" && !e.shiftKey)) return mv(1);
+    if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p") || (e.key === "Tab" && e.shiftKey)) return mv(-1);
+    if (e.key === "Enter") { e.preventDefault(); acPick(st.ac.sel); return true; }
+    if (e.key === "Escape") { e.preventDefault(); st.acOff = input.value; st.ac = null; paintAc(); return true; }
+    return false;
+  }
+
   function move(d) {
     if (!st.rows.length) return;
     st.sel = (st.sel + d + st.rows.length) % st.rows.length;
@@ -411,7 +473,8 @@
       if (e.key === "Enter" && st.detail.url) { e.preventDefault(); openUrl(st.detail.url); return; }
       return;
     }
-    if (e.key === "Escape") { e.preventDefault(); if (input.value) { input.value = ""; st.q = ""; refresh(); } else close(); return; }
+    if (st.ac && acKey(e)) return;
+    if (e.key === "Escape") { e.preventDefault(); if (input.value) { input.value = ""; st.q = ""; st.acOff = null; refresh(); } else close(); return; }
     if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) { e.preventDefault(); move(1); return; }
     if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) { e.preventDefault(); move(-1); return; }
     if (e.key === "Tab") { e.preventDefault(); move(e.shiftKey ? -1 : 1); return; }
@@ -437,7 +500,7 @@
   function act(r, how) {
     if (!r) return;
     if (r.type === "ask") { pushRecent(r.q); close(); window.NED.comms.ask(r.q); return; }
-    if (r.type === "recent") { input.value = r.q; st.q = r.q; st.sel = 0; st.selKey = null; refresh(); input.focus(); return; }
+    if (r.type === "recent") { input.value = r.q; st.q = r.q; st.sel = 0; st.selKey = null; refresh(); input.focus(); updateAc(); return; }
     pushRecent(st.q);
     if (how === "newtab") {
       if (r.url) { window.open(r.url, "_blank", "noopener"); return; } // palette stays open: open several in a row

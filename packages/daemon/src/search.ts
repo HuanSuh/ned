@@ -8,8 +8,10 @@ import type { Agenda } from "./agenda.js";
 import { readRecentEvents, type NedEvent } from "./events.js";
 import { listBriefings } from "./heartbeat.js";
 import { NED_HOME, TODOS_PATH, readJson } from "./paths.js";
-import { briefingOk, readState, type AttentionItem, type BriefingSection } from "./state.js";
+import { briefingOk, readSourceReviewed, readState, type AttentionItem, type BriefingSection } from "./state.js";
 import type { Todo } from "./todos.js";
+import { activityMs, reviewedAt, srcKey, type Marks } from "./review-keys.js";
+import { parseQuery, runQuery, type FilterFields } from "./search-query.js";
 
 /**
  * GET /api/search?q=&limit=50 — one ranked list over everything Ned keeps on disk: state (attention, sessions),
@@ -42,56 +44,9 @@ export interface SearchHit {
   body?: string;
 }
 
-// ---------- matching (mirrors public/search.js) ----------
+// ---------- matching + 검색 키: src/search-query.ts (shared with public/app/features/searchq.js) ----------
 
-const CHO = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ";
-const norm = (s: unknown): string => String(s ?? "").normalize("NFC").toLowerCase();
-/** Hangul syllables → their initial consonant (초성); everything else unchanged. */
-function chosung(s: string): string {
-  let out = "";
-  for (const ch of s) {
-    const c = ch.charCodeAt(0);
-    out += c >= 0xac00 && c <= 0xd7a3 ? CHO[Math.floor((c - 0xac00) / 588)] : ch;
-  }
-  return out;
-}
-const isCho = (t: string) => /^[ㄱ-ㅎ]+$/.test(t);
-const WORD_SEP = /[\s\-_/#@:.,()[\]<>"'·|]/;
-
-/** 6 = field starts with token, 4 = a word starts with it, 2 = substring, 1.5 = 초성 match, 0 = none. */
-function tokenScore(text: string, tok: string): number {
-  if (!text) return 0;
-  if (text.startsWith(tok)) return 6;
-  let i = text.indexOf(tok);
-  if (i >= 0) {
-    for (; i >= 0; i = text.indexOf(tok, i + 1)) if (WORD_SEP.test(text[i - 1] ?? " ")) return 4;
-    return 2;
-  }
-  if (isCho(tok) && chosung(text).includes(tok)) return 1.5;
-  return 0;
-}
-
-export function tokenize(q: string): string[] {
-  return norm(q).split(/\s+/).filter(Boolean).slice(0, 8);
-}
-
-/** Fields: [text, weight]. Every token must match some field (AND); score = Σ best weight×tokenScore + recency. */
-export function scoreFields(fields: Array<[unknown, number]>, toks: string[], ts: number | null, now = Date.now()): number {
-  if (!toks.length) return 0;
-  const f = fields.map(([t, w]) => [norm(t), w] as const).filter(([t]) => t);
-  let total = 0;
-  for (const tok of toks) {
-    let best = 0;
-    for (const [t, w] of f) best = Math.max(best, tokenScore(t, tok) * w);
-    if (!best) return 0;
-    total += best;
-  }
-  if (ts) {
-    const days = Math.abs(now - ts) / 86_400_000;
-    total += days < 1 ? 2 : days < 7 ? 1 : 0;
-  }
-  return total;
-}
+export { scoreFields, tokenize } from "./search-query.js";
 
 // ---------- sources ----------
 
@@ -113,7 +68,15 @@ const EVENT_KO: Record<string, string> = { SessionStart: "세션 시작", Sessio
 /** Event identity shared with the client: ts + event + session. */
 export const eventId = (e: Pick<NedEvent, "ts" | "event" | "session_id">) => `${e.ts}:${e.event}:${e.session_id ?? ""}`;
 
-type Cand = Omit<SearchHit, "score"> & { fields: Array<[unknown, number]> };
+/** Text fields (weighted, scored) + structured fields for the 검색 키 filters (src / people / channel / ts / done / mine). */
+type Cand = Omit<SearchHit, "score"> & Omit<FilterFields, "type" | "ts"> & { fields: Array<[unknown, number]> };
+
+const ATT_SRC: Record<string, string> = { email: "mail", slack: "slack", jira: "jira", github: "github", calendar: "calendar", session: "session" };
+/** ✓ 처리: a 확인 완료 mark that still covers the item (same key / rule as the cards — src/review-keys.ts). */
+const revDone = (marks: Marks, kind: string, x: Parameters<typeof srcKey>[1]) => reviewedAt(marks, srcKey(kind, x), activityMs(kind, x)) > 0;
+const MY_PR = /^my_pr/;
+/** How the agenda writes my own Slack messages (DM / 팔로업 recent rows). */
+const ME = "나";
 
 function drafts(): Cand[] {
   // Drafts store isn't settled yet: accept NED_HOME/drafts.json (array or {drafts: []}) or NED_HOME/drafts/*.json.
@@ -148,6 +111,7 @@ function drafts(): Cand[] {
         tab: "inbox" as const,
         anchor: `draft:${String(d.id ?? i)}`,
         body: body.slice(0, 2000) || undefined,
+        src: "draft",
         fields: [[title, 3], [to, 2], [body, 1]],
       };
     });
@@ -157,16 +121,18 @@ function candidates(): Cand[] {
   const out: Cand[] = [];
   const cfg = loadConfig();
   const st = readState();
+  const marks = readSourceReviewed();
 
   const att = (a: AttentionItem): Cand => ({
     type: "attention", id: a.id, title: a.title, detail: a.detail ?? "", ts: a.ts, url: url(a.url), kind: a.kind, tab: "inbox", anchor: `row:${a.id}`,
+    src: ATT_SRC[a.kind] ?? "attention", done: !!a.reviewed_at,
     fields: [[a.title, 3], [a.kind, 2], [a.detail, 1]],
   });
   out.push(...st.attention.map(att));
 
   for (const s of st.sessions) {
     out.push({
-      type: "session", id: s.id, title: s.worktree, detail: s.last_summary ?? s.last_prompt ?? s.status, ts: s.last_event_ts, url: null, kind: "session", tab: "inbox", anchor: `session:${s.id}`,
+      type: "session", id: s.id, title: s.worktree, detail: s.last_summary ?? s.last_prompt ?? s.status, ts: s.last_event_ts, url: null, kind: "session", tab: "inbox", anchor: `session:${s.id}`, src: "session",
       fields: [[s.worktree, 3], [s.status, 2], [s.cwd, 1], [s.last_prompt, 1], [s.last_summary, 1]],
     });
   }
@@ -174,19 +140,22 @@ function candidates(): Cand[] {
   const a = readAgenda();
   if (cfg.sources.calendar) for (const c of a.calendar) {
     out.push({
-      type: "calendar", id: c.id, title: c.title, detail: [c.all_day ? "종일" : hm(isoTs(c.start)), c.location].filter(Boolean).join(" · "), ts: isoTs(c.start), url: url(c.url) ?? url(c.meet_url), kind: "calendar", tab: "home", anchor: "card:cal",
+      type: "calendar", id: c.id, title: c.title, detail: [c.all_day ? "종일" : hm(isoTs(c.start)), c.location].filter(Boolean).join(" · "), ts: isoTs(c.start), url: url(c.url) ?? url(c.meet_url), kind: "calendar", tab: "home", anchor: "card:cal", src: "calendar",
       fields: [[c.title, 3], [c.location, 1]],
     });
   }
   if (cfg.sources.jira) for (const j of a.jira) {
     out.push({
       type: "jira", id: j.key, title: j.title, detail: [j.key, j.status, j.priority, j.due ? `마감 ${j.due}` : ""].filter(Boolean).join(" · "), ts: isoTs(j.updated), url: url(j.url), kind: "jira", tab: "home", anchor: "card:jira",
+      // Jira 는 agenda 데이터에 사람 필드(담당자·보고자)가 없어 from: 대상 아님 (people 없음).
+      src: "jira", done: revDone(marks, "jira", j),
       fields: [[j.title, 3], [j.key, 3], [j.status, 1], [j.priority, 1]],
     });
   }
   if (cfg.sources.github) for (const g of a.github) {
     out.push({
       type: "github", id: `${g.repo}#${g.number}`, title: g.title, detail: `${g.repo}#${g.number} · @${g.author}`, ts: isoTs(g.updated), url: url(g.url), kind: "github", tab: "home", anchor: "card:gh",
+      src: "github", people: g.author ? [g.author] : [], done: revDone(marks, "github", g), mine: MY_PR.test(g.reason ?? "") || undefined,
       fields: [[g.title, 3], [`${g.repo}#${g.number}`, 2], [g.author, 2], [g.reason, 1]],
     });
   }
@@ -197,6 +166,7 @@ function candidates(): Cand[] {
       seen.add(m.id);
       out.push({
         type: "mail", id: m.id, title: m.subject || "(제목 없음)", detail: [m.from, m.snippet].filter(Boolean).join(" · "), ts: isoTs(m.ts), url: url(m.url), kind: "email", tab: "home", anchor: "card:mail",
+        src: "mail", people: m.from ? [m.from] : [], done: revDone(marks, "email", m),
         fields: [[m.subject, 3], [m.from, 2], [m.snippet, 1]],
       });
     }
@@ -209,6 +179,7 @@ function candidates(): Cand[] {
       seen.add(id);
       out.push({
         type: "slack", id, title: x.text || "(내용 없음)", detail: [`${x.channel} · ${x.from}`, x.thread?.thread_summary].filter(Boolean).join(" — "), ts: isoTs(x.ts), url: url(x.url), kind: "slack", tab: "home", anchor: "card:slack",
+        src: "slack", people: x.from ? [x.from] : [], channel: x.channel, done: revDone(marks, "slack", x), mine: x.from === ME || undefined,
         // Followed thread: its summary and latest reply are searchable too.
         fields: [[x.text, 3], [x.channel, 2], [x.from, 2], [x.thread?.thread_summary, 2], [x.thread?.last_reply_text, 1], [x.thread?.last_reply_from, 1]],
       });
@@ -221,17 +192,19 @@ function candidates(): Cand[] {
       out.push({
         type: "slack", id, title: h.text || "(내용 없음)", detail: `${w.channel} · ${h.from}${h.needs_me ? " · 나한테" : ""}`, ts: isoTs(h.ts), url: url(h.url), kind: "slack", tab: "home",
         anchor: cfg.dashboard.watch_cards === false ? "card:slack" : `card:watch:${w.channel.replace(/^#+/, "")}`,
+        src: "slack", people: h.from ? [h.from] : [], channel: w.channel, done: revDone(marks, "slack", h), mine: h.from === ME || undefined,
         fields: [[h.text, 3], [w.channel, 2], [h.from, 2], [w.summary, 1]],
       });
     }
   }
 
-  out.push(...historyCands(cfg, a));
+  out.push(...historyCands(cfg, a, marks));
 
   const todos = readJson<Todo[]>(TODOS_PATH, []);
   if (Array.isArray(todos)) for (const t of todos) {
     out.push({
       type: "todo", id: t.id, title: t.title, detail: [t.done ? "완료" : "", t.due ? `마감 ${t.due}` : "", t.note ?? ""].filter(Boolean).join(" · "), ts: t.created_at, url: null, kind: "me", tab: "home", anchor: "card:todo",
+      src: "todo", done: !!t.done,
       fields: [[t.title, 3], [t.note, 1]],
     });
   }
@@ -242,6 +215,7 @@ function candidates(): Cand[] {
     out.push({
       type: "briefing", id: b.id, title: b.headline || `${label} · ${!briefingOk(b) ? "Claude 실패" : b.status === "NED_OK" ? "이상 무" : `${items.length}건`}`, detail: items.map((x) => x.title).slice(0, 3).join(" · ") || label, ts: b.ts, url: null, kind: "briefing", tab: "inbox", anchor: `briefing:${b.id}`,
       items: (["action_items", "updates", "fyi", "sessions"] as const).flatMap((sec) => (b[sec] ?? []).map((x) => ({ section: sec, title: x.title, detail: x.detail, url: url(x.url) ?? undefined, kind: x.kind }))),
+      src: "briefing",
       fields: [[b.headline, 3], [label, 1], [b.status, 1], ...items.flatMap((x): Array<[unknown, number]> => [[x.title, 2], [x.detail, 1], [x.kind, 1]])],
     });
   }
@@ -252,6 +226,7 @@ function candidates(): Cand[] {
     const label = EVENT_KO[e.event] ?? e.event;
     out.push({
       type: "event", id: eventId(e), title: msg ? String(msg).replace(/\s+/g, " ").slice(0, 160) : label, detail: [label, wt].filter(Boolean).join(" · "), ts: e.ts, url: null, kind: "event", tab: "timeline", anchor: `day:${localDay(e.ts)}`, body: msg ? String(msg).slice(0, 2000) : undefined,
+      src: "event",
       fields: [[msg, 3], [wt, 2], [label, 1], [e.event, 1], [e.notification_type, 1]],
     });
   }
@@ -269,7 +244,7 @@ const srcOn = (cfg: NedConfig, s: HistorySource) => (s === "mail" ? cfg.sources.
  * 수집 이력 records as hits (same type / id scheme as the agenda hits, so the palette dedupes them), minus what agenda.json
  * shows now (currentKeys — those are hits already). Detail says "이력 · M/D"; anchor = the source's card.
  */
-export function historyCands(cfg: NedConfig, a: Agenda): Cand[] {
+export function historyCands(cfg: NedConfig, a: Agenda, marks: Marks = readSourceReviewed()): Cand[] {
   if (cfg.history?.enabled === false) return [];
   const cur = currentKeys(a);
   const out: Cand[] = [];
@@ -290,6 +265,8 @@ export function historyCands(cfg: NedConfig, a: Agenda): Cand[] {
         kind: HIST_KIND[src],
         tab: "home",
         anchor: watchCh && cfg.dashboard.watch_cards !== false ? `card:watch:${watchCh}` : HIST_CARD[src],
+        ...histFilterFields(src, it, d.channel),
+        done: src === "calendar" ? undefined : revDone(marks, HIST_KIND[src], it),
         fields: [[d.title, 3], [d.detail, 2], [it.subject ?? it.key ?? it.repo, 2], [it.why ?? it.snippet ?? it.location, 1]],
       });
     }
@@ -306,16 +283,30 @@ function histId(r: HistRecord): string {
   return r.key;
 }
 
-export function search(q: string, limit = 50): SearchHit[] {
-  const toks = tokenize(q);
-  if (!toks.length) return [];
-  const now = Date.now();
-  const hits: SearchHit[] = [];
-  for (const { fields, ...c } of candidates()) {
-    const score = scoreFields(fields, toks, c.ts, now);
-    if (score > 0) hits.push({ ...c, score: Math.round(score * 10) / 10 });
+/** History record → src / people / channel / mine (only fields the record has). */
+function histFilterFields(src: HistorySource, it: Record<string, any>, channel?: string): Pick<Cand, "src" | "people" | "channel" | "mine"> {
+  const s = (v: unknown) => (typeof v === "string" && v.trim() ? [v] : []);
+  if (src === "slack") {
+    const from = it.from ?? it.watch?.from;
+    return { src, people: s(from), channel: channel || undefined, mine: from === ME || undefined };
   }
-  return hits.sort((a, b) => b.score - a.score || (b.ts ?? 0) - (a.ts ?? 0)).slice(0, limit);
+  if (src === "mail") return { src, people: s(it.from) };
+  if (src === "github") return { src, people: s(it.author), mine: MY_PR.test(String(it.reason ?? "")) || undefined };
+  return { src }; // jira (no person fields — not a from: target), calendar
+}
+
+/**
+ * Ranked hits for a ⌘K query — the same parser / filters / ranking as the palette (src/search-query.ts): words score,
+ * 검색 키 (source: from: channel: #채널 days: after: before: is:) filter; keys only = newest first.
+ */
+export function search(q: string, limit = 50): SearchHit[] {
+  const now = Date.now();
+  const pq = parseQuery(q, now);
+  if (!pq.terms.length && !pq.active) return [];
+  // The filter fields (src / people / channel / done / mine) are internal like `fields` — not part of the hit.
+  return runQuery(candidates(), pq, now)
+    .slice(0, limit)
+    .map(({ fields: _f, src: _s, people: _p, channel: _c, done: _d, mine: _m, ...c }) => ({ ...c, score: Math.round(c.score * 10) / 10 }));
 }
 
 export function registerSearch(app: Hono): void {
