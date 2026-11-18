@@ -142,9 +142,80 @@ export const codeBlockHtml = (code, mentions = null) => {
     : "";
   return `<div class="cm-code"><button type="button" class="cm-copy" aria-label="${alt !== code ? "@이름 텍스트로 복사" : "복사"}" title="${alt !== code ? "@이름 텍스트로 복사" : "복사"}">${COPY_ICON}</button>${menu}<pre><code>${esc(code)}</code></pre></div>`;
 };
-export function mdLite(text, { mentions = null } = {}) {
-  const parts = String(text ?? "").split(/```[^\n`]*\n?/);
-  return parts.map((p, i) => (i % 2 ? codeBlockHtml(p.replace(/\n$/, ""), mentions) : p.split("\n").map(inline).join("<br>"))).join("");
+// ---------- GFM tables (outside fences only) ----------
+/** Cells of a `| a | b |` row: outer pipes dropped, split on unescaped `|`, `\|` → `|`, trimmed. */
+export function splitRow(line) {
+  let s = String(line).trim();
+  if (s.startsWith("|")) s = s.slice(1);
+  if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
+  const cells = [];
+  let cur = "";
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "\\" && s[i + 1] === "|") { cur += "|"; i++; } else if (s[i] === "|") { cells.push(cur.trim()); cur = ""; } else cur += s[i];
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+const hasPipe = (l) => /(^|[^\\])\|/.test(l);
+/** A delimiter row's per-column alignment ("" | "left" | "center" | "right"), or null when `line` isn't one. */
+export function tableAligns(line) {
+  if (!hasPipe(line) || !/-/.test(line)) return null;
+  const cells = splitRow(line);
+  if (!cells.every((c) => /^:?-+:?$/.test(c))) return null;
+  return cells.map((c) => (c.startsWith(":") && c.endsWith(":") ? "center" : c.endsWith(":") ? "right" : c.startsWith(":") ? "left" : ""));
+}
+/** Inline markdown → plain text (for TSV): `code` / [text](url) / **bold** lose their marks; bare urls stay. */
+export const plainInline = (s) => String(s).replace(/`([^`\n]+)`|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|\*\*([^*\n]+)\*\*/g, (m, c, t, _u, b) => c ?? t ?? b ?? m);
+/** Rows (header first, each already cut/filled to the header width) → TSV; tabs / newlines inside a cell become spaces. */
+export const tableTsv = (rows) => rows.map((r) => r.map((c) => plainInline(c).replace(/[\t\r\n]+/g, " ")).join("\t")).join("\n");
+/**
+ * A table block + the code-block copy button (features/code-copy.js): main copy = the table's markdown source
+ * (`data-md`), "TSV 복사" (.cm-copy-alt `data-alt`) = tab-separated plain text for spreadsheets / Confluence.
+ * Only `.cm-tbl` scrolls sideways, so a wide table never widens the bubble.
+ */
+export function tableHtml(src, header, aligns, body) {
+  const n = header.length;
+  const fit = (r) => Array.from({ length: n }, (_, i) => r[i] ?? "");
+  const rows = [header, ...body.map(fit)];
+  const al = (i) => (aligns[i] ? ` style="text-align:${aligns[i]}"` : "");
+  const tr = (r, tag) => `<tr>${r.map((c, i) => `<${tag}${al(i)}>${inline(c)}</${tag}>`).join("")}</tr>`;
+  const tbody = rows.length > 1 ? `<tbody>${rows.slice(1).map((r) => tr(r, "td")).join("")}</tbody>` : "";
+  const hint = "스프레드시트·Confluence 에 붙여넣기용 (탭으로 구분한 글)";
+  return `<div class="cm-code cm-tablewrap" data-md="${esc(src)}"><button type="button" class="cm-copy" aria-label="표 복사 (마크다운)" title="표 복사 (마크다운)">${COPY_ICON}</button>`
+    + `<span class="cm-copym"><button type="button" class="cm-copy-alt" data-alt="${esc(tableTsv(rows))}" title="${hint}">TSV 복사</button><span class="cm-copyh">${hint}</span></span>`
+    + `<div class="cm-tbl"><table><thead>${tr(rows[0], "th")}</thead>${tbody}</table></div></div>`;
+}
+/**
+ * Text outside fences: lines joined by <br>, except a header row + delimiter row (same column count) + body rows
+ * (lines with a pipe, up to a blank / pipe-less line) → tableHtml. `openTail` (streaming, text without a final
+ * newline): the last line is still being typed, so it never joins a table — a half-typed delimiter or row stays text.
+ */
+function textHtml(p, openTail = false) {
+  const lines = p.split("\n");
+  const end = openTail && lines.length ? lines.length - 1 : lines.length; // lines[end] (if any) is the unfinished one
+  const out = [];
+  let buf = [];
+  const flush = () => { if (buf.length) out.push(buf.map(inline).join("<br>")); buf = []; };
+  for (let i = 0; i < lines.length; i++) {
+    const head = lines[i];
+    const aligns = i + 1 < end && hasPipe(head) ? tableAligns(lines[i + 1]) : null;
+    const header = aligns ? splitRow(head) : null;
+    if (!header || header.length !== aligns.length) { buf.push(head); continue; }
+    let j = i + 2;
+    while (j < end && lines[j].trim() && hasPipe(lines[j])) j++;
+    flush();
+    out.push(tableHtml(lines.slice(i, j).join("\n"), header, aligns, lines.slice(i + 2, j).map(splitRow)));
+    i = j - 1;
+  }
+  flush();
+  return out.join("");
+}
+/** `live`: the streaming answer — an unfinished last line stays text (see textHtml). */
+export function mdLite(text, { mentions = null, live = false } = {}) {
+  const src = String(text ?? "");
+  const parts = src.split(/```[^\n`]*\n?/);
+  const tail = live && !src.endsWith("\n");
+  return parts.map((p, i) => (i % 2 ? codeBlockHtml(p.replace(/\n$/, ""), mentions) : textHtml(p, tail && i === parts.length - 1))).join("");
 }
 
 // ---------- 메시지 feed ----------
@@ -214,7 +285,9 @@ export function messagesHtml(msgs, voice, live = null, timeFn = () => "", hello 
   let html = msgs.map(row).join("");
   const lo = live ? parseOutputBlock(live.text) : null; // a ned-output block shows as a 저장 카드 once saved
   const lp = live ? parseActionBlock(lo.text) : null; // a proposal shows as a card once the answer is done
-  if (live) html += `<div class="cm-msg ned live"><div class="bb">${lp.text ? mdLite(lp.text) : ""}${lo.block || lo.pending ? `<div class="cm-out s-pending">📎 정리 결과 저장 준비 중…</div>` : ""}${lp.block || lp.pending ? `<div class="cm-act s-pending">⚡ 실행 제안 준비 중…</div>` : ""}<div class="cm-think"><span class="spin"></span>${esc(live.tool ? `${voice.thinking} ${live.tool}` : voice.thinking)}</div></div></div>`;
+  // Nothing after the text yet (no ned-output / ned-action block started) → its last line may be half-typed.
+  const open = live && !(lo.block || lo.pending || lp.block || lp.pending);
+  if (live) html += `<div class="cm-msg ned live"><div class="bb">${lp.text ? mdLite(lp.text, { live: open }) : ""}${lo.block || lo.pending ? `<div class="cm-out s-pending">📎 정리 결과 저장 준비 중…</div>` : ""}${lp.block || lp.pending ? `<div class="cm-act s-pending">⚡ 실행 제안 준비 중…</div>` : ""}<div class="cm-think"><span class="spin"></span>${esc(live.tool ? `${voice.thinking} ${live.tool}` : voice.thinking)}</div></div></div>`;
   return html;
 }
 

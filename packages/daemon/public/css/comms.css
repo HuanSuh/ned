@@ -143,6 +143,14 @@
 .cm-copy-alt.ok { color: var(--cm-rx, var(--mint)); border-color: var(--cm-rx, var(--mint)); }
 .cm-copyh { display: none; font-size: 11px; color: var(--dim); background: var(--cm-bg, var(--raise)); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
 .cm-copym:hover .cm-copyh, .cm-copym:focus-within .cm-copyh { display: inline; }
+/* GFM table (chat-core.js tableHtml): same copy button / "TSV 복사" as code blocks; only .cm-tbl scrolls sideways so the
+ * bubble's text keeps wrapping. The bubble's overflow-wrap:anywhere would squeeze columns to one character, so the
+ * table opts out (keep-all keeps Korean words whole). Theme tokens only — works for every theme / persona. */
+.cm-tbl { overflow-x: auto; max-width: 100%; padding-right: 34px; -webkit-overflow-scrolling: touch; }
+.cm-tbl table { border-collapse: collapse; font-size: 12.5px; line-height: 1.45; overflow-wrap: normal; word-break: keep-all; color: var(--fg); }
+.cm-tbl th, .cm-tbl td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
+.cm-tbl th { font-weight: 700; background: var(--hover); white-space: nowrap; }
+.cm-tbl tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--hover) 45%, transparent); }
 .cm-err { color: var(--red); font-size: 12px; margin-top: 4px; }
 /* 확인 카드 (ned-action proposal, features/chat-action.js): target read-only, text editable, [실행] [취소]. */
 .cm-act { margin-top: 8px; padding: 8px 10px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--cm-accent) 45%, var(--line)); background: color-mix(in srgb, var(--cm-accent) 6%, var(--raise)); display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; }
