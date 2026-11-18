@@ -12,7 +12,8 @@ import { toast } from "../ui/toast.js";
 import { sendAndWait } from "./sendjob.js";
 import { buildFeed, clampSize, commsVoice, createSseParser, feedHtml, helloLine, messagesHtml, readSize, shellHtml, tickerOf, usd } from "./chat-core.js";
 import { bindCodeCopy } from "./code-copy.js";
-import { openLink } from "./openlink.js";
+import { focusHash, resolveFocus } from "./focus.js";
+import { model } from "../tabs/inbox.js";
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const MOD = MAC ? "⌘" : "Ctrl+";
@@ -305,13 +306,35 @@ export function render() {
 }
 
 function onFeedClick(e) {
+  const row = e.target.closest(".cm-row");
+  // 원문 button: openlink.js's delegated capture click already opened it (app deep link in Ned.app) — only mark it read.
+  if (e.target.closest(".cm-src")) {
+    const x = st.feed[+row?.querySelector("[data-fi]")?.dataset.fi];
+    if (x) { st.seen.add(x.key); saveSeen(); render(); }
+    return;
+  }
   const b = e.target.closest("[data-fi]"); if (!b) return;
   const x = st.feed[+b.dataset.fi]; if (!x) return;
   st.seen.add(x.key); saveSeen();
   if (x.go === "chat") { setTab("chat"); return; }
-  if (x.url) openLink(x.url);
-  else { location.hash = `#${x.go}`; close(); }
+  goFeedTarget(x);
+  close();
   render();
+}
+
+/** Click on a message → the dashboard, focused on that item (#item=…, tabs/inbox.js focusItem); no target → its view. */
+export function feedHash(x, m = model()) {
+  if (x.target) {
+    if (x.fallback && resolveFocus(x.target, m).missing) return `#${x.fallback}`;
+    const h = focusHash(x.target);
+    if (h) return h;
+  }
+  return `#${x.go || "inbox"}`;
+}
+function goFeedTarget(x) {
+  const h = feedHash(x);
+  if (location.hash === h) window.dispatchEvent(new HashChangeEvent("hashchange")); // same item again → focus again
+  else location.hash = h;
 }
 
 // ---------- mount ----------

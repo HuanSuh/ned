@@ -110,3 +110,10 @@ pre.raw { background: var(--bg); border: 1px solid var(--line); border-radius: 6
 .tape .tr span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tape .tr .h { color: var(--faint); flex: none; }
 .tape .tr.ok { color: var(--faint); }
+
+/* 출처 줄 · 원문 버튼 · 항목 포커스 (features/focus.js, tabs/inbox.js focusItem) */
+.srcline { margin: 6px 0 -2px; color: var(--faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-src span { font-size: 13px; line-height: 1; }
+.focus-hl { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; animation: focus-hl 2.6s ease-out; }
+@keyframes focus-hl { 0%, 30% { background: color-mix(in srgb, var(--accent) 18%, transparent); } 100% { background: transparent; } }
+@media (prefers-reduced-motion: reduce) { .focus-hl { animation: none; } }

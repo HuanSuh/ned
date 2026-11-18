@@ -8,10 +8,12 @@ import { canReply, inDialog, keepFocus, replyBox, replyMenu, replyOn, replySig }
 import { loadState, renderHeader } from "../main.js";
 import { S, alive, saveRead, subscribe, ui } from "../state.js";
 import { PF, PILL_KINDS, pillRow, srcOn } from "../ui/chips.js";
-import { EVENT_KO, KIND_ICON, KIND_KO, STATUS_KO, STATUS_LED, iconBtn, openIcon, reviewIcon } from "../ui/icons.js";
+import { EVENT_KO, KIND_ICON, KIND_KO, STATUS_KO, STATUS_LED, iconBtn, reviewIcon } from "../ui/icons.js";
 import { toast } from "../ui/toast.js";
 import { $, dayLabel, esc, hhmm, lsSet, mdhm, rel, safeUrl } from "../util.js";
 import { mdLite } from "../features/chat-core.js";
+import { focusHash, originalOf, resolveFocus, sourceLineHtml, sourceParts, srcBtn } from "../features/focus.js";
+import { openLink } from "../features/openlink.js";
 
 // ---------- inbox model ----------
 export function model() {
@@ -69,7 +71,7 @@ export function rowHtml(it, i) {
     const b = it.brief, n = (b.action_items?.length || 0), u = (b.updates?.length || 0), f = (b.fyi?.length || 0);
     return `<div class="row ${sel}" data-i="${i}"><span class="ic">📝</span><span class="tt"><span class="stk ${bfFailed(b) ? "r" : b.type === "daily" ? "b" : ""} flat">${bfKind(b)}</span>&nbsp; ${esc(b.headline || (bfFailed(b) ? "Claude 실행 실패 — raw 참고" : `${n + u + f}건`))}</span><span class="tm">${hhmm(b.ts)}</span><span class="sb">행동 ${n} · 업데이트 ${u} · 참고 ${f}${b.cost_usd != null ? ` · $${Number(b.cost_usd).toFixed(2)}` : ""}</span></div>`;
   }
-  const acts = it.att ? `${openIcon(it.url)}${reviewIcon(it.att)}` : `${openIcon(it.url)}${it.rk ? reviewIcon({ id: it.rk, reviewed_at: it.rat }) : ""}`;
+  const acts = it.att ? `${srcBtn(it.kind, it.url)}${reviewIcon(it.att)}` : `${srcBtn(it.kind, it.url)}${it.rk ? reviewIcon({ id: it.rk, reviewed_at: it.rat }) : ""}`;
   return `<div class="row ${sel} ${!it.att && ui.read.has(it.key) ? "read" : ""}${isRevRow(it) ? " reviewed" : ""}${acts ? " has-acts" : ""}" data-i="${i}">
       <span class="ic">${KIND_ICON[it.kind] || "·"}</span>
       <span class="tt">${it.led ? `<span class="led ${it.led}"></span>` : ""}${esc(it.title)}</span>
@@ -127,11 +129,12 @@ export function closeDetail() { $("detail").classList.remove("open"); }
  * buttons, delegated by code-copy.js). One-line list rows / titles stay plain esc().
  */
 export const mdBody = (s, cls = "body") => `<div class="${cls} md-lite">${mdLite(s)}</div>`;
-export function sectionList(title, xs) {
+/** `sec` (action_items / updates / fyi / sessions) gives each block a `data-anchor="<sec>.<i>"` — the #item=…&at= target. */
+export function sectionList(title, xs, sec = "") {
   if (!xs || !xs.length) return "";
-  return `<h3>${esc(title)}</h3><ul>${xs.map((x) => {
+  return `<h3>${esc(title)}</h3><ul>${xs.map((x, i) => {
       const u = safeUrl(x.url);
-      return `<li>${KIND_ICON[x.kind] ? KIND_ICON[x.kind] + " " : ""}${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(x.title)}</a>` : esc(x.title)}${x.detail ? mdBody(x.detail, "d") : ""}</li>`;
+      return `<li${sec ? ` data-anchor="${sec}.${i}"` : ""}>${KIND_ICON[x.kind] ? KIND_ICON[x.kind] + " " : ""}${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(x.title)}</a>` : esc(x.title)}${x.detail ? mdBody(x.detail, "d") : ""}</li>`;
     }).join("")}</ul>`;
 }
 export const bfLabel = (b) => `${b.type === "daily" ? "아침 브리핑" : "점검"}${bfFailed(b) ? " 실패" : ""} · ${dayLabel(b.ts)} ${hhmm(b.ts)}`;
@@ -172,7 +175,7 @@ export function renderDetail(it, m) {
     html = `<div class="dwrap">${back}
         <div class="crumb"><span class="stk ${b.type === "daily" ? "b" : ""}">${b.type === "daily" ? "아침" : "점검"}</span>${bfFailed(b) ? `<span class="stk r">실패</span>` : `<span class="stk a">update</span>`}<span>${esc(dayLabel(b.ts))} ${hhmm(b.ts)} · ${rel(b.ts)}</span></div>
         <div class="ctx">${briefingSay(b)}
-        ${sectionList("행동 필요", b.action_items)}${sectionList("업데이트", b.updates)}${sectionList("참고", b.fyi)}${sectionList("세션", b.sessions)}
+        ${sectionList("행동 필요", b.action_items, "action_items")}${sectionList("업데이트", b.updates, "updates")}${sectionList("참고", b.fyi, "fyi")}${sectionList("세션", b.sessions, "sessions")}
         <h3>메타</h3>${costLine(b)}</div></div>`;
   } else {
     if (!it.att && !ui.read.has(it.key)) { ui.read.add(it.key); saveRead(); }
@@ -191,15 +194,18 @@ export function renderDetail(it, m) {
     } else if (it.att) {
       ctx = `<h3>출처</h3><div class="body" style="font-size:13px">${esc(it.att.source)}</div>`;
     }
-    sig = `it:${it.key}:${it.title}:${it.detail}:${S.events.length}:${it.sess ? it.sess.status + it.sess.last_event_ts + replySig(it.sess) : ""}:${it.att?.reviewed_at || it.rat || 0}`;
+    const src = sourceLineHtml(sourceParts(it, { agenda: S.agenda, sess: it.sess, fmt: rel }));
+    const orig = originalOf(it);
+    sig = `it:${it.key}:${it.title}:${it.detail}:${S.events.length}:${it.sess ? it.sess.status + it.sess.last_event_ts + replySig(it.sess) : ""}:${it.att?.reviewed_at || it.rat || 0}:${src}`;
     html = `<div class="dwrap">${back}
-        <div class="crumb"><span class="stk ${it.att ? "a" : it.label === "참고" ? "" : "b"}">${it.att ? "행동 필요" : esc(it.label)}</span><span>${KIND_ICON[it.kind] || ""} ${esc(KIND_KO[it.kind] || it.kind)}</span><span>· ${rel(it.ts)}</span></div>
+        <div class="crumb"><span class="stk ${it.att ? "a" : it.label === "참고" ? "" : "b"}">${it.att ? "행동 필요" : esc(it.label)}</span>${isRevRow(it) ? `<span class="stk g">확인 완료</span>` : ""}<span>${KIND_ICON[it.kind] || ""} ${esc(KIND_KO[it.kind] || it.kind)}</span><span>· ${rel(it.ts)}</span></div>
+        ${src}
         <h2>${esc(it.title)}</h2>
         ${it.detail ? mdBody(it.detail) : ""}
         <div class="dacts">
           ${it.sess ? draftBtn("session", sessionRef(it.sess), it.att?.id) : it.kind === "slack" ? draftBtn("slack", slackRef(it), it.att?.id) : it.kind === "email" ? draftBtn("email", mailRef(it), it.att?.id) : ""}
-          ${openIcon(it.url)}${it.att ? reviewIcon(it.att) + iconBtn("close", "닫기 — 처리 완료로 치우기 (e)", { attrs: 'id="done"' }) : it.rk ? reviewIcon({ id: it.rk, reviewed_at: it.rat }) : ""}
-          <span class="dkeys">${it.url ? "<kbd>⏎</kbd> 열기 · " : ""}${it.att ? "<kbd>e</kbd> 닫기" : ""}</span>
+          ${srcBtn(it.kind, it.url)}${it.att ? reviewIcon(it.att) + iconBtn("close", "닫기 — 처리 완료로 치우기 (e)", { attrs: 'id="done"' }) : it.rk ? reviewIcon({ id: it.rk, reviewed_at: it.rat }) : ""}
+          <span class="dkeys">${orig ? `<kbd>o</kbd> ${orig.url ? "원문" : "세션"}${it.att ? " · " : ""}` : ""}${it.att ? "<kbd>e</kbd> 닫기" : ""}</span>
         </div>
         ${it.sess ? replyBox(it.sess, "detail") : ""}
         <div class="ctx">${ctx}</div></div>`;
@@ -225,11 +231,69 @@ export async function dismissSelected() {
   await loadState();
 }
 
+// ---------- 항목 포커스 (#item=… · 통신기 메시지) + 원문 (o) ----------
+export const FOCUS_HL_MS = 2600;
+const reduceMotion = () => !!globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+/** Scroll to + highlight for ~2.6 s (css .focus-hl: reduced motion = outline only, no animation). */
+export function flash(el) {
+  if (!el) return null;
+  el.classList.remove("focus-hl");
+  el.classList.add("focus-hl");
+  el.scrollIntoView?.({ block: "center", behavior: reduceMotion() ? "auto" : "smooth" });
+  setTimeout(() => el.classList.remove("focus-hl"), FOCUS_HL_MS);
+  return el;
+}
+/**
+ * Inbox: switch to the target's tab, select its row (opening the 확인 완료 fold when it is ✓), open the detail, scroll +
+ * highlight — and the briefing block when `at` is set. Gone → that tab's top + a short toast. target = parseFocusHash().
+ */
+export function focusItem(target) {
+  const r = resolveFocus(target, model());
+  ui.tab = r.tab;
+  if (r.missing) {
+    ui.sel = 0; ui.selKey = null;
+    renderInbox();
+    $("items").scrollTop = 0;
+    closeDetail();
+    toast("항목이 더 이상 없음");
+    return r;
+  }
+  if (r.reviewed) { if (r.tab === "other") ui.revOpenOther = true; else ui.revOpenInbox = true; }
+  if (PF.inbox.size && !listOf(model()).some((x) => x.key === r.key)) PF.inbox.clear(); // a source pill hid it
+  ui.selKey = r.key;
+  renderInbox();
+  openDetail();
+  flash($("items").querySelector(".row.sel"));
+  // r.at passed ANCHOR_RE (letters, "_", ".", digits) — safe inside the attribute selector.
+  if (r.at) flash($("detail").querySelector(`[data-anchor="${r.at}"]`));
+  return r;
+}
+/** `o`: the item's original — its web URL through openLink (app deep link in Ned.app), else its session (rail unit, or
+ *  the timeline filtered to its worktree when the rail is folded), else the detail. */
+export function openOriginal(it) {
+  if (!it) return null;
+  const o = originalOf(it);
+  if (o?.url) { openLink(o.url); return "url"; }
+  if (o?.session) return showSession(o.session);
+  openDetail();
+  return "detail";
+}
+export function showSession(x) {
+  const unit = [...document.querySelectorAll("#rail .unit[data-sid]")].find((u) => u.dataset.sid === x.id);
+  if (unit && !ui.railOff) { flash(unit); return "rail"; }
+  S.filterWt.clear();
+  if (x.worktree) S.filterWt.add(x.worktree);
+  location.hash = "#timeline";
+  return "timeline";
+}
+/** For the 통신기: the hash that focuses a feed target (null → the caller keeps its old #view). */
+export const feedFocusHash = (target) => (target ? focusHash(target) : null);
+
 // ---------- sessions (rail + phone drawer) ----------
 /** 대화창(Ned Net)에서 만든 세션 (state sessions[].origin === "chat", src/session-create.ts). */
 export const chatOriginBadge = (x) => (x?.origin === "chat" ? ` <span class="origin-chat" title="Ned 대화창에서 시작한 세션${x.origin_terminal ? ` · ${esc(x.origin_terminal)}` : ""}">대화창에서 시작</span>` : "");
 /** One session unit: status, name, last summary / prompt (= what it is asking), ✎, and 세션에 답하기 (features/sessreply.js). */
-export const unitHtml = (x, where) => `<div class="unit${x.status === "waiting" ? " waiting" : ""}" title="${esc(x.cwd)}"><span class="led ${STATUS_LED[x.status] || ""}"></span><span class="nm">${esc(x.worktree)}${x.subagents_active ? ` <span class="sa">+${x.subagents_active}</span>` : ""}${chatOriginBadge(x)}</span><span class="r">${rel(x.last_event_ts)}${replyMenu(x, where)}</span><span class="s">${esc(x.last_summary || (x.last_prompt ? "» " + x.last_prompt : ""))}</span>${draftBtn("session", sessionRef(x), (S.state?.attention || []).some((a) => a.id === `session:${x.id}`) ? `session:${x.id}` : "")}${replyBox(x, where)}</div>`;
+export const unitHtml = (x, where) => `<div class="unit${x.status === "waiting" ? " waiting" : ""}" data-sid="${esc(x.id)}" title="${esc(x.cwd)}"><span class="led ${STATUS_LED[x.status] || ""}"></span><span class="nm">${esc(x.worktree)}${x.subagents_active ? ` <span class="sa">+${x.subagents_active}</span>` : ""}${chatOriginBadge(x)}</span><span class="r">${rel(x.last_event_ts)}${replyMenu(x, where)}</span><span class="s">${esc(x.last_summary || (x.last_prompt ? "» " + x.last_prompt : ""))}</span>${draftBtn("session", sessionRef(x), (S.state?.attention || []).some((a) => a.id === `session:${x.id}`) ? `session:${x.id}` : "")}${replyBox(x, where)}</div>`;
 export function renderSessions() {
   const ss = S.state?.sessions ?? [];
   const units = ss.map((x) => unitHtml(x, "rail")).join("");

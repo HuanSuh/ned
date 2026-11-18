@@ -215,6 +215,11 @@
 .cm-it.new .tt { color: var(--fg); font-weight: 600; }
 .cm-it .tm { font: 10.5px var(--mono); color: var(--faint); }
 .cm-it .sb { grid-column: 2 / span 2; font-size: 12px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cm-row { position: relative; }
+.cm-row.has-src .cm-it { padding-right: 38px; }
+.cm-it .srcl { color: var(--dim); }
+.cm-src { position: absolute; right: 8px; bottom: 6px; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; text-decoration: none; font-size: 13px; line-height: 1; }
+.cm-src:hover, .cm-src:focus-visible { background: var(--hover); outline: none; }
 .cm-it .dot { position: absolute; left: 3px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: var(--cm-accent); }
 
 /* resize handles: left edge / top edge / top-left corner (mirrored to the right when the panel opens on the left) */
