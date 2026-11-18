@@ -3,8 +3,12 @@
 
 export const COPIED_MS = 1500;
 
-/** The original block text: <pre><code>'s textContent (the ```lang line never reaches the DOM). */
-export const codeOf = (btn) => btn.closest(".cm-code")?.querySelector("pre code")?.textContent ?? "";
+/** The original block text: <pre><code>'s textContent (the ```lang line never reaches the DOM); for a table
+ * (chat-core.js tableHtml, `.cm-code[data-md]`) its markdown source. */
+export const codeOf = (btn) => {
+  const box = btn.closest(".cm-code");
+  return box?.dataset.md ?? box?.querySelector("pre code")?.textContent ?? "";
+};
 
 /** Hidden textarea + execCommand('copy') — for when navigator.clipboard is missing or refuses (non-secure origin, no focus). */
 export function legacyCopy(text, doc = document) {
@@ -34,11 +38,12 @@ export async function copyText(text, doc = document) {
 const timers = new WeakMap();
 function flash(btn) {
   clearTimeout(timers.get(btn));
+  const label = (btn.dataset.label ??= btn.getAttribute("aria-label") || "복사"); // e.g. "표 복사 (마크다운)"
   btn.classList.add("ok");
   btn.setAttribute("aria-label", "복사됨"); btn.title = "복사됨";
   timers.set(btn, setTimeout(() => {
     btn.classList.remove("ok");
-    btn.setAttribute("aria-label", "복사"); btn.title = "복사";
+    btn.setAttribute("aria-label", label); btn.title = label;
   }, COPIED_MS));
 }
 
