@@ -28,8 +28,8 @@ import { V, applyPersona, mood, opener, persona, quip, say } from "./features/pe
 import { openAtt } from "./features/reviewed.js";
 import { S, alive, ui } from "./state.js";
 import { renderHome } from "./tabs/home.js";
-import { closeDetail, dismissSelected, focusItem, listOf, model, openDetail, openOriginal, renderInbox, select, setTab, syncRailButton } from "./tabs/inbox.js";
-import { isTypingTarget, parseFocusHash } from "./features/focus.js";
+import { applyPendingFocus, hashRoute, onInboxKey, renderInbox, setTab, syncRailButton } from "./tabs/inbox.js";
+import { isTypingTarget } from "./features/focus.js";
 import { renderConfig, renderExcl } from "./tabs/settings.js";
 import { renderTimeline } from "./tabs/timeline.js";
 import { MOOD_KO } from "./ui/icons.js";
@@ -136,6 +136,7 @@ export async function loadEvents(render = true) {
 }
 export async function loadBriefings(render = true) {
   try { S.briefings = (await api("/api/briefings?limit=30")).sort((a, b) => b.ts - a.ts); } catch (e) { console.warn("briefings", e.message); }
+  S.briefingsLoaded = true; // tried once (even if it failed) — a pending #item= focus waits for this
   if (render) renderAll();
 }
 export async function loadAgenda(render = true) {
@@ -165,21 +166,15 @@ export function renderAll() {
 // ---------- views + keys ----------
 export const VIEWS = ["home", "inbox", "timeline", "settings"];
 export function setView() {
-  const v = (location.hash || "#home").slice(1);
-  // #item=<id>[&tab=][&at=] (features/focus.js) = the inbox, focused on one item. A hash failing the allow-list → inbox top.
-  const focus = v.startsWith("item=") ? parseFocusHash(v) : null;
-  ui.view = v.startsWith("item=") ? "inbox" : VIEWS.includes(v) ? v : "home";
+  // #item=<id>[&tab=][&at=] (features/focus.js) = the inbox, focused on one item (tabs/inbox.js hashRoute / applyPendingFocus,
+  // run from renderAll once state + briefings + agenda are in). A hash failing the allow-list → inbox top + "항목이 더 이상 없음".
+  const r = hashRoute(location.hash, VIEWS);
+  ui.view = r.view;
   for (const id of VIEWS) $("v-" + id).hidden = ui.view !== id;
   for (const a of $("views").children) a.classList.toggle("on", a.dataset.v === ui.view);
   if (ui.view === "settings" && !S.config) loadConfig();
-  if (v.startsWith("item=")) ui.pendingFocus = focus || { item: "\u0000" }; // invalid → resolves as gone (top + toast)
+  if (r.focus) ui.pendingFocus = r.focus;
   renderAll();
-}
-/** A pending #item= focus runs once the state has loaded (boot loads briefings before the first state). */
-function applyPendingFocus() {
-  if (!ui.pendingFocus || ui.view !== "inbox" || !S.state) return;
-  const t = ui.pendingFocus; ui.pendingFocus = null;
-  focusItem(t);
 }
 
 export const TAB_KEYS = { 1: "priority", 2: "other", 3: "history" };
@@ -216,20 +211,7 @@ function boot() {
       else if (TAB_KEYS[ev.key]) { ui.tab = TAB_KEYS[ev.key]; ui.sel = 0; ui.selKey = null; location.hash = "#inbox"; }
       return;
     }
-    if (ui.view !== "inbox") return;
-    const list = listOf(model());
-    if (ev.key === "j" || ev.key === "ArrowDown") { select(ui.sel + 1); ev.preventDefault(); }
-    else if (ev.key === "k" || ev.key === "ArrowUp") { select(ui.sel - 1); ev.preventDefault(); }
-    else if (ev.key === "e") dismissSelected();
-    else if (ev.key === "Enter") { // ⏎ = 상세 (원문은 o)
-      if (t && t.tagName === "BUTTON" || t && t.tagName === "A") return;
-      if (list[ui.sel]) openDetail();
-    }
-    else if (ev.key === "o") openOriginal(list[ui.sel]);
-    else if (ev.key === "1") setTab("priority");
-    else if (ev.key === "2") setTab("other");
-    else if (ev.key === "3") setTab("history");
-    else if (ev.key === "Escape") closeDetail();
+    if (ui.view === "inbox") onInboxKey(ev); // tabs/inbox.js: j/k e ⏎(상세) o(원문) 1/2/3 Esc
   });
 
   $("btn-hb").title = "지금 점검 (r) — 메일·Slack·Jira·GitHub·캘린더를 새로 가져온 뒤 판단 · 1~2분";

@@ -331,7 +331,7 @@ export function feedHash(x, m = model()) {
   }
   return `#${x.go || "inbox"}`;
 }
-function goFeedTarget(x) {
+export function goFeedTarget(x) {
   const h = feedHash(x);
   if (location.hash === h) window.dispatchEvent(new HashChangeEvent("hashchange")); // same item again → focus again
   else location.hash = h;

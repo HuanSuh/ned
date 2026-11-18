@@ -85,7 +85,13 @@ export function agendaIndex(agenda) {
   for (const w of sl?.watch || []) for (const h of w.highlights || []) put(srcKey("slack", h), { kind: "slack", channel: w.channel, from: h.from, ts: toMs(h.ts) });
   for (const t of [...(sl?.threads || []), ...(sl?.dms || [])]) put(srcKey("slack", t), { kind: "slack", channel: t.channel, from: t.last_reply_from, ts: toMs(t.last_reply_at) });
   const ml = agenda?.mail;
-  for (const x of [...(ml?.items || []), ...(ml?.all || [])]) put(srcKey("email", x), { kind: "email", from: x.from, subject: x.subject, ts: toMs(x.received || x.ts) });
+  // Mail: under the Gmail id key and the key the row's own URL gives (an attention item is looked up by URL only — its
+  // thread token may not be the agenda id).
+  for (const x of [...(ml?.items || []), ...(ml?.all || [])]) {
+    const v = { kind: "email", from: x.from, subject: x.subject, ts: toMs(x.received || x.ts) };
+    put(srcKey("email", x), v);
+    put(srcKey("email", { url: x.url }), v);
+  }
   for (const x of agenda?.jira || []) put(srcKey("jira", x), { kind: "jira", key: x.key, status: x.status });
   for (const x of agenda?.github || []) put(srcKey("github", x), { kind: "github", key: `${x.repo}#${x.number}`, from: x.author });
   return idx;
@@ -93,8 +99,9 @@ export function agendaIndex(agenda) {
 
 /**
  * 출처 줄 parts (plain strings, not escaped): kind label, then what the data already says —
- *   Slack: #채널 · 보낸 사람 · (full) 시각 · 메일: 보낸 사람 · (full) 제목 · Jira: KEY · 상태 · GitHub: repo#n · 작성자 · 세션: worktree.
- * `short` (통신기 메시지): no time / subject. `fmt` formats a ms time.
+ *   Slack: #채널 · 보낸 사람 · 시각 · 메일: 보낸 사람 · 제목 · Jira: KEY · 상태 · GitHub: repo#n · 작성자 · 세션: worktree.
+ * `short` (통신기 메시지): no time / subject. `fmt` formats a ms time — pass an absolute one (inbox: mdhm "11/18 10:05"),
+ * never a relative "3분 전": the detail redraws when this line changes.
  */
 export function sourceParts(item, { agenda = null, index = null, sess = null, short = false, fmt = null } = {}) {
   const kind = item?.kind || "other";

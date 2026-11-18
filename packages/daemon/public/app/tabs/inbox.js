@@ -12,7 +12,7 @@ import { EVENT_KO, KIND_ICON, KIND_KO, STATUS_KO, STATUS_LED, iconBtn, reviewIco
 import { toast } from "../ui/toast.js";
 import { $, dayLabel, esc, hhmm, lsSet, mdhm, rel, safeUrl } from "../util.js";
 import { mdLite } from "../features/chat-core.js";
-import { focusHash, originalOf, resolveFocus, sourceLineHtml, sourceParts, srcBtn } from "../features/focus.js";
+import { isTypingTarget, originalOf, parseFocusHash, resolveFocus, sourceLineHtml, sourceParts, srcBtn } from "../features/focus.js";
 import { openLink } from "../features/openlink.js";
 
 // ---------- inbox model ----------
@@ -59,20 +59,20 @@ export function renderTabs(m) {
   $("tabs").innerHTML = t("priority", "우선", m.priOpen.length, m.priOpen.length > 0) + t("other", "기타", m.other.length) + t("history", "기록", S.briefings.length);
   for (const b of $("tabs").children) b.onclick = () => setTab(b.dataset.t);
 }
-export function setTab(t) { ui.tab = t; ui.sel = 0; ui.selKey = null; renderInbox(); }
+export function setTab(t) { ui.tab = t; ui.sel = 0; ui.selKey = null; clearFocusHash(); renderInbox(); }
 
 export function rowHtml(it, i) {
   const sel = i === ui.sel ? "sel" : "";
   if (it.okrun) {
     const r = it.okrun, first = r[r.length - 1];
-    return `<div class="row okr ${sel}" data-i="${i}"><span class="ic">✓</span><span class="tt"><span class="stk g flat">ned_ok ×${r.length}</span>&nbsp; 이상 무</span><span class="tm">${hhmm(it.ts)}</span><span class="sb">${r.length > 1 ? `${hhmm(first.ts)}–${hhmm(it.ts)} 순찰 ${r.length}번, 전부 조용` : "순찰 한 번, 조용"}</span></div>`;
+    return `<div class="row okr ${sel}${rowHl(it.key)}" data-i="${i}"><span class="ic">✓</span><span class="tt"><span class="stk g flat">ned_ok ×${r.length}</span>&nbsp; 이상 무</span><span class="tm">${hhmm(it.ts)}</span><span class="sb">${r.length > 1 ? `${hhmm(first.ts)}–${hhmm(it.ts)} 순찰 ${r.length}번, 전부 조용` : "순찰 한 번, 조용"}</span></div>`;
   }
   if (it.brief) {
     const b = it.brief, n = (b.action_items?.length || 0), u = (b.updates?.length || 0), f = (b.fyi?.length || 0);
-    return `<div class="row ${sel}" data-i="${i}"><span class="ic">📝</span><span class="tt"><span class="stk ${bfFailed(b) ? "r" : b.type === "daily" ? "b" : ""} flat">${bfKind(b)}</span>&nbsp; ${esc(b.headline || (bfFailed(b) ? "Claude 실행 실패 — raw 참고" : `${n + u + f}건`))}</span><span class="tm">${hhmm(b.ts)}</span><span class="sb">행동 ${n} · 업데이트 ${u} · 참고 ${f}${b.cost_usd != null ? ` · $${Number(b.cost_usd).toFixed(2)}` : ""}</span></div>`;
+    return `<div class="row ${sel}${rowHl(it.key)}" data-i="${i}"><span class="ic">📝</span><span class="tt"><span class="stk ${bfFailed(b) ? "r" : b.type === "daily" ? "b" : ""} flat">${bfKind(b)}</span>&nbsp; ${esc(b.headline || (bfFailed(b) ? "Claude 실행 실패 — raw 참고" : `${n + u + f}건`))}</span><span class="tm">${hhmm(b.ts)}</span><span class="sb">행동 ${n} · 업데이트 ${u} · 참고 ${f}${b.cost_usd != null ? ` · $${Number(b.cost_usd).toFixed(2)}` : ""}</span></div>`;
   }
   const acts = it.att ? `${srcBtn(it.kind, it.url)}${reviewIcon(it.att)}` : `${srcBtn(it.kind, it.url)}${it.rk ? reviewIcon({ id: it.rk, reviewed_at: it.rat }) : ""}`;
-  return `<div class="row ${sel} ${!it.att && ui.read.has(it.key) ? "read" : ""}${isRevRow(it) ? " reviewed" : ""}${acts ? " has-acts" : ""}" data-i="${i}">
+  return `<div class="row ${sel} ${!it.att && ui.read.has(it.key) ? "read" : ""}${isRevRow(it) ? " reviewed" : ""}${acts ? " has-acts" : ""}${rowHl(it.key)}" data-i="${i}">
       <span class="ic">${KIND_ICON[it.kind] || "·"}</span>
       <span class="tt">${it.led ? `<span class="led ${it.led}"></span>` : ""}${esc(it.title)}</span>
       <span class="tm">${rel(it.ts)}</span>
@@ -105,6 +105,7 @@ export function renderInbox() {
   if (ui.tab !== "history" && m.ok.length) html += `<button class="okrun" id="okrun">${esc(V().okRun(m.ok.length, rel(m.ok[0].ts)))}</button>`;
   const box = $("items");
   box.innerHTML = html;
+  if (ui.hl) ui.hl.fresh = false; // drawn once with the animation; later re-renders keep the outline only
   for (const r of box.querySelectorAll(".row")) r.onclick = () => { select(+r.dataset.i); openDetail(); };
   const ok = $("okrun"); if (ok) ok.onclick = () => setTab("history");
   const rf = $("revfold"); if (rf) rf.onclick = () => { if (ui.tab === "other") ui.revOpenOther = !ui.revOpenOther; else ui.revOpenInbox = !ui.revOpenInbox; renderInbox(); };
@@ -117,6 +118,7 @@ export function select(i) {
   const list = listOf(model());
   ui.sel = Math.max(0, Math.min(i, list.length - 1));
   ui.selKey = list[ui.sel]?.key ?? null;
+  if (ui.focusKey && ui.selKey !== ui.focusKey) clearFocusHash();
   renderInbox();
 }
 export function openDetail() { $("detail").classList.add("open"); }
@@ -194,7 +196,7 @@ export function renderDetail(it, m) {
     } else if (it.att) {
       ctx = `<h3>출처</h3><div class="body" style="font-size:13px">${esc(it.att.source)}</div>`;
     }
-    const src = sourceLineHtml(sourceParts(it, { agenda: S.agenda, sess: it.sess, fmt: rel }));
+    const src = sourceLineHtml(sourceParts(it, { agenda: S.agenda, sess: it.sess, fmt: mdhm }));
     const orig = originalOf(it);
     sig = `it:${it.key}:${it.title}:${it.detail}:${S.events.length}:${it.sess ? it.sess.status + it.sess.last_event_ts + replySig(it.sess) : ""}:${it.att?.reviewed_at || it.rat || 0}:${src}`;
     html = `<div class="dwrap">${back}
@@ -222,6 +224,7 @@ export async function dismissSelected() {
   const it = listOf(model())[ui.sel];
   if (!it?.att) return;
   const id = it.att.id;
+  clearFocusHash();
   S.state.attention = S.state.attention.filter((a) => a.id !== id); // optimistic
   renderInbox(); renderHeader();
   try {
@@ -234,14 +237,45 @@ export async function dismissSelected() {
 // ---------- 항목 포커스 (#item=… · 통신기 메시지) + 원문 (o) ----------
 export const FOCUS_HL_MS = 2600;
 const reduceMotion = () => !!globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-/** Scroll to + highlight for ~2.6 s (css .focus-hl: reduced motion = outline only, no animation). */
-export function flash(el) {
+const mq = (q) => !!globalThis.matchMedia?.(q).matches;
+const flashTimers = new WeakMap();
+/**
+ * Highlight one element for ~2.6 s (css .focus-hl: reduced motion = outline only, no animation), scrolling to it unless
+ * `scroll: false`. The same element again: its old timer is cancelled and the animation restarts (reflow in between).
+ * Used for things the inbox list does not redraw on its own (briefing block, session unit, detail title) — list rows keep
+ * theirs through ui.hl (rowHl) so a polling re-render does not drop it.
+ */
+export function flash(el, { scroll = true } = {}) {
   if (!el) return null;
+  clearTimeout(flashTimers.get(el));
   el.classList.remove("focus-hl");
+  void el.offsetWidth; // restart the animation
   el.classList.add("focus-hl");
-  el.scrollIntoView?.({ block: "center", behavior: reduceMotion() ? "auto" : "smooth" });
-  setTimeout(() => el.classList.remove("focus-hl"), FOCUS_HL_MS);
+  if (scroll) el.scrollIntoView?.({ block: "center", behavior: reduceMotion() ? "auto" : "smooth" });
+  flashTimers.set(el, setTimeout(() => { el.classList.remove("focus-hl"); flashTimers.delete(el); }, FOCUS_HL_MS));
   return el;
+}
+/** The focused row's class while ui.hl lasts: the first draw animates (focus-hl), later re-renders (state polling,
+ *  the 60 s clock) keep only the outline (focus-hold) so the row does not blink again. */
+export const rowHl = (key) => {
+  const h = ui.hl;
+  if (!h || h.key !== key || Date.now() >= h.until) return "";
+  return h.fresh ? " focus-hl" : " focus-hold";
+};
+let hlTimer = 0;
+function holdRow(key) {
+  clearTimeout(hlTimer);
+  ui.hl = { key, until: Date.now() + FOCUS_HL_MS, fresh: true };
+  hlTimer = setTimeout(() => {
+    ui.hl = null;
+    for (const r of document.querySelectorAll("#items .row.focus-hl, #items .row.focus-hold")) r.classList.remove("focus-hl", "focus-hold");
+  }, FOCUS_HL_MS);
+}
+/** Leaving the focused item (j/k or click to another row, a tab switch, ✕): drop `#item=` without a hashchange, so a
+ *  reload shows the inbox instead of jumping back to an item the user has moved on from. */
+export function clearFocusHash() {
+  ui.focusKey = null;
+  if (location.hash.startsWith("#item=")) history.replaceState(null, "", "#inbox");
 }
 /**
  * Inbox: switch to the target's tab, select its row (opening the 확인 완료 fold when it is ✓), open the detail, scroll +
@@ -252,6 +286,7 @@ export function focusItem(target) {
   ui.tab = r.tab;
   if (r.missing) {
     ui.sel = 0; ui.selKey = null;
+    clearFocusHash();
     renderInbox();
     $("items").scrollTop = 0;
     closeDetail();
@@ -261,33 +296,88 @@ export function focusItem(target) {
   if (r.reviewed) { if (r.tab === "other") ui.revOpenOther = true; else ui.revOpenInbox = true; }
   if (PF.inbox.size && !listOf(model()).some((x) => x.key === r.key)) PF.inbox.clear(); // a source pill hid it
   ui.selKey = r.key;
+  ui.focusKey = r.key;
+  holdRow(r.key);
   renderInbox();
   openDetail();
-  flash($("items").querySelector(".row.sel"));
+  const row = $("items").querySelector(".row.sel");
+  row?.scrollIntoView?.({ block: "center", behavior: reduceMotion() ? "auto" : "smooth" });
   // r.at passed ANCHOR_RE (letters, "_", ".", digits) — safe inside the attribute selector.
   if (r.at) flash($("detail").querySelector(`[data-anchor="${r.at}"]`));
   return r;
 }
-/** `o`: the item's original — its web URL through openLink (app deep link in Ned.app), else its session (rail unit, or
- *  the timeline filtered to its worktree when the rail is folded), else the detail. */
+/** ⏎: open the detail and show where it went — focus moves into it (Esc / j / k still work) + a short title highlight. */
+export function enterDetail() {
+  openDetail();
+  const d = $("detail");
+  if (!d.hasAttribute("tabindex")) d.setAttribute("tabindex", "-1");
+  d.focus?.({ preventScroll: true });
+  flash(d.querySelector("h2"), { scroll: false });
+}
+/** `o`: the item's original — its web URL through openLink (app deep link in Ned.app), else its session, else the detail. */
 export function openOriginal(it) {
   if (!it) return null;
   const o = originalOf(it);
   if (o?.url) { openLink(o.url); return "url"; }
   if (o?.session) return showSession(o.session);
-  openDetail();
+  enterDetail();
   return "detail";
 }
+/** Is the session rail on screen? ≤1180px it is hidden (the 세션 drawer instead); ≥1800px always shown; else unless 접기. */
+export const railShown = () => (mq("(max-width: 1180px)") ? false : mq("(min-width: 1800px)") ? true : !ui.railOff);
+/** A session with no URL: its unit in the rail, or — narrow screen — in the opened 세션 drawer; rail folded → the timeline
+ *  filtered to its worktree. */
 export function showSession(x) {
-  const unit = [...document.querySelectorAll("#rail .unit[data-sid]")].find((u) => u.dataset.sid === x.id);
-  if (unit && !ui.railOff) { flash(unit); return "rail"; }
+  const find = (sel) => [...document.querySelectorAll(sel)].find((u) => u.dataset.sid === x.id);
+  if (mq("(max-width: 1180px)")) {
+    const unit = find("#msess-rack .unit[data-sid]"), dr = $("msess");
+    if (unit && dr) { dr.open = true; flash(unit); return "drawer"; }
+  } else if (railShown()) {
+    const unit = find("#rail .unit[data-sid]");
+    if (unit) { flash(unit); return "rail"; }
+  }
   S.filterWt.clear();
   if (x.worktree) S.filterWt.add(x.worktree);
   location.hash = "#timeline";
   return "timeline";
 }
-/** For the 통신기: the hash that focuses a feed target (null → the caller keeps its old #view). */
-export const feedFocusHash = (target) => (target ? focusHash(target) : null);
+
+// ---------- routing + keys (main.js calls these; kept here so tests run the real handlers) ----------
+/** location.hash → { view, focus } — `#item=…` is the inbox; a focus hash failing the allow-list → focus = invalid (gone). */
+export function hashRoute(hash, views) {
+  const v = String(hash || "#home").replace(/^#/, "");
+  if (v.startsWith("item=")) return { view: "inbox", focus: parseFocusHash(v) || { item: "\u0000" } };
+  return { view: views.includes(v) ? v : "home", focus: null };
+}
+/** A pending #item= focus runs once state, briefings and agenda have all loaded (a visibilitychange loadState can land
+ *  before the boot loaders — resolving then would call a real item "gone"). */
+export function applyPendingFocus() {
+  if (!ui.pendingFocus || ui.view !== "inbox" || !S.state || !S.briefingsLoaded || S.agenda === undefined) return false;
+  const t = ui.pendingFocus; ui.pendingFocus = null;
+  focusItem(t);
+  return true;
+}
+/** Inbox keys (main.js keydown, after its modal guard): j/k ↑↓ move, e ✕, ⏎ 상세, o 원문, 1/2/3 tabs, Esc. Typing → ignored. */
+export function onInboxKey(ev) {
+  const t = ev.target;
+  if (isTypingTarget(t)) return false;
+  const list = listOf(model());
+  if (ev.key === "j" || ev.key === "ArrowDown") { select(ui.sel + 1); ev.preventDefault(); }
+  else if (ev.key === "k" || ev.key === "ArrowUp") { select(ui.sel - 1); ev.preventDefault(); }
+  else if (ev.key === "e") dismissSelected();
+  else if (ev.key === "Enter") { // ⏎ = 상세 (원문은 o)
+    if (t && (t.tagName === "BUTTON" || t.tagName === "A")) return false;
+    if (!list[ui.sel]) return false;
+    enterDetail();
+  }
+  else if (ev.key === "o") openOriginal(list[ui.sel]);
+  else if (ev.key === "1") setTab("priority");
+  else if (ev.key === "2") setTab("other");
+  else if (ev.key === "3") setTab("history");
+  else if (ev.key === "Escape") closeDetail();
+  else return false;
+  return true;
+}
 
 // ---------- sessions (rail + phone drawer) ----------
 /** 대화창(Ned Net)에서 만든 세션 (state sessions[].origin === "chat", src/session-create.ts). */

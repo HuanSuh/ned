@@ -113,6 +113,10 @@ describe("sourceParts (출처 줄)", () => {
     expect(sourceParts({ kind: "jira", url: "https://example.atlassian.net/browse/ABC-12" }, { agenda })).toEqual(["Jira", "ABC-12", "In Review"]);
     expect(sourceParts({ kind: "github", url: "https://github.com/acme/app/pull/42" }, { agenda })).toEqual(["GitHub", "acme/app#42", "dev-x"]);
   });
+  it("mail: found by the URL's thread token even when it is not the agenda id (L4)", () => {
+    const ag = { mail: { items: [{ id: "gmail-id-1", from: "사람E", subject: "샘플 제목", url: "https://mail.google.com/mail/u/0/#inbox/FMfcgzSample" }], all: [] } };
+    expect(sourceParts({ kind: "email", url: "https://mail.google.com/mail/u/0/#inbox/FMfcgzSample" }, { agenda: ag })).toEqual(["메일", "사람E", "샘플 제목"]);
+  });
   it("short drops time / subject; unknown → just the kind label (no guessing)", () => {
     expect(sourceParts({ kind: "email", url: "https://mail.google.com/mail/u/0/#inbox/t1" }, { agenda, short: true })).toEqual(["메일", "사람D <d@example.com>"]);
     expect(sourceParts({ kind: "sentry", url: "https://sentry.io/x" }, { agenda })).toEqual(["Sentry"]);
